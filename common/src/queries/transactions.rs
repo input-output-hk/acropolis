@@ -20,7 +20,7 @@ pub enum TransactionsStateQuery {
     GetTransactionWithdrawals { tx_hash: TxHash },
     GetTransactionMIRs { tx_hash: TxHash },
     GetTransactionPoolUpdateCertificates { tx_hash: TxHash },
-    GetTransactionPoolRetirementCertificates,
+    GetTransactionPoolRetirementCertificates { tx_hash: TxHash },
     GetTransactionMetadata,
     GetTransactionMetadataCBOR,
     GetTransactionRedeemers,
@@ -118,7 +118,7 @@ pub struct TransactionStakeCertificates {
 pub struct TransactionDelegationCertificate {
     pub index: u64,
     pub address: StakeAddress,
-    pub pool: PoolId,
+    pub pool_id: PoolId,
     pub active_epoch: u64,
 }
 
@@ -167,7 +167,16 @@ pub struct TransactionPoolUpdateCertificates {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionPoolRetirementCertificates {}
+pub struct TransactionPoolRetirementCertificate {
+    pub cert_index: u64,
+    pub pool_id: PoolId,
+    pub retirement_epoch: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionPoolRetirementCertificates {
+    pub pool_retirements: Vec<TransactionPoolRetirementCertificate>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionMetadata {}

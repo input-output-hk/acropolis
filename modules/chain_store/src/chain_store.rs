@@ -11,10 +11,12 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::transactions::{
         TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
-        TransactionMIR, TransactionMIRs, TransactionOutputAmount, TransactionPoolUpdateCertificate,
-        TransactionPoolUpdateCertificates, TransactionStakeCertificate,
-        TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
-        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionMIR, TransactionMIRs, TransactionOutputAmount,
+        TransactionPoolRetirementCertificate, TransactionPoolRetirementCertificates,
+        TransactionPoolUpdateCertificate, TransactionPoolUpdateCertificates,
+        TransactionStakeCertificate, TransactionStakeCertificates, TransactionWithdrawal,
+        TransactionWithdrawals, TransactionsStateQuery, TransactionsStateQueryResponse,
+        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     queries::{
         blocks::{
@@ -767,7 +769,7 @@ impl ChainStore {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
-                            pool: to_pool_id(pool_key_hash),
+                            pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
@@ -779,7 +781,7 @@ impl ChainStore {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
-                            pool: to_pool_id(pool_key_hash),
+                            pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
@@ -931,6 +933,43 @@ impl ChainStore {
         Ok(certs)
     }
 
+    fn to_tx_pool_retirements(tx: &Tx) -> Result<Vec<TransactionPoolRetirementCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::PoolRetirement(operator, epoch) =
+                        cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolRetirementCertificate {
+                            cert_index: cert_index as u64,
+                            pool_id: to_pool_id(operator),
+                            retirement_epoch: *epoch,
+                        });
+                    }
+                }
+                MultiEraCert::Conway(cert) => {
+                    if let conway::Certificate::PoolRetirement(operator, epoch) =
+                        cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolRetirementCertificate {
+                            cert_index: cert_index as u64,
+                            pool_id: to_pool_id(operator),
+                            retirement_epoch: *epoch,
+                        });
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
@@ -1009,6 +1048,20 @@ impl ChainStore {
                     TransactionsStateQueryResponse::TransactionPoolUpdateCertificates(
                         TransactionPoolUpdateCertificates {
                             pool_updates: Self::to_tx_pool_updates(&tx, network_id)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionPoolRetirementCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionPoolRetirementCertificates(
+                        TransactionPoolRetirementCertificates {
+                            pool_retirements: Self::to_tx_pool_retirements(&tx)?,
                         },
                     ),
                 )

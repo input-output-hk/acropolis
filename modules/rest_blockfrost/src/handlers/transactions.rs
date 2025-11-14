@@ -8,8 +8,9 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
             TransactionDelegationCertificate, TransactionInfo, TransactionMIR,
-            TransactionPoolUpdateCertificate, TransactionStakeCertificate, TransactionWithdrawal,
-            TransactionsStateQuery, TransactionsStateQueryResponse,
+            TransactionPoolRetirementCertificate, TransactionPoolUpdateCertificate,
+            TransactionStakeCertificate, TransactionWithdrawal, TransactionsStateQuery,
+            TransactionsStateQueryResponse,
         },
         utils::{query_state, rest_query_state_async},
     },
@@ -96,7 +97,9 @@ pub async fn handle_transactions_blockfrost(
         Some("pool_updates") => {
             handle_transaction_pool_updates_query(context, tx_hash, handlers_config).await
         }
-        Some("pool_retires") => Ok(RESTResponse::with_text(501, "Not implemented")),
+        Some("pool_retires") => {
+            handle_transaction_pool_retires_query(context, tx_hash, handlers_config).await
+        }
         Some("metadata") => match param2 {
             None => Ok(RESTResponse::with_text(501, "Not implemented")),
             Some("cbor") => Ok(RESTResponse::with_text(501, "Not implemented")),
@@ -232,7 +235,7 @@ impl Serialize for TxDelegation {
         let mut state = serializer.serialize_struct("TxDelegation", 4)?;
         state.serialize_field("index", &self.0.index)?;
         state.serialize_field("address", &address)?;
-        state.serialize_field("pool_id", &self.0.pool.to_string())?;
+        state.serialize_field("pool_id", &self.0.pool_id.to_string())?;
         state.serialize_field("active_epoch", &self.0.active_epoch)?;
         state.end()
     }
@@ -447,6 +450,55 @@ async fn handle_transaction_pool_updates_query(
                     .pool_updates
                     .into_iter()
                     .map(TxPoolUpdateCertificate)
+                    .collect::<Vec<_>>(),
+            ))),
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(e)),
+            _ => None,
+        },
+    )
+    .await
+}
+
+struct TxPoolRetirementCertificate(TransactionPoolRetirementCertificate);
+
+impl Serialize for TxPoolRetirementCertificate {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("TxPoolUpdateCertificate", 3)?;
+        state.serialize_field("cert_index", &self.0.cert_index)?;
+        state.serialize_field("pool_id", &self.0.pool_id.to_string())?;
+        state.serialize_field("retirement_epoch", &self.0.retirement_epoch)?;
+        state.end()
+    }
+}
+
+/// Handle `/txs/{hash}/pool_retires`
+async fn handle_transaction_pool_retires_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse, RESTError> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionPoolRetirementCertificates { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionPoolRetirementCertificates(
+                    pool_retirements,
+                ),
+            )) => Some(Ok(Some(
+                pool_retirements
+                    .pool_retirements
+                    .into_iter()
+                    .map(TxPoolRetirementCertificate)
                     .collect::<Vec<_>>(),
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
