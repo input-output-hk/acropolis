@@ -64,6 +64,16 @@ async fn main() -> Result<()> {
         ),
         download(
             &client,
+            "https://book.world.dev.cardano.org/environments/preview/byron-genesis.json",
+            "preview-byron-genesis.json",
+        ),
+        download(
+            &client,
+            "https://book.world.dev.cardano.org/environments/preview/shelley-genesis.json",
+            "preview-shelley-genesis.json",
+        ),
+        download(
+            &client,
             "https://raw.githubusercontent.com/Hornan7/SanchoNet-Tutorials/refs/heads/main/genesis/byron-genesis.json",
             "sanchonet-byron-genesis.json",
         ),

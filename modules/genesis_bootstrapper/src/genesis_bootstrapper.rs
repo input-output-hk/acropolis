@@ -34,6 +34,9 @@ const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
 const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
+const PREVIEW_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/preview-byron-genesis.json");
+const PREVIEW_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/preview-shelley-genesis.json");
+const PREVIEW_SHELLEY_START_EPOCH: u64 = 0;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
@@ -102,6 +105,11 @@ impl GenesisBootstrapper {
                             MAINNET_BYRON_GENESIS,
                             MAINNET_SHELLEY_GENESIS,
                             MAINNET_SHELLEY_START_EPOCH,
+                        ),
+                        "preview" => (
+                            PREVIEW_BYRON_GENESIS,
+                            PREVIEW_SHELLEY_GENESIS,
+                            PREVIEW_SHELLEY_START_EPOCH,
                         ),
                         "sanchonet" => (
                             SANCHONET_BYRON_GENESIS,

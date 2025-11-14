@@ -1,9 +1,9 @@
-use acropolis_common::{messages::RawBlockMessage, BlockInfo};
-use anyhow::{anyhow, bail, Result};
+use crate::{messages::RawBlockMessage, BlockInfo};
+use anyhow::{anyhow, bail, Context, Result};
 use std::{
     fs::File,
     io::{BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -19,26 +19,26 @@ pub trait Storage {
 }
 
 pub struct FileStorage {
-    path: String,
+    path: PathBuf,
 }
 
 impl FileStorage {
-    pub fn new(path: &str) -> Self {
-        Self {
-            path: path.to_string(),
-        }
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        std::fs::create_dir_all(&path)?;
+        Ok(Self { path })
     }
 
-    fn get_file_name(&self, chunk_no: usize) -> String {
-        format!("{}/chunk-{chunk_no}.json", self.path)
+    fn get_file_name(&self, chunk_no: usize) -> PathBuf {
+        self.path.join(format!("chunk-{chunk_no}.json"))
     }
 }
 
 pub type UpstreamCache = UpstreamCacheImpl<FileStorage>;
 
 impl UpstreamCache {
-    pub fn new(path: &str) -> Self {
-        UpstreamCache::new_impl(FileStorage::new(path))
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Ok(UpstreamCache::new_impl(FileStorage::new(path)?))
     }
 }
 
@@ -124,7 +124,9 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
     pub fn write_record(&mut self, record: &UpstreamCacheRecord) -> Result<()> {
         self.chunk_cached.push(record.clone());
-        self.storage.write_chunk(self.current_chunk, &self.chunk_cached)?;
+        self.storage
+            .write_chunk(self.current_chunk, &self.chunk_cached)
+            .context("could not write cache record")?;
 
         self.current_record += 1;
         if self.current_record >= self.density {
@@ -139,26 +141,25 @@ impl<S: Storage> UpstreamCacheImpl<S> {
 
 impl Storage for FileStorage {
     fn read_chunk(&mut self, chunk_no: usize) -> Result<Vec<UpstreamCacheRecord>> {
-        let name = self.get_file_name(chunk_no);
-        let path = Path::new(&name);
+        let path = self.get_file_name(chunk_no);
         if !path.try_exists()? {
             return Ok(vec![]);
         }
 
-        let file = File::open(&name)?;
+        let file = File::open(&path)?;
         let reader = BufReader::new(file);
-        match serde_json::from_reader::<BufReader<std::fs::File>, Vec<UpstreamCacheRecord>>(reader)
-        {
-            Ok(res) => Ok(res.clone()),
-            Err(err) => Err(anyhow!(
-                "Error reading upstream cache chunk JSON from {name}: '{err}'"
-            )),
-        }
+        serde_json::from_reader(reader).with_context(|| {
+            format!(
+                "Error reading upstream cache chunk JSON from {}",
+                path.display()
+            )
+        })
     }
 
     fn write_chunk(&mut self, chunk_no: usize, data: &[UpstreamCacheRecord]) -> Result<()> {
-        let mut file = File::create(self.get_file_name(chunk_no))?;
-        file.write_all(serde_json::to_string(data)?.as_bytes())?;
+        let mut file =
+            File::create(self.get_file_name(chunk_no)).context("could not write chunk")?;
+        file.write_all(&serde_json::to_vec(data)?)?;
         Ok(())
     }
 }
@@ -166,7 +167,7 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use acropolis_common::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
+    use crate::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 

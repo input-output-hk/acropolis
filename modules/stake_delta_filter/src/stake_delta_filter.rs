@@ -105,7 +105,7 @@ impl StakeDeltaFilterParams {
         };
 
         info!("Cache mode {:?}", params.cache_mode);
-        if params.cache_mode != CacheMode::Predefined {
+        if params.cache_mode == CacheMode::Read {
             if !Path::new(&params.cache_dir).try_exists()? {
                 return Err(anyhow!(
                     "Pointer cache directory '{}' does not exist.",
@@ -113,6 +113,8 @@ impl StakeDeltaFilterParams {
                 ));
             }
             info!("Reading (writing) caches from (to) {}", params.cache_dir);
+        } else if params.cache_mode != CacheMode::Predefined {
+            std::fs::create_dir_all(&params.cache_dir)?;
         }
 
         Ok(Arc::new(params))
