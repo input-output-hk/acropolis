@@ -8,9 +8,9 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
             TransactionDelegationCertificate, TransactionInfo, TransactionMIR,
-            TransactionPoolRetirementCertificate, TransactionPoolUpdateCertificate,
-            TransactionStakeCertificate, TransactionWithdrawal, TransactionsStateQuery,
-            TransactionsStateQueryResponse,
+            TransactionMetadataItem, TransactionPoolRetirementCertificate,
+            TransactionPoolUpdateCertificate, TransactionStakeCertificate, TransactionWithdrawal,
+            TransactionsStateQuery, TransactionsStateQueryResponse,
         },
         utils::{query_state, rest_query_state_async},
     },
@@ -101,7 +101,7 @@ pub async fn handle_transactions_blockfrost(
             handle_transaction_pool_retires_query(context, tx_hash, handlers_config).await
         }
         Some("metadata") => match param2 {
-            None => Ok(RESTResponse::with_text(501, "Not implemented")),
+            None => handle_transaction_metadata_query(context, tx_hash, handlers_config).await,
             Some("cbor") => Ok(RESTResponse::with_text(501, "Not implemented")),
             _ => Ok(RESTResponse::with_text(400, "Invalid parameters")),
         },
@@ -501,6 +501,32 @@ async fn handle_transaction_pool_retires_query(
                     .map(TxPoolRetirementCertificate)
                     .collect::<Vec<_>>(),
             ))),
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::Error(e),
+            )) => Some(Err(e)),
+            _ => None,
+        },
+    )
+    .await
+}
+
+/// Handle `/txs/{hash}/metadata`
+async fn handle_transaction_metadata_query(
+    context: Arc<Context<Message>>,
+    tx_hash: TxHash,
+    handlers_config: Arc<HandlersConfig>,
+) -> Result<RESTResponse, RESTError> {
+    let txs_info_msg = Arc::new(Message::StateQuery(StateQuery::Transactions(
+        TransactionsStateQuery::GetTransactionMetadata { tx_hash },
+    )));
+    rest_query_state_async(
+        &context.clone(),
+        &handlers_config.transactions_query_topic.clone(),
+        txs_info_msg,
+        async move |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Transactions(
+                TransactionsStateQueryResponse::TransactionMetadata(metadata),
+            )) => Some(Ok(Some(metadata.metadata))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
             )) => Some(Err(e)),

@@ -3,7 +3,7 @@ mod stores;
 use acropolis_codec::{
     block::map_to_block_issuer,
     map_parameters,
-    map_parameters::{map_stake_address, to_pool_id, to_pool_reg},
+    map_parameters::{map_metadata, map_stake_address, to_pool_id, to_pool_reg},
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -11,12 +11,12 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::transactions::{
         TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
-        TransactionMIR, TransactionMIRs, TransactionOutputAmount,
-        TransactionPoolRetirementCertificate, TransactionPoolRetirementCertificates,
-        TransactionPoolUpdateCertificate, TransactionPoolUpdateCertificates,
-        TransactionStakeCertificate, TransactionStakeCertificates, TransactionWithdrawal,
-        TransactionWithdrawals, TransactionsStateQuery, TransactionsStateQueryResponse,
-        DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+        TransactionMIR, TransactionMIRs, TransactionMetadata, TransactionMetadataItem,
+        TransactionOutputAmount, TransactionPoolRetirementCertificate,
+        TransactionPoolRetirementCertificates, TransactionPoolUpdateCertificate,
+        TransactionPoolUpdateCertificates, TransactionStakeCertificate,
+        TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
+        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
     },
     queries::{
         blocks::{
@@ -35,7 +35,7 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
 use pallas::ledger::primitives::{alonzo, conway};
-use pallas_traverse::MultiEraCert;
+use pallas_traverse::{MultiEraCert, MultiEraMeta};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -970,6 +970,27 @@ impl ChainStore {
         Ok(certs)
     }
 
+    fn to_tx_metadata(tx: &Tx) -> Result<Vec<TransactionMetadataItem>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut items = Vec::new();
+        match tx_decoded.metadata() {
+            MultiEraMeta::AlonzoCompatible(metadata) => {
+                for (label, datum) in &metadata.clone().to_vec() {
+                    items.push(TransactionMetadataItem {
+                        label: label.to_string(),
+                        json_metadata: map_metadata(&datum),
+                    });
+                }
+            }
+            _ => (),
+        }
+        Ok(items)
+    }
+
     fn handle_txs_query(
         store: &Arc<dyn Store>,
         query: &TransactionsStateQuery,
@@ -1065,6 +1086,18 @@ impl ChainStore {
                         },
                     ),
                 )
+            }
+            TransactionsStateQuery::GetTransactionMetadata { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionMetadata(
+                    TransactionMetadata {
+                        metadata: Self::to_tx_metadata(&tx)?,
+                    },
+                ))
             }
             _ => Ok(TransactionsStateQueryResponse::Error(
                 QueryError::not_implemented("Unimplemented".to_string()),

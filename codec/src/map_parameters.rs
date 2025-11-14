@@ -1136,3 +1136,19 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
         None => None,
     }
 }
+
+pub fn map_metadata(metadata: &pallas_primitives::Metadatum) -> Metadata {
+    match metadata {
+        pallas_primitives::Metadatum::Int(pallas_primitives::Int(i)) => {
+            Metadata::Int(MetadataInt(*i))
+        }
+        pallas_primitives::Metadatum::Bytes(b) => Metadata::Bytes(b.to_vec()),
+        pallas_primitives::Metadatum::Text(s) => Metadata::Text(s.clone()),
+        pallas_primitives::Metadatum::Array(a) => {
+            Metadata::Array(a.iter().map(map_metadata).collect())
+        }
+        pallas_primitives::Metadatum::Map(m) => {
+            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(&k), map_metadata(&v))).collect())
+        }
+    }
+}
