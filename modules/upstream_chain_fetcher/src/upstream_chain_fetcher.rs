@@ -4,6 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
+    upstream_cache::{UpstreamCache, UpstreamCacheRecord},
     BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
@@ -24,12 +25,10 @@ use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, error, info};
 
 mod body_fetcher;
-mod upstream_cache;
 mod utils;
 
 use crate::utils::FetchResult;
 use body_fetcher::BodyFetcher;
-use upstream_cache::{UpstreamCache, UpstreamCacheRecord};
 use utils::{FetcherConfig, SyncPoint};
 
 const MAX_BODY_FETCHER_CHANNEL_LENGTH: usize = 100;
@@ -228,7 +227,7 @@ impl UpstreamChainFetcher {
                 Self::sync_to_point(cfg, None, Point::Origin).await?;
             }
             SyncPoint::Cache => {
-                let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir);
+                let mut upstream_cache = UpstreamCache::new(&cfg.cache_dir)?;
                 let point = match Self::read_cache(cfg.clone(), &mut upstream_cache).await? {
                     None => Point::Origin,
                     Some(blk) => Point::Specific(blk.slot, blk.hash.to_vec()),

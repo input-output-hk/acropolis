@@ -12,6 +12,7 @@ members = [
     "modules/mithril_snapshot_fetcher",     # Mithril snapshot fetcher
     "modules/snapshot_bootstrapper",        # Bootstrap state from a ledger snapshot
     "modules/upstream_chain_fetcher",       # Upstream chain fetcher
+    "modules/peer_network_interface",       # Multi-peer network interface
     "modules/block_unpacker",               # Block to transaction unpacker
     "modules/tx_unpacker",                  # Tx to UTXO unpacker
     "modules/utxo_state",                   # UTXO state

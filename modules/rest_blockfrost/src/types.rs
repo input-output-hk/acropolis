@@ -939,8 +939,16 @@ pub struct AccountUTxOREST {
 }
 
 #[derive(serde::Serialize)]
-pub struct _AccountTotalsREST {
+pub struct AccountTotalsREST {
     pub stake_address: String,
+    pub received_sum: AmountList,
+    pub sent_sum: AmountList,
+    pub tx_count: u64,
+}
+
+#[derive(serde::Serialize)]
+pub struct AddressTotalsREST {
+    pub address: String,
     pub received_sum: AmountList,
     pub sent_sum: AmountList,
     pub tx_count: u64,

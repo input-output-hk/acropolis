@@ -255,6 +255,7 @@ pub type PolicyId = [u8; 28];
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
+pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
 
 #[derive(
     Debug,
@@ -398,6 +399,63 @@ impl AddAssign for ValueMap {
             for (asset_name, amount) in assets {
                 *entry.entry(asset_name).or_default() += amount;
             }
+        }
+    }
+}
+
+/// Hashmap representation of ValueDelta (lovelace + multiasset)
+pub struct ValueDeltaMap {
+    pub lovelace: i64,
+    pub assets: NativeAssetsDeltaMap,
+}
+
+impl From<ValueDelta> for ValueDeltaMap {
+    fn from(value: ValueDelta) -> Self {
+        let mut assets = HashMap::new();
+
+        for (policy, asset_list) in value.assets {
+            let policy_entry = assets.entry(policy).or_insert_with(HashMap::new);
+            for asset in asset_list {
+                *policy_entry.entry(asset.name).or_insert(0) += asset.amount;
+            }
+        }
+
+        ValueDeltaMap {
+            lovelace: value.lovelace,
+            assets,
+        }
+    }
+}
+
+impl AddAssign<ValueDelta> for ValueDeltaMap {
+    fn add_assign(&mut self, delta: ValueDelta) {
+        self.lovelace += delta.lovelace;
+
+        for (policy, assets) in delta.assets {
+            let policy_entry = self.assets.entry(policy).or_default();
+            for asset in assets {
+                *policy_entry.entry(asset.name).or_insert(0) += asset.amount;
+            }
+        }
+    }
+}
+
+impl From<ValueDeltaMap> for ValueDelta {
+    fn from(map: ValueDeltaMap) -> Self {
+        let mut assets_vec = Vec::with_capacity(map.assets.len());
+
+        for (policy, asset_map) in map.assets {
+            let inner_assets = asset_map
+                .into_iter()
+                .map(|(name, amount)| NativeAssetDelta { name, amount })
+                .collect();
+
+            assets_vec.push((policy, inner_assets));
+        }
+
+        ValueDelta {
+            lovelace: map.lovelace,
+            assets: assets_vec,
         }
     }
 }

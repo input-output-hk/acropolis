@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::types::AddressTotalsREST;
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
@@ -20,35 +21,19 @@ pub async fn handle_address_single_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let [address_str] = &params[..] else {
-        return Err(RESTError::param_missing("address"));
-    };
-
-    let (address, stake_address) = match Address::from_string(address_str) {
-        Ok(Address::None) | Ok(Address::Stake(_)) => {
-            return Err(RESTError::invalid_param(
-                "address",
-                "must be a payment address",
-            ));
-        }
-        Ok(Address::Byron(byron)) => (Address::Byron(byron), None),
-        Ok(Address::Shelley(shelley)) => {
-            let stake_addr = shelley
-                .stake_address_string()
-                .map_err(|e| RESTError::invalid_param("address", &e.to_string()))?;
-
-            (Address::Shelley(shelley), stake_addr)
-        }
-        Err(e) => {
-            return Err(RESTError::invalid_param("address", &e.to_string()));
-        }
+    let address = parse_address(&params)?;
+    let stake_address = match address {
+        Address::Shelley(ref addr) => addr.stake_address_string()?,
+        _ => None,
     };
 
     let address_type = address.kind().to_string();
     let is_script = address.is_script();
 
     let address_query_msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
-        AddressStateQuery::GetAddressUTxOs { address },
+        AddressStateQuery::GetAddressUTxOs {
+            address: address.clone(),
+        },
     )));
 
     let utxo_identifiers = query_state(
@@ -77,7 +62,7 @@ pub async fn handle_address_single_blockfrost(
         None => {
             // Empty address - return zero balance (Blockfrost behavior)
             let rest_response = AddressInfoREST {
-                address: address_str.to_string(),
+                address: address.to_string()?,
                 amount: Value {
                     lovelace: 0,
                     assets: Vec::new(),
@@ -116,7 +101,7 @@ pub async fn handle_address_single_blockfrost(
     .await?;
 
     let rest_response = AddressInfoREST {
-        address: address_str.to_string(),
+        address: address.to_string()?,
         amount: address_balance.into(),
         stake_address,
         address_type,
@@ -138,11 +123,45 @@ pub async fn handle_address_extended_blockfrost(
 
 /// Handle `/addresses/{address}/totals` Blockfrost-compatible endpoint
 pub async fn handle_address_totals_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Address totals endpoint"))
+    let address = parse_address(&params)?;
+
+    // Get totals from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressTotals {
+            address: address.clone(),
+        },
+    )));
+    let totals = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressTotals(totals),
+            )) => Ok(totals),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving address totals",
+            )),
+        },
+    )
+    .await?;
+
+    let rest_response = AddressTotalsREST {
+        address: address.to_string()?,
+        received_sum: totals.received.into(),
+        sent_sum: totals.sent.into(),
+        tx_count: totals.tx_count,
+    };
+
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 /// Handle `/addresses/{address}/utxos` Blockfrost-compatible endpoint
@@ -170,4 +189,12 @@ pub async fn handle_address_transactions_blockfrost(
     _handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
     Err(RESTError::not_implemented("Address transactions endpoint"))
+}
+
+fn parse_address(params: &[String]) -> Result<Address, RESTError> {
+    let Some(address_str) = params.first() else {
+        return Err(RESTError::param_missing("address"));
+    };
+
+    Ok(Address::from_string(address_str)?)
 }
