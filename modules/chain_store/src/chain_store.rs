@@ -3,7 +3,7 @@ mod stores;
 use acropolis_codec::{
     block::map_to_block_issuer,
     map_parameters,
-    map_parameters::{map_relay, map_stake_address, to_hash, to_pool_id, to_vrf_key},
+    map_parameters::{map_stake_address, to_pool_id, to_pool_reg},
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -27,13 +27,12 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate,
-    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, PoolMetadata, PoolRegistration,
-    Ratio, StakeAddress, StakeCredential, TxHash,
+    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, StakeAddress, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
-use pallas::ledger::primitives::{alonzo, conway, Nullable};
+use pallas::ledger::primitives::{alonzo, conway};
 use pallas_traverse::MultiEraCert;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -862,6 +861,37 @@ impl ChainStore {
         let mut certs = Vec::new();
         for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
             match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::PoolRegistration {
+                        operator,
+                        vrf_keyhash,
+                        pledge,
+                        cost,
+                        margin,
+                        reward_account,
+                        pool_owners,
+                        relays,
+                        pool_metadata,
+                    } = cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolUpdateCertificate {
+                            cert_index: cert_index as u64,
+                            pool_reg: to_pool_reg(
+                                operator,
+                                vrf_keyhash,
+                                pledge,
+                                cost,
+                                margin,
+                                reward_account,
+                                pool_owners,
+                                relays,
+                                pool_metadata,
+                                network_id.clone(),
+                                false,
+                            )?,
+                        });
+                    }
+                }
                 MultiEraCert::Conway(cert) => {
                     if let conway::Certificate::PoolRegistration {
                         operator,
@@ -877,34 +907,19 @@ impl ChainStore {
                     {
                         certs.push(TransactionPoolUpdateCertificate {
                             cert_index: cert_index as u64,
-                            pool_reg: PoolRegistration {
-                                operator: to_pool_id(operator),
-                                vrf_key_hash: to_vrf_key(vrf_keyhash),
-                                pledge: *pledge,
-                                cost: *cost,
-                                margin: Ratio {
-                                    numerator: margin.numerator,
-                                    denominator: margin.denominator,
-                                },
-                                reward_account: StakeAddress::from_binary(reward_account)?,
-                                pool_owners: pool_owners
-                                    .into_iter()
-                                    .map(|v| {
-                                        StakeAddress::new(
-                                            StakeCredential::AddrKeyHash(to_hash(v)),
-                                            network_id.clone(),
-                                        )
-                                    })
-                                    .collect(),
-                                relays: relays.iter().map(map_relay).collect(),
-                                pool_metadata: match pool_metadata {
-                                    Nullable::Some(md) => Some(PoolMetadata {
-                                        url: md.url.clone(),
-                                        hash: md.hash.to_vec(),
-                                    }),
-                                    _ => None,
-                                },
-                            },
+                            pool_reg: to_pool_reg(
+                                operator,
+                                vrf_keyhash,
+                                pledge,
+                                cost,
+                                margin,
+                                reward_account,
+                                pool_owners,
+                                relays,
+                                pool_metadata,
+                                network_id.clone(),
+                                false,
+                            )?,
                         });
                     }
                 }

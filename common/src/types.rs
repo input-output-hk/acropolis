@@ -22,6 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     fmt::{Display, Formatter},
+    net::{Ipv4Addr, Ipv6Addr},
     ops::{AddAssign, Neg},
     str::FromStr,
 };
@@ -915,10 +916,10 @@ pub struct SingleHostAddr {
     pub port: Option<u16>,
 
     /// Optional IPv4 address
-    pub ipv4: Option<[u8; 4]>,
+    pub ipv4: Option<Ipv4Addr>,
 
     /// Optional IPv6 address
-    pub ipv6: Option<[u8; 16]>,
+    pub ipv6: Option<Ipv6Addr>,
 }
 
 /// Relay hostname

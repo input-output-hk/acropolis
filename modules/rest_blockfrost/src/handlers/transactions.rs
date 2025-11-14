@@ -13,7 +13,7 @@ use acropolis_common::{
         },
         utils::{query_state, rest_query_state_async},
     },
-    Lovelace, TxHash,
+    Lovelace, Relay, TxHash,
 };
 use caryatid_sdk::Context;
 use hex::FromHex;
@@ -358,6 +358,36 @@ async fn handle_transaction_mirs_query(
     .await
 }
 
+struct TxRelay(Relay);
+
+impl Serialize for TxRelay {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Relay::SingleHostAddr(addr) => {
+                let mut state = serializer.serialize_struct("TxRelay", 3)?;
+                state.serialize_field("ipv4", &addr.ipv4)?;
+                state.serialize_field("ipv6", &addr.ipv6)?;
+                state.serialize_field("port", &addr.port)?;
+                state.end()
+            }
+            Relay::SingleHostName(name) => {
+                let mut state = serializer.serialize_struct("TxRelay", 2)?;
+                state.serialize_field("dns", &name.dns_name)?;
+                state.serialize_field("port", &name.port)?;
+                state.end()
+            }
+            Relay::MultiHostName(name) => {
+                let mut state = serializer.serialize_struct("TxRelay", 1)?;
+                state.serialize_field("dns", &name.dns_name)?;
+                state.end()
+            }
+        }
+    }
+}
+
 struct TxPoolUpdateCertificate(TransactionPoolUpdateCertificate);
 
 impl Serialize for TxPoolUpdateCertificate {
@@ -373,9 +403,24 @@ impl Serialize for TxPoolUpdateCertificate {
         state.serialize_field("pool_id", &self.0.pool_reg.operator.to_string())?;
         state.serialize_field("vrf_key", &self.0.pool_reg.vrf_key_hash.to_string())?;
         state.serialize_field("pledge", &self.0.pool_reg.pledge.to_string())?;
-        state.serialize_field("margin_cost", &self.0.pool_reg.margin)?;
+        state.serialize_field("margin_cost", &self.0.pool_reg.margin.to_f64())?;
         state.serialize_field("fixed_cost", &self.0.pool_reg.cost.to_string())?;
         state.serialize_field("reward_account", &reward_account)?;
+        state.serialize_field(
+            "owners",
+            &self
+                .0
+                .pool_reg
+                .pool_owners
+                .iter()
+                .map(|o| o.to_string().unwrap_or("bad address".to_string()))
+                .collect::<Vec<_>>(),
+        )?;
+        state.serialize_field("metadata", &self.0.pool_reg.pool_metadata)?;
+        state.serialize_field(
+            "relays",
+            &self.0.pool_reg.relays.clone().into_iter().map(TxRelay).collect::<Vec<_>>(),
+        )?;
         state.end()
     }
 }
