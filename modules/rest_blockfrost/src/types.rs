@@ -930,6 +930,7 @@ pub struct AccountAddressREST {
 pub struct UTxOREST {
     pub address: String,
     pub tx_hash: String,
+    pub tx_index: u16,
     pub output_index: u16,
     pub amount: AmountList,
     pub block: String,
