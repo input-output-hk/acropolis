@@ -138,6 +138,8 @@ index-by-policy = false
 clear-on-start = true
 
 [module.address-state]
+# Clear state on start up (default true)
+clear-on-start = true
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
 store-info = false

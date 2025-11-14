@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
-    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountWithdrawalREST, AmountList,
+    DelegationUpdateREST, RegistrationUpdateREST, UTxOREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
@@ -784,13 +784,13 @@ pub async fn handle_account_utxos_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::UTxOHashes(utxos),
-            )) => Ok(utxos),
+                BlocksStateQueryResponse::UTxOHashes(hashes),
+            )) => Ok(hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving account UTxOs",
+                "Unexpected message type while retrieving UTxO hashes",
             )),
         },
     )
@@ -824,6 +824,7 @@ pub async fn handle_account_utxos_blockfrost(
     for (i, entry) in entries.into_iter().enumerate() {
         let tx_hash = hashes.tx_hashes.get(i).map(hex::encode).unwrap_or_default();
         let block_hash = hashes.block_hashes.get(i).map(hex::encode).unwrap_or_default();
+        let tx_index = utxo_identifiers[i].tx_index();
         let output_index = utxo_identifiers.get(i).map(|id| id.output_index()).unwrap_or(0);
         let (data_hash, inline_datum) = match &entry.datum {
             Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
@@ -846,9 +847,10 @@ pub async fn handle_account_utxos_blockfrost(
             None => None,
         };
 
-        rest_response.push(AccountUTxOREST {
+        rest_response.push(UTxOREST {
             address: entry.address.to_string()?,
             tx_hash,
+            tx_index,
             output_index,
             amount: entry.value.into(),
             block: block_hash,

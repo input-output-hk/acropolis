@@ -17,6 +17,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub struct AddressStorageConfig {
     pub db_path: String,
+    pub clear_on_start: bool,
     pub skip_until: Option<u64>,
 
     pub store_info: bool,
@@ -60,7 +61,7 @@ impl State {
             PathBuf::from(&config.db_path)
         };
 
-        let store = Arc::new(ImmutableAddressStore::new(&db_path)?);
+        let store = Arc::new(ImmutableAddressStore::new(&db_path, config.clear_on_start)?);
 
         let mut config = config.clone();
         config.skip_until = store.get_last_epoch_stored().await?;
@@ -81,14 +82,20 @@ impl State {
         }
 
         let store = self.immutable.clone();
+        let mut db_had_address = false;
         let mut combined: HashSet<UTxOIdentifier> = match store.get_utxos(address).await? {
-            Some(db) => db.into_iter().collect(),
+            Some(db) => {
+                db_had_address = true;
+                db.into_iter().collect()
+            }
             None => HashSet::new(),
         };
 
+        let mut pending_touched = false;
         for map in self.volatile.window.iter() {
             if let Some(entry) = map.get(address) {
                 if let Some(deltas) = &entry.utxos {
+                    pending_touched = true;
                     for delta in deltas {
                         match delta {
                             UtxoDelta::Created(u) => {
@@ -104,7 +111,11 @@ impl State {
         }
 
         if combined.is_empty() {
-            Ok(None)
+            if db_had_address || pending_touched {
+                Ok(Some(vec![]))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(Some(combined.into_iter().collect()))
         }
@@ -242,6 +253,7 @@ mod tests {
         let dir = tempdir().unwrap();
         AddressStorageConfig {
             db_path: dir.path().to_string_lossy().into_owned(),
+            clear_on_start: true,
             skip_until: None,
             store_info: true,
             store_transactions: true,
