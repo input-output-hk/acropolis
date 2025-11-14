@@ -94,6 +94,15 @@ impl ChainStore {
             // Get promise of params message so the params queue is cleared and
             // the message is ready as soon as possible when we need it
             let mut params_message = params_subscription.read();
+
+            // Validate the first stored block matches what is already persisted when clear-on-start is false
+            let Ok((_, first_block_message)) = new_blocks_subscription.read().await else {
+                return;
+            };
+            if let Err(err) = Self::handle_first_block(&store, &first_block_message) {
+                panic!("Corrupted DB: {err}")
+            };
+
             loop {
                 let Ok((_, message)) = new_blocks_subscription.read().await else {
                     return;
@@ -129,7 +138,38 @@ impl ChainStore {
             bail!("Unexpected message type: {message:?}");
         };
 
-        store.insert_block(info, &raw_block.body)
+        if store.should_persist(info.number) {
+            store.insert_block(info, &raw_block.body)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_first_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
+        let Message::Cardano((block_info, CardanoMessage::BlockAvailable(raw_block))) = message
+        else {
+            bail!("Unexpected message type: {message:?}");
+        };
+
+        if !store.should_persist(block_info.number) {
+            if let Some(existing) = store.get_block_by_number(block_info.number)? {
+                if existing.bytes != raw_block.body {
+                    return Err(anyhow::anyhow!(
+                        "Stored block {} does not match. Set clear-store to true",
+                        block_info.number
+                    ));
+                }
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Unable to retrieve block {}. Set clear-store to true",
+                    block_info.number
+                ));
+            }
+        }
+
+        Self::handle_new_block(store, message)?;
+
+        Ok(())
     }
 
     fn handle_blocks_query(
