@@ -30,9 +30,9 @@ pub struct ImmutableAddressStore {
 }
 
 impl ImmutableAddressStore {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, clear_on_start: bool) -> Result<Self> {
         let path = path.as_ref();
-        if path.exists() {
+        if path.exists() && clear_on_start {
             std::fs::remove_dir_all(path)?;
         }
         let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
@@ -56,15 +56,36 @@ impl ImmutableAddressStore {
     /// for an entire epoch. Skips any partitions that have already stored the given epoch.
     /// All writes are batched and committed atomically, preventing on-disk corruption in case of failure.
     pub async fn persist_epoch(&self, epoch: u64, config: &AddressStorageConfig) -> Result<()> {
-        let persist_utxos = config.store_info
-            && !self.epoch_exists(self.utxos.clone(), ADDRESS_UTXOS_EPOCH_COUNTER, epoch).await?;
-        let persist_txs = config.store_transactions
-            && !self.epoch_exists(self.txs.clone(), ADDRESS_TXS_EPOCH_COUNTER, epoch).await?;
-        let persist_totals = config.store_totals
-            && !self.epoch_exists(self.totals.clone(), ADDRESS_TOTALS_EPOCH_COUNTER, epoch).await?;
+        // Skip if all options disabled
+        if !(config.store_info || config.store_transactions || config.store_totals) {
+            debug!("no persistence needed for epoch {epoch} (all stores disabled)");
+            return Ok(());
+        }
 
+        // Determine which partitions need persistence
+        let (persist_utxos, persist_txs, persist_totals) = if config.clear_on_start {
+            (
+                config.store_info,
+                config.store_transactions,
+                config.store_totals,
+            )
+        } else {
+            let utxos = config.store_info
+                && !self
+                    .epoch_exists(self.utxos.clone(), ADDRESS_UTXOS_EPOCH_COUNTER, epoch)
+                    .await?;
+            let txs = config.store_transactions
+                && !self.epoch_exists(self.txs.clone(), ADDRESS_TXS_EPOCH_COUNTER, epoch).await?;
+            let totals = config.store_totals
+                && !self
+                    .epoch_exists(self.totals.clone(), ADDRESS_TOTALS_EPOCH_COUNTER, epoch)
+                    .await?;
+            (utxos, txs, totals)
+        };
+
+        // Skip if all partitions have already been persisted for the epoch
         if !(persist_utxos || persist_txs || persist_totals) {
-            debug!("no persistence needed for epoch {epoch} (already persisted or disabled)");
+            debug!("no persistence needed for epoch {epoch}");
             return Ok(());
         }
 
@@ -124,22 +145,14 @@ impl ImmutableAddressStore {
         }
 
         // Metadata markers
-        if persist_utxos {
-            batch.insert(
-                &self.utxos,
-                ADDRESS_UTXOS_EPOCH_COUNTER,
-                epoch.to_le_bytes(),
-            );
-        }
-        if persist_txs {
-            batch.insert(&self.txs, ADDRESS_TXS_EPOCH_COUNTER, epoch.to_le_bytes());
-        }
-        if persist_totals {
-            batch.insert(
-                &self.totals,
-                ADDRESS_TOTALS_EPOCH_COUNTER,
-                epoch.to_le_bytes(),
-            );
+        for (enabled, part, key) in [
+            (persist_utxos, &self.utxos, ADDRESS_UTXOS_EPOCH_COUNTER),
+            (persist_txs, &self.txs, ADDRESS_TXS_EPOCH_COUNTER),
+            (persist_totals, &self.totals, ADDRESS_TOTALS_EPOCH_COUNTER),
+        ] {
+            if enabled {
+                batch.insert(part, key, epoch.to_le_bytes());
+            }
         }
 
         match batch.commit() {

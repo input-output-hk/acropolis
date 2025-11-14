@@ -33,6 +33,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
 
 // Configuration defaults
 const DEFAULT_ADDRESS_DB_PATH: (&str, &str) = ("db-path", "./db");
+const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_TOTALS: (&str, bool) = ("store-totals", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
@@ -178,6 +179,7 @@ impl AddressState {
         // Get configuration flags and query topic
         let storage_config = AddressStorageConfig {
             db_path: get_string_flag(&config, DEFAULT_ADDRESS_DB_PATH),
+            clear_on_start: get_bool_flag(&config, DEFAULT_CLEAR_ON_START),
             skip_until: None,
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
             store_totals: get_bool_flag(&config, DEFAULT_STORE_TOTALS),

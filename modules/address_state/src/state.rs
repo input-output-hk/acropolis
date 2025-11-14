@@ -17,6 +17,7 @@ use crate::{
 #[derive(Debug, Default, Clone)]
 pub struct AddressStorageConfig {
     pub db_path: String,
+    pub clear_on_start: bool,
     pub skip_until: Option<u64>,
 
     pub store_info: bool,
@@ -60,7 +61,7 @@ impl State {
             PathBuf::from(&config.db_path)
         };
 
-        let store = Arc::new(ImmutableAddressStore::new(&db_path)?);
+        let store = Arc::new(ImmutableAddressStore::new(&db_path, config.clear_on_start)?);
 
         let mut config = config.clone();
         config.skip_until = store.get_last_epoch_stored().await?;
@@ -252,6 +253,7 @@ mod tests {
         let dir = tempdir().unwrap();
         AddressStorageConfig {
             db_path: dir.path().to_string_lossy().into_owned(),
+            clear_on_start: true,
             skip_until: None,
             store_info: true,
             store_transactions: true,
