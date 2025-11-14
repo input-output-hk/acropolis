@@ -605,6 +605,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 100,
             });
 
@@ -682,6 +683,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 100,
             });
 
@@ -741,6 +743,7 @@ mod tests {
             let delta = StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 42,
             };
             stake_addresses.process_stake_delta(&delta);
@@ -760,12 +763,14 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 100,
             });
 
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: -30,
             });
 
@@ -782,6 +787,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 50,
             });
 
@@ -789,6 +795,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: -100,
             });
 
@@ -810,6 +817,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: stake_address.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 42,
             });
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
@@ -1021,6 +1029,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 50);
@@ -1028,6 +1037,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
             stake_addresses.add_to_reward(&addr2, 100);
@@ -1055,11 +1065,13 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1079,6 +1091,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
 
@@ -1105,6 +1118,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 50);
@@ -1112,6 +1126,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
             stake_addresses.add_to_reward(&addr2, 100);
@@ -1119,6 +1134,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr3.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 3000,
             });
             stake_addresses.add_to_reward(&addr3, 150);
@@ -1159,6 +1175,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 50);
@@ -1166,6 +1183,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
             stake_addresses.add_to_reward(&addr2, 100);
@@ -1192,11 +1210,13 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1221,6 +1241,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 50);
@@ -1228,6 +1249,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1255,6 +1277,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 500);
@@ -1262,6 +1285,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1283,6 +1307,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
 
@@ -1314,6 +1339,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 500);
@@ -1321,6 +1347,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1340,6 +1367,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
 
@@ -1375,6 +1403,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 100);
@@ -1382,6 +1411,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1403,6 +1433,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
 
@@ -1434,6 +1465,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.add_to_reward(&addr1, 100);
@@ -1441,6 +1473,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
 
@@ -1460,6 +1493,7 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
 
@@ -1550,16 +1584,19 @@ mod tests {
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr1.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 1000,
             });
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr2.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 2000,
             });
             stake_addresses.process_stake_delta(&StakeAddressDelta {
                 stake_address: addr3.clone(),
                 addresses: Vec::new(),
+                tx_count: 1,
                 delta: 3000,
             });
 
