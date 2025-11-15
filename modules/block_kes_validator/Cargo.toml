@@ -1,0 +1,28 @@
+# Acropolis Block KES Validator
+
+[package]
+name = "acropolis_module_block_kes_validator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Golddy <golddy@sundae.fi>"]
+description = "Validate the KES in the block header"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+hex = { workspace = true }
+imbl = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = "2.0.17"
+pallas = { workspace = true }
+
+kes-summed-ed25519 = { git = "https://github.com/txpipe/kes", rev = "f69fb357d46f6a18925543d785850059569d7e78" }
+
+[lib]
+path = "src/block_kes_validator.rs"

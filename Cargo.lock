@@ -105,6 +105,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_block_kes_validator"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "hex",
+ "imbl",
+ "kes-summed-ed25519 0.2.1 (git+https://github.com/txpipe/kes?rev=f69fb357d46f6a18925543d785850059569d7e78)",
+ "pallas 0.33.0",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_block_unpacker"
 version = "0.2.0"
 dependencies = [
@@ -467,6 +484,7 @@ dependencies = [
  "acropolis_module_accounts_state",
  "acropolis_module_address_state",
  "acropolis_module_assets_state",
+ "acropolis_module_block_kes_validator",
  "acropolis_module_block_unpacker",
  "acropolis_module_block_vrf_validator",
  "acropolis_module_chain_store",
@@ -3399,6 +3417,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kes-summed-ed25519"
+version = "0.2.1"
+source = "git+https://github.com/txpipe/kes?rev=f69fb357d46f6a18925543d785850059569d7e78#f69fb357d46f6a18925543d785850059569d7e78"
+dependencies = [
+ "blake2 0.10.6",
+ "ed25519-dalek",
+ "rand_core 0.6.4",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
 name = "lapin"
 version = "3.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3732,7 +3762,7 @@ dependencies = [
  "ed25519-dalek",
  "fixed",
  "hex",
- "kes-summed-ed25519",
+ "kes-summed-ed25519 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "mithril-build-script",
  "mithril-stm",
  "nom 8.0.0",
