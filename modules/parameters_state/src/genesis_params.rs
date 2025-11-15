@@ -12,7 +12,7 @@ use pallas::ledger::configs::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
+const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 12] = [
     (
         "sanchonet",
         Era::Byron,
@@ -32,6 +32,26 @@ const PREDEFINED_GENESIS: [(&str, Era, &[u8]); 8] = [
         "sanchonet",
         Era::Conway,
         include_bytes!("../downloads/sanchonet-conway-genesis.json"),
+    ),
+    (
+        "preview",
+        Era::Byron,
+        include_bytes!("../downloads/preview-byron-genesis.json"),
+    ),
+    (
+        "preview",
+        Era::Shelley,
+        include_bytes!("../downloads/preview-shelley-genesis.json"),
+    ),
+    (
+        "preview",
+        Era::Alonzo,
+        include_bytes!("../downloads/preview-alonzo-genesis.json"),
+    ),
+    (
+        "preview",
+        Era::Conway,
+        include_bytes!("../downloads/preview-conway-genesis.json"),
     ),
     (
         "mainnet",
