@@ -96,6 +96,12 @@ impl EpochsState {
                         {
                             state.handle_protocol_parameters(params);
                         }
+
+                        let ea = state.end_epoch(block_info);
+                        // publish epoch activity message
+                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
+                            |e| error!("Failed to publish epoch activity messages: {e}"),
+                        );
                     }
 
                     let span = info_span!("epochs_state.decode_header", block = block_info.number);
@@ -122,14 +128,6 @@ impl EpochsState {
                             }
                         }
                     });
-
-                    if is_new_epoch {
-                        let ea = state.end_epoch(block_info);
-                        // publish epoch activity message
-                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
-                            |e| error!("Failed to publish epoch activity messages: {e}"),
-                        );
-                    }
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
