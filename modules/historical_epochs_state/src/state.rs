@@ -62,7 +62,7 @@ impl State {
 
     pub fn get_next_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
         let mut epochs = vec![];
-        let immutable_epochs_rage =
+        let immutable_epochs_range =
             self.volatile.last_persisted_epoch.and_then(|last_persisted_epoch| {
                 if last_persisted_epoch > epoch {
                     Some(epoch + 1..=last_persisted_epoch)
@@ -71,13 +71,13 @@ impl State {
                 }
             });
 
-        if let Some(immutable_epochs_rage) = immutable_epochs_rage {
-            epochs.extend(self.immutable.get_epochs(immutable_epochs_rage)?);
+        if let Some(immutable_epochs_range) = immutable_epochs_range {
+            epochs.extend(self.immutable.get_epochs(immutable_epochs_range)?);
         }
 
-        if let Some(volatile_epoch) = self.volatile.get_volatile_epoch(epoch) {
-            if volatile_epoch.epoch > epoch {
-                epochs.push(volatile_epoch);
+        if let Some(volatile_ea) = self.volatile.volatile_ea.as_ref() {
+            if volatile_ea.epoch > epoch {
+                epochs.push(volatile_ea.clone());
             }
         }
         epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
@@ -86,18 +86,18 @@ impl State {
 
     pub fn get_previous_epochs(&self, epoch: u64) -> Result<Vec<EpochActivityMessage>> {
         let mut epochs = vec![];
-        let immutable_epochs_rage = self
+        let immutable_epochs_range = self
             .volatile
             .last_persisted_epoch
             .map(|last_persisted_epoch| 0..=last_persisted_epoch.min(epoch - 1));
 
-        if let Some(immutable_epochs_rage) = immutable_epochs_rage {
-            epochs.extend(self.immutable.get_epochs(immutable_epochs_rage)?);
+        if let Some(immutable_epochs_range) = immutable_epochs_range {
+            epochs.extend(self.immutable.get_epochs(immutable_epochs_range)?);
         }
 
-        if let Some(volatile_epoch) = self.volatile.get_volatile_epoch(epoch) {
-            if volatile_epoch.epoch < epoch {
-                epochs.push(volatile_epoch);
+        if let Some(volatile_ea) = self.volatile.volatile_ea.as_ref() {
+            if volatile_ea.epoch < epoch {
+                epochs.push(volatile_ea.clone());
             }
         }
         epochs.sort_by(|a, b| a.epoch.cmp(&b.epoch));
