@@ -62,6 +62,7 @@ pub fn validate_kes_signature(
 
 pub fn validate_operational_certificate<'a>(
     certificate: OperationalCertificate<'a>,
+    pool_id: &PoolId,
     issuer: &ed25519::PublicKey,
     latest_sequence_number: u64,
     is_praos: bool,
@@ -103,6 +104,7 @@ pub fn validate_operational_certificate<'a>(
     if !issuer.verify(&message, &signature) {
         return Err(OperationalCertificateError::InvalidSignatureOcert {
             issuer: issuer.as_ref().to_vec(),
+            pool_id: *pool_id,
         });
     }
 
@@ -175,7 +177,13 @@ pub fn validate_block_kes<'a>(
                 Ok(())
             }),
             Box::new(move || {
-                validate_operational_certificate(cert, &issuer, latest_sequence_number, is_praos)?;
+                validate_operational_certificate(
+                    cert,
+                    &pool_id,
+                    &issuer,
+                    latest_sequence_number,
+                    is_praos,
+                )?;
                 Ok(())
             }),
         ],

@@ -295,8 +295,8 @@ pub enum OperationalCertificateError {
     MalformedSignatureOcert { reason: String },
     /// **Cause:** The cold key signature on the operational certificate is invalid.
     /// The OCert was not properly signed by the pool's cold key.
-    #[error("Invalid Signature OCert: Issuer={}", hex::encode(issuer))]
-    InvalidSignatureOcert { issuer: Vec<u8> },
+    #[error("Invalid Signature OCert: Issuer={}, Pool ID={}", hex::encode(issuer), hex::encode(pool_id))]
+    InvalidSignatureOcert { issuer: Vec<u8>, pool_id: PoolId, },
     /// **Cause:** The operational certificate counter in the header is not greater
     /// than the last counter used by this pool.
     #[error(
