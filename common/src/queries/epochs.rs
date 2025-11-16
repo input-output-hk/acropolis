@@ -4,9 +4,16 @@ use crate::{messages::EpochActivityMessage, protocol_params::ProtocolParams, Poo
 pub const DEFAULT_EPOCHS_QUERY_TOPIC: (&str, &str) =
     ("epochs-state-query-topic", "cardano.query.epochs");
 
+pub const DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC: (&str, &str) = (
+    "historical-epochs-state-query-topic",
+    "cardano.query.historical.epochs",
+);
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum EpochsStateQuery {
     GetLatestEpoch,
+
+    // Served from historical epochs state
     GetEpochInfo { epoch_number: u64 },
     GetNextEpochs { epoch_number: u64 },
     GetPreviousEpochs { epoch_number: u64 },

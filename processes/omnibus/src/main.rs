@@ -21,6 +21,7 @@ use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
+use acropolis_module_historical_epochs_state::HistoricalEpochsState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
@@ -117,6 +118,7 @@ pub async fn main() -> Result<()> {
     AddressState::register(&mut process);
     AssetsState::register(&mut process);
     HistoricalAccountsState::register(&mut process);
+    HistoricalEpochsState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
