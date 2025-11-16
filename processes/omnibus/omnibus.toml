@@ -73,6 +73,8 @@ store-mir-history = false
 store-withdrawal-history = false
 store-addresses = false
 
+[module.historical-epochs-state]
+
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
 store-info = false

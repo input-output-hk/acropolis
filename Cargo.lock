@@ -206,7 +206,6 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "dashmap",
  "hex",
  "imbl",
  "pallas 0.33.0",
@@ -273,9 +272,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "hex",
  "minicbor 0.26.5",
- "rayon",
  "tokio",
  "tracing",
 ]

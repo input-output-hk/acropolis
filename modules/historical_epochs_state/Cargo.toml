@@ -16,11 +16,9 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 minicbor = { version = "0.26.0", features = ["std", "derive"] }
-hex = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 fjall = "2.11.2"
-rayon = "1.10.0"
 
 [lib]
 path = "src/historical_epochs_state.rs"
