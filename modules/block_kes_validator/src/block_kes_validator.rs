@@ -48,7 +48,7 @@ impl BlockKesValidator {
     #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut kes_validation_publisher: KesValidationPublisher,
+        kes_validation_publisher: KesValidationPublisher,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,

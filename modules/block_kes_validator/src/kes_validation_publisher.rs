@@ -23,7 +23,7 @@ impl KesValidationPublisher {
     }
 
     pub async fn publish_kes_validation(
-        &mut self,
+        &self,
         block: &BlockInfo,
         validation_result: Result<Option<(PoolId, u64)>, KesValidationError>,
     ) -> anyhow::Result<()> {
