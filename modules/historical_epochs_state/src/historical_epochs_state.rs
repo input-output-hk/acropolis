@@ -215,8 +215,8 @@ impl HistoricalEpochsState {
                 let response = match query {
                     EpochsStateQuery::GetEpochInfo { epoch_number } => {
                         match state.lock().await.get_historical_epoch(*epoch_number) {
-                            Ok(Some(epoch_info)) => {
-                                EpochsStateQueryResponse::EpochInfo(EpochInfo { epoch: epoch_info })
+                            Ok(Some(epoch)) => {
+                                EpochsStateQueryResponse::EpochInfo(EpochInfo { epoch })
                             }
                             Ok(None) => EpochsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Epoch {}", epoch_number),
