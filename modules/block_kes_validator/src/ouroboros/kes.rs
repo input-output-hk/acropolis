@@ -1,36 +1,6 @@
-use kes_summed_ed25519::{
-    self as kes,
-    kes::{Sum6Kes, Sum6KesSig},
-    traits::{KesSig, KesSk},
-};
+use kes_summed_ed25519::{self as kes, kes::Sum6KesSig, traits::KesSig};
 use std::{array::TryFromSliceError, ops::Deref};
 use thiserror::Error;
-
-// ------------------------------------------------------------------- SecretKey
-
-/// KES secret key
-pub struct SecretKey<'a>(Sum6Kes<'a>);
-
-impl SecretKey<'_> {
-    /// Create a new KES secret key
-    pub fn from_bytes(sk_bytes: &mut Vec<u8>) -> Result<SecretKey<'_>, Error> {
-        // TODO: extend() could potentially re-allocate memory to a new location and copy the sk_bytes.
-        // This would leave the original memory containing the secret key without being wiped.
-        sk_bytes.extend([0u8; 4]); // default to period = 0
-        let sum_6_kes = Sum6Kes::from_bytes(sk_bytes.as_mut_slice())?;
-        Ok(SecretKey(sum_6_kes))
-    }
-
-    /// Get the current period of the KES secret key
-    pub fn get_period(&self) -> u32 {
-        self.0.get_period()
-    }
-
-    /// Update the KES secret key to the next period
-    pub fn update(&mut self) -> Result<(), Error> {
-        Ok(self.0.update()?)
-    }
-}
 
 // ------------------------------------------------------------------- PublicKey
 
@@ -58,12 +28,6 @@ impl Deref for PublicKey {
                 hex::encode(self.0),
             )
         })
-    }
-}
-
-impl From<&SecretKey<'_>> for PublicKey {
-    fn from(sk: &SecretKey<'_>) -> Self {
-        PublicKey(sk.0.to_pk())
     }
 }
 
@@ -135,6 +99,39 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kes_summed_ed25519::{kes::Sum6Kes, traits::KesSk};
+
+    // ------------------------------------------------------------------- SecretKey
+
+    /// KES secret key
+    pub struct SecretKey<'a>(Sum6Kes<'a>);
+
+    impl SecretKey<'_> {
+        /// Create a new KES secret key
+        pub fn from_bytes(sk_bytes: &mut Vec<u8>) -> Result<SecretKey<'_>, Error> {
+            // TODO: extend() could potentially re-allocate memory to a new location and copy the sk_bytes.
+            // This would leave the original memory containing the secret key without being wiped.
+            sk_bytes.extend([0u8; 4]); // default to period = 0
+            let sum_6_kes = Sum6Kes::from_bytes(sk_bytes.as_mut_slice())?;
+            Ok(SecretKey(sum_6_kes))
+        }
+
+        /// Get the current period of the KES secret key
+        pub fn get_period(&self) -> u32 {
+            self.0.get_period()
+        }
+
+        /// Update the KES secret key to the next period
+        pub fn update(&mut self) -> Result<(), Error> {
+            Ok(self.0.update()?)
+        }
+    }
+
+    impl From<&SecretKey<'_>> for PublicKey {
+        fn from(sk: &SecretKey<'_>) -> Self {
+            PublicKey(sk.0.to_pk())
+        }
+    }
 
     #[test]
     fn kes_key_evolution() {
