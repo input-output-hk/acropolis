@@ -197,7 +197,7 @@ impl HistoricalEpochsState {
         };
 
         // Initalize state
-        let state = State::new(&config).await?;
+        let state = State::new(&config)?;
         let state_mutex = Arc::new(Mutex::new(state));
         let state_query = state_mutex.clone();
 

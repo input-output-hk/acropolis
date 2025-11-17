@@ -143,7 +143,13 @@ pub struct BlockTxsMessage {
 
 /// Epoch activity - sent at end of epoch
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    PartialEq,
 )]
 pub struct EpochActivityMessage {
     /// Epoch which has ended
