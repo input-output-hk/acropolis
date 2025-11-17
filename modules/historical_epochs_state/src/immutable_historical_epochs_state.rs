@@ -1,16 +1,17 @@
-use std::path::Path;
+use std::{collections::VecDeque, path::Path};
 
 use acropolis_common::messages::EpochActivityMessage;
 use anyhow::Result;
 use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
 use minicbor::{decode, to_vec};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct ImmutableHistoricalEpochsState {
     epochs_history: Partition,
     keyspace: Keyspace,
-    pub pending: Mutex<Vec<EpochActivityMessage>>,
+    pub pending: Mutex<VecDeque<EpochActivityMessage>>,
+    pub max_pending: usize,
 }
 
 impl ImmutableHistoricalEpochsState {
@@ -18,7 +19,6 @@ impl ImmutableHistoricalEpochsState {
         let cfg = fjall::Config::new(path)
             // 4MB write buffer since EpochActivityMessage is not that big
             .max_write_buffer_size(4 * 1024 * 1024)
-            .temporary(true)
             // Enable manual control of flushing
             // We store EpochActivityMessage only every 5 days (need manual Flush)
             .manual_journal_persist(true);
@@ -30,16 +30,22 @@ impl ImmutableHistoricalEpochsState {
         Ok(Self {
             epochs_history,
             keyspace,
-            pending: Mutex::new(Vec::new()),
+            pending: Mutex::new(VecDeque::new()),
+            max_pending: 5,
         })
     }
 
     pub async fn update_immutable(&self, ea: EpochActivityMessage) {
         let mut pending = self.pending.lock().await;
-        pending.push(ea);
+        if pending.len() >= self.max_pending {
+            warn!("historical epochs state pending buffer full, dropping oldest");
+            pending.pop_front();
+        }
+        pending.push_back(ea);
     }
 
     /// Persists pending EpochActivityMessages for epoch N
+    /// There should be only one EpochActivityMessage for each epoch
     /// Returns the number of persisted EpochActivityMessages
     /// Errors if the batch commit or persist fails
     pub async fn persist_epoch(&self, epoch: u64) -> Result<u32> {

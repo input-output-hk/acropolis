@@ -18,7 +18,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info, info_span, warn, Instrument};
 mod immutable_historical_epochs_state;
 mod state;
 mod volatile_historical_epochs_state;
@@ -143,7 +143,7 @@ impl HistoricalEpochsState {
                     };
 
                     if let Err(e) = persist_tx.send((current_block.epoch - 1, immutable)).await {
-                        panic!("persistence worker crashed: {e}");
+                        error!("persistence worker crashed: {e}");
                     }
                 }
             }
@@ -221,9 +221,12 @@ impl HistoricalEpochsState {
                             Ok(None) => EpochsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Epoch {}", epoch_number),
                             )),
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                QueryError::storage_disabled("historical epoch"),
-                            ),
+                            Err(e) => {
+                                warn!("failed to get epoch info: {e}");
+                                EpochsStateQueryResponse::Error(QueryError::internal_error(
+                                    "historical epoch info",
+                                ))
+                            }
                         }
                     }
 
@@ -232,9 +235,12 @@ impl HistoricalEpochsState {
                             Ok(epochs) => {
                                 EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
                             }
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                QueryError::storage_disabled("historical epoch"),
-                            ),
+                            Err(e) => {
+                                warn!("failed to get next epochs: {e}");
+                                EpochsStateQueryResponse::Error(QueryError::internal_error(
+                                    "historical next epochs",
+                                ))
+                            }
                         }
                     }
 
@@ -243,9 +249,12 @@ impl HistoricalEpochsState {
                             Ok(epochs) => {
                                 EpochsStateQueryResponse::PreviousEpochs(PreviousEpochs { epochs })
                             }
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                QueryError::storage_disabled("historical epoch"),
-                            ),
+                            Err(e) => {
+                                warn!("failed to get previous epochs: {e}");
+                                EpochsStateQueryResponse::Error(QueryError::internal_error(
+                                    "historical previous epochs",
+                                ))
+                            }
                         }
                     }
 

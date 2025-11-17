@@ -17,6 +17,7 @@ pub enum EpochsStateQuery {
     GetEpochInfo { epoch_number: u64 },
     GetNextEpochs { epoch_number: u64 },
     GetPreviousEpochs { epoch_number: u64 },
+
     GetEpochStakeDistribution { epoch_number: u64 },
     GetEpochStakeDistributionByPool { epoch_number: u64 },
     GetLatestEpochBlocksMintedByPool { spo_id: PoolId },

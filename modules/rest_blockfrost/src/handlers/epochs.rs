@@ -265,13 +265,13 @@ pub async fn handle_epoch_next_blockfrost(
         .parse::<u64>()
         .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
-    let lastest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
-    let lastest_epoch = query_state(
+    let latest_epoch = query_state(
         &context,
         &handlers_config.epochs_query_topic,
-        lastest_epoch_msg,
+        latest_epoch_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::LatestEpoch(res),
@@ -286,13 +286,13 @@ pub async fn handle_epoch_next_blockfrost(
     )
     .await?;
 
-    if parsed > lastest_epoch.epoch {
+    if parsed > latest_epoch.epoch {
         return Err(RESTError::not_found(
             format!("Epoch {parsed} not found").as_str(),
         ));
     }
 
-    if parsed == lastest_epoch.epoch {
+    if parsed == latest_epoch.epoch {
         return Ok(RESTResponse::with_json(200, "[]"));
     }
 
@@ -319,7 +319,7 @@ pub async fn handle_epoch_next_blockfrost(
         },
     )
     .await?;
-    next_epochs.push(EpochActivityRest::from(lastest_epoch));
+    next_epochs.push(EpochActivityRest::from(latest_epoch));
 
     let json = serde_json::to_string_pretty(&next_epochs)?;
     Ok(RESTResponse::with_json(200, &json))
@@ -341,13 +341,13 @@ pub async fn handle_epoch_previous_blockfrost(
         .parse::<u64>()
         .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
-    let lastest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
-    let lastest_epoch = query_state(
+    let latest_epoch = query_state(
         &context,
         &handlers_config.epochs_query_topic,
-        lastest_epoch_msg,
+        latest_epoch_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::LatestEpoch(res),
@@ -362,7 +362,7 @@ pub async fn handle_epoch_previous_blockfrost(
     )
     .await?;
 
-    if parsed > lastest_epoch.epoch {
+    if parsed > latest_epoch.epoch {
         return Err(RESTError::not_found(
             format!("Epoch {parsed} not found").as_str(),
         ));
@@ -373,7 +373,7 @@ pub async fn handle_epoch_previous_blockfrost(
             epoch_number: parsed,
         },
     )));
-    let mut previous_epochs = query_state(
+    let previous_epochs = query_state(
         &context,
         &handlers_config.historical_epochs_query_topic,
         previous_epochs_msg,
@@ -390,10 +390,6 @@ pub async fn handle_epoch_previous_blockfrost(
         },
     )
     .await?;
-
-    if lastest_epoch.epoch < parsed {
-        previous_epochs.push(EpochActivityRest::from(lastest_epoch));
-    }
 
     let json = serde_json::to_string_pretty(&previous_epochs)?;
     Ok(RESTResponse::with_json(200, &json))
