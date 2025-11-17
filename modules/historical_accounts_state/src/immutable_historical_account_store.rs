@@ -25,6 +25,7 @@ pub struct ImmutableHistoricalAccountStore {
     mir_history: Partition,
     withdrawal_history: Partition,
     addresses: Partition,
+    tx_count: Partition,
     keyspace: Keyspace,
     pub pending: Mutex<Vec<HashMap<StakeAddress, AccountEntry>>>,
 }
@@ -47,6 +48,7 @@ impl ImmutableHistoricalAccountStore {
         let mir_history =
             keyspace.open_partition("mir_history", PartitionCreateOptions::default())?;
         let addresses = keyspace.open_partition("addresses", PartitionCreateOptions::default())?;
+        let tx_count = keyspace.open_partition("tx_count", PartitionCreateOptions::default())?;
 
         Ok(Self {
             rewards_history,
@@ -56,6 +58,7 @@ impl ImmutableHistoricalAccountStore {
             withdrawal_history,
             mir_history,
             addresses,
+            tx_count,
             keyspace,
             pending: Mutex::new(Vec::new()),
         })
@@ -139,6 +142,13 @@ impl ImmutableHistoricalAccountStore {
                             Self::make_address_key(&account, epoch, idx, address.clone());
                         batch.insert(&self.addresses, address_key, []);
                     }
+                }
+            }
+
+            // Persist new tx count
+            if config.store_tx_count {
+                if let Some(count) = &entry.tx_count {
+                    batch.insert(&self.tx_count, epoch_key, count.to_le_bytes());
                 }
             }
         }
@@ -297,6 +307,26 @@ impl ImmutableHistoricalAccountStore {
         Ok((!addresses.is_empty()).then_some(addresses))
     }
 
+    pub async fn get_tx_count(&self, account: &StakeAddress) -> Result<Option<u32>> {
+        let mut total_count = 0;
+
+        for result in self.tx_count.prefix(account.get_hash().as_ref()) {
+            let (_, bytes) = result?;
+            let epoch_count = u32::from_le_bytes(bytes[..4].try_into()?);
+            total_count += epoch_count;
+        }
+
+        for block_map in self.pending.lock().await.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(block_count) = &entry.tx_count {
+                    total_count += block_count;
+                }
+            }
+        }
+
+        Ok((total_count != 0).then_some(total_count))
+    }
+
     fn merge_block_deltas(
         block_deltas: Vec<HashMap<StakeAddress, AccountEntry>>,
     ) -> HashMap<StakeAddress, AccountEntry> {
@@ -317,6 +347,9 @@ impl ImmutableHistoricalAccountStore {
                 Self::extend_opt_vec(&mut agg_entry.withdrawal_history, entry.withdrawal_history);
                 Self::extend_opt_vec(&mut agg_entry.mir_history, entry.mir_history);
                 Self::extend_opt_vec_ordered(&mut agg_entry.addresses, entry.addresses);
+                if let Some(count) = entry.tx_count {
+                    agg_entry.tx_count = Some(agg_entry.tx_count.unwrap_or(0) + count);
+                }
             }
             acc
         })

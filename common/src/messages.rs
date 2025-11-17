@@ -73,7 +73,7 @@ pub struct GenesisUTxOsMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
     /// Ordered set of deltas
-    pub deltas: Vec<UTXODelta>,
+    pub deltas: Vec<TxUTxODeltas>,
 }
 
 /// Message encapsulating multiple asset deltas

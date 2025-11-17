@@ -680,15 +680,35 @@ pub async fn handle_account_totals_blockfrost(
     )
     .await?;
 
-    // TODO: Query historical accounts state to retrieve account tx count instead of
-    //       using the addresses totals as the addresses totals does not deduplicate
-    //       for multi-address transactions, overstating count
+    // Get account tx count from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountTotalTxCount {
+            account: account.clone(),
+        },
+    )));
+    let tx_count = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountTotalTxCount(count),
+            )) => Ok(count),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account tx count",
+            )),
+        },
+    )
+    .await?;
 
     let rest_response = AccountTotalsREST {
         stake_address: account.to_string()?,
         received_sum: totals.received.into(),
         sent_sum: totals.sent.into(),
-        tx_count: totals.tx_count,
+        tx_count,
     };
 
     let json = serde_json::to_string_pretty(&rest_response)?;

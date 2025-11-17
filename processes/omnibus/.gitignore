@@ -3,6 +3,7 @@ sled-immutable-utxos
 fjall-blocks
 fjall-immutable-utxos
 cache
+upstream-cache
 
 # DB files
 *_db

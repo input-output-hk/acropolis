@@ -9,7 +9,7 @@ use acropolis_common::{
         UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, GenesisDelegates, Lovelace,
-    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, UTXODelta,
+    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -34,6 +34,9 @@ const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const MAINNET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-byron-genesis.json");
 const MAINNET_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/mainnet-shelley-genesis.json");
 const MAINNET_SHELLEY_START_EPOCH: u64 = 208;
+const PREVIEW_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/preview-byron-genesis.json");
+const PREVIEW_SHELLEY_GENESIS: &[u8] = include_bytes!("../downloads/preview-shelley-genesis.json");
+const PREVIEW_SHELLEY_START_EPOCH: u64 = 0;
 const SANCHONET_BYRON_GENESIS: &[u8] = include_bytes!("../downloads/sanchonet-byron-genesis.json");
 const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
@@ -103,6 +106,11 @@ impl GenesisBootstrapper {
                             MAINNET_SHELLEY_GENESIS,
                             MAINNET_SHELLEY_START_EPOCH,
                         ),
+                        "preview" => (
+                            PREVIEW_BYRON_GENESIS,
+                            PREVIEW_SHELLEY_GENESIS,
+                            PREVIEW_SHELLEY_START_EPOCH,
+                        ),
                         "sanchonet" => (
                             SANCHONET_BYRON_GENESIS,
                             SANCHONET_SHELLEY_GENESIS,
@@ -157,7 +165,11 @@ impl GenesisBootstrapper {
                         reference_script: None,
                     };
 
-                    utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
+                    utxo_deltas_message.deltas.push(TxUTxODeltas {
+                        tx_identifier,
+                        inputs: Vec::new(),
+                        outputs: vec![tx_output],
+                    });
                     total_allocated += amount;
                 }
 

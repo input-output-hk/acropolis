@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use pallas::ledger::primitives::{alonzo, byron};
 use pallas::ledger::traverse::{MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
-use acropolis_common::{AssetName, BlockInfo, NativeAsset, NativeAssets, TxHash, TxIdentifier, TxInput, TxOutRef, TxOutput, UTXODelta, UTxOIdentifier, Value};
+use acropolis_common::{AssetName, BlockInfo, NativeAsset, NativeAssets, TxHash, TxIdentifier, TxOutRef, TxOutput, UTxOIdentifier, Value};
 use acropolis_common::messages::{ProtocolParamsMessage, RawTxsMessage};
 use acropolis_common::validation::{ValidationError, ValidationStatus};
 use crate::TxValidatorPhase1StateConfig;
@@ -91,7 +91,7 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
  */
 
 struct Transaction {
-    inputs: Vec<TxInput>,
+    inputs: Vec<UTxOIdentifier>,
     outputs: Vec<TxOutput>
 }
 
@@ -135,13 +135,12 @@ impl State {
             match self.utxos_registry.live_map.get(&tx_ref) {
                 Some(tx_identifier) => {
                     // Add TxInput to utxo_deltas
-                    converted_inputs.push(TxInput {
-                        utxo_identifier: UTxOIdentifier::new(
+                    converted_inputs.push(UTxOIdentifier::new(
                             tx_identifier.block_number(),
                             tx_identifier.tx_index(),
                             tx_ref.output_index,
-                        ),
-                    });
+                        )
+                    );
                 }
                 None => {
                     return Ok(ConversionResult::Error(ValidationError::MalformedTransaction(

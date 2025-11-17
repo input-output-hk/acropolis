@@ -1,12 +1,13 @@
 //! Acropolis AssetsState: State storage
 
+use std::collections::HashSet;
+
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
-    math::update_value_with_delta,
     queries::assets::{AssetHistory, PolicyAssets},
     Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
     AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetsDelta, PolicyAsset, PolicyId,
-    ShelleyAddress, TxIdentifier, UTXODelta,
+    ShelleyAddress, TxIdentifier, TxUTxODeltas,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -355,7 +356,7 @@ impl State {
 
     pub fn handle_transactions(
         &self,
-        deltas: &[UTXODelta],
+        deltas: &[TxUTxODeltas],
         registry: &AssetRegistry,
     ) -> Result<Self> {
         let mut new_txs = self.transactions.clone();
@@ -369,27 +370,28 @@ impl State {
 
         let store_cfg = self.config.store_transactions;
 
-        for delta in deltas {
-            let UTXODelta::Output(output) = delta else {
-                continue;
-            };
+        for tx in deltas {
+            let mut tx_asset_ids = HashSet::new();
+            for output in &tx.outputs {
+                for (policy_id, assets) in &output.value.assets {
+                    for asset in assets {
+                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
+                            tx_asset_ids.insert(asset_id);
+                        }
+                    }
+                }
+            }
 
-            let tx_identifier = TxIdentifier::from(output.utxo_identifier);
-            for (policy_id, assets) in &output.value.assets {
-                for asset in assets {
-                    if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                        let entry = txs_map.entry(asset_id).or_default();
+            for asset_id in &tx_asset_ids {
+                let entry = txs_map.entry(*asset_id).or_default();
 
-                        let should_push = entry.back() != Some(&tx_identifier);
+                let last = entry.back().copied();
+                if last != Some(tx.tx_identifier) {
+                    entry.push_back(tx.tx_identifier);
 
-                        if should_push {
-                            entry.push_back(tx_identifier);
-
-                            if let StoreTransactions::Last(max) = store_cfg {
-                                if entry.len() as u64 > max {
-                                    entry.pop_front();
-                                }
-                            }
+                    if let StoreTransactions::Last(max) = store_cfg {
+                        if entry.len() as u64 > max {
+                            entry.pop_front();
                         }
                     }
                 }
@@ -418,30 +420,31 @@ impl State {
 
         for address_delta in deltas {
             if let Address::Shelley(shelley_addr) = &address_delta.address {
-                for (policy_id, asset_deltas) in &address_delta.value.assets {
-                    for asset_delta in asset_deltas {
-                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset_delta.name) {
+                for (policy_id, assets) in &address_delta.sent.assets {
+                    for asset in assets {
+                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
                             if let Some(holders) = addr_map.get_mut(&asset_id) {
-                                let new_balance = {
-                                    let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                    if let Err(e) =
-                                        update_value_with_delta(current, asset_delta.amount)
-                                    {
-                                        error!(
-                                            "Address balance update error for {:?}: {e}",
-                                            address_delta.address
-                                        );
-                                        0
-                                    } else {
-                                        *current
-                                    }
-                                };
+                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
+                                *current = current.saturating_sub(asset.amount);
 
-                                if new_balance == 0 {
+                                if *current == 0 {
                                     holders.remove(shelley_addr);
                                 }
                             } else {
-                                error!("Address delta for unknown asset_id: {:?}", asset_id);
+                                error!("Sent delta for unknown asset_id: {:?}", asset_id);
+                            }
+                        }
+                    }
+                }
+
+                for (policy_id, assets) in &address_delta.received.assets {
+                    for asset in assets {
+                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
+                            if let Some(holders) = addr_map.get_mut(&asset_id) {
+                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
+                                *current = current.saturating_add(asset.amount);
+                            } else {
+                                error!("Received delta for unknown asset_id: {:?}", asset_id);
                             }
                         }
                     }
@@ -540,42 +543,41 @@ impl State {
 
     pub fn handle_cip68_metadata(
         &self,
-        deltas: &[UTXODelta],
+        deltas: &[TxUTxODeltas],
         registry: &AssetRegistry,
     ) -> Result<Self> {
         let mut new_info = self.info.clone();
 
-        for delta in deltas {
-            let UTXODelta::Output(output) = delta else {
-                continue;
-            };
-            let Some(Datum::Inline(blob)) = &output.datum else {
-                continue;
-            };
+        for tx in deltas {
+            for output in &tx.outputs {
+                let Some(Datum::Inline(blob)) = &output.datum else {
+                    continue;
+                };
 
-            for (policy_id, native_assets) in &output.value.assets {
-                for asset in native_assets {
-                    let name = &asset.name;
+                for (policy_id, native_assets) in &output.value.assets {
+                    for asset in native_assets {
+                        let name = &asset.name;
 
-                    if !name.as_slice().starts_with(&CIP68_LABEL_100) {
-                        continue;
-                    }
-
-                    // NOTE: CIP68 metadata version is included in the blob and is decoded in REST handler
-                    match registry.lookup_id(policy_id, name) {
-                        Some(asset_id) => {
-                            if let Some(record) =
-                                new_info.as_mut().and_then(|m| m.get_mut(&asset_id))
-                            {
-                                record.onchain_metadata = Some(blob.clone());
-                            }
+                        if !name.as_slice().starts_with(&CIP68_LABEL_100) {
+                            continue;
                         }
-                        None => {
-                            error!(
-                                "Got CIP-68 datum for unknown asset: {}.{}",
-                                hex::encode(policy_id),
-                                hex::encode(name.as_slice())
-                            );
+
+                        // NOTE: CIP68 metadata version is included in the blob and is decoded in REST handler
+                        match registry.lookup_id(policy_id, name) {
+                            Some(asset_id) => {
+                                if let Some(record) =
+                                    new_info.as_mut().and_then(|m| m.get_mut(&asset_id))
+                                {
+                                    record.onchain_metadata = Some(blob.clone());
+                                }
+                            }
+                            None => {
+                                error!(
+                                    "Got CIP-68 datum for unknown asset: {}.{}",
+                                    hex::encode(policy_id),
+                                    hex::encode(name.as_slice())
+                                );
+                            }
                         }
                     }
                 }
@@ -633,8 +635,8 @@ mod tests {
     };
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
-        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxInput, TxOutput,
-        UTXODelta, UTxOIdentifier, Value, ValueDelta,
+        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
+        TxUTxODeltas, UTxOIdentifier, Value,
     };
 
     fn dummy_policy(byte: u8) -> PolicyId {
@@ -732,16 +734,47 @@ mod tests {
         serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
     }
 
-    fn make_address_delta(policy_id: PolicyId, name: AssetName, amount: i64) -> AddressDelta {
+    fn make_address_delta(
+        policy_id: PolicyId,
+        name: AssetName,
+        sent_amount: u64,
+        received_amount: u64,
+    ) -> AddressDelta {
         AddressDelta {
             address: dummy_address(),
-            utxo: UTxOIdentifier::new(0, 0, 0),
-            value: ValueDelta {
-                lovelace: 0,
-                assets: vec![(policy_id, vec![NativeAssetDelta { name, amount }])]
-                    .into_iter()
-                    .collect(),
-            },
+            tx_identifier: TxIdentifier::new(0, 0),
+            spent_utxos: Vec::new(),
+            created_utxos: Vec::new(),
+
+            sent: Value::new(
+                0,
+                if sent_amount > 0 {
+                    vec![(
+                        policy_id,
+                        vec![NativeAsset {
+                            name,
+                            amount: sent_amount,
+                        }],
+                    )]
+                } else {
+                    vec![]
+                },
+            ),
+
+            received: Value::new(
+                0,
+                if received_amount > 0 {
+                    vec![(
+                        policy_id,
+                        vec![NativeAsset {
+                            name,
+                            amount: received_amount,
+                        }],
+                    )]
+                } else {
+                    vec![]
+                },
+            ),
         }
     }
 
@@ -1080,8 +1113,13 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, reference_name, Some(datum_blob.clone()));
 
-        let new_state =
-            state.handle_cip68_metadata(&[UTXODelta::Output(output)], &registry).unwrap();
+        let tx_deltas = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: Vec::new(),
+            outputs: vec![output],
+        };
+
+        let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&reference_id).expect("record should exist");
 
@@ -1106,8 +1144,13 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, normal_name, Some(datum_blob.clone()));
 
-        let delta = UTXODelta::Output(output);
-        let new_state = state.handle_cip68_metadata(&[delta], &registry).unwrap();
+        let tx_deltas = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: Vec::new(),
+            outputs: vec![output],
+        };
+
+        let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&normal_id).expect("non reference asset should exist");
@@ -1133,8 +1176,13 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, name, Some(datum_blob));
 
-        let delta = UTXODelta::Output(output);
-        let new_state = state.handle_cip68_metadata(&[delta], &registry).unwrap();
+        let tx_deltas = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: Vec::new(),
+            outputs: vec![output],
+        };
+
+        let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
 
@@ -1159,14 +1207,16 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let input_delta = UTXODelta::Input(TxInput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
-        });
+        let input = UTxOIdentifier::new(0, 0, 0);
         let output = make_output(policy_id, name, None);
-        let output_delta = UTXODelta::Output(output);
 
-        let new_state =
-            state.handle_cip68_metadata(&[input_delta, output_delta], &registry).unwrap();
+        let tx_deltas = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: vec![input],
+            outputs: vec![output],
+        };
+
+        let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
         let info = new_state.info.expect("info should be Some");
         let record = info.get(&asset_id).unwrap();
@@ -1278,16 +1328,26 @@ mod tests {
 
         let output = make_output(policy_id, asset_name, None);
 
-        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
-            ..output.clone()
-        });
-        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 1),
-            ..output
-        });
+        let tx_identifier = TxIdentifier::new(0, 0);
 
-        let new_state = state.handle_transactions(&[delta1, delta2], &registry).unwrap();
+        let tx1 = TxUTxODeltas {
+            tx_identifier,
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+                ..output.clone()
+            }],
+        };
+        let tx2 = TxUTxODeltas {
+            tx_identifier,
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(0, 0, 1),
+                ..output
+            }],
+        };
+
+        let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
         let entry = txs.get(&asset_id).expect("asset_id should be present");
 
@@ -1312,16 +1372,24 @@ mod tests {
         let out1 = make_output(policy_id, asset_name, None);
         let out2 = make_output(policy_id, asset_name, None);
 
-        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
-            ..out1
-        });
-        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(10, 0, 0),
-            ..out2
-        });
+        let tx1 = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(9, 0),
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(9, 0, 0),
+                ..out1
+            }],
+        };
+        let tx2 = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(10, 0),
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(10, 0, 0),
+                ..out2
+            }],
+        };
 
-        let new_state = state.handle_transactions(&[delta1, delta2], &registry).unwrap();
+        let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
         let entry = txs.get(&asset_id).expect("asset_id should be present");
 
@@ -1347,20 +1415,32 @@ mod tests {
         );
 
         let base_output = make_output(policy_id, asset_name, None);
-        let delta1 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(9, 0, 0),
-            ..base_output.clone()
-        });
-        let delta2 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(8, 0, 0),
-            ..base_output.clone()
-        });
-        let delta3 = UTXODelta::Output(acropolis_common::TxOutput {
-            utxo_identifier: UTxOIdentifier::new(7, 0, 0),
-            ..base_output
-        });
+        let tx1 = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(9, 0),
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(9, 0, 0),
+                ..base_output.clone()
+            }],
+        };
+        let tx2 = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(8, 0),
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(8, 0, 0),
+                ..base_output.clone()
+            }],
+        };
+        let tx3 = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(7, 0),
+            inputs: Vec::new(),
+            outputs: vec![TxOutput {
+                utxo_identifier: UTxOIdentifier::new(7, 0, 0),
+                ..base_output
+            }],
+        };
 
-        let new_state = state.handle_transactions(&[delta1, delta2, delta3], &registry).unwrap();
+        let new_state = state.handle_transactions(&[tx1, tx2, tx3], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
         let entry = txs.get(&asset_id).expect("asset_id should be present");
 
@@ -1384,8 +1464,8 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let delta1 = make_address_delta(policy_id, asset_name, 10);
-        let delta2 = make_address_delta(policy_id, asset_name, 15);
+        let delta1 = make_address_delta(policy_id, asset_name, 0, 10);
+        let delta2 = make_address_delta(policy_id, asset_name, 0, 15);
 
         let new_state = state.handle_address_deltas(&[delta1, delta2], &registry).unwrap();
         let addr_map = new_state.addresses.unwrap();
@@ -1417,7 +1497,7 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let add_delta = make_address_delta(policy_id, asset_name, 10);
+        let add_delta = make_address_delta(policy_id, asset_name, 0, 10);
         let state_after_add = state.handle_address_deltas(&[add_delta], &registry).unwrap();
         let addr_map = state_after_add.addresses.as_ref().unwrap();
         let holders = addr_map.get(&asset_id).unwrap();
@@ -1433,7 +1513,7 @@ mod tests {
             10
         );
 
-        let remove_delta = make_address_delta(policy_id, asset_name, -10);
+        let remove_delta = make_address_delta(policy_id, asset_name, 10, 0);
         let state_after_remove =
             state_after_add.handle_address_deltas(&[remove_delta], &registry).unwrap();
         let addr_map = state_after_remove.addresses.as_ref().unwrap();

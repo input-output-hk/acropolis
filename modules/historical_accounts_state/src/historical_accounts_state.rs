@@ -43,6 +43,7 @@ const DEFAULT_STORE_DELEGATION_HISTORY: (&str, bool) = ("store-delegation-histor
 const DEFAULT_STORE_MIR_HISTORY: (&str, bool) = ("store-mir-history", false);
 const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
+const DEFAULT_STORE_TX_COUNT: (&str, bool) = ("store-tx-count", false);
 
 /// Historical Accounts State module
 #[module(
@@ -290,6 +291,9 @@ impl HistoricalAccountsState {
             store_addresses: config
                 .get_bool(DEFAULT_STORE_ADDRESSES.0)
                 .unwrap_or(DEFAULT_STORE_ADDRESSES.1),
+            store_tx_count: config
+                .get_bool(DEFAULT_STORE_TX_COUNT.0)
+                .unwrap_or(DEFAULT_STORE_TX_COUNT.1),
         };
 
         // Initalize state
@@ -382,6 +386,14 @@ impl HistoricalAccountsState {
                             Ok(None) => AccountsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Account {}", account),
                             )),
+                            Err(e) => AccountsStateQueryResponse::Error(
+                                QueryError::internal_error(e.to_string()),
+                            ),
+                        }
+                    }
+                    AccountsStateQuery::GetAccountTotalTxCount { account } => {
+                        match state.lock().await.get_total_tx_count(account).await {
+                            Ok(count) => AccountsStateQueryResponse::AccountTotalTxCount(count),
                             Err(e) => AccountsStateQueryResponse::Error(
                                 QueryError::internal_error(e.to_string()),
                             ),
