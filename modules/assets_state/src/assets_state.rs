@@ -443,6 +443,18 @@ impl AssetsState {
                             )),
                         }
                     }
+                    AssetsStateQuery::GetAssetsMetadata { assets } => {
+                        let reg = registry.lock().await;
+                        match state.get_assets_metadata(assets, &reg) {
+                            Ok(Some(assets)) => AssetsStateQueryResponse::AssetsMetadata(assets),
+                            Ok(None) => AssetsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more assets not found in registry".to_string(),
+                            )),
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::Assets(
                     response,
