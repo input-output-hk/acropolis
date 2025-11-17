@@ -1,4 +1,7 @@
-use crate::cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3};
+use crate::{
+    cost_models::{PLUTUS_V1, PLUTUS_V2, PLUTUS_V3},
+    handlers::addresses::AmountListExtended,
+};
 use acropolis_common::{
     messages::EpochActivityMessage,
     protocol_params::{Nonce, NonceVariant, ProtocolParams},
@@ -727,11 +730,11 @@ pub struct AssetInfoRest {
     pub onchain_metadata: Option<Value>,
     pub onchain_metadata_standard: Option<AssetMetadataStandard>,
     pub onchain_metadata_extra: Option<String>,
-    pub metadata: Option<AssetMetadata>,
+    pub metadata: Option<AssetMetadataREST>,
 }
 
 #[derive(Serialize, Clone)]
-pub struct AssetMetadata {
+pub struct AssetMetadataREST {
     pub name: String,
     pub description: String,
     pub ticker: Option<String>,
@@ -952,4 +955,13 @@ pub struct AddressTotalsREST {
     pub received_sum: AmountList,
     pub sent_sum: AmountList,
     pub tx_count: u64,
+}
+
+#[derive(serde::Serialize)]
+pub struct AddressInfoExtended {
+    pub address: String,
+    pub amount: AmountListExtended,
+    pub stake_address: Option<String>,
+    pub type_: String,
+    pub script: bool,
 }
