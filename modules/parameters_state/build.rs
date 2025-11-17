@@ -65,6 +65,17 @@ fn main() {
     download(main, "alonzo", "mainnet-alonzo-genesis.json", &vec![]);
     download(main, "conway", "mainnet-conway-genesis.json", &vec![]);
 
+    let preview = "https://book.world.dev.cardano.org/environments/preview";
+    download(preview, "byron", "preview-byron-genesis.json", &vec![]);
+    download(
+        preview,
+        "shelley",
+        "preview-shelley-genesis.json",
+        &shelley_fix,
+    );
+    download(preview, "alonzo", "preview-alonzo-genesis.json", &vec![]);
+    download(preview, "conway", "preview-conway-genesis.json", &vec![]);
+
     let sancho =
         "https://raw.githubusercontent.com/Hornan7/SanchoNet-Tutorials/refs/heads/main/genesis";
     download(sancho, "byron", "sanchonet-byron-genesis.json", &vec![]);
