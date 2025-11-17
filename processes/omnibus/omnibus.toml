@@ -139,6 +139,8 @@ store-transactions = false
 
 [module.tx-validator-phase1]
 
+[module.block-vrf-validator]
+
 [module.clock]
 
 [module.rest-server]

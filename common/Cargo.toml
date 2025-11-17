@@ -14,7 +14,6 @@ caryatid_module_clock = { workspace = true }
 caryatid_module_rest_server = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = "0.1"
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
@@ -23,10 +22,7 @@ bytes = { version = "1", features = ["serde"] }
 bs58 = "0.5"
 chrono = { workspace = true }
 crc = "3"
-gcd = "2.3"
-fraction = "0.15"
 hex = { workspace = true }
-lf-queue = "0.1.0"
 memmap2 = "0.9"
 num-rational = { version = "0.4.2", features = ["serde"] }
 regex = "1"
@@ -39,14 +35,13 @@ tracing = { workspace = true }
 futures = "0.3.31"
 minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
 num-traits = "0.2"
-imbl = { workspace = true }
 dashmap = { workspace = true }
 rayon = "1.11.0"
 cryptoxide = "0.5.1"
 thiserror = "2.0.17"
 sha2 = "0.10.8"
-caryatid_process.workspace = true
-config.workspace = true
+caryatid_process = { workspace = true }
+config = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]

@@ -10,6 +10,8 @@ use acropolis_common::{
     *,
 };
 
+use acropolis_codec::map_parameters;
+
 use caryatid_sdk::{module, Context, Module, Subscription};
 use std::{clone::Clone, sync::Arc};
 

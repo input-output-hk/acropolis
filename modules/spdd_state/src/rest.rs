@@ -1,4 +1,5 @@
 use crate::state::State;
+use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::DelegatedStake;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse};
@@ -10,7 +11,7 @@ use tokio::sync::Mutex;
 pub async fn handle_spdd(
     state: Arc<Mutex<State>>,
     params: HashMap<String, String>,
-) -> Result<RESTResponse> {
+) -> Result<RESTResponse, RESTError> {
     let locked = state.lock().await;
 
     extract_strict_query_params!(params, {
@@ -38,12 +39,7 @@ pub async fn handle_spdd(
 
         match serde_json::to_string(&spdd) {
             Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-            Err(e) => Ok(RESTResponse::with_text(
-                500,
-                &format!(
-                    "Internal server error retrieving stake pool delegation distribution: {e}"
-                ),
-            )),
+            Err(e) => Err(RESTError::from(e)),
         }
     } else {
         Ok(RESTResponse::with_json(200, "{}"))

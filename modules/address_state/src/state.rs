@@ -1,12 +1,12 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use acropolis_common::{
-    Address, AddressDelta, AddressTotals, BlockInfo, NativeAssets, ShelleyAddress, TxIdentifier,
-    UTxOIdentifier, ValueDelta,
+    Address, AddressDelta, AddressTotals, BlockInfo, ShelleyAddress, TxIdentifier, UTxOIdentifier,
+    ValueDelta, ValueDeltaMap,
 };
 use anyhow::Result;
 
@@ -172,10 +172,14 @@ impl State {
             && block_info.number > self.volatile.epoch_start_block + self.volatile.security_param_k
     }
 
-    pub fn apply_address_deltas(&mut self, deltas: &[AddressDelta]) -> Result<()> {
+    pub fn apply_address_deltas(&mut self, deltas: &[AddressDelta]) {
         let addresses = self.volatile.window.back_mut().expect("window should never be empty");
 
+        // Keeps track seen txs to avoid overcounting totals tx count and duplicating tx identifiers
+        let mut seen: HashMap<Address, HashSet<TxIdentifier>> = HashMap::new();
+
         for delta in deltas {
+            let tx_id = TxIdentifier::from(delta.utxo);
             let entry = addresses.entry(delta.address.clone()).or_default();
 
             if self.config.store_info {
@@ -187,29 +191,44 @@ impl State {
                 }
             }
 
-            if self.config.store_transactions {
-                let txs = entry.transactions.get_or_insert(Vec::new());
-                txs.push(TxIdentifier::from(delta.utxo))
-            }
+            if self.config.store_transactions || self.config.store_totals {
+                let seen_for_addr = seen.entry(delta.address.clone()).or_default();
 
-            if self.config.store_totals {
-                let totals = entry.totals.get_or_insert(Vec::new());
-                totals.push(delta.value.clone());
+                if self.config.store_transactions {
+                    let txs = entry.transactions.get_or_insert(Vec::new());
+                    if !seen_for_addr.contains(&tx_id) {
+                        txs.push(tx_id);
+                    }
+                }
+                if self.config.store_totals {
+                    let totals = entry.totals.get_or_insert(Vec::new());
+
+                    if seen_for_addr.contains(&tx_id) {
+                        if let Some(last_total) = totals.last_mut() {
+                            // Create temporary map for summing same tx deltas efficiently
+                            // TODO: Potentially move upstream to address deltas publisher
+                            let mut map = ValueDeltaMap::from(last_total.clone());
+                            map += delta.value.clone();
+                            *last_total = ValueDelta::from(map);
+                        }
+                    } else {
+                        totals.push(delta.value.clone());
+                    }
+                }
+                seen_for_addr.insert(tx_id);
             }
         }
-
-        Ok(())
     }
 
-    pub async fn get_addresses_assets(
+    pub async fn get_addresses_totals(
         &self,
-        _addresses: &[ShelleyAddress],
-    ) -> Result<NativeAssets> {
-        Ok(NativeAssets::default())
-    }
-
-    pub async fn get_addresses_totals(&self, _addresses: &[ShelleyAddress]) -> Result<ValueDelta> {
-        Ok(ValueDelta::default())
+        addresses: &[ShelleyAddress],
+    ) -> Result<AddressTotals> {
+        let mut totals = AddressTotals::default();
+        for addr in addresses {
+            totals += self.get_address_totals(&Address::Shelley(addr.clone())).await?;
+        }
+        Ok(totals)
     }
 
     pub async fn get_addresses_utxos(
@@ -277,7 +296,7 @@ mod tests {
         let deltas = vec![delta(&addr, &utxo, 1)];
 
         // Apply deltas
-        state.apply_address_deltas(&deltas)?;
+        state.apply_address_deltas(&deltas);
 
         // Verify UTxO is retrievable when in volatile
         let utxos = state.get_address_utxos(&addr).await?;
@@ -319,7 +338,7 @@ mod tests {
         let created = vec![delta(&addr, &utxo, 1)];
 
         // Apply delta to volatile
-        state.apply_address_deltas(&created)?;
+        state.apply_address_deltas(&created);
 
         // Drain volatile to immutable pending
         state.volatile.epoch_start_block = 1;
@@ -333,7 +352,7 @@ mod tests {
         assert_eq!(after_persist.as_ref().unwrap(), &[utxo]);
 
         state.volatile.next_block();
-        state.apply_address_deltas(&[delta(&addr, &utxo, -1)])?;
+        state.apply_address_deltas(&[delta(&addr, &utxo, -1)]);
 
         // Verify UTxO was removed while in volatile
         let after_spend_volatile = state.get_address_utxos(&addr).await?;
@@ -368,9 +387,9 @@ mod tests {
 
         state.volatile.epoch_start_block = 1;
 
-        state.apply_address_deltas(&[delta(&addr, &utxo_old, 1)])?;
+        state.apply_address_deltas(&[delta(&addr, &utxo_old, 1)]);
         state.volatile.next_block();
-        state.apply_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)])?;
+        state.apply_address_deltas(&[delta(&addr, &utxo_old, -1), delta(&addr, &utxo_new, 1)]);
 
         // Verify Create and spend both in volatile is not included in address utxos
         let volatile = state.get_address_utxos(&addr).await?;
@@ -397,6 +416,69 @@ mod tests {
             utxo_new,
             persisted_view
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_same_tx_deltas_sums_totals_in_volatile() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut state = setup_state_and_store().await?;
+
+        let addr = dummy_address();
+        let delta_1 = UTxOIdentifier::new(0, 1, 0);
+        let delta_2 = UTxOIdentifier::new(0, 1, 1);
+
+        state.volatile.epoch_start_block = 1;
+
+        state.apply_address_deltas(&[delta(&addr, &delta_1, 1), delta(&addr, &delta_2, 1)]);
+
+        // Verify only 1 totals entry with delta of 2
+        let volatile = state
+            .volatile
+            .window
+            .back()
+            .expect("Window should have a delta")
+            .get(&addr)
+            .expect("Entry should be populated")
+            .totals
+            .as_ref()
+            .expect("Totals should be populated");
+
+        assert_eq!(volatile.len(), 1);
+        assert_eq!(volatile.first().expect("Should be populated").lovelace, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_same_tx_deltas_prevents_duplicate_identifier_in_volatile() -> Result<()> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut state = setup_state_and_store().await?;
+
+        let addr = dummy_address();
+        let delta_1 = UTxOIdentifier::new(0, 1, 0);
+        let delta_2 = UTxOIdentifier::new(0, 1, 1);
+
+        state.volatile.epoch_start_block = 1;
+
+        state.apply_address_deltas(&[delta(&addr, &delta_1, 1), delta(&addr, &delta_2, 1)]);
+
+        // Verify only 1 transactions entry
+        let volatile = state
+            .volatile
+            .window
+            .back()
+            .expect("Window should have a delta")
+            .get(&addr)
+            .expect("Entry should be populated")
+            .transactions
+            .as_ref()
+            .expect("Transactions should be populated");
+
+        assert_eq!(volatile.len(), 1);
 
         Ok(())
     }

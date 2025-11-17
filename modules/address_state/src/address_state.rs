@@ -117,9 +117,7 @@ impl AddressState {
                         }
 
                         // Add deltas to volatile
-                        if let Err(e) = state.apply_address_deltas(&address_deltas_msg.deltas) {
-                            error!("address deltas handling error: {e:#}");
-                        }
+                        state.apply_address_deltas(&address_deltas_msg.deltas);
 
                         store = state.immutable.clone();
                         config = state.config.clone();
@@ -246,14 +244,6 @@ impl AddressState {
                     AddressStateQuery::GetAddressTotals { address } => {
                         match state.get_address_totals(address).await {
                             Ok(totals) => AddressStateQueryResponse::AddressTotals(totals),
-                            Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
-                                e.to_string(),
-                            )),
-                        }
-                    }
-                    AddressStateQuery::GetAddressesAssets { addresses } => {
-                        match state.get_addresses_assets(addresses).await {
-                            Ok(assets) => AddressStateQueryResponse::AddressesAssets(assets),
                             Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),

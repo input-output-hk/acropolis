@@ -180,13 +180,26 @@ impl TxUnpacker {
                                         let mut props = None;
                                         let mut votes = None;
 
+                                        let (txs_ref_in, tx_out, total, errors) =
+                                            map_parameters::map_one_transaction(
+                                                block_number, tx_index, &tx
+                                            );
+
                                         if tracing::enabled!(tracing::Level::DEBUG) {
-                                            debug!("Decoded tx with {} inputs, {} outputs, {} certs",
-                                               inputs.len(), outputs.len(), certs.len());
+                                            debug!(
+                                                "Decoded tx with {} inputs, {} outputs, {} certs, {} errors",
+                                               //inputs.len(), outputs.len(), certs.len());
+                                                txs_ref_in.len(),
+                                                tx_out.len(),
+                                                certs.len(),
+                                                errors.len()
+                                            )
                                         }
 
                                         if publish_utxo_deltas_topic.is_some() {
                                             // Add all the inputs
+
+/*
                                             for input in inputs {  // MultiEraInput
                                                 // Lookup and remove UTxOIdentifier from registry 
                                                 let oref = input.output_ref();
@@ -208,8 +221,28 @@ impl TxUnpacker {
                                                     }
                                                 }
                                             }
+ */
+
+                                            for tx_ref in txs_ref_in {
+                                                match utxo_registry.consume(&tx_ref) {
+                                                    Ok(tx_identifier) => {
+                                                        // Add TxInput to utxo_deltas
+                                                        utxo_deltas.push(UTXODelta::Input(TxInput {
+                                                            utxo_identifier: UTxOIdentifier::new(
+                                                                tx_identifier.block_number(),
+                                                                tx_identifier.tx_index(),
+                                                                tx_ref.output_index,
+                                                            ),
+                                                        }));
+                                                    }
+                                                    Err(e) => {
+                                                        error!("Failed to consume input {}: {e}", tx_ref.output_index);
+                                                    }
+                                                }
+                                            }
 
                                             // Add all the outputs
+                                            /*
                                             for (index, output) in outputs {
                                                 // Add TxOutRef to registry
                                                 match utxo_registry.add(
@@ -246,6 +279,22 @@ impl TxUnpacker {
                                                     }
                                                 }
                                             }
+                                             */
+
+                                            for (tx_ref, output) in tx_out.into_iter() {
+                                                if let Err(e) = utxo_registry.add(
+                                                    block_number,
+                                                    tx_index,
+                                                    tx_ref,
+                                                ) {
+                                                    error!("Failed to insert output into registry: {e}");
+                                                }
+                                                else {
+                                                    utxo_deltas.push(UTXODelta::Output(output));
+                                                }
+                                            }
+
+                                            total_output += total;
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {

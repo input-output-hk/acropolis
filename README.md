@@ -1,8 +1,23 @@
 # Acropolis
 
-Acropolis is a project to create a kit of micro-service parts, written in
+Acropolis is a project to create a kit of modular parts, written in
 Rust, which allows flexible construction of clients, services and APIs for
 the Cardano ecosystem.
+
+## Status
+
+This project has moved out of the experimental phase and is being implemented
+according to a set of deliverables documented in the Treasury Fund Milestones.
+
+# Overview and Deliverables
+
+The Acropolis Cardano Node is a rust implementation that seeks parity with the
+Haskell implementation and is intended to be a full block producing node on mainnet.
+Please see the [overview document](docs/overview.md) that describes the phases of
+development, descriptions, expected use cases, and runtime environments expected
+of each of the deliverables.
+
+# Architecture
 
 Acropolis is based on the
 [Caryatid framework](https://github.com/input-output-hk/caryatid),
@@ -12,7 +27,7 @@ to communicate between micro-services.
 ```mermaid
 graph TB
 
-  subgraph Microservice A
+  subgraph Process A
     Module1(Module 1)
     Module2(Module 2)
     Caryatid1(Caryatid Framework)
@@ -21,7 +36,7 @@ graph TB
     Module2 <--> Caryatid1
   end
 
-  subgraph Microservice B
+  subgraph Process B
     Module3(Module 3)
 
     Caryatid2(Caryatid Framework)
@@ -38,9 +53,6 @@ graph TB
 ```
 
 ## Modules
-
-This project is in an experimental phase at the moment, and the module
-structure is highly subject to change:
 
 - [Upstream Chain Fetcher](modules/upstream_chain_fetcher) -
   implementation of the Node-to-Node (N2N) client-side (initiator)
@@ -62,56 +74,21 @@ structure is highly subject to change:
 - [Accounts State](modules/accounts_state) - stake and reward accounts tracker
 - [Assets State](modules/assets_state) - tracks native asset supply, metadata, transactions, and addresses
 
-```mermaid
-graph LR
-
-   UpstreamChainFetcher(Upstream Chain Fetcher)
-   GenesisBootstrapper(Genesis Bootstrapper)
-   MithrilSnapshotFetcher(Mithril Snapshot Fetcher)
-   BlockUnpacker(Block Unpacker)
-   TxUnpacker(Transaction Unpacker)
-   UTXOState(UTXO State)
-   SPOState(SPO State)
-   DRepState(DRep State)
-   GovernanceState(Governance State)
-   StakeDeltaFilter(Stake Delta Filter)
-   EpochsState(Epochs State)
-   AccountsState(Accounts State)
-   AssetsState(Assets State)
-   ParametersState(Parameters State)
-
-   UpstreamChainFetcher --> BlockUnpacker
-   MithrilSnapshotFetcher --> BlockUnpacker
-   BlockUnpacker --> TxUnpacker
-   GenesisBootstrapper --> UTXOState
-   TxUnpacker --> UTXOState
-   TxUnpacker --> AssetsState
-   TxUnpacker --> EpochsState
-   TxUnpacker --> AccountsState
-   TxUnpacker --> DRepState
-   TxUnpacker --> SPOState
-   TxUnpacker --> GovernanceState
-   GovernanceState --> ParametersState
-   TxUnpacker --> ParametersState
-   UTXOState --> StakeDeltaFilter
-   StakeDeltaFilter --> AccountsState
-   UpstreamChainFetcher --> EpochsState
-   MithrilSnapshotFetcher --> EpochsState
-   EpochsState --> AccountsState
-   SPOState --> AccountsState
-   DRepState --> GovernanceState
-   GovernanceState --> AccountsState
-   ParametersState --> AccountsState
-```
-
-## Messages
-
-The messages passed between modules are defined in a single global enum in
-the [Messages](messages) crate.
-
 ## Processes
 
 There is currently only one process, for testing:
 
 - [Omnibus](processes/omnibus) - includes all the above modules for
   testing, by default using the internal message bus only
+
+## Build
+
+Everything is locally contained or is a crate dependency. To build the node,
+
+`make build`
+
+## Running the node
+
+The following will run the omnibus process.
+
+`make run`
