@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn cip25_existance_overrides_decimals() {
+    fn cip25_existence_overrides_decimals() {
         use serde_cbor::Value as CborValue;
         use std::collections::BTreeMap;
 
