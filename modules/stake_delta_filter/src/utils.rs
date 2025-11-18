@@ -1,7 +1,7 @@
 use acropolis_common::{
     messages::{AddressDeltasMessage, StakeAddressDeltasMessage},
     Address, AddressDelta, BlockInfo, Era, ShelleyAddress, ShelleyAddressDelegationPart,
-    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential,
+    ShelleyAddressPointer, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier,
 };
 use anyhow::{anyhow, Result};
 use serde_with::serde_as;
@@ -275,13 +275,15 @@ impl Tracker {
                     .map(|a| a.to_string())
                     .unwrap_or(Ok("(none)".to_owned()))
                     .unwrap_or("(???)".to_owned());
-                delta += event.address_delta.value.lovelace;
+                let lovelace_delta = (event.address_delta.received.lovelace as i64)
+                    - (event.address_delta.sent.lovelace as i64);
+                delta += lovelace_delta;
 
                 chunk.push(format!(
                     "   blk {}, {}: {} ({:?}) => {} ({:?})",
                     event.block.number,
                     src_addr,
-                    event.address_delta.value.lovelace,
+                    lovelace_delta,
                     event.address_delta.address,
                     dst_addr,
                     event.stake_address
@@ -315,7 +317,8 @@ impl Tracker {
 struct StakeEntry {
     delta: i64,
     addresses: Vec<ShelleyAddress>,
-    seen: HashSet<ShelleyAddress>,
+    addresses_seen: HashSet<ShelleyAddress>,
+    txs_seen: HashSet<TxIdentifier>,
 }
 
 /// Iterates through all address deltas in `delta`, leaves only stake addresses
@@ -399,15 +402,17 @@ pub fn process_message(
         let entry = grouped.entry(stake_address).or_insert_with(|| StakeEntry {
             delta: 0,
             addresses: Vec::new(),
-            seen: HashSet::new(),
+            addresses_seen: HashSet::new(),
+            txs_seen: HashSet::new(),
         });
-        entry.delta += d.value.lovelace;
+        entry.delta += (d.received.lovelace as i64) - (d.sent.lovelace as i64);
 
         if let Some(shelley) = shelley_opt {
-            if entry.seen.insert(shelley.clone()) {
+            if entry.addresses_seen.insert(shelley.clone()) {
                 entry.addresses.push(shelley.clone());
             }
         }
+        entry.txs_seen.insert(d.tx_identifier);
     }
 
     let deltas = grouped
@@ -415,6 +420,7 @@ pub fn process_message(
         .map(|(stake_address, entry)| StakeAddressDelta {
             stake_address,
             addresses: entry.addresses,
+            tx_count: entry.txs_seen.len() as u32,
             delta: entry.delta,
         })
         .collect();
@@ -429,8 +435,9 @@ mod test {
     use acropolis_common::{
         messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
         ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeCredential, UTxOIdentifier, ValueDelta,
+        ShelleyAddressPointer, StakeAddress, StakeCredential,
     };
+    use acropolis_common::{TxIdentifier, Value};
     use bech32::{Bech32, Hrp};
     use pallas::ledger::addresses::{PaymentKeyHash, ScriptHash, StakeKeyHash};
 
@@ -438,8 +445,11 @@ mod test {
         let a = pallas::ledger::addresses::Address::from_bech32(s)?;
         Ok(AddressDelta {
             address: map_address(&a)?,
-            utxo: UTxOIdentifier::new(0, 0, 0),
-            value: ValueDelta::new(1, Vec::new()),
+            tx_identifier: TxIdentifier::default(),
+            spent_utxos: Vec::new(),
+            created_utxos: Vec::new(),
+            sent: Value::default(),
+            received: Value::default(),
         })
     }
 

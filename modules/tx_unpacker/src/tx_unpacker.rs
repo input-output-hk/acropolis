@@ -186,22 +186,23 @@ impl TxUnpacker {
                                         }
 
                                         if publish_utxo_deltas_topic.is_some() {
-                                            // Add all the inputs
-                                            for input in inputs {  // MultiEraInput
-                                                // Lookup and remove UTxOIdentifier from registry 
+                                            // Group deltas by tx
+                                            let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
+
+                                            // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
+                                            for input in inputs {
                                                 let oref = input.output_ref();
                                                 let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
-                                                        // Add TxInput to utxo_deltas
-                                                        utxo_deltas.push(UTXODelta::Input(TxInput {
-                                                            utxo_identifier: UTxOIdentifier::new(
+                                                        tx_utxo_deltas.inputs.push(
+                                                            UTxOIdentifier::new(
                                                                 tx_identifier.block_number(),
                                                                 tx_identifier.tx_index(),
                                                                 tx_ref.output_index,
                                                             ),
-                                                        }));
+                                                      );
                                                     }
                                                     Err(e) => {
                                                         error!("Failed to consume input {}: {e}", tx_ref.output_index);
@@ -209,9 +210,8 @@ impl TxUnpacker {
                                                 }
                                             }
 
-                                            // Add all the outputs
+                                            // Add outputs to UTxORegistry and push TxOutputs to delta
                                             for (index, output) in outputs {
-                                                // Add TxOutRef to registry
                                                 match utxo_registry.add(
                                                     block_number,
                                                     tx_index,
@@ -224,14 +224,13 @@ impl TxUnpacker {
                                                         match output.address() {
                                                             Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
                                                                 Ok(address) => {
-                                                                    // Add TxOutput to utxo_deltas
-                                                                    utxo_deltas.push(UTXODelta::Output(TxOutput {
+                                                                    tx_utxo_deltas.outputs.push(TxOutput {
                                                                         utxo_identifier: utxo_id,
                                                                         address,
                                                                         value: map_parameters::map_value(&output.value()),
                                                                         datum: map_parameters::map_datum(&output.datum()),
                                                                         reference_script: map_parameters::map_reference_script(&output.script_ref())
-                                                                    }));
+                                                                    });
 
                                                                     // catch all output lovelaces
                                                                     total_output += output.value().coin() as u128;
@@ -246,6 +245,7 @@ impl TxUnpacker {
                                                     }
                                                 }
                                             }
+                                            utxo_deltas.push(tx_utxo_deltas);
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {

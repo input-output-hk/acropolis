@@ -29,6 +29,7 @@ pub struct AccountEntry {
     pub withdrawal_history: Option<Vec<AccountWithdrawal>>,
     pub mir_history: Option<Vec<AccountWithdrawal>>,
     pub addresses: Option<Vec<ShelleyAddress>>,
+    pub tx_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, minicbor::Decode, minicbor::Encode)]
@@ -52,6 +53,7 @@ pub struct HistoricalAccountsConfig {
     pub store_mir_history: bool,
     pub store_withdrawal_history: bool,
     pub store_addresses: bool,
+    pub store_tx_count: bool,
 }
 
 impl HistoricalAccountsConfig {
@@ -63,6 +65,7 @@ impl HistoricalAccountsConfig {
             || self.store_mir_history
             || self.store_withdrawal_history
             || self.store_addresses
+            || self.store_tx_count
     }
 }
 
@@ -219,12 +222,11 @@ impl State {
     pub fn handle_address_deltas(&mut self, stake_address_deltas: &StakeAddressDeltasMessage) {
         let window = self.volatile.window.back_mut().expect("window should never be empty");
         for delta in stake_address_deltas.deltas.iter() {
-            window
-                .entry(delta.stake_address.clone())
-                .or_default()
-                .addresses
-                .get_or_insert_with(Vec::new)
-                .extend(delta.addresses.clone());
+            let entry = window.entry(delta.stake_address.clone()).or_default();
+
+            entry.addresses.get_or_insert_with(Vec::new).extend(delta.addresses.clone());
+
+            *entry.tx_count.get_or_insert(0) += delta.tx_count;
         }
     }
 
@@ -365,6 +367,20 @@ impl State {
         }
 
         Ok((!addresses.is_empty()).then_some(addresses))
+    }
+
+    pub async fn get_total_tx_count(&self, account: &StakeAddress) -> Result<u32> {
+        let mut total_count = self.immutable.get_tx_count(account).await?.unwrap_or_default();
+
+        for block_map in self.volatile.window.iter() {
+            if let Some(entry) = block_map.get(account) {
+                if let Some(block_tx_count) = &entry.tx_count {
+                    total_count += block_tx_count;
+                }
+            }
+        }
+
+        Ok(total_count)
     }
 
     fn handle_stake_registration_change(
