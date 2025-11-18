@@ -54,7 +54,7 @@ graph TB
 
 ## Modules
 
-- [Upstream Chain Fetcher](modules/upstream_chain_fetcher) -
+- [Peer Network Interface](modules/peer_network_interface) -
   implementation of the Node-to-Node (N2N) client-side (initiator)
   protocol, allowing chain synchronisation and block fetching
 - [Mithril Snapshot Fetcher](modules/mithril_snapshot_fetcher) -

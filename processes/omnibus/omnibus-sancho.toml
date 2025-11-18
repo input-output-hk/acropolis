@@ -11,9 +11,9 @@ network-name = "sanchonet" # "sanchonet", "mainnet"
 
 [module.rest-blockfrost]
 
-[module.upstream-chain-fetcher]
+[module.peer-network-interface]
 sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
-node-address = "sancho-testnet.able-pool.io:6002"
+node-addresses = ["sancho-testnet.able-pool.io:6002"]
 magic-number = 4
 
 [module.block-unpacker]

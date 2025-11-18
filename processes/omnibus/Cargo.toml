@@ -11,7 +11,6 @@ license = "Apache-2.0"
 acropolis_common = { path = "../../common" }
 acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
 acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
-acropolis_module_upstream_chain_fetcher = { path = "../../modules/upstream_chain_fetcher" }
 acropolis_module_peer_network_interface = { path = "../../modules/peer_network_interface" }
 acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
 acropolis_module_tx_unpacker = { path = "../../modules/tx_unpacker" }
