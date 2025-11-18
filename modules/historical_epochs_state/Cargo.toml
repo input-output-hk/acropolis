@@ -20,5 +20,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 fjall = "2.11.2"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lib]
 path = "src/historical_epochs_state.rs"

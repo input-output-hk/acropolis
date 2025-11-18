@@ -31,7 +31,7 @@ const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
-const DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH: (&str, &str) = ("db-path", "./db");
+const DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH: (&str, &str) = ("db-path", "./fjall-epochs");
 
 /// Historical Epochs State module
 #[module(

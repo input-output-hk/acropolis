@@ -273,6 +273,7 @@ dependencies = [
  "config",
  "fjall",
  "minicbor 0.26.5",
+ "tempfile",
  "tokio",
  "tracing",
 ]

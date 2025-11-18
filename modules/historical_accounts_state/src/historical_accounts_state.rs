@@ -35,7 +35,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
 // Configuration defaults
-const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./db");
+const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./fjall-accounts");
 const DEFAULT_STORE_REWARDS_HISTORY: (&str, bool) = ("store-rewards-history", false);
 const DEFAULT_STORE_ACTIVE_STAKE_HISTORY: (&str, bool) = ("store-active-stake-history", false);
 const DEFAULT_STORE_REGISTRATION_HISTORY: (&str, bool) = ("store-registration-history", false);

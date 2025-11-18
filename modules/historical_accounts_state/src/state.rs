@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use acropolis_common::{
     messages::{
@@ -80,13 +76,8 @@ pub struct State {
 
 impl State {
     pub async fn new(config: HistoricalAccountsConfig) -> Result<Self> {
-        let db_path = if Path::new(&config.db_path).is_relative() {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&config.db_path)
-        } else {
-            PathBuf::from(&config.db_path)
-        };
-
-        let store = Arc::new(ImmutableHistoricalAccountStore::new(&db_path)?);
+        let db_path = Path::new(&config.db_path);
+        let store = Arc::new(ImmutableHistoricalAccountStore::new(db_path)?);
 
         Ok(Self {
             config,

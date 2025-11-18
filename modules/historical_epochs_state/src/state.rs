@@ -4,10 +4,7 @@ use crate::{
 };
 use acropolis_common::{messages::EpochActivityMessage, BlockInfo};
 use anyhow::Result;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 #[derive(Debug, Clone)]
 pub struct HistoricalEpochsStateConfig {
@@ -23,13 +20,8 @@ pub struct State {
 
 impl State {
     pub fn new(config: &HistoricalEpochsStateConfig) -> Result<Self> {
-        let db_path = if Path::new(&config.db_path).is_relative() {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&config.db_path)
-        } else {
-            PathBuf::from(&config.db_path)
-        };
-
-        let immutable = Arc::new(ImmutableHistoricalEpochsState::new(&db_path)?);
+        let db_path = Path::new(&config.db_path);
+        let immutable = Arc::new(ImmutableHistoricalEpochsState::new(db_path)?);
 
         Ok(Self {
             volatile: VolatileHistoricalEpochsState::new(),
@@ -109,6 +101,7 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::{BlockHash, BlockStatus, Era, PoolId};
+    use tempfile::TempDir;
 
     fn make_ea(epoch: u64) -> EpochActivityMessage {
         EpochActivityMessage {
@@ -144,8 +137,9 @@ mod tests {
 
     #[test]
     fn test_get_historical_epoch() {
+        let temp_dir = TempDir::new().unwrap();
         let config = HistoricalEpochsStateConfig {
-            db_path: "test_db".to_string(),
+            db_path: temp_dir.path().to_string_lossy().into_owned(),
         };
         let mut state = State::new(&config).unwrap();
 
@@ -165,8 +159,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_persist_epochs() {
+        let temp_dir = TempDir::new().unwrap();
         let config = HistoricalEpochsStateConfig {
-            db_path: "test_db".to_string(),
+            db_path: temp_dir.path().to_string_lossy().into_owned(),
         };
         let mut state = State::new(&config).unwrap();
 
