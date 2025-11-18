@@ -145,8 +145,6 @@ impl State {
             if let Some(info_mut) = info.as_mut() {
                 info_mut.metadata.cip68_metadata = ref_info.metadata.cip68_metadata;
                 info_mut.metadata.cip68_version = ref_info.metadata.cip68_version;
-            } else {
-                info = Some(ref_info);
             }
         }
 
@@ -596,7 +594,7 @@ impl State {
                     continue;
                 };
 
-                let mut cip68_version = None;
+                let mut cip68_version = Some(AssetMetadataStandard::CIP68v1);
 
                 if let Ok(serde_cbor::Value::Map(m)) =
                     serde_cbor::from_slice::<serde_cbor::Value>(blob)
@@ -619,7 +617,6 @@ impl State {
                             continue;
                         }
 
-                        // NOTE: CIP68 metadata version is included in the blob and is decoded in REST handler
                         match registry.lookup_id(policy_id, name) {
                             Some(asset_id) => {
                                 if let Some(record) =
@@ -689,13 +686,14 @@ mod tests {
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
-        state::{AssetsStorageConfig, State, StoreTransactions},
+        state::{AssetsStorageConfig, State, StoreTransactions, CIP67_LABEL_222, CIP68_LABEL_100},
     };
     use acropolis_common::{
-        Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
-        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
+        Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName,
+        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
         TxUTxODeltas, UTxOIdentifier, Value,
     };
+    use serde_cbor::Value as CborValue;
 
     fn dummy_policy(byte: u8) -> PolicyId {
         [byte; 28]
@@ -1287,6 +1285,46 @@ mod tests {
     }
 
     #[test]
+    fn handle_cip68_version_detection() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [7u8; 28];
+
+        let (state, asset_id, name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0, 0xAA],
+            true,
+            false,
+            StoreTransactions::None,
+        );
+
+        let mut map = BTreeMap::new();
+        map.insert(
+            CborValue::Text("version".to_string()),
+            CborValue::Text("2.0".to_string()),
+        );
+
+        let datum = serde_cbor::to_vec(&CborValue::Map(map)).unwrap();
+
+        let output = make_output(policy_id, name, Some(datum.clone()));
+
+        let tx = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: vec![],
+            outputs: vec![output],
+        };
+        let new_state = state.handle_cip68_metadata(&[tx], &registry).unwrap();
+        let record = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
+
+        // CIP68 version should be v2
+        assert_eq!(
+            record.metadata.cip68_version,
+            Some(AssetMetadataStandard::CIP68v2),
+            "CIP68 version should be set as CIP68v2"
+        );
+    }
+
+    #[test]
     fn get_asset_info_reference_nft_strips_metadata() {
         let mut registry = AssetRegistry::new();
         let policy_id: PolicyId = [9u8; 28];
@@ -1318,6 +1356,54 @@ mod tests {
         assert!(rec.metadata.cip68_metadata.is_none());
         // Metadata standard removed for reference asset
         assert!(rec.metadata.cip68_version.is_none());
+    }
+
+    #[test]
+    fn get_asset_info_resolves_user_token_metadata_from_reference_nft() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [5u8; 28];
+        let asset_name = [0x53, 0x4E, 0x45, 0x4B];
+
+        let mut user_name = CIP67_LABEL_222.to_vec();
+        user_name.extend_from_slice(&asset_name);
+        let user_token_name = AssetName::new(&user_name).unwrap();
+        let user_token_id = registry.get_or_insert(policy_id, user_token_name);
+
+        let mut reference_name = CIP68_LABEL_100.to_vec();
+        reference_name.extend_from_slice(&asset_name);
+        let reference_nft_name = AssetName::new(&reference_name).unwrap();
+        let reference_id = registry.get_or_insert(policy_id, reference_nft_name);
+
+        let mut state = State::new(full_config());
+        state.info.as_mut().unwrap().insert(
+            reference_id,
+            AssetInfoRecord {
+                initial_mint_tx: dummy_tx_identifier(0),
+                mint_or_burn_count: 0,
+                metadata: AssetMetadata {
+                    cip25_metadata: None,
+                    cip25_version: None,
+                    cip68_metadata: Some(vec![1, 2, 3]),
+                    cip68_version: Some(AssetMetadataStandard::CIP68v1),
+                },
+            },
+        );
+
+        let resolved = state.resolve_cip68_metadata(&user_token_id, &registry);
+
+        let record = resolved.expect("User token should resolve to reference NFT metadata");
+
+        assert_eq!(
+            record.metadata.cip68_metadata,
+            Some(vec![1, 2, 3]),
+            "User token should inherit CIP68 metadata from reference NFT"
+        );
+
+        assert_eq!(
+            record.metadata.cip68_version,
+            Some(AssetMetadataStandard::CIP68v1),
+            "User token should inherit CIP68 version from reference NFT"
+        );
     }
 
     #[test]

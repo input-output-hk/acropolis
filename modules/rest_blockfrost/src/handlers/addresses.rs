@@ -349,9 +349,18 @@ impl AmountListExtended {
                 let meta = &metadata[idx];
                 idx += 1;
 
-                let decimals = if let Some(raw) = meta.cip68_metadata.as_ref() {
+                // Blockfrost priority
+                // 1. Set decimals to null if CIP25 metadata exists (This is an NFT)
+                // 2. Set decimals based on CIP68 metadata if exists
+                // 3. Set decimals based on off-chain registry
+                // 4. Set decimals to null if no CIP68 metadata or off-chain registry entry
+
+                let decimals = if meta.cip25_metadata.is_some() {
+                    None
+                } else if let Some(raw) = meta.cip68_metadata.as_ref() {
                     extract_cip68_decimals(raw)
                 } else {
+                    // TODO: off-chain registry lookup once caching exists
                     None
                 };
 
@@ -406,4 +415,83 @@ pub fn extract_cip68_decimals(raw: &[u8]) -> Option<u64> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::{AssetName, NativeAsset, NativeAssets, Value};
+
+    fn make_value(policy_id: [u8; 28], name: Vec<u8>, amount: u64) -> Value {
+        let assets: NativeAssets = vec![(
+            policy_id,
+            vec![NativeAsset {
+                name: AssetName::new(&name).expect("Invalid asset name"),
+                amount,
+            }],
+        )];
+
+        Value::new(0, assets)
+    }
+
+    fn make_metadata(cip25: Option<Vec<u8>>, cip68: Option<Vec<u8>>) -> AssetMetadata {
+        AssetMetadata {
+            cip25_metadata: cip25,
+            cip68_metadata: cip68,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn cip25_existance_overrides_decimals() {
+        use serde_cbor::Value as CborValue;
+        use std::collections::BTreeMap;
+
+        let mut map = BTreeMap::new();
+        map.insert(
+            CborValue::Text("decimals".to_string()),
+            CborValue::Integer(18),
+        );
+
+        let cbor = serde_cbor::to_vec(&vec![CborValue::Map(map), CborValue::Null]).unwrap();
+
+        let policy_id = [1u8; 28];
+        let value = make_value(policy_id, vec![0x41, 0x42], 100);
+
+        let metadata = vec![make_metadata(Some(vec![1, 2, 3]), Some(cbor))];
+
+        let list = AmountListExtended::from_value_and_metadata(value, &metadata);
+        let asset = &list.0[1];
+
+        // Decimals set to none when CIP25 present
+        assert!(asset.decimals.is_none());
+
+        // Onchain metadata flag is set
+        assert!(asset.has_nft_onchain_metadata);
+    }
+
+    #[test]
+    fn cip68_decimals_are_extracted_when_no_cip25() {
+        use serde_cbor::Value as CborValue;
+        use std::collections::BTreeMap;
+
+        let mut map = BTreeMap::new();
+        map.insert(CborValue::Text("decimals".into()), CborValue::Integer(18));
+
+        let cbor = serde_cbor::to_vec(&vec![CborValue::Map(map), CborValue::Null]).unwrap();
+
+        let policy_id = [3u8; 28];
+        let value = make_value(policy_id, b"\x99".to_vec(), 999);
+
+        let metadata = vec![make_metadata(None, Some(cbor))];
+
+        let list = AmountListExtended::from_value_and_metadata(value, &metadata);
+        let asset = &list.0[1];
+
+        // Decimals set to value in CIP68 metadata
+        assert_eq!(asset.decimals, Some(18));
+
+        // Onchain metadata is false
+        assert!(!asset.has_nft_onchain_metadata);
+    }
 }
