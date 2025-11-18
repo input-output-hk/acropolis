@@ -92,13 +92,14 @@ impl ImmutableHistoricalEpochsState {
         &self,
         range: std::ops::RangeInclusive<u64>,
     ) -> Result<Vec<EpochActivityMessage>> {
-        let mut epochs: Vec<EpochActivityMessage> = Vec::new();
-        for epoch in range {
-            let slice = self.epochs_history.get(Self::make_epoch_key(epoch))?;
-            if let Some(slice) = slice.as_ref() {
-                let decoded: EpochActivityMessage = decode(slice)?;
-                epochs.push(decoded);
-            }
+        let mut epochs = Vec::new();
+        let start_key = Self::make_epoch_key(*range.start());
+        let end_key = Self::make_epoch_key(*range.end());
+
+        for result in self.epochs_history.range(start_key..=end_key) {
+            let (_, slice) = result?;
+            let decoded: EpochActivityMessage = decode(&slice)?;
+            epochs.push(decoded);
         }
         Ok(epochs)
     }
