@@ -4,7 +4,10 @@ use crate::{
         EpochActivityRest, ProtocolParamsRest, SPDDByEpochAndPoolItemRest, SPDDByEpochItemRest,
     },
 };
-use acropolis_common::queries::errors::QueryError;
+use acropolis_common::queries::{
+    blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+    errors::QueryError,
+};
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::{
@@ -501,11 +504,102 @@ pub async fn handle_epoch_pool_stakes_blockfrost(
 }
 
 pub async fn handle_epoch_total_blocks_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Epoch total blocks endpoint"))
+    if params.len() != 1 {
+        return Err(RESTError::BadRequest(
+            "Expected one parameter: an epoch number".to_string(),
+        ));
+    }
+    let param = &params[0];
+
+    let epoch_number = param
+        .parse::<u64>()
+        .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
+
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        latest_epoch_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving latest epoch",
+            )),
+        },
+    )
+    .await?;
+
+    if epoch_number > latest_epoch.epoch {
+        return Err(RESTError::not_found("Epoch not found"));
+    }
+
+    let (first_block_height, last_block_height) = if epoch_number == latest_epoch.epoch {
+        (
+            latest_epoch.first_block_height,
+            latest_epoch.last_block_height,
+        )
+    } else {
+        // Query from historical epochs state
+        let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+            EpochsStateQuery::GetEpochInfo { epoch_number },
+        )));
+        let epoch_info = query_state(
+            &context,
+            &handlers_config.epochs_query_topic,
+            epoch_info_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    EpochsStateQueryResponse::EpochInfo(res),
+                )) => Ok(res.epoch),
+                Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    EpochsStateQueryResponse::Error(e),
+                )) => Err(e),
+                _ => Err(QueryError::internal_error(
+                    "Unexpected message type while retrieving epoch info",
+                )),
+            },
+        )
+        .await?;
+        (epoch_info.first_block_height, epoch_info.last_block_height)
+    };
+
+    // Query all blocks hashes from chain_store
+    // using first_block_height and last_block_height
+    let block_hashes_msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockHashesByNumberRange {
+            min_number: first_block_height,
+            max_number: last_block_height,
+        },
+    )));
+    let block_hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        block_hashes_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockHashesByNumberRange(block_hashes),
+            )) => Ok(block_hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error("Unexpected message type")),
+        },
+    )
+    .await?;
+
+    let json = serde_json::to_string_pretty(&block_hashes)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_epoch_pool_blocks_blockfrost(
