@@ -5,10 +5,12 @@ use acropolis_common::{
     queries::{accounts::AccountReward, blocks::BlockInfo, governance::DRepActionUpdate},
     rest_helper::ToCheckedF64,
     serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
-    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, KeyHash, PolicyAsset,
-    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, ValueMap, Vote, VrfKeyHash,
+    AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, Datum, KeyHash, PolicyAsset,
+    PoolEpochState, PoolId, PoolUpdateAction, ReferenceScript, Relay, TxHash, UTXOValue,
+    UTxOIdentifier, ValueMap, Vote, VrfKeyHash,
 };
 use anyhow::Result;
+use blake2::{Blake2b512, Digest};
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -937,6 +939,48 @@ pub struct UTxOREST {
     pub data_hash: Option<String>,
     pub inline_datum: Option<String>,
     pub reference_script_hash: Option<String>,
+}
+
+impl UTxOREST {
+    pub fn new(
+        address: String,
+        utxo_id: &UTxOIdentifier,
+        entry: &UTXOValue,
+        tx_hash: &[u8],
+        block_hash: &[u8],
+    ) -> Self {
+        let (data_hash, inline_datum) = match &entry.datum {
+            Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
+            Some(Datum::Inline(bytes)) => (None, Some(hex::encode(bytes))),
+            None => (None, None),
+        };
+
+        let reference_script_hash = entry.reference_script.as_ref().map(|script| {
+            let bytes = match script {
+                ReferenceScript::Native(b)
+                | ReferenceScript::PlutusV1(b)
+                | ReferenceScript::PlutusV2(b)
+                | ReferenceScript::PlutusV3(b) => b,
+            };
+
+            let mut hasher = Blake2b512::new();
+            hasher.update(bytes);
+            let result = hasher.finalize();
+            hex::encode(&result[..32])
+        });
+
+        Self {
+            address,
+            tx_hash: hex::encode(tx_hash),
+            tx_index: utxo_id.tx_index(),
+            output_index: utxo_id.output_index(),
+            amount: entry.value.clone().into(),
+            block: hex::encode(block_hash),
+            data_hash,
+            inline_datum,
+            reference_script_hash,
+        }
+    }
 }
 
 #[derive(serde::Serialize)]

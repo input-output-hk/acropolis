@@ -17,8 +17,7 @@ use acropolis_common::queries::utils::query_state;
 use acropolis_common::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, Datum, ReferenceScript, StakeAddress};
-use blake2::{Blake2b512, Digest};
+use acropolis_common::{DRepChoice, StakeAddress};
 use caryatid_sdk::Context;
 
 #[derive(serde::Serialize)]
@@ -822,42 +821,13 @@ pub async fn handle_account_utxos_blockfrost(
 
     let mut rest_response = Vec::with_capacity(entries.len());
     for (i, entry) in entries.into_iter().enumerate() {
-        let tx_hash = hashes.tx_hashes.get(i).map(hex::encode).unwrap_or_default();
-        let block_hash = hashes.block_hashes.get(i).map(hex::encode).unwrap_or_default();
-        let tx_index = utxo_identifiers[i].tx_index();
-        let output_index = utxo_identifiers.get(i).map(|id| id.output_index()).unwrap_or(0);
-        let (data_hash, inline_datum) = match &entry.datum {
-            Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
-            Some(Datum::Inline(bytes)) => (None, Some(hex::encode(bytes))),
-            None => (None, None),
-        };
-        let reference_script_hash = match &entry.reference_script {
-            Some(script) => {
-                let bytes = match script {
-                    ReferenceScript::Native(b)
-                    | ReferenceScript::PlutusV1(b)
-                    | ReferenceScript::PlutusV2(b)
-                    | ReferenceScript::PlutusV3(b) => b,
-                };
-                let mut hasher = Blake2b512::new();
-                hasher.update(bytes);
-                let result = hasher.finalize();
-                Some(hex::encode(&result[..32]))
-            }
-            None => None,
-        };
-
-        rest_response.push(UTxOREST {
-            address: entry.address.to_string()?,
-            tx_hash,
-            tx_index,
-            output_index,
-            amount: entry.value.into(),
-            block: block_hash,
-            data_hash,
-            inline_datum,
-            reference_script_hash,
-        })
+        rest_response.push(UTxOREST::new(
+            entry.address.to_string()?,
+            &utxo_identifiers[i],
+            &entry,
+            hashes.tx_hashes[i].as_ref(),
+            hashes.block_hashes[i].as_ref(),
+        ));
     }
 
     let json = serde_json::to_string_pretty(&rest_response)?;
