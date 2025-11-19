@@ -14,12 +14,12 @@ use acropolis_common::{
         },
         utils::{query_state, rest_query_state_async},
     },
-    Lovelace, Relay, TxHash,
+    Lovelace, Metadata, Relay, TxHash,
 };
 use caryatid_sdk::Context;
 use hex::FromHex;
 use serde::{
-    ser::{Error, SerializeStruct},
+    ser::{Error, SerializeMap, SerializeSeq, SerializeStruct},
     Serialize, Serializer,
 };
 use std::sync::Arc;
@@ -510,6 +510,61 @@ async fn handle_transaction_pool_retires_query(
     .await
 }
 
+struct TxMetadata(Metadata);
+
+impl Serialize for TxMetadata {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match &self.0 {
+            Metadata::Int(i) => i.serialize(serializer),
+            Metadata::Bytes(b) => {
+                let h = hex::encode(b);
+                serializer.serialize_str(&h)
+            }
+            Metadata::Text(s) => s.serialize(serializer),
+            Metadata::Array(a) => {
+                let mut state = serializer.serialize_seq(Some(a.len()))?;
+                for i in a {
+                    state.serialize_element(&TxMetadata(i.clone()))?;
+                }
+                state.end()
+            }
+            Metadata::Map(m) => {
+                let mut state = serializer.serialize_map(Some(m.len()))?;
+                for (k, v) in m {
+                    match k {
+                        Metadata::Int(i) => {
+                            state.serialize_entry(&i.to_string(), &TxMetadata(v.clone()))?
+                        }
+                        Metadata::Bytes(b) => {
+                            state.serialize_entry(&hex::encode(b), &TxMetadata(v.clone()))?
+                        }
+                        Metadata::Text(s) => state.serialize_entry(&s, &TxMetadata(v.clone()))?,
+                        _ => return Err(S::Error::custom("Invalid key type in map")),
+                    }
+                }
+                state.end()
+            }
+        }
+    }
+}
+
+struct TxMetadataItem(TransactionMetadataItem);
+
+impl Serialize for TxMetadataItem {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("TxPoolUpdateCertificate", 2)?;
+        state.serialize_field("label", &self.0.label)?;
+        state.serialize_field("json_metadata", &TxMetadata(self.0.json_metadata.clone()))?;
+        state.end()
+    }
+}
+
 /// Handle `/txs/{hash}/metadata`
 async fn handle_transaction_metadata_query(
     context: Arc<Context<Message>>,
@@ -526,7 +581,9 @@ async fn handle_transaction_metadata_query(
         async move |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::TransactionMetadata(metadata),
-            )) => Some(Ok(Some(metadata.metadata))),
+            )) => Some(Ok(Some(
+                metadata.metadata.into_iter().map(|i| TxMetadataItem(i)).collect::<Vec<_>>(),
+            ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),
             )) => Some(Err(e)),

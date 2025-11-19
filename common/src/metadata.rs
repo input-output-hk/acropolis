@@ -22,6 +22,12 @@ impl Serialize for MetadataInt {
     }
 }
 
+impl ToString for MetadataInt {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 impl<'a> Deserialize<'a> for MetadataInt {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
