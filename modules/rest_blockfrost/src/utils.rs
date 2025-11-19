@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use acropolis_common::{rest_error::RESTError, AssetName, PolicyId};
 use anyhow::Result;
 use blake2::digest::{Update, VariableOutput};
 use reqwest::Client;
@@ -83,6 +84,29 @@ pub fn verify_pool_metadata_hash(
 fn invalid_size_desc<T: std::fmt::Display>(e: T) -> String {
     format!("Invalid size for hashing pool metadata json {e}")
 }
+
+pub fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
+    let decoded = hex::decode(hex_str)?;
+
+    if decoded.len() < 28 {
+        return Err(RESTError::BadRequest(
+            "Asset identifier must be at least 28 bytes".to_string(),
+        ));
+    }
+
+    let (policy_part, asset_part) = decoded.split_at(28);
+
+    let policy_id: PolicyId = policy_part
+        .try_into()
+        .map_err(|_| RESTError::BadRequest("Policy id must be 28 bytes".to_string()))?;
+
+    let asset_name = AssetName::new(asset_part).ok_or_else(|| {
+        RESTError::BadRequest("Asset name must be less than 32 bytes".to_string())
+    })?;
+
+    Ok((policy_id, asset_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

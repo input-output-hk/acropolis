@@ -4,6 +4,7 @@ use crate::{
         AssetAddressRest, AssetInfoRest, AssetMetadata, AssetMintRecordRest, AssetTransactionRest,
         PolicyAssetRest,
     },
+    utils::split_policy_and_asset,
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
@@ -14,7 +15,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AssetMetadataStandard, AssetName, PolicyId,
+    AssetMetadataStandard, PolicyId,
 };
 use blake2::{digest::consts::U20, Blake2b, Digest};
 use caryatid_sdk::Context;
@@ -293,28 +294,6 @@ pub async fn handle_policy_assets_blockfrost(
     let rest_assets: Vec<PolicyAssetRest> = assets.iter().map(Into::into).collect();
     let json = serde_json::to_string_pretty(&rest_assets)?;
     Ok(RESTResponse::with_json(200, &json))
-}
-
-fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
-    let decoded = hex::decode(hex_str)?;
-
-    if decoded.len() < 28 {
-        return Err(RESTError::BadRequest(
-            "Asset identifier must be at least 28 bytes".to_string(),
-        ));
-    }
-
-    let (policy_part, asset_part) = decoded.split_at(28);
-
-    let policy_id: PolicyId = policy_part
-        .try_into()
-        .map_err(|_| RESTError::BadRequest("Policy id must be 28 bytes".to_string()))?;
-
-    let asset_name = AssetName::new(asset_part).ok_or_else(|| {
-        RESTError::BadRequest("Asset name must be less than 32 bytes".to_string())
-    })?;
-
-    Ok((policy_id, asset_name))
 }
 
 pub async fn fetch_asset_metadata(
