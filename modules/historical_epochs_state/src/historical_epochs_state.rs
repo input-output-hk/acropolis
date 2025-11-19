@@ -143,7 +143,7 @@ impl HistoricalEpochsState {
                         state.immutable.clone()
                     };
 
-                    if let Err(e) = persist_tx.send((current_block.epoch - 1, immutable)).await {
+                    if let Err(e) = persist_tx.send((current_block.epoch, immutable)).await {
                         error!("persistence worker crashed: {e}");
                     }
                 }

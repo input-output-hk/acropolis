@@ -40,6 +40,9 @@ impl State {
         }
     }
 
+    /// block_info is the first block of Epoch N (epoch param)
+    /// And at that point, we are saving EpochActivityMessage for Epoch N - 1
+    /// That is why we check Some(block_info.epoch - 1) != self.volatile.last_persisted_epoch
     pub fn ready_to_prune(&self, block_info: &BlockInfo) -> bool {
         block_info.epoch > 0
             && Some(block_info.epoch - 1) != self.volatile.last_persisted_epoch
@@ -179,7 +182,7 @@ mod tests {
         assert!(state.ready_to_prune(&block_info));
 
         state.prune_volatile().await;
-        state.immutable.persist_epoch(0).await.unwrap();
+        state.immutable.persist_epoch(block_info.epoch).await.unwrap();
 
         let block_info = make_block_info(2, true);
         let ea_1 = make_ea(1);
@@ -192,7 +195,7 @@ mod tests {
         assert!(state.ready_to_prune(&block_info));
 
         state.prune_volatile().await;
-        state.immutable.persist_epoch(1).await.unwrap();
+        state.immutable.persist_epoch(block_info.epoch).await.unwrap();
 
         let historical_epoch = state.immutable.get_historical_epoch(0).unwrap().unwrap();
         assert_eq!(historical_epoch, ea_0);

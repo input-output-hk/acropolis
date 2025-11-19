@@ -49,11 +49,13 @@ impl ImmutableHistoricalEpochsState {
         pending.push_back(ea);
     }
 
-    /// Persists pending EpochActivityMessages for epoch N
+    /// Persists pending EpochActivityMessages for Epoch N - 1
+    /// at the first block of Epoch N
     /// There should be only one EpochActivityMessage for each epoch
     /// Returns the number of persisted EpochActivityMessages
     /// Errors if the batch commit or persist fails
     pub async fn persist_epoch(&self, epoch: u64) -> Result<u32> {
+        let saving_epoch = epoch - 1;
         let drained_epochs = {
             let mut pending = self.pending.lock().await;
             std::mem::take(&mut *pending)
@@ -69,16 +71,16 @@ impl ImmutableHistoricalEpochsState {
         }
 
         if let Err(e) = batch.commit() {
-            error!("batch commit failed for epoch {epoch}: {e}");
+            error!("batch commit failed for epoch {saving_epoch}: {e}");
             return Err(e.into());
         }
 
         if let Err(e) = self.keyspace.persist(PersistMode::Buffer) {
-            error!("persist failed for epoch {epoch}: {e}");
+            error!("persist failed for epoch {saving_epoch}: {e}");
             return Err(e.into());
         }
 
-        info!("persisted {persisted_epochs} epochs for epoch {epoch}");
+        info!("persisted {persisted_epochs} epochs for epoch {saving_epoch}");
         Ok(persisted_epochs)
     }
 
