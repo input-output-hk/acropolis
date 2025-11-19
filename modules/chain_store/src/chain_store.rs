@@ -345,6 +345,26 @@ impl ChainStore {
                     block_hashes,
                 }))
             }
+            BlocksStateQuery::GetBlockHashesByNumberRange {
+                min_number,
+                max_number,
+            } => {
+                if *max_number < *min_number {
+                    return Ok(BlocksStateQueryResponse::Error(
+                        QueryError::invalid_request("Invalid number range"),
+                    ));
+                }
+                let mut block_hashes = Vec::new();
+                let blocks = store.get_blocks_by_number_range(*min_number, *max_number)?;
+                for block in blocks {
+                    if let Ok(hash) = Self::get_block_hash(&block) {
+                        block_hashes.push(hash);
+                    }
+                }
+                Ok(BlocksStateQueryResponse::BlockHashesByNumberRange(
+                    block_hashes,
+                ))
+            }
             BlocksStateQuery::GetTransactionHashes { tx_ids } => {
                 let mut block_ids: HashMap<_, Vec<_>> = HashMap::new();
                 for tx_id in tx_ids {

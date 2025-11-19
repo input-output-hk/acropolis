@@ -26,6 +26,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 
+use crate::cbor::u128_cbor_codec;
 use crate::types::*;
 use crate::validation::ValidationStatus;
 
@@ -141,47 +142,68 @@ pub struct BlockTxsMessage {
 }
 
 /// Epoch activity - sent at end of epoch
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    PartialEq,
+)]
 pub struct EpochActivityMessage {
     /// Epoch which has ended
+    #[n(0)]
     pub epoch: u64,
 
     /// Epoch start time
     /// UNIX timestamp
+    #[n(1)]
     pub epoch_start_time: u64,
 
     /// Epoch end time
     /// UNIX timestamp
+    #[n(2)]
     pub epoch_end_time: u64,
 
     /// When first block of this epoch was created
+    #[n(3)]
     pub first_block_time: u64,
 
     /// Block height of first block of this epoch
+    #[n(4)]
     pub first_block_height: u64,
 
     /// When last block of this epoch was created
+    #[n(5)]
     pub last_block_time: u64,
 
     /// Block height of last block of this epoch
+    #[n(6)]
     pub last_block_height: u64,
 
     /// Total blocks in this epoch
+    #[n(7)]
     pub total_blocks: usize,
 
     /// Total txs in this epoch
+    #[n(8)]
     pub total_txs: u64,
 
     /// Total outputs of all txs in this epoch
+    #[cbor(n(9), with = "u128_cbor_codec")]
     pub total_outputs: u128,
 
     /// Total fees in this epoch
+    #[n(10)]
     pub total_fees: u64,
 
     /// Map of SPO IDs to blocks produced
+    #[n(11)]
     pub spo_blocks: Vec<(PoolId, usize)>,
 
     /// Nonce
+    #[n(12)]
     pub nonce: Option<Nonce>,
 }
 

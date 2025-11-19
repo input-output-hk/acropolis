@@ -223,7 +223,6 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "dashmap",
  "hex",
  "imbl",
  "pallas 0.33.0",
@@ -277,6 +276,21 @@ dependencies = [
  "hex",
  "minicbor 0.26.5",
  "rayon",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_historical_epochs_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "minicbor 0.26.5",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -480,6 +494,7 @@ dependencies = [
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_historical_accounts_state",
+ "acropolis_module_historical_epochs_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",

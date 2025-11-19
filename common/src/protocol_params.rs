@@ -254,21 +254,46 @@ impl ProtocolVersion {
 }
 
 #[derive(
-    Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    Default,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 #[serde(rename_all = "PascalCase")]
 pub enum NonceVariant {
+    #[n(0)]
     #[default]
     NeutralNonce,
+    #[n(1)]
     Nonce,
 }
 
 pub type NonceHash = [u8; 32];
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Nonce {
+    #[n(0)]
     pub tag: NonceVariant,
+    #[n(1)]
     pub hash: Option<NonceHash>,
 }
 

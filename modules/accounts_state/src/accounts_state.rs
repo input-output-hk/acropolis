@@ -51,7 +51,7 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
-const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./spdd_db");
+const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
 
 /// Accounts State module
@@ -403,24 +403,28 @@ impl AccountsState {
         let parameters_topic = config
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
+        info!("Creating protocol parameters subscriber on '{parameters_topic}'");
 
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
             .unwrap_or(DEFAULT_DREP_DISTRIBUTION_TOPIC.to_string());
+        info!("Creating DRep distribution publisher on '{drep_distribution_topic}'");
 
         let spo_distribution_topic = config
             .get_string("publish-spo-distribution-topic")
             .unwrap_or(DEFAULT_SPO_DISTRIBUTION_TOPIC.to_string());
+        info!("Creating SPO distribution publisher on '{spo_distribution_topic}'");
 
         let spo_rewards_topic = config
             .get_string("publish-spo-rewards-topic")
             .unwrap_or(DEFAULT_SPO_REWARDS_TOPIC.to_string());
+        info!("Creating SPO rewards publisher on '{spo_rewards_topic}'");
 
         let stake_reward_deltas_topic = config
             .get_string("publish-stake-reward-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
-        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_topic}'");
+        info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
 
         let spdd_db_path =
             config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());

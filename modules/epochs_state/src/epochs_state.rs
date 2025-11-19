@@ -1,15 +1,14 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::epochs::{
-        EpochInfo, EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, NextEpochs,
-        PreviousEpochs, DEFAULT_EPOCHS_QUERY_TOPIC,
+        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
     },
+    queries::errors::QueryError,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, Era,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -19,21 +18,16 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span};
 mod epoch_activity_publisher;
-mod epochs_history;
 mod state;
-mod store_config;
-use crate::{
-    epoch_activity_publisher::EpochActivityPublisher, epochs_history::EpochsHistoryState,
-    store_config::StoreConfig,
-};
+use crate::epoch_activity_publisher::EpochActivityPublisher;
 use state::State;
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
+const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-txs-subscribe-topic", "cardano.block.txs");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -56,9 +50,8 @@ impl EpochsState {
     /// Run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        epochs_history: EpochsHistoryState,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut blocks_subscription: Box<dyn Subscription<Message>>,
+        mut block_subscription: Box<dyn Subscription<Message>>,
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
@@ -80,11 +73,11 @@ impl EpochsState {
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
-            let blocks_message_f = blocks_subscription.read();
+            let block_message_f = block_subscription.read();
             let block_txs_message_f = block_txs_subscription.read();
 
             // Handle blocks first
-            let (_, message) = blocks_message_f.await?;
+            let (_, message) = block_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -103,23 +96,22 @@ impl EpochsState {
                         {
                             state.handle_protocol_parameters(params);
                         }
+
+                        let ea = state.end_epoch(block_info);
+                        // publish epoch activity message
+                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
+                            |e| error!("Failed to publish epoch activity messages: {e}"),
+                        );
                     }
 
-                    // decode header
-                    // Derive the variant from the era - just enough to make
-                    // MultiEraHeader::decode() work.
-                    let variant = match block_info.era {
-                        Era::Byron => 0,
-                        Era::Shelley => 1,
-                        Era::Allegra => 2,
-                        Era::Mary => 3,
-                        Era::Alonzo => 4,
-                        _ => 5,
-                    };
                     let span = info_span!("epochs_state.decode_header", block = block_info.number);
                     let mut header = None;
                     span.in_scope(|| {
-                        header = match MultiEraHeader::decode(variant, None, &block_msg.header) {
+                        header = match MultiEraHeader::decode(
+                            block_info.era as u8,
+                            None,
+                            &block_msg.header,
+                        ) {
                             Ok(header) => Some(header),
                             Err(e) => {
                                 error!("Can't decode header {}: {e}", block_info.slot);
@@ -136,16 +128,6 @@ impl EpochsState {
                             }
                         }
                     });
-
-                    if is_new_epoch {
-                        let ea = state.end_epoch(block_info);
-                        // update epochs history
-                        epochs_history.handle_epoch_activity(block_info, &ea);
-                        // publish epoch activity message
-                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
-                            |e| error!("Failed to publish epoch activity messages: {e}"),
-                        );
-                    }
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
@@ -188,10 +170,10 @@ impl EpochsState {
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
-        let blocks_subscribe_topic = config
-            .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for blocks on '{blocks_subscribe_topic}'");
+        let block_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for blocks on '{block_subscribe_topic}'");
 
         let block_txs_subscribe_topic = config
             .get_string(DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC.0)
@@ -215,9 +197,6 @@ impl EpochsState {
             .unwrap_or(DEFAULT_EPOCHS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", epochs_query_topic);
 
-        // store config
-        let store_config = StoreConfig::from(config.clone());
-
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "epochs_state",
@@ -225,13 +204,9 @@ impl EpochsState {
         )));
         let history_query = history.clone();
 
-        // epochs history
-        let epochs_history = EpochsHistoryState::new(&store_config);
-        let epochs_history_query = epochs_history.clone();
-
         // Subscribe
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
+        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
@@ -243,7 +218,6 @@ impl EpochsState {
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
             let history = history_query.clone();
-            let epochs_history = epochs_history_query.clone();
 
             async move {
                 let Message::StateQuery(StateQuery::Epochs(query)) = message.as_ref() else {
@@ -260,64 +234,6 @@ impl EpochsState {
                         EpochsStateQueryResponse::LatestEpoch(LatestEpoch {
                             epoch: state.get_epoch_info(),
                         })
-                    }
-
-                    EpochsStateQuery::GetEpochInfo { epoch_number } => {
-                        match epochs_history.get_historical_epoch(*epoch_number) {
-                            Ok(Some(epoch_info)) => {
-                                EpochsStateQueryResponse::EpochInfo(EpochInfo { epoch: epoch_info })
-                            }
-                            Ok(None) => EpochsStateQueryResponse::Error(QueryError::not_found(
-                                format!("Epoch {}", epoch_number),
-                            )),
-                            Err(_) => EpochsStateQueryResponse::Error(
-                                QueryError::storage_disabled("historical epoch"),
-                            ),
-                        }
-                    }
-
-                    EpochsStateQuery::GetNextEpochs { epoch_number } => {
-                        let current_epoch = state.get_epoch_info();
-                        if *epoch_number > current_epoch.epoch {
-                            EpochsStateQueryResponse::Error(QueryError::not_found(format!(
-                                "Epoch {} is in the future",
-                                epoch_number
-                            )))
-                        } else {
-                            match epochs_history.get_next_epochs(*epoch_number) {
-                                Ok(mut epochs) => {
-                                    // check the current epoch also
-                                    if current_epoch.epoch > *epoch_number {
-                                        epochs.push(current_epoch);
-                                    }
-                                    EpochsStateQueryResponse::NextEpochs(NextEpochs { epochs })
-                                }
-                                Err(_) => EpochsStateQueryResponse::Error(
-                                    QueryError::storage_disabled("historical epoch"),
-                                ),
-                            }
-                        }
-                    }
-
-                    EpochsStateQuery::GetPreviousEpochs { epoch_number } => {
-                        let current_epoch = state.get_epoch_info();
-                        if *epoch_number > current_epoch.epoch {
-                            EpochsStateQueryResponse::Error(QueryError::not_found(format!(
-                                "Epoch {} is in the future",
-                                epoch_number
-                            )))
-                        } else {
-                            match epochs_history.get_previous_epochs(*epoch_number) {
-                                Ok(epochs) => {
-                                    EpochsStateQueryResponse::PreviousEpochs(PreviousEpochs {
-                                        epochs,
-                                    })
-                                }
-                                Err(_) => EpochsStateQueryResponse::Error(
-                                    QueryError::storage_disabled("historical epoch"),
-                                ),
-                            }
-                        }
                     }
 
                     EpochsStateQuery::GetLatestEpochBlocksMintedByPool { spo_id } => {
@@ -340,9 +256,8 @@ impl EpochsState {
         context.run(async move {
             Self::run(
                 history,
-                epochs_history,
                 bootstrapped_subscription,
-                blocks_subscription,
+                block_subscription,
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,

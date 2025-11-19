@@ -114,7 +114,7 @@ store-history = false
 [module.accounts-state]
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
-spdd-db-path = "./spdd_db"
+spdd-db-path = "./fjall-spdd"
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
