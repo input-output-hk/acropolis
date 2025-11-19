@@ -8,7 +8,7 @@ use acropolis_common::{
     BlockInfo,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context, Module, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::{fs::File, io::Write, sync::Arc};
 use tracing::{error, info};

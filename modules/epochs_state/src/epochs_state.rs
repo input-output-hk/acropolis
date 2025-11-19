@@ -12,7 +12,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus, Era,
 };
 use anyhow::Result;
-use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;

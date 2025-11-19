@@ -15,7 +15,7 @@ use acropolis_common::{
     BlockHash, BlockInfo, BlockStatus, Era, GenesisDelegates,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use tokio::time::Instant;
 use tracing::{error, info, info_span, Instrument};

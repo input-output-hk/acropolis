@@ -17,7 +17,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
