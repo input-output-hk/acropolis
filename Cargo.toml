@@ -38,11 +38,11 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-caryatid_sdk = "0.12"
-caryatid_process = "0.12"
-caryatid_module_rest_server = "0.14"
-caryatid_module_clock = "0.12"
-caryatid_module_spy = "0.12"
+caryatid_sdk = "0.13"
+caryatid_process = "0.13"
+caryatid_module_rest_server = "0.15"
+caryatid_module_clock = "0.13"
+caryatid_module_spy = "0.13"
 anyhow = "1.0"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "string"] }
