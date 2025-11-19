@@ -32,6 +32,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
 const DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH: (&str, &str) = ("db-path", "./fjall-epochs");
+const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
 
 /// Historical Epochs State module
 #[module(
@@ -194,6 +195,9 @@ impl HistoricalEpochsState {
             db_path: config
                 .get_string(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.1.to_string()),
+            clear_on_start: config
+                .get_bool(DEFAULT_CLEAR_ON_START.0)
+                .unwrap_or(DEFAULT_CLEAR_ON_START.1),
         };
 
         // Initalize state

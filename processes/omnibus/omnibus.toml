@@ -83,6 +83,8 @@ store-addresses = false
 store-tx-count = false
 
 [module.historical-epochs-state]
+# Clear state on start up (default true)
+clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -109,8 +111,6 @@ cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
-# Enables /epochs/{number} endpoint (for historical epochs)
-store-history = false
 
 [module.accounts-state]
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints

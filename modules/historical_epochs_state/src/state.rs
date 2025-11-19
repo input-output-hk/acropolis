@@ -9,6 +9,7 @@ use std::{path::Path, sync::Arc};
 #[derive(Debug, Clone)]
 pub struct HistoricalEpochsStateConfig {
     pub db_path: String,
+    pub clear_on_start: bool,
 }
 
 /// Overall state - stored per epoch
@@ -21,7 +22,10 @@ pub struct State {
 impl State {
     pub fn new(config: &HistoricalEpochsStateConfig) -> Result<Self> {
         let db_path = Path::new(&config.db_path);
-        let immutable = Arc::new(ImmutableHistoricalEpochsState::new(db_path)?);
+        let immutable = Arc::new(ImmutableHistoricalEpochsState::new(
+            db_path,
+            config.clear_on_start,
+        )?);
 
         Ok(Self {
             volatile: VolatileHistoricalEpochsState::new(),
@@ -140,6 +144,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = HistoricalEpochsStateConfig {
             db_path: temp_dir.path().to_string_lossy().into_owned(),
+            clear_on_start: true,
         };
         let mut state = State::new(&config).unwrap();
 
@@ -162,6 +167,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = HistoricalEpochsStateConfig {
             db_path: temp_dir.path().to_string_lossy().into_owned(),
+            clear_on_start: true,
         };
         let mut state = State::new(&config).unwrap();
 

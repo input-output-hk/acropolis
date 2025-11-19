@@ -15,7 +15,12 @@ pub struct ImmutableHistoricalEpochsState {
 }
 
 impl ImmutableHistoricalEpochsState {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, clear_on_start: bool) -> Result<Self> {
+        let path = path.as_ref();
+        if clear_on_start && path.exists() {
+            std::fs::remove_dir_all(path)?;
+        }
+
         let cfg = fjall::Config::new(path)
             // 4MB write buffer since EpochActivityMessage is not that big
             .max_write_buffer_size(4 * 1024 * 1024)
