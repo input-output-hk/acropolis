@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use crate::types::{AddressInfoExtended, AddressTotalsREST};
+use crate::types::{AddressInfoExtended, AddressTotalsREST, TransactionInfoREST, UTxOREST};
 use crate::{handlers_config::HandlersConfig, types::AddressInfoREST};
 use acropolis_common::queries::assets::{AssetsStateQuery, AssetsStateQueryResponse};
+use acropolis_common::queries::blocks::{BlocksStateQuery, BlocksStateQueryResponse};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::AssetMetadata;
@@ -34,7 +35,7 @@ pub async fn handle_address_single_blockfrost(
     let address_type = address.kind().to_string();
     let is_script = address.is_script();
 
-    let address_query_msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
         AddressStateQuery::GetAddressUTxOs {
             address: address.clone(),
         },
@@ -43,7 +44,7 @@ pub async fn handle_address_single_blockfrost(
     let utxo_identifiers = query_state(
         &context,
         &handlers_config.addresses_query_topic,
-        address_query_msg,
+        msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
@@ -82,14 +83,14 @@ pub async fn handle_address_single_blockfrost(
         }
     };
 
-    let utxos_query_msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
         UTxOStateQuery::GetUTxOsSum { utxo_identifiers },
     )));
 
     let address_balance = query_state(
         &context,
         &handlers_config.utxos_query_topic,
-        utxos_query_msg,
+        msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::UTxOsSum(balance),
@@ -131,7 +132,7 @@ pub async fn handle_address_extended_blockfrost(
     let address_type = address.kind().to_string();
     let is_script = address.is_script();
 
-    let address_query_msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
         AddressStateQuery::GetAddressUTxOs {
             address: address.clone(),
         },
@@ -140,7 +141,7 @@ pub async fn handle_address_extended_blockfrost(
     let utxo_identifiers = query_state(
         &context,
         &handlers_config.addresses_query_topic,
-        address_query_msg,
+        msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Addresses(
                 AddressStateQueryResponse::AddressUTxOs(utxo_identifiers),
@@ -179,14 +180,14 @@ pub async fn handle_address_extended_blockfrost(
         }
     };
 
-    let utxos_query_msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
         UTxOStateQuery::GetUTxOsSum { utxo_identifiers },
     )));
 
     let address_balance = query_state(
         &context,
         &handlers_config.utxos_query_topic,
-        utxos_query_msg,
+        msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
                 UTxOStateQueryResponse::UTxOsSum(balance),
@@ -284,11 +285,96 @@ pub async fn handle_address_totals_blockfrost(
 
 /// Handle `/addresses/{address}/utxos` Blockfrost-compatible endpoint
 pub async fn handle_address_utxos_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Address UTxOs endpoint"))
+    let address = parse_address(&params)?;
+    let address_str = address.to_string()?;
+
+    // Get utxos from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressUTxOs { address },
+    )));
+    let utxo_identifiers = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressUTxOs(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving address UTxOs",
+            )),
+        },
+    )
+    .await?;
+
+    // Get TxHashes and BlockHashes from UTxOIdentifiers
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetUTxOHashes {
+            utxo_ids: utxo_identifiers.clone(),
+        },
+    )));
+    let hashes = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::UTxOHashes(hashes),
+            )) => Ok(hashes),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving UTxO hashes",
+            )),
+        },
+    )
+    .await?;
+
+    // Get UTxO balances from utxo state
+    let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+        UTxOStateQuery::GetUTxOs {
+            utxo_identifiers: utxo_identifiers.clone(),
+        },
+    )));
+    let entries = query_state(
+        &context,
+        &handlers_config.utxos_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::UTxOs(utxos),
+            )) => Ok(utxos),
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving UTxO entries",
+            )),
+        },
+    )
+    .await?;
+
+    let mut rest_response = Vec::with_capacity(entries.len());
+    for (i, entry) in entries.into_iter().enumerate() {
+        rest_response.push(UTxOREST::new(
+            address_str.clone(),
+            &utxo_identifiers[i],
+            &entry,
+            hashes.tx_hashes[i].as_ref(),
+            hashes.block_hashes[i].as_ref(),
+        ))
+    }
+
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 /// Handle `/addresses/{address}/utxos/{asset}` Blockfrost-compatible endpoint
@@ -302,11 +388,70 @@ pub async fn handle_address_asset_utxos_blockfrost(
 
 /// Handle `/addresses/{address}/transactions` Blockfrost-compatible endpoint
 pub async fn handle_address_transactions_blockfrost(
-    _context: Arc<Context<Message>>,
-    _params: Vec<String>,
-    _handlers_config: Arc<HandlersConfig>,
+    context: Arc<Context<Message>>,
+    params: Vec<String>,
+    handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    Err(RESTError::not_implemented("Address transactions endpoint"))
+    let address = parse_address(&params)?;
+
+    // Get tx identifiers from address state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Addresses(
+        AddressStateQuery::GetAddressTransactions { address },
+    )));
+    let tx_identifiers = query_state(
+        &context,
+        &handlers_config.addresses_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::AddressTransactions(txs),
+            )) => Ok(txs),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving address transactions",
+            )),
+        },
+    )
+    .await?;
+
+    // Get tx hashes and timestamps from chain store
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetTransactionHashesAndTimestamps {
+            tx_ids: tx_identifiers.clone(),
+        },
+    )));
+    let tx_info = query_state(
+        &context,
+        &handlers_config.blocks_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::TransactionHashesAndTimestamps(info),
+            )) => Ok(info),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving transaction hashes and timestamps",
+            )),
+        },
+    )
+    .await?;
+
+    let mut rest_response = Vec::with_capacity(tx_identifiers.len());
+    for (i, tx_id) in tx_identifiers.iter().enumerate() {
+        rest_response.push(TransactionInfoREST {
+            tx_hash: hex::encode(tx_info.tx_hashes[i]),
+            tx_index: tx_id.tx_index(),
+            block_height: tx_id.block_number(),
+            block_time: tx_info.timestamps[i],
+        });
+    }
+
+    let json = serde_json::to_string_pretty(&rest_response)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 fn parse_address(params: &[String]) -> Result<Address, RESTError> {

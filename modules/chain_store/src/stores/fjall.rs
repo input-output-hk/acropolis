@@ -11,7 +11,7 @@ pub struct FjallStore {
     keyspace: Keyspace,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
-    last_persisted_block: Option<u64>,
+    last_persisted_block: u64,
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
@@ -36,11 +36,17 @@ impl FjallStore {
         let txs = FjallTXStore::new(&keyspace)?;
 
         let last_persisted_block = if !clear {
-            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
-                res.ok().and_then(|(key, _)| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-            })
+            blocks
+                .block_hashes_by_number
+                .iter()
+                .next_back()
+                .and_then(|res| {
+                    res.ok()
+                        .and_then(|(key, _)| key.as_ref().try_into().ok().map(u64::from_be_bytes))
+                })
+                .unwrap_or(0)
         } else {
-            None
+            0
         };
 
         Ok(Self {
@@ -81,10 +87,7 @@ impl super::Store for FjallStore {
     }
 
     fn should_persist(&self, block_number: u64) -> bool {
-        match self.last_persisted_block {
-            Some(last) => block_number > last,
-            None => false,
-        }
+        block_number > self.last_persisted_block
     }
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {

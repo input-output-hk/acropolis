@@ -72,6 +72,9 @@ pub enum BlocksStateQuery {
     GetUTxOHashes {
         utxo_ids: Vec<UTxOIdentifier>,
     },
+    GetTransactionHashesAndTimestamps {
+        tx_ids: Vec<TxIdentifier>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -96,6 +99,7 @@ pub enum BlocksStateQueryResponse {
     BlockHashes(BlockHashes),
     TransactionHashes(TransactionHashes),
     UTxOHashes(UTxOHashes),
+    TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),
     Error(QueryError),
 }
 
@@ -239,4 +243,10 @@ pub struct TransactionHashes {
 pub struct UTxOHashes {
     pub block_hashes: Vec<BlockHash>,
     pub tx_hashes: Vec<TxHash>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionHashesAndTimeStamps {
+    pub tx_hashes: Vec<TxHash>,
+    pub timestamps: Vec<u64>,
 }
