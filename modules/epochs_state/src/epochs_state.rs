@@ -32,8 +32,8 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
+const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("block-txs-subscribe-topic", "cardano.block.txs");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -58,7 +58,7 @@ impl EpochsState {
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut blocks_subscription: Box<dyn Subscription<Message>>,
+        mut block_subscription: Box<dyn Subscription<Message>>,
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
@@ -80,11 +80,11 @@ impl EpochsState {
             let mut current_block: Option<BlockInfo> = None;
 
             // Read both topics in parallel
-            let blocks_message_f = blocks_subscription.read();
+            let block_message_f = block_subscription.read();
             let block_txs_message_f = block_txs_subscription.read();
 
             // Handle blocks first
-            let (_, message) = blocks_message_f.await?;
+            let (_, message) = block_message_f.await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -188,10 +188,10 @@ impl EpochsState {
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
-        let blocks_subscribe_topic = config
-            .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for blocks on '{blocks_subscribe_topic}'");
+        let block_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for blocks on '{block_subscribe_topic}'");
 
         let block_txs_subscribe_topic = config
             .get_string(DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC.0)
@@ -231,7 +231,7 @@ impl EpochsState {
 
         // Subscribe
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
+        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
@@ -342,7 +342,7 @@ impl EpochsState {
                 history,
                 epochs_history,
                 bootstrapped_subscription,
-                blocks_subscription,
+                block_subscription,
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
