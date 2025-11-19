@@ -34,26 +34,20 @@ pub async fn handle_epoch_info_blockfrost(
     }
     let param = &params[0];
 
-    // query to get latest epoch or epoch info
-    let query = if param == "latest" {
-        EpochsStateQuery::GetLatestEpoch
-    } else {
-        let parsed = param
-            .parse::<u64>()
-            .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
-        EpochsStateQuery::GetEpochInfo {
-            epoch_number: parsed,
-        }
-    };
-
-    // Get the current epoch number from epochs-state
-    let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(query)));
-    let epoch_info_response = query_state(
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch = query_state(
         &context,
         &handlers_config.epochs_query_topic,
-        epoch_info_msg,
+        latest_epoch_msg,
         |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Epochs(response)) => Ok(response),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving latest epoch",
             )),
@@ -61,26 +55,54 @@ pub async fn handle_epoch_info_blockfrost(
     )
     .await?;
 
-    let ea_message = match epoch_info_response {
-        EpochsStateQueryResponse::LatestEpoch(response) => response.epoch,
-        EpochsStateQueryResponse::EpochInfo(response) => response.epoch,
-        EpochsStateQueryResponse::Error(QueryError::NotFound { .. }) => {
+    let (is_latest, mut response) = if param == "latest" {
+        (true, EpochActivityRest::from(latest_epoch))
+    } else {
+        let parsed = param
+            .parse::<u64>()
+            .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
+
+        if parsed > latest_epoch.epoch {
             return Err(RESTError::not_found("Epoch not found"));
         }
-        EpochsStateQueryResponse::Error(e) => {
-            return Err(e.into());
-        }
-        _ => {
-            return Err(RESTError::unexpected_response(
-                "Unexpected message type while retrieving epoch info",
-            ));
+
+        if parsed == latest_epoch.epoch {
+            (true, EpochActivityRest::from(latest_epoch))
+        } else {
+            let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+                EpochsStateQuery::GetEpochInfo {
+                    epoch_number: parsed,
+                },
+            )));
+            let epoch_info = query_state(
+                &context,
+                &handlers_config.historical_epochs_query_topic,
+                epoch_info_msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Epochs(
+                        EpochsStateQueryResponse::EpochInfo(response),
+                    )) => Ok(EpochActivityRest::from(response.epoch)),
+                    Message::StateQueryResponse(StateQueryResponse::Epochs(
+                        EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
+                    )) => Err(QueryError::not_found("Epoch not found")),
+                    Message::StateQueryResponse(StateQueryResponse::Epochs(
+                        EpochsStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving epoch info",
+                    )),
+                },
+            )
+            .await?;
+            (false, epoch_info)
         }
     };
-    let epoch_number = ea_message.epoch;
 
     // For the latest epoch, query accounts-state for the stake pool delegation distribution (SPDD)
     // Otherwise, fall back to SPDD module to fetch historical epoch totals
-    let total_active_stakes: u64 = if param == "latest" {
+    // if spdd_storage is not enabled, return NULL for active_stakes
+    let epoch_number = response.epoch;
+    let total_active_stakes = if is_latest {
         let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
             AccountsStateQuery::GetActiveStakes {},
         )));
@@ -91,10 +113,10 @@ pub async fn handle_epoch_info_blockfrost(
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::ActiveStakes(total_active_stake),
-                )) => Ok(total_active_stake),
+                )) => Ok(Some(total_active_stake)),
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::Error(e),
-                )) => Err(e),
+                    AccountsStateQueryResponse::Error(_),
+                )) => Ok(None),
                 _ => Err(QueryError::internal_error(
                     "Unexpected message type while retrieving the latest total active stakes",
                 )),
@@ -115,19 +137,17 @@ pub async fn handle_epoch_info_blockfrost(
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
                                                 SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
-                                            )) => Ok(total_active_stakes),
+                                            )) => Ok(Some(total_active_stakes)),
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
-                                                SPDDStateQueryResponse::Error(e),
-                                            )) => Err(e),
+                                                SPDDStateQueryResponse::Error(_),
+                                            )) => Ok(None),
                 _ => Err(QueryError::internal_error(
                     format!("Unexpected message type while retrieving total active stakes for epoch: {epoch_number}"),
                 )),
             },
         )
             .await?
-    };
-
-    let mut response = EpochActivityRest::from(ea_message);
+    }.unwrap_or(0);
 
     if total_active_stakes == 0 {
         response.active_stake = None;
@@ -246,22 +266,51 @@ pub async fn handle_epoch_next_blockfrost(
         .parse::<u64>()
         .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        latest_epoch_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving latest epoch",
+            )),
+        },
+    )
+    .await?;
+
+    if parsed > latest_epoch.epoch {
+        return Err(RESTError::not_found(
+            format!("Epoch {parsed} not found").as_str(),
+        ));
+    }
+
+    if parsed == latest_epoch.epoch {
+        return Ok(RESTResponse::with_json(200, "[]"));
+    }
+
     let next_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetNextEpochs {
             epoch_number: parsed,
         },
     )));
-    let next_epochs = query_state(
+
+    let mut next_epochs = query_state(
         &context,
-        &handlers_config.epochs_query_topic,
+        &handlers_config.historical_epochs_query_topic,
         next_epochs_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::NextEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
-            )) => Err(QueryError::not_found("Epoch")),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -271,6 +320,7 @@ pub async fn handle_epoch_next_blockfrost(
         },
     )
     .await?;
+    next_epochs.push(EpochActivityRest::from(latest_epoch));
 
     let json = serde_json::to_string_pretty(&next_epochs)?;
     Ok(RESTResponse::with_json(200, &json))
@@ -292,6 +342,33 @@ pub async fn handle_epoch_previous_blockfrost(
         .parse::<u64>()
         .map_err(|_| RESTError::invalid_param("epoch", "invalid epoch number"))?;
 
+    let latest_epoch_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+        EpochsStateQuery::GetLatestEpoch,
+    )));
+    let latest_epoch = query_state(
+        &context,
+        &handlers_config.epochs_query_topic,
+        latest_epoch_msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::LatestEpoch(res),
+            )) => Ok(res.epoch),
+            Message::StateQueryResponse(StateQueryResponse::Epochs(
+                EpochsStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving latest epoch",
+            )),
+        },
+    )
+    .await?;
+
+    if parsed > latest_epoch.epoch {
+        return Err(RESTError::not_found(
+            format!("Epoch {parsed} not found").as_str(),
+        ));
+    }
+
     let previous_epochs_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetPreviousEpochs {
             epoch_number: parsed,
@@ -299,15 +376,12 @@ pub async fn handle_epoch_previous_blockfrost(
     )));
     let previous_epochs = query_state(
         &context,
-        &handlers_config.epochs_query_topic,
+        &handlers_config.historical_epochs_query_topic,
         previous_epochs_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::PreviousEpochs(response),
             )) => Ok(response.epochs.into_iter().map(EpochActivityRest::from).collect::<Vec<_>>()),
-            Message::StateQueryResponse(StateQueryResponse::Epochs(
-                EpochsStateQueryResponse::Error(QueryError::NotFound { .. }),
-            )) => Err(QueryError::not_found("Epoch")),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),

@@ -69,6 +69,8 @@ store-stake-addresses = false
 store-spdd = false
 
 [module.historical-accounts-state]
+# Clear state on start up (default true)
+clear-on-start = true
 # Enables /accounts/{stake_address}/rewards endpoint
 store-rewards-history = false
 # Enables /accounts/{stake_address}/history endpoint
@@ -85,6 +87,10 @@ store-withdrawal-history = false
 store-addresses = false
 # Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
 store-tx-count = false
+
+[module.historical-epochs-state]
+# Clear state on start up (default true)
+clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -111,13 +117,11 @@ cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
-# Enables /epochs/{number} endpoint (for historical epochs)
-store-history = false
 
 [module.accounts-state]
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
-spdd-db-path = "./spdd_db"
+spdd-db-path = "./fjall-spdd"
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
