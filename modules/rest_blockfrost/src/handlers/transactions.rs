@@ -153,10 +153,8 @@ async fn handle_transaction_query(
                     Ok(params) => params,
                     Err(e) => return Some(Err(e)),
                 };
-                let fee = match txs_info.recorded_fee {
-                    Some(fee) => fee,
-                    None => 0, // TODO: calc from outputs and inputs
-                };
+                // TODO: calc from outputs and inputs if recorded_fee is None
+                let fee = txs_info.recorded_fee.unwrap_or_default();
                 let deposit = match calculate_deposit(
                     txs_info.pool_update_count,
                     txs_info.stake_cert_count,
@@ -582,7 +580,7 @@ async fn handle_transaction_metadata_query(
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::TransactionMetadata(metadata),
             )) => Some(Ok(Some(
-                metadata.metadata.into_iter().map(|i| TxMetadataItem(i)).collect::<Vec<_>>(),
+                metadata.metadata.into_iter().map(TxMetadataItem).collect::<Vec<_>>(),
             ))),
             Message::StateQueryResponse(StateQueryResponse::Transactions(
                 TransactionsStateQueryResponse::Error(e),

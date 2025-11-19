@@ -1,5 +1,6 @@
 use minicbor::data::Int;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct MetadataInt(pub Int);
@@ -22,9 +23,9 @@ impl Serialize for MetadataInt {
     }
 }
 
-impl ToString for MetadataInt {
-    fn to_string(&self) -> String {
-        self.0.to_string()
+impl fmt::Display for MetadataInt {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

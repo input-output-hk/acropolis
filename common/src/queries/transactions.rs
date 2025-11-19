@@ -28,6 +28,7 @@ pub enum TransactionsStateQuery {
     GetTransactionCBOR,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TransactionsStateQueryResponse {
     TransactionInfo(TransactionInfo),
@@ -190,7 +191,15 @@ pub struct TransactionMetadata {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TransactionMetadataCBOR {}
+pub struct TransactionMetadataItemCBOR {
+    pub label: String,
+    pub metadata: Vec<u8>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TransactionMetadataCBOR {
+    pub metadata: Vec<TransactionMetadataItemCBOR>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionRedeemers {}

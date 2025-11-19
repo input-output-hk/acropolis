@@ -375,14 +375,8 @@ impl From<Relay> for PoolRelayRest {
 
         match value {
             Relay::SingleHostAddr(s) => PoolRelayRest {
-                ipv4: s.ipv4.map(|bytes| {
-                    let ipv4_addr = std::net::Ipv4Addr::from(bytes);
-                    format!("{:?}", ipv4_addr)
-                }),
-                ipv6: s.ipv6.map(|bytes| {
-                    let ipv6_addr = std::net::Ipv6Addr::from(bytes);
-                    format!("{:?}", ipv6_addr)
-                }),
+                ipv4: s.ipv4.map(|addr| format!("{:?}", addr)),
+                ipv6: s.ipv6.map(|addr| format!("{:?}", addr)),
                 dns: None,
                 dns_srv: None,
                 port: s.port.unwrap_or(default_port),

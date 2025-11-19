@@ -962,36 +962,33 @@ impl ChainStore {
         };
         let mut certs = Vec::new();
         for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
-            match cert {
-                MultiEraCert::AlonzoCompatible(cert) => {
-                    if let alonzo::Certificate::MoveInstantaneousRewardsCert(cert) =
-                        cert.as_ref().as_ref()
-                    {
-                        match &cert.target {
-                            alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
-                                for (cred, amount) in creds.clone().to_vec() {
-                                    certs.push(TransactionMIR {
-                                        cert_index: cert_index as u64,
-                                        pot: match cert.source {
-                                            alonzo::InstantaneousRewardSource::Reserves => {
-                                                InstantaneousRewardSource::Reserves
-                                            }
-                                            alonzo::InstantaneousRewardSource::Treasury => {
-                                                InstantaneousRewardSource::Treasury
-                                            }
-                                        },
-                                        address: map_stake_address(&cred, network_id.clone()),
-                                        amount: amount as u64,
-                                    });
-                                }
+            if let MultiEraCert::AlonzoCompatible(cert) = cert {
+                if let alonzo::Certificate::MoveInstantaneousRewardsCert(cert) =
+                    cert.as_ref().as_ref()
+                {
+                    match &cert.target {
+                        alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
+                            for (cred, amount) in creds.clone().to_vec() {
+                                certs.push(TransactionMIR {
+                                    cert_index: cert_index as u64,
+                                    pot: match cert.source {
+                                        alonzo::InstantaneousRewardSource::Reserves => {
+                                            InstantaneousRewardSource::Reserves
+                                        }
+                                        alonzo::InstantaneousRewardSource::Treasury => {
+                                            InstantaneousRewardSource::Treasury
+                                        }
+                                    },
+                                    address: map_stake_address(&cred, network_id.clone()),
+                                    amount: amount as u64,
+                                });
                             }
-                            alonzo::InstantaneousRewardTarget::OtherAccountingPot(coin) => {
-                                // TODO
-                            }
+                        }
+                        alonzo::InstantaneousRewardTarget::OtherAccountingPot(_coin) => {
+                            // TODO
                         }
                     }
                 }
-                _ => (),
             }
         }
         Ok(certs)
@@ -1123,16 +1120,13 @@ impl ChainStore {
             return Err(anyhow!("Transaction not found in block for given index"));
         };
         let mut items = Vec::new();
-        match tx_decoded.metadata() {
-            MultiEraMeta::AlonzoCompatible(metadata) => {
-                for (label, datum) in &metadata.clone().to_vec() {
-                    items.push(TransactionMetadataItem {
-                        label: label.to_string(),
-                        json_metadata: map_metadata(&datum),
-                    });
-                }
+        if let MultiEraMeta::AlonzoCompatible(metadata) = tx_decoded.metadata() {
+            for (label, datum) in &metadata.clone().to_vec() {
+                items.push(TransactionMetadataItem {
+                    label: label.to_string(),
+                    json_metadata: map_metadata(datum),
+                });
             }
-            _ => (),
         }
         Ok(items)
     }

@@ -239,7 +239,7 @@ pub fn map_relay(relay: &PallasRelay) -> Relay {
 //
 // Certificates
 //
-
+#[allow(clippy::too_many_arguments)]
 pub fn to_pool_reg(
     operator: &pallas_primitives::PoolKeyhash,
     vrf_keyhash: &pallas_primitives::VrfKeyhash,
@@ -247,8 +247,8 @@ pub fn to_pool_reg(
     cost: &pallas_primitives::Coin,
     margin: &pallas_primitives::UnitInterval,
     reward_account: &pallas_primitives::RewardAccount,
-    pool_owners: &Vec<pallas_primitives::AddrKeyhash>,
-    relays: &Vec<pallas_primitives::Relay>,
+    pool_owners: &[pallas_primitives::AddrKeyhash],
+    relays: &[pallas_primitives::Relay],
     pool_metadata: &Nullable<pallas_primitives::PoolMetadata>,
     network_id: NetworkId,
     force_reward_network_id: bool,
@@ -1148,7 +1148,7 @@ pub fn map_metadata(metadata: &pallas_primitives::Metadatum) -> Metadata {
             Metadata::Array(a.iter().map(map_metadata).collect())
         }
         pallas_primitives::Metadatum::Map(m) => {
-            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(&k), map_metadata(&v))).collect())
+            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(k), map_metadata(v))).collect())
         }
     }
 }
