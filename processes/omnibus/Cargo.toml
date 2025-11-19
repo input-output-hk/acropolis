@@ -33,6 +33,7 @@ acropolis_module_consensus = { path = "../../modules/consensus" }
 acropolis_module_historical_accounts_state = { path = "../../modules/historical_accounts_state" }
 acropolis_module_tx_validator_phase1 = { path = "../../modules/tx_validator_phase1" }
 acropolis_module_block_vrf_validator = { path = "../../modules/block_vrf_validator" }
+acropolis_module_block_kes_validator = { path = "../../modules/block_kes_validator" }
 
 caryatid_process = { workspace = true }
 caryatid_module_clock = { workspace = true }

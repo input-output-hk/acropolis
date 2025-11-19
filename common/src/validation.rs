@@ -15,8 +15,8 @@ pub enum ValidationError {
     #[error("VRF failure: {0}")]
     BadVRF(#[from] VrfValidationError),
 
-    #[error("KES failure")]
-    BadKES,
+    #[error("KES failure: {0}")]
+    BadKES(#[from] KesValidationError),
 
     #[error("CBOR Decoding error")]
     CborDecodeError(usize, String),
@@ -229,4 +229,107 @@ impl PartialEq for BadVrfProofError {
             _ => false,
         }
     }
+}
+
+/// Reference
+/// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L342
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum KesValidationError {
+    /// **Cause:** The KES signature on the block header is invalid.
+    #[error("KES Signature Error: {0}")]
+    KesSignatureError(#[from] KesSignatureError),
+    /// **Cause:** The operational certificate is invalid.
+    #[error("Operational Certificate Error: {0}")]
+    OperationalCertificateError(#[from] OperationalCertificateError),
+    /// **Cause:** No OCert counter found for this issuer (not a stake pool or genesis delegate)
+    #[error("No OCert Counter For Issuer: Pool ID={}", hex::encode(pool_id))]
+    NoOCertCounter { pool_id: PoolId },
+    /// **Cause:** Some data has incorrect bytes
+    #[error("TryFromSlice: {0}")]
+    TryFromSlice(String),
+    #[error("Other Kes Validation Error: {0}")]
+    Other(String),
+}
+
+/// Validation function for Kes
+pub type KesValidation<'a> = Box<dyn Fn() -> Result<(), KesValidationError> + Send + Sync + 'a>;
+
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum KesSignatureError {
+    /// **Cause:** Current KES period is before the operational certificate's
+    /// start period.
+    #[error(
+        "KES Before Start OCert: OCert Start Period={}, Current Period={}",
+        ocert_start_period,
+        current_period
+    )]
+    KesBeforeStartOcert {
+        ocert_start_period: u64,
+        current_period: u64,
+    },
+    /// **Cause:** Current KES period exceeds the operational certificate's
+    /// validity period.
+    #[error(
+        "KES After End OCert: Current Period={}, OCert Start Period={}, Max KES Evolutions={}",
+        current_period,
+        ocert_start_period,
+        max_kes_evolutions
+    )]
+    KesAfterEndOcert {
+        current_period: u64,
+        ocert_start_period: u64,
+        max_kes_evolutions: u64,
+    },
+    /// **Cause:** The KES signature on the block header is cryptographically invalid.
+    #[error(
+        "Invalid KES Signature OCert: Current Period={}, OCert Start Period={}, Reason={}",
+        current_period,
+        ocert_start_period,
+        reason
+    )]
+    InvalidKesSignatureOcert {
+        current_period: u64,
+        ocert_start_period: u64,
+        reason: String,
+    },
+}
+
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum OperationalCertificateError {
+    /// **Cause:** The operational certificate is malformed.
+    #[error("Malformed Signature OCert: Reason={}", reason)]
+    MalformedSignatureOcert { reason: String },
+    /// **Cause:** The cold key signature on the operational certificate is invalid.
+    /// The OCert was not properly signed by the pool's cold key.
+    #[error(
+        "Invalid Signature OCert: Issuer={}, Pool ID={}",
+        hex::encode(issuer),
+        hex::encode(pool_id)
+    )]
+    InvalidSignatureOcert { issuer: Vec<u8>, pool_id: PoolId },
+    /// **Cause:** The operational certificate counter in the header is not greater
+    /// than the last counter used by this pool.
+    #[error(
+        "Counter Too Small OCert: Latest Counter={}, Declared Counter={}",
+        latest_counter,
+        declared_counter
+    )]
+    CounterTooSmallOcert {
+        latest_counter: u64,
+        declared_counter: u64,
+    },
+    /// **Cause:** OCert counter jumped by more than 1. While not strictly invalid,
+    /// this is suspicious and may indicate key compromise. (Praos Only)
+    #[error(
+        "Counter Over Incremented OCert: Latest Counter={}, Declared Counter={}",
+        latest_counter,
+        declared_counter
+    )]
+    CounterOverIncrementedOcert {
+        latest_counter: u64,
+        declared_counter: u64,
+    },
+    /// **Cause:** No counter found for this key hash (not a stake pool or genesis delegate)
+    #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
+    NoCounterForKeyHashOcert { pool_id: PoolId },
 }
