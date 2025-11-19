@@ -9,7 +9,7 @@ use acropolis_common::{
         UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, GenesisDelegates, Lovelace,
-    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, UTXODelta,
+    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -165,7 +165,11 @@ impl GenesisBootstrapper {
                         reference_script: None,
                     };
 
-                    utxo_deltas_message.deltas.push(UTXODelta::Output(tx_output));
+                    utxo_deltas_message.deltas.push(TxUTxODeltas {
+                        tx_identifier,
+                        inputs: Vec::new(),
+                        outputs: vec![tx_output],
+                    });
                     total_allocated += amount;
                 }
 

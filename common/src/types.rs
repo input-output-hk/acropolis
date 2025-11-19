@@ -188,17 +188,33 @@ impl PartialOrd for BlockInfo {
     }
 }
 
+// Individual transaction UTxO deltas
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxUTxODeltas {
+    // Transaction in which delta occured
+    pub tx_identifier: TxIdentifier,
+
+    // Created and spent UTxOs
+    pub inputs: Vec<UTxOIdentifier>,
+    pub outputs: Vec<TxOutput>,
+}
+
 /// Individual address balance change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
-    /// Address
+    // Address involved in delta
     pub address: Address,
 
-    /// UTxO causing address delta
-    pub utxo: UTxOIdentifier,
+    // Transaction in which delta occured
+    pub tx_identifier: TxIdentifier,
 
-    /// Balance change
-    pub value: ValueDelta,
+    // Address impacted UTxOs
+    pub spent_utxos: Vec<UTxOIdentifier>,
+    pub created_utxos: Vec<UTxOIdentifier>,
+
+    // Sums of spent and created UTxOs
+    pub sent: Value,
+    pub received: Value,
 }
 
 /// Stake balance change
@@ -209,6 +225,9 @@ pub struct StakeAddressDelta {
 
     /// Shelley addresses contributing to the delta
     pub addresses: Vec<ShelleyAddress>,
+
+    /// The number of transactions contributing to the delta
+    pub tx_count: u32,
 
     /// Balance change
     pub delta: i64,
@@ -340,7 +359,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -404,59 +423,66 @@ impl AddAssign for ValueMap {
     }
 }
 
-/// Hashmap representation of ValueDelta (lovelace + multiasset)
-pub struct ValueDeltaMap {
-    pub lovelace: i64,
-    pub assets: NativeAssetsDeltaMap,
-}
+impl ValueMap {
+    pub fn add_value(&mut self, other: &Value) {
+        // Handle lovelace
+        self.lovelace = self.lovelace.saturating_add(other.lovelace);
 
-impl From<ValueDelta> for ValueDeltaMap {
-    fn from(value: ValueDelta) -> Self {
-        let mut assets = HashMap::new();
-
-        for (policy, asset_list) in value.assets {
-            let policy_entry = assets.entry(policy).or_insert_with(HashMap::new);
-            for asset in asset_list {
-                *policy_entry.entry(asset.name).or_insert(0) += asset.amount;
-            }
-        }
-
-        ValueDeltaMap {
-            lovelace: value.lovelace,
-            assets,
-        }
-    }
-}
-
-impl AddAssign<ValueDelta> for ValueDeltaMap {
-    fn add_assign(&mut self, delta: ValueDelta) {
-        self.lovelace += delta.lovelace;
-
-        for (policy, assets) in delta.assets {
-            let policy_entry = self.assets.entry(policy).or_default();
+        // Handle multi-assets
+        for (policy, assets) in &other.assets {
+            let policy_entry = self.assets.entry(*policy).or_default();
             for asset in assets {
-                *policy_entry.entry(asset.name).or_insert(0) += asset.amount;
+                *policy_entry.entry(asset.name).or_default() = policy_entry
+                    .get(&asset.name)
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(asset.amount);
             }
         }
     }
 }
 
-impl From<ValueDeltaMap> for ValueDelta {
-    fn from(map: ValueDeltaMap) -> Self {
-        let mut assets_vec = Vec::with_capacity(map.assets.len());
-
-        for (policy, asset_map) in map.assets {
-            let inner_assets = asset_map
-                .into_iter()
-                .map(|(name, amount)| NativeAssetDelta { name, amount })
-                .collect();
-
-            assets_vec.push((policy, inner_assets));
-        }
-
-        ValueDelta {
+impl From<ValueMap> for Value {
+    fn from(map: ValueMap) -> Self {
+        Self {
             lovelace: map.lovelace,
-            assets: assets_vec,
+            assets: map
+                .assets
+                .into_iter()
+                .map(|(policy, assets)| {
+                    (
+                        policy,
+                        assets
+                            .into_iter()
+                            .map(|(name, amount)| NativeAsset { name, amount })
+                            .collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<ValueMap> for ValueDelta {
+    fn from(map: ValueMap) -> Self {
+        Self {
+            lovelace: map.lovelace as i64,
+            assets: map
+                .assets
+                .into_iter()
+                .map(|(policy, assets)| {
+                    (
+                        policy,
+                        assets
+                            .into_iter()
+                            .map(|(name, amount)| NativeAssetDelta {
+                                name,
+                                amount: amount as i64,
+                            })
+                            .collect(),
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -552,27 +578,6 @@ pub struct TxOutput {
 
     /// Reference script
     pub reference_script: Option<ReferenceScript>,
-}
-
-/// Transaction input (UTXO reference)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TxInput {
-    /// Identifer of the referenced UTxO
-    pub utxo_identifier: UTxOIdentifier,
-}
-
-/// Option of either TxOutput or TxInput
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum UTXODelta {
-    None(()),
-    Output(TxOutput),
-    Input(TxInput),
-}
-
-impl Default for UTXODelta {
-    fn default() -> Self {
-        Self::None(())
-    }
 }
 
 /// Key hash
@@ -2169,6 +2174,12 @@ pub struct AssetAddressEntry {
     pub quantity: u64,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxTotals {
+    pub sent: Value,
+    pub received: Value,
+}
+
 #[derive(
     Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
 )]
@@ -2190,25 +2201,19 @@ impl AddAssign for AddressTotals {
 }
 
 impl AddressTotals {
-    pub fn apply_delta(&mut self, delta: &ValueDelta) {
-        if delta.lovelace > 0 {
-            self.received.lovelace += delta.lovelace as u64;
-        } else if delta.lovelace < 0 {
-            self.sent.lovelace += (-delta.lovelace) as u64;
+    pub fn apply_delta(&mut self, delta: &TxTotals) {
+        self.received.lovelace += delta.received.lovelace;
+        self.sent.lovelace += delta.sent.lovelace;
+
+        for (policy, assets) in &delta.received.assets {
+            for asset in assets {
+                Self::apply_asset(&mut self.received.assets, *policy, asset.name, asset.amount);
+            }
         }
 
-        for (policy, assets) in &delta.assets {
-            for a in assets {
-                if a.amount > 0 {
-                    Self::apply_asset(&mut self.received.assets, *policy, a.name, a.amount as u64);
-                } else if a.amount < 0 {
-                    Self::apply_asset(
-                        &mut self.sent.assets,
-                        *policy,
-                        a.name,
-                        a.amount.unsigned_abs(),
-                    );
-                }
+        for (policy, assets) in &delta.sent.assets {
+            for asset in assets {
+                Self::apply_asset(&mut self.sent.assets, *policy, asset.name, asset.amount);
             }
         }
 

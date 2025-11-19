@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::handlers_config::HandlersConfig;
 use crate::types::{
-    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountUTxOREST,
-    AccountWithdrawalREST, AmountList, DelegationUpdateREST, RegistrationUpdateREST,
+    AccountAddressREST, AccountRewardREST, AccountTotalsREST, AccountWithdrawalREST, AmountList,
+    DelegationUpdateREST, RegistrationUpdateREST, UTxOREST,
 };
 use acropolis_common::messages::{Message, RESTResponse, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::{AccountsStateQuery, AccountsStateQueryResponse};
@@ -17,8 +17,7 @@ use acropolis_common::queries::utils::query_state;
 use acropolis_common::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use acropolis_common::rest_error::RESTError;
 use acropolis_common::serialization::{Bech32Conversion, Bech32WithHrp};
-use acropolis_common::{DRepChoice, Datum, ReferenceScript, StakeAddress};
-use blake2::{Blake2b512, Digest};
+use acropolis_common::{DRepChoice, StakeAddress};
 use caryatid_sdk::Context;
 
 #[derive(serde::Serialize)]
@@ -680,15 +679,35 @@ pub async fn handle_account_totals_blockfrost(
     )
     .await?;
 
-    // TODO: Query historical accounts state to retrieve account tx count instead of
-    //       using the addresses totals as the addresses totals does not deduplicate
-    //       for multi-address transactions, overstating count
+    // Get account tx count from historical accounts state
+    let msg = Arc::new(Message::StateQuery(StateQuery::Accounts(
+        AccountsStateQuery::GetAccountTotalTxCount {
+            account: account.clone(),
+        },
+    )));
+    let tx_count = query_state(
+        &context,
+        &handlers_config.historical_accounts_query_topic,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::AccountTotalTxCount(count),
+            )) => Ok(count),
+            Message::StateQueryResponse(StateQueryResponse::Addresses(
+                AddressStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving account tx count",
+            )),
+        },
+    )
+    .await?;
 
     let rest_response = AccountTotalsREST {
         stake_address: account.to_string()?,
         received_sum: totals.received.into(),
         sent_sum: totals.sent.into(),
-        tx_count: totals.tx_count,
+        tx_count,
     };
 
     let json = serde_json::to_string_pretty(&rest_response)?;
@@ -764,13 +783,13 @@ pub async fn handle_account_utxos_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::UTxOHashes(utxos),
-            )) => Ok(utxos),
+                BlocksStateQueryResponse::UTxOHashes(hashes),
+            )) => Ok(hashes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving account UTxOs",
+                "Unexpected message type while retrieving UTxO hashes",
             )),
         },
     )
@@ -802,40 +821,13 @@ pub async fn handle_account_utxos_blockfrost(
 
     let mut rest_response = Vec::with_capacity(entries.len());
     for (i, entry) in entries.into_iter().enumerate() {
-        let tx_hash = hashes.tx_hashes.get(i).map(hex::encode).unwrap_or_default();
-        let block_hash = hashes.block_hashes.get(i).map(hex::encode).unwrap_or_default();
-        let output_index = utxo_identifiers.get(i).map(|id| id.output_index()).unwrap_or(0);
-        let (data_hash, inline_datum) = match &entry.datum {
-            Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
-            Some(Datum::Inline(bytes)) => (None, Some(hex::encode(bytes))),
-            None => (None, None),
-        };
-        let reference_script_hash = match &entry.reference_script {
-            Some(script) => {
-                let bytes = match script {
-                    ReferenceScript::Native(b)
-                    | ReferenceScript::PlutusV1(b)
-                    | ReferenceScript::PlutusV2(b)
-                    | ReferenceScript::PlutusV3(b) => b,
-                };
-                let mut hasher = Blake2b512::new();
-                hasher.update(bytes);
-                let result = hasher.finalize();
-                Some(hex::encode(&result[..32]))
-            }
-            None => None,
-        };
-
-        rest_response.push(AccountUTxOREST {
-            address: entry.address.to_string()?,
-            tx_hash,
-            output_index,
-            amount: entry.value.into(),
-            block: block_hash,
-            data_hash,
-            inline_datum,
-            reference_script_hash,
-        })
+        rest_response.push(UTxOREST::new(
+            entry.address.to_string()?,
+            &utxo_identifiers[i],
+            &entry,
+            hashes.tx_hashes[i].as_ref(),
+            hashes.block_hashes[i].as_ref(),
+        ));
     }
 
     let json = serde_json::to_string_pretty(&rest_response)?;

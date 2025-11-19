@@ -150,9 +150,7 @@ impl EpochsState {
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            if let Some(issuer_vkey) = header.issuer_vkey() {
-                                state.handle_mint(block_info, issuer_vkey);
-                            }
+                            state.handle_mint(block_info, header.issuer_vkey());
                         }
                     });
                 }

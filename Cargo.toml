@@ -29,6 +29,7 @@ members = [
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
     "modules/tx_submitter",                 # Submits TXs to peers
     "modules/block_vrf_validator",          # Validate the VRF calculation in the block header
+    "modules/block_kes_validator",          # Validate KES in the block header
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process

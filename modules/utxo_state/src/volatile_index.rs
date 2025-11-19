@@ -6,7 +6,7 @@ use tracing::error;
 
 pub struct VolatileIndex {
     /// First block number represented in the index VecDeque
-    first_block: u64,
+    first_block: Option<u64>,
 
     /// List of UTXOs for each block number
     blocks: VecDeque<Vec<UTxOIdentifier>>,
@@ -16,7 +16,7 @@ impl VolatileIndex {
     /// Create a new empty index
     pub fn new() -> Self {
         Self {
-            first_block: 0,
+            first_block: None,
             blocks: VecDeque::new(),
         }
     }
@@ -29,11 +29,9 @@ impl VolatileIndex {
     /// Add a new block entry
     pub fn add_block(&mut self, number: u64) {
         // Capture the first volatile block we get
-        if self.first_block == 0 {
-            self.first_block = number;
-        }
+        let first_block = *self.first_block.get_or_insert(number);
 
-        if number == self.first_block + self.blocks.len() as u64 {
+        if number == first_block + self.blocks.len() as u64 {
             // Add empty UTXO set
             self.blocks.push_back(Vec::new());
         } else {
@@ -54,7 +52,7 @@ impl VolatileIndex {
         let mut utxos = Vec::<UTxOIdentifier>::new();
 
         // Remove blocks before boundary, calling back for all UTXOs in them
-        while self.first_block < boundary {
+        while let Some(first_block) = self.first_block.as_mut().filter(|b| **b < boundary) {
             if let Some(block) = self.blocks.pop_front() {
                 for utxo in block {
                     utxos.push(utxo);
@@ -63,7 +61,7 @@ impl VolatileIndex {
                 break;
             }
 
-            self.first_block += 1;
+            *first_block += 1;
         }
 
         utxos
@@ -74,10 +72,10 @@ impl VolatileIndex {
     pub fn prune_on_or_after(&mut self, boundary: u64) -> Vec<UTxOIdentifier> {
         let mut utxos = Vec::<UTxOIdentifier>::new();
 
-        if self.first_block == 0 {
+        let Some(first_block) = self.first_block else {
             return utxos;
-        }
-        let mut last_block = self.first_block + self.blocks.len() as u64 - 1;
+        };
+        let mut last_block = first_block + self.blocks.len() as u64 - 1;
 
         // Remove blocks before boundary, calling back for all UTXOs in them
         while last_block >= boundary {
@@ -104,7 +102,7 @@ mod tests {
     #[test]
     fn new_index_is_empty() {
         let index = VolatileIndex::new();
-        assert_eq!(0, index.first_block);
+        assert_eq!(None, index.first_block);
         assert_eq!(0, index.blocks.len());
     }
 
@@ -112,12 +110,12 @@ mod tests {
     fn add_block_sequential_captures_number_and_adds_block() {
         let mut index = VolatileIndex::new();
         index.add_block(42);
-        assert_eq!(42, index.first_block);
+        assert_eq!(Some(42), index.first_block);
         assert_eq!(1, index.blocks.len());
         assert!(index.blocks[0].is_empty());
 
         index.add_block(43);
-        assert_eq!(42, index.first_block);
+        assert_eq!(Some(42), index.first_block);
         assert_eq!(2, index.blocks.len());
         assert!(index.blocks[1].is_empty());
     }
@@ -126,11 +124,11 @@ mod tests {
     fn add_block_non_sequential_ignores_it() {
         let mut index = VolatileIndex::new();
         index.add_block(42);
-        assert_eq!(42, index.first_block);
+        assert_eq!(Some(42), index.first_block);
         assert_eq!(1, index.blocks.len());
 
         index.add_block(99);
-        assert_eq!(42, index.first_block);
+        assert_eq!(Some(42), index.first_block);
         assert_eq!(1, index.blocks.len());
     }
 
@@ -139,7 +137,7 @@ mod tests {
         let mut index = VolatileIndex::new();
         index.add_block(1);
         index.add_block(2);
-        assert_eq!(1, index.first_block);
+        assert_eq!(Some(1), index.first_block);
         assert_eq!(2, index.blocks.len());
 
         let utxo = UTxOIdentifier::new(42, 42, 42);
@@ -160,7 +158,7 @@ mod tests {
         index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
 
         let pruned = index.prune_before(2);
-        assert_eq!(2, index.first_block);
+        assert_eq!(Some(2), index.first_block);
         assert_eq!(1, index.blocks.len());
         assert_eq!(2, pruned.len());
         assert_eq!(1, pruned[0].output_index());
@@ -176,7 +174,7 @@ mod tests {
         index.add_block(2);
         index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
         let pruned = index.prune_on_or_after(1);
-        assert_eq!(1, index.first_block);
+        assert_eq!(Some(1), index.first_block);
         assert_eq!(0, index.blocks.len());
         assert_eq!(3, pruned.len());
 

@@ -29,6 +29,7 @@ pub enum AccountsStateQuery {
     GetAccountMIRHistory { account: StakeAddress },
     GetAccountWithdrawalHistory { account: StakeAddress },
     GetAccountAssociatedAddresses { account: StakeAddress },
+    GetAccountTotalTxCount { account: StakeAddress },
 
     // Epochs-related queries
     GetActiveStakes {},
@@ -62,6 +63,7 @@ pub enum AccountsStateQueryResponse {
     AccountMIRHistory(Vec<AccountWithdrawal>),
     AccountWithdrawalHistory(Vec<AccountWithdrawal>),
     AccountAssociatedAddresses(Vec<ShelleyAddress>),
+    AccountTotalTxCount(u32),
 
     // Epochs-related responses
     ActiveStakes(u64),

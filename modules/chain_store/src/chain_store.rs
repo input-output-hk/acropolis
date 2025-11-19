@@ -1,10 +1,12 @@
 mod stores;
 
+use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 use acropolis_codec::{
     block::map_to_block_issuer,
     map_parameters,
     map_parameters::{map_metadata, map_stake_address, to_pool_id, to_pool_reg},
 };
+use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     crypto::keyhash_224,
@@ -40,8 +42,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
-
-use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 
 const DEFAULT_BLOCKS_TOPIC: &str = "cardano.block.available";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
@@ -140,6 +140,15 @@ impl ChainStore {
             // Get promise of params message so the params queue is cleared and
             // the message is ready as soon as possible when we need it
             let mut params_message = params_subscription.read();
+
+            // Validate the first stored block matches what is already persisted when clear-on-start is false
+            let Ok((_, first_block_message)) = new_blocks_subscription.read().await else {
+                return;
+            };
+            if let Err(err) = Self::handle_first_block(&store, &first_block_message) {
+                panic!("Corrupted DB: {err}")
+            };
+
             loop {
                 let Ok((_, message)) = new_blocks_subscription.read().await else {
                     return;
@@ -175,7 +184,38 @@ impl ChainStore {
             bail!("Unexpected message type: {message:?}");
         };
 
-        store.insert_block(info, &raw_block.body)
+        if store.should_persist(info.number) {
+            store.insert_block(info, &raw_block.body)?;
+        }
+
+        Ok(())
+    }
+
+    fn handle_first_block(store: &Arc<dyn Store>, message: &Message) -> Result<()> {
+        let Message::Cardano((block_info, CardanoMessage::BlockAvailable(raw_block))) = message
+        else {
+            bail!("Unexpected message type: {message:?}");
+        };
+
+        if !store.should_persist(block_info.number) {
+            if let Some(existing) = store.get_block_by_number(block_info.number)? {
+                if existing.bytes != raw_block.body {
+                    return Err(anyhow::anyhow!(
+                        "Stored block {} does not match. Set clear-store to true",
+                        block_info.number
+                    ));
+                }
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Unable to retrieve block {}. Set clear-store to true",
+                    block_info.number
+                ));
+            }
+        }
+
+        Self::handle_new_block(store, message)?;
+
+        Ok(())
     }
 
     fn handle_blocks_query(
@@ -376,26 +416,132 @@ impl ChainStore {
                 let mut block_hashes = Vec::with_capacity(utxo_ids.len());
 
                 for utxo in utxo_ids {
-                    if let Ok(Some(block)) = store.get_block_by_number(utxo.block_number().into()) {
-                        if let Ok(hash) = Self::get_block_hash(&block) {
-                            if let Ok(tx_hashes_in_block) =
-                                Self::to_block_transaction_hashes(&block)
-                            {
-                                if let Some(tx_hash) =
-                                    tx_hashes_in_block.get(utxo.tx_index() as usize)
-                                {
-                                    tx_hashes.push(*tx_hash);
-                                    block_hashes.push(hash);
-                                }
-                            }
+                    let block = match store.get_block_by_number(utxo.block_number().into()) {
+                        Ok(Some(b)) => b,
+                        Ok(None) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("Block {} not found", utxo.block_number()),
+                            )))
                         }
-                    }
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("Failed to fetch block {}: {e}", utxo.block_number()),
+                            )))
+                        }
+                    };
+
+                    let block_hash = match Self::get_block_hash(&block) {
+                        Ok(h) => h,
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "Failed to extract block hash for block {}: {e}",
+                                    utxo.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    let tx_hashes_in_block = match Self::to_block_transaction_hashes(&block) {
+                        Ok(h) => h,
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "Failed to extract tx list for block {}: {e}",
+                                    utxo.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    let tx_hash = match tx_hashes_in_block.get(utxo.tx_index() as usize) {
+                        Some(h) => h,
+                        None => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "tx_index {} out of bounds for block {}",
+                                    utxo.tx_index(),
+                                    utxo.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    tx_hashes.push(*tx_hash);
+                    block_hashes.push(block_hash);
                 }
 
                 Ok(BlocksStateQueryResponse::UTxOHashes(UTxOHashes {
                     block_hashes,
                     tx_hashes,
                 }))
+            }
+            BlocksStateQuery::GetTransactionHashesAndTimestamps { tx_ids } => {
+                let mut tx_hashes = Vec::with_capacity(tx_ids.len());
+                let mut timestamps = Vec::with_capacity(tx_ids.len());
+
+                for tx in tx_ids {
+                    let block = match store.get_block_by_number(tx.block_number().into()) {
+                        Ok(Some(b)) => b,
+                        Ok(None) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("Block {} not found", tx.block_number()),
+                            )))
+                        }
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("Failed to fetch block {}: {e}", tx.block_number()),
+                            )))
+                        }
+                    };
+
+                    let hashes_in_block = match Self::to_block_transaction_hashes(&block) {
+                        Ok(h) => h,
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "Failed to extract tx hashes for block {}: {e}",
+                                    tx.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    let tx_hash = match hashes_in_block.get(tx.tx_index() as usize) {
+                        Some(h) => h,
+                        None => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "tx_index {} out of bounds for block {}",
+                                    tx.tx_index(),
+                                    tx.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    let block_info = match Self::to_block_info(block, store, state, false) {
+                        Ok(info) => info,
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!(
+                                    "Failed to build block info for block {}: {e}",
+                                    tx.block_number()
+                                ),
+                            )))
+                        }
+                    };
+
+                    tx_hashes.push(*tx_hash);
+                    timestamps.push(block_info.timestamp);
+                }
+
+                Ok(BlocksStateQueryResponse::TransactionHashesAndTimestamps(
+                    TransactionHashesAndTimeStamps {
+                        tx_hashes,
+                        timestamps,
+                    },
+                ))
             }
         }
     }
