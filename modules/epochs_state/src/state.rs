@@ -347,6 +347,22 @@ mod tests {
     }
 
     #[test]
+    fn handle_mint_without_issuer() {
+        let mut state = State::new(&GenesisValues::mainnet());
+        let mut block = make_block(100);
+        state.handle_mint(&block, None);
+        block.number += 1;
+        state.handle_mint(&block, None);
+
+        assert_eq!(state.epoch_blocks, 2);
+        assert_eq!(state.blocks_minted.len(), 0);
+        assert_eq!(
+            state.blocks_minted.get(&keyhash_224(b"issuer").into()),
+            None
+        );
+    }
+
+    #[test]
     fn handle_mint_multiple_issuer_records_counts() {
         let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
