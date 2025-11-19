@@ -36,6 +36,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
 
 // Configuration defaults
 const DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH: (&str, &str) = ("db-path", "./fjall-accounts");
+const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
 const DEFAULT_STORE_REWARDS_HISTORY: (&str, bool) = ("store-rewards-history", false);
 const DEFAULT_STORE_ACTIVE_STAKE_HISTORY: (&str, bool) = ("store-active-stake-history", false);
 const DEFAULT_STORE_REGISTRATION_HISTORY: (&str, bool) = ("store-registration-history", false);
@@ -270,6 +271,9 @@ impl HistoricalAccountsState {
             db_path: config
                 .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
+            clear_on_start: config
+                .get_bool(DEFAULT_CLEAR_ON_START.0)
+                .unwrap_or(DEFAULT_CLEAR_ON_START.1),
             store_rewards_history: config
                 .get_bool(DEFAULT_STORE_REWARDS_HISTORY.0)
                 .unwrap_or(DEFAULT_STORE_REWARDS_HISTORY.1),

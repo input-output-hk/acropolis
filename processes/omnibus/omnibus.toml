@@ -65,6 +65,8 @@ store-stake-addresses = false
 store-spdd = false
 
 [module.historical-accounts-state]
+# Clear state on start up (default true)
+clear-on-start = true
 # Enables /accounts/{stake_address}/rewards endpoint
 store-rewards-history = false
 # Enables /accounts/{stake_address}/history endpoint

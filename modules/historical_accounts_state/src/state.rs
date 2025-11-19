@@ -45,6 +45,7 @@ pub struct ActiveStakeHistory {
 #[derive(Debug, Clone)]
 pub struct HistoricalAccountsConfig {
     pub db_path: String,
+    pub clear_on_start: bool,
 
     pub store_rewards_history: bool,
     pub store_active_stake_history: bool,
@@ -80,7 +81,10 @@ pub struct State {
 impl State {
     pub async fn new(config: HistoricalAccountsConfig) -> Result<Self> {
         let db_path = Path::new(&config.db_path);
-        let store = Arc::new(ImmutableHistoricalAccountStore::new(db_path)?);
+        let store = Arc::new(ImmutableHistoricalAccountStore::new(
+            db_path,
+            config.clear_on_start,
+        )?);
 
         Ok(Self {
             config,
