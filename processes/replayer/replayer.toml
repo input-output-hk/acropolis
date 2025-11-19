@@ -23,9 +23,13 @@ download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
 
-[module.upstream-chain-fetcher]
+[module.peer-network-interface]
 sync-point = "snapshot"
-node-address = "backbone.cardano.iog.io:3001"
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
+]
 magic-number = 764824073
 
 #[module.consensus]
