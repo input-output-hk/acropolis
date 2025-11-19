@@ -69,9 +69,13 @@ impl State {
             epoch: 0,
             epoch_start_time: genesis.byron_timestamp,
             first_block_time: genesis.byron_timestamp,
-            first_block_height: 0,
-            last_block_time: 0,
-            last_block_height: 0,
+            // NOTE:
+            // First block height is 1
+            // only because we don't handle EBB for now
+            // so by default, we counter epoch 0's EBB
+            first_block_height: 1,
+            last_block_time: genesis.byron_timestamp,
+            last_block_height: 1,
             blocks_minted: HashMap::new(),
             epoch_blocks: 0,
             epoch_txs: 0,
@@ -339,6 +343,22 @@ mod tests {
         assert_eq!(
             state.blocks_minted.get(&keyhash_224(issuer).into()),
             Some(&2)
+        );
+    }
+
+    #[test]
+    fn handle_mint_without_issuer() {
+        let mut state = State::new(&GenesisValues::mainnet());
+        let mut block = make_block(100);
+        state.handle_mint(&block, None);
+        block.number += 1;
+        state.handle_mint(&block, None);
+
+        assert_eq!(state.epoch_blocks, 2);
+        assert_eq!(state.blocks_minted.len(), 0);
+        assert_eq!(
+            state.blocks_minted.get(&keyhash_224(b"issuer").into()),
+            None
         );
     }
 
