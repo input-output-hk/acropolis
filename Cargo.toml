@@ -10,7 +10,6 @@ members = [
     "modules/genesis_bootstrapper",         # Genesis bootstrap UTXOs
     "modules/mithril_snapshot_fetcher",     # Mithril snapshot fetcher
     "modules/snapshot_bootstrapper",        # Bootstrap state from a ledger snapshot
-    "modules/upstream_chain_fetcher",       # Upstream chain fetcher
     "modules/peer_network_interface",       # Multi-peer network interface
     "modules/block_unpacker",               # Block to transaction unpacker
     "modules/tx_unpacker",                  # Tx to UTXO unpacker
@@ -24,6 +23,7 @@ members = [
     "modules/accounts_state",               # Tracks stake and reward accounts
     "modules/assets_state",                 # Tracks native asset mints and burns
     "modules/historical_accounts_state",    # Tracks historical account information
+    "modules/historical_epochs_state",      # Tracks historical epochs information
     "modules/consensus",                    # Chooses favoured chain across multiple options
     "modules/chain_store",                  # Tracks historical information about blocks and TXs
     "modules/tx_submitter",                 # Submits TXs to peers

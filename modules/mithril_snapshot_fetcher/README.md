@@ -9,7 +9,7 @@ a startup event before beginning to allow the
 
 When it has finished it sends a snapshot complete event indicating the
 last block fetched, which is used by the
-[Upstream Chain Fetcher](../upstream_chain_fetcher) to synchronize ongoing 
+[Peer Network Interface](../peer_network_interface) to synchronize ongoing 
 fetches.
 
 ## Configuration

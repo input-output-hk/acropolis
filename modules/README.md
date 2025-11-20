@@ -3,7 +3,7 @@
 This directory holds microservice modules for a Caryatid framework which
 compose the Acropolis Architecture
 
-* [Upstream Chain Fetcher](upstream_chain_fetcher) -
+* [Peer Network Interface](peer_network_interface) -
   implementation of the Node-to-Node (N2N) client-side (initiator)
   protocol, allowing chain synchronisation and block fetching
 * [Mithril Snapshot Fetcher](mithril_snapshot_fetcher) -

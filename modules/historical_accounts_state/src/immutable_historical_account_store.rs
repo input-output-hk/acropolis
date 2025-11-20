@@ -31,7 +31,12 @@ pub struct ImmutableHistoricalAccountStore {
 }
 
 impl ImmutableHistoricalAccountStore {
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, clear_on_start: bool) -> Result<Self> {
+        let path = path.as_ref();
+        if clear_on_start && path.exists() {
+            std::fs::remove_dir_all(path)?;
+        }
+
         let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
         let keyspace = Keyspace::open(cfg)?;
 

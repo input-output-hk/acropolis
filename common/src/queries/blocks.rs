@@ -66,6 +66,10 @@ pub enum BlocksStateQuery {
     GetBlockHashes {
         block_numbers: Vec<u64>,
     },
+    GetBlockHashesByNumberRange {
+        min_number: u64,
+        max_number: u64,
+    },
     GetTransactionHashes {
         tx_ids: Vec<TxIdentifier>,
     },
@@ -97,6 +101,7 @@ pub enum BlocksStateQueryResponse {
     BlockTransactionsCBOR(BlockTransactionsCBOR),
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
+    BlockHashesByNumberRange(Vec<BlockHash>),
     TransactionHashes(TransactionHashes),
     UTxOHashes(UTxOHashes),
     TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),

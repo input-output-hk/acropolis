@@ -1,3 +1,5 @@
 downloads
-sled-immutable-utxos
-fjall-immutable-utxos
+
+# DB files
+fjall-*/
+sled-*/

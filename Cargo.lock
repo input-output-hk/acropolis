@@ -223,7 +223,6 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "dashmap",
  "hex",
  "imbl",
  "pallas 0.33.0",
@@ -277,6 +276,21 @@ dependencies = [
  "hex",
  "minicbor 0.26.5",
  "rayon",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_historical_epochs_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "minicbor 0.26.5",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -466,21 +480,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_upstream_chain_fetcher"
-version = "0.2.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "crossbeam",
- "pallas 0.33.0",
- "serde",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_utxo_state"
 version = "0.1.0"
 dependencies = [
@@ -516,6 +515,7 @@ dependencies = [
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_historical_accounts_state",
+ "acropolis_module_historical_epochs_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
@@ -525,7 +525,6 @@ dependencies = [
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
  "acropolis_module_tx_validator_phase1",
- "acropolis_module_upstream_chain_fetcher",
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",
@@ -559,12 +558,12 @@ dependencies = [
  "acropolis_module_governance_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
+ "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
- "acropolis_module_upstream_chain_fetcher",
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",
@@ -1922,28 +1921,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-deque",
- "crossbeam-epoch",
- "crossbeam-queue",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1958,15 +1935,6 @@ name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
 dependencies = [
  "crossbeam-utils",
 ]

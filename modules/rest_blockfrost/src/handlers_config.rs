@@ -5,7 +5,7 @@ use acropolis_common::queries::{
     addresses::DEFAULT_ADDRESS_QUERY_TOPIC,
     assets::{DEFAULT_ASSETS_QUERY_TOPIC, DEFAULT_OFFCHAIN_TOKEN_REGISTRY_URL},
     blocks::DEFAULT_BLOCKS_QUERY_TOPIC,
-    epochs::DEFAULT_EPOCHS_QUERY_TOPIC,
+    epochs::{DEFAULT_EPOCHS_QUERY_TOPIC, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC},
     governance::{DEFAULT_DREPS_QUERY_TOPIC, DEFAULT_GOVERNANCE_QUERY_TOPIC},
     parameters::DEFAULT_PARAMETERS_QUERY_TOPIC,
     pools::DEFAULT_POOLS_QUERY_TOPIC,
@@ -27,6 +27,7 @@ pub struct HandlersConfig {
     pub dreps_query_topic: String,
     pub governance_query_topic: String,
     pub epochs_query_topic: String,
+    pub historical_epochs_query_topic: String,
     pub spdd_query_topic: String,
     pub parameters_query_topic: String,
     pub utxos_query_topic: String,
@@ -72,6 +73,10 @@ impl From<Arc<Config>> for HandlersConfig {
             .get_string(DEFAULT_EPOCHS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_EPOCHS_QUERY_TOPIC.1.to_string());
 
+        let historical_epochs_query_topic = config
+            .get_string(DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC.1.to_string());
+
         let parameters_query_topic = config
             .get_string(DEFAULT_PARAMETERS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_PARAMETERS_QUERY_TOPIC.1.to_string());
@@ -102,6 +107,7 @@ impl From<Arc<Config>> for HandlersConfig {
             dreps_query_topic,
             governance_query_topic,
             epochs_query_topic,
+            historical_epochs_query_topic,
             spdd_query_topic,
             parameters_query_topic,
             utxos_query_topic,

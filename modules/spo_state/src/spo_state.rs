@@ -47,8 +47,8 @@ const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("withdrawals-subscribe-topic", "cardano.withdrawals");
 const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("governance-subscribe-topic", "cardano.governance");
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
+const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("block-subscribe-topic", "cardano.block.proposed");
 const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
     ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -87,7 +87,7 @@ impl SPOState {
         store_config: &StoreConfig,
         // subscribers
         mut certificates_subscription: Box<dyn Subscription<Message>>,
-        mut blocks_subscription: Box<dyn Subscription<Message>>,
+        mut block_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
@@ -113,7 +113,7 @@ impl SPOState {
 
             // read per-block topics in parallel
             let certs_message_f = certificates_subscription.read();
-            let blocks_message_f = blocks_subscription.read();
+            let block_message_f = block_subscription.read();
             let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
             let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
             let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
@@ -140,7 +140,7 @@ impl SPOState {
 
             // handle blocks (handle_mint) before handle_tx_certs
             // in case of epoch boundary
-            let (_, block_message) = blocks_message_f.await?;
+            let (_, block_message) = block_message_f.await?;
             match block_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     let span =
@@ -438,10 +438,10 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating SPO rewards subscriber on '{spo_rewards_subscribe_topic}'");
 
-        let blocks_subscribe_topic = config
-            .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating blocks subscriber on '{blocks_subscribe_topic}'");
+        let block_subscribe_topic = config
+            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating block subscriber on '{block_subscribe_topic}'");
 
         let stake_reward_deltas_subscribe_topic = config
             .get_string(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.0)
@@ -765,7 +765,7 @@ impl SPOState {
 
         // Subscriptions
         let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
-        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
+        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
         let epoch_activity_subscription =
             context.subscribe(&epoch_activity_subscribe_topic).await?;
         let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
@@ -811,7 +811,7 @@ impl SPOState {
                 retired_pools_history,
                 &store_config,
                 certificates_subscription,
-                blocks_subscription,
+                block_subscription,
                 withdrawals_subscription,
                 governance_subscription,
                 epoch_activity_subscription,
