@@ -5,7 +5,7 @@ mod network;
 
 use acropolis_common::{
     BlockInfo, BlockStatus,
-    commands::sync::SyncCommand,
+    commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -245,7 +245,7 @@ impl PeerNetworkInterface {
         let mut sub = context.subscribe(topic).await?;
         tokio::spawn(async move {
             while let Ok((_, msg)) = sub.read().await {
-                if let Message::Command(Command::Sync(SyncCommand::ChangeSyncPoint {
+                if let Message::Command(Command::ChainSync(ChainSyncCommand::ChangeSyncPoint {
                     slot,
                     hash,
                 })) = msg.as_ref()

@@ -1,7 +1,7 @@
 //! Acropolis indexer module for Caryatid
 
 use acropolis_common::{
-    commands::sync::SyncCommand,
+    commands::chain_sync::ChainSyncCommand,
     hash::Hash,
     messages::{Command, Message},
 };
@@ -36,7 +36,7 @@ impl Indexer {
 
         // This is a placeholder to test dynamic sync
         context.run(async move {
-            let example = SyncCommand::ChangeSyncPoint {
+            let example = ChainSyncCommand::ChangeSyncPoint {
                 slot: 4492799,
                 hash: Hash::from_str(
                     "f8084c61b6a238acec985b59310b6ecec49c0ab8352249afd7268da5cff2a457",
@@ -48,7 +48,7 @@ impl Indexer {
             ctx.message_bus
                 .publish(
                     &dynamic_sync_publisher_topic,
-                    Arc::new(Message::Command(Command::Sync(example.clone()))),
+                    Arc::new(Message::Command(Command::ChainSync(example.clone()))),
                 )
                 .await
                 .unwrap();
@@ -59,7 +59,7 @@ impl Indexer {
             ctx.message_bus
                 .publish(
                     &dynamic_sync_publisher_topic,
-                    Arc::new(Message::Command(Command::Sync(example))),
+                    Arc::new(Message::Command(Command::ChainSync(example))),
                 )
                 .await
                 .unwrap();

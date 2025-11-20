@@ -1,2 +1,2 @@
-pub mod sync;
+pub mod chain_sync;
 pub mod transactions;
