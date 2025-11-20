@@ -11,6 +11,7 @@ pub enum SyncPoint {
     Tip,
     Cache,
     Snapshot,
+    Dynamic,
 }
 
 #[derive(serde::Deserialize)]

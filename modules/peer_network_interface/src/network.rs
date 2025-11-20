@@ -5,7 +5,7 @@ use crate::{
     chain_state::ChainState,
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
-use acropolis_common::{BlockHash, commands::sync::SyncCommand};
+use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
@@ -55,7 +55,7 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
-    cmd_rx: mpsc::Receiver<SyncCommand>,
+    cmd_rx: Option<mpsc::Receiver<Point>>,
 }
 
 impl NetworkManager {
@@ -64,7 +64,7 @@ impl NetworkManager {
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
-        cmd_rx: mpsc::Receiver<SyncCommand>,
+        cmd_rx: Option<mpsc::Receiver<Point>>,
     ) -> Self {
         Self {
             network_magic,
@@ -80,15 +80,52 @@ impl NetworkManager {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        while let Some(event) = self.events.recv().await {
-            match event {
-                NetworkEvent::PeerUpdate { peer, event } => {
-                    self.handle_peer_update(peer, event);
-                    self.publish_blocks().await?;
+        loop {
+            tokio::select! {
+                cmd = async {
+                    if let Some(rx) = &mut self.cmd_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    self.on_sync_cmd(cmd).await?;
+                },
+
+                event = self.events.recv() => {
+                    self.on_network_event(event).await?;
                 }
             }
         }
-        bail!("event sink closed")
+    }
+
+    async fn on_sync_cmd(&mut self, cmd: Option<Point>) -> Result<()> {
+        let Some(cmd) = cmd else {
+            return Ok(());
+        };
+
+        self.handle_sync_command(cmd).await
+    }
+
+    async fn on_network_event(&mut self, event: Option<NetworkEvent>) -> Result<()> {
+        let Some(NetworkEvent::PeerUpdate { peer, event }) = event else {
+            bail!("event sink closed");
+        };
+
+        self.handle_peer_update(peer, event);
+        self.publish_blocks().await?;
+        Ok(())
+    }
+
+    pub async fn handle_sync_command(&mut self, point: Point) -> Result<()> {
+        self.chain = ChainState::new();
+
+        for peer in self.peers.values_mut() {
+            peer.reqs.clear();
+            peer.find_intersect(vec![point.clone()]);
+        }
+
+        Ok(())
     }
 
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) {

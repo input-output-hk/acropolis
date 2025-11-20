@@ -3,7 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use crate::commands::sync::{SyncCommand, SyncCommandResponse};
+use crate::commands::sync::SyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
@@ -460,5 +460,4 @@ pub enum Command {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CommandResponse {
     Transactions(TransactionsCommandResponse),
-    Sync(SyncCommandResponse),
 }
