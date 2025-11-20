@@ -99,12 +99,19 @@ impl NetworkManager {
         }
     }
 
-    async fn on_sync_cmd(&mut self, cmd: Option<Point>) -> Result<()> {
-        let Some(cmd) = cmd else {
+    async fn on_sync_cmd(&mut self, point: Option<Point>) -> Result<()> {
+        let Some(point) = point else {
             return Ok(());
         };
 
-        self.handle_sync_command(cmd).await
+        self.chain = ChainState::new();
+
+        for peer in self.peers.values_mut() {
+            peer.reqs.clear();
+            peer.find_intersect(vec![point.clone()]);
+        }
+
+        Ok(())
     }
 
     async fn on_network_event(&mut self, event: Option<NetworkEvent>) -> Result<()> {
@@ -114,17 +121,6 @@ impl NetworkManager {
 
         self.handle_peer_update(peer, event);
         self.publish_blocks().await?;
-        Ok(())
-    }
-
-    pub async fn handle_sync_command(&mut self, point: Point) -> Result<()> {
-        self.chain = ChainState::new();
-
-        for peer in self.peers.values_mut() {
-            peer.reqs.clear();
-            peer.find_intersect(vec![point.clone()]);
-        }
-
         Ok(())
     }
 
