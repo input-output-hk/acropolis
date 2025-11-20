@@ -5,7 +5,7 @@ use crate::{
     chain_state::ChainState,
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
-use acropolis_common::BlockHash;
+use acropolis_common::{BlockHash, commands::sync::SyncCommand};
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
@@ -55,6 +55,7 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
+    cmd_rx: mpsc::Receiver<SyncCommand>,
 }
 
 impl NetworkManager {
@@ -63,6 +64,7 @@ impl NetworkManager {
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
+        cmd_rx: mpsc::Receiver<SyncCommand>,
     ) -> Self {
         Self {
             network_magic,
@@ -73,6 +75,7 @@ impl NetworkManager {
             events_sender,
             block_sink,
             published_blocks: 0,
+            cmd_rx,
         }
     }
 

@@ -4,6 +4,8 @@ block-topic = "cardano.block.available"
 snapshot-completion-topic = "cardano.snapshot.complete"
 # The topic to wait for when listening for genesis values from another module
 genesis-completion-topic = "cardano.sequence.bootstrapped"
+# The topic to listen on for runtime sync commands
+sync-command-topic = "cardano.sync.command"
 
 # Upstream node connections
 node-addresses = [

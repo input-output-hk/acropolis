@@ -5,8 +5,9 @@ mod network;
 
 use acropolis_common::{
     BlockInfo, BlockStatus,
+    commands::sync::{SyncCommand, SyncCommandResponse},
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, CommandResponse, Message, RawBlockMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -43,6 +44,24 @@ impl PeerNetworkInterface {
             SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
             _ => None,
         };
+        let (cmd_tx, cmd_rx) = mpsc::channel::<SyncCommand>(32);
+
+        context.handle(&cfg.sync_command_topic, move |message| {
+            let cmd_tx = cmd_tx.clone();
+            async move {
+                let Message::Command(Command::Sync(point)) = message.as_ref() else {
+                    return Arc::new(Message::CommandResponse(CommandResponse::Sync(
+                        SyncCommandResponse::Error("Invalid message for sync command".to_string()),
+                    )));
+                };
+
+                let _ = cmd_tx.send(point.clone()).await;
+
+                Arc::new(Message::CommandResponse(CommandResponse::Sync(
+                    SyncCommandResponse::Success,
+                )))
+            }
+        });
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -82,12 +101,12 @@ impl PeerNetworkInterface {
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, cmd_rx);
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, cmd_rx);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
@@ -95,7 +114,7 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, cmd_rx);
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
@@ -108,7 +127,7 @@ impl PeerNetworkInterface {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
                                 sink.last_epoch = Some(epoch);
                             }
-                            let mut manager = Self::init_manager(cfg, sink);
+                            let mut manager = Self::init_manager(cfg, sink, cmd_rx);
                             manager.sync_to_point(point);
                             manager
                         }
@@ -128,9 +147,14 @@ impl PeerNetworkInterface {
         Ok(())
     }
 
-    fn init_manager(cfg: InterfaceConfig, sink: BlockSink) -> NetworkManager {
+    fn init_manager(
+        cfg: InterfaceConfig,
+        sink: BlockSink,
+        cmd_rx: mpsc::Receiver<SyncCommand>,
+    ) -> NetworkManager {
         let (events_sender, events) = mpsc::channel(1024);
-        let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
+        let mut manager =
+            NetworkManager::new(cfg.magic_number, events, events_sender, sink, cmd_rx);
         for address in cfg.node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
