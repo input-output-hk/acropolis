@@ -15,7 +15,7 @@ use tracing::info;
 const DEFAULT_DYNAMIC_SYNC_TOPIC: (&str, &str) =
     ("dynamic-sync-publisher-topic", "cardano.sync.command");
 
-/// Historical Epochs State module
+/// Indexer module
 #[module(
     message_type(Message),
     name = "indexer",
@@ -44,7 +44,7 @@ impl Indexer {
                 .expect("Valid hash"),
             };
 
-            // Inital sync message (This will be read from config for first sync and from DB on subsequent runs)
+            // Initial sync message (This will be read from config for first sync and from DB on subsequent runs)
             ctx.message_bus
                 .publish(
                     &dynamic_sync_publisher_topic,
