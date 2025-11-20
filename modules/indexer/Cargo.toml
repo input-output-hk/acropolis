@@ -16,6 +16,7 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lib]
 path = "src/indexer.rs"
