@@ -5,7 +5,7 @@ use acropolis_common::{
     AlonzoBabbageUpdateProposal, BlockInfo, GenesisKeyhash, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context, Module, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use serde_with::{base64::Base64, serde_as};
 use std::{fs::File, io::Write, sync::Arc};

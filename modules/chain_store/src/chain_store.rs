@@ -20,7 +20,7 @@ use acropolis_common::{
     BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, PoolId, TxHash,
 };
 use anyhow::{bail, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;

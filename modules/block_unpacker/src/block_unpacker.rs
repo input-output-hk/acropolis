@@ -3,7 +3,7 @@
 
 use acropolis_common::messages::{CardanoMessage, Message, RawTxsMessage};
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use pallas::ledger::traverse::MultiEraBlock;
 use std::sync::Arc;

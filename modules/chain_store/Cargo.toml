@@ -7,7 +7,7 @@ description = "Chain Store Tracker"
 license = "Apache-2.0"
 
 [dependencies]
-caryatid_sdk = "0.12"
+caryatid_sdk = { workspace = true }
 acropolis_common = { path = "../../common" }
 acropolis_codec = { path = "../../codec" }
 anyhow = "1.0"

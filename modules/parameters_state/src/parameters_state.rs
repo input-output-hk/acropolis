@@ -11,7 +11,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
-use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;

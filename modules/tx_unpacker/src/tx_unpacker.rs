@@ -9,7 +9,7 @@ use acropolis_common::{
     },
     *,
 };
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use std::{clone::Clone, fmt::Debug, sync::Arc};
 
 use anyhow::Result;

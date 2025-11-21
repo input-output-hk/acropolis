@@ -11,7 +11,7 @@ use acropolis_common::{
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
-use caryatid_sdk::{Context, Module, Subscription, module};
+use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
