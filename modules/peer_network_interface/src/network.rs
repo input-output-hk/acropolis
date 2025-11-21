@@ -55,7 +55,6 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
-    cmd_rx: Option<mpsc::Receiver<Point>>,
 }
 
 impl NetworkManager {
@@ -64,7 +63,6 @@ impl NetworkManager {
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
-        cmd_rx: Option<mpsc::Receiver<Point>>,
     ) -> Self {
         Self {
             network_magic,
@@ -75,52 +73,39 @@ impl NetworkManager {
             events_sender,
             block_sink,
             published_blocks: 0,
-            cmd_rx,
         }
     }
 
     pub async fn run(mut self) -> Result<()> {
-        loop {
-            tokio::select! {
-                cmd = async {
-                    if let Some(rx) = &mut self.cmd_rx {
-                        rx.recv().await
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    self.on_sync_cmd(cmd).await?;
-                },
-
-                event = self.events.recv() => {
-                    self.on_network_event(event).await?;
-                }
-            }
-        }
-    }
-
-    async fn on_sync_cmd(&mut self, point: Option<Point>) -> Result<()> {
-        let Some(point) = point else {
-            return Ok(());
-        };
-
-        self.chain = ChainState::new();
-
-        for peer in self.peers.values_mut() {
-            peer.reqs.clear();
-            peer.find_intersect(vec![point.clone()]);
+        while let Some(event) = self.events.recv().await {
+            self.on_network_event(event).await?;
         }
 
         Ok(())
     }
 
-    async fn on_network_event(&mut self, event: Option<NetworkEvent>) -> Result<()> {
-        let Some(NetworkEvent::PeerUpdate { peer, event }) = event else {
-            bail!("event sink closed");
-        };
+    async fn on_network_event(&mut self, event: NetworkEvent) -> Result<()> {
+        match event {
+            NetworkEvent::PeerUpdate { peer, event } => {
+                self.handle_peer_update(peer, event);
+                self.publish_blocks().await?;
+            }
+            NetworkEvent::SyncPointUpdate { point } => {
+                self.chain = ChainState::new();
 
-        self.handle_peer_update(peer, event);
-        self.publish_blocks().await?;
+                for peer in self.peers.values_mut() {
+                    peer.reqs.clear();
+                }
+
+                if let Point::Specific(slot, _) = point {
+                    let (epoch, _) = self.block_sink.genesis_values.slot_to_epoch(slot);
+                    self.block_sink.last_epoch = Some(epoch);
+                }
+
+                self.sync_to_point(point);
+            }
+        }
+
         Ok(())
     }
 
@@ -271,6 +256,7 @@ impl NetworkManager {
 
 pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
+    SyncPointUpdate { point: Point },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

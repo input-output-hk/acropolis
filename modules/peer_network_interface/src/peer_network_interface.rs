@@ -15,14 +15,14 @@ use caryatid_sdk::{Context, Module, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use std::{path::Path, sync::Arc, time::Duration};
 
 use crate::{
     configuration::{InterfaceConfig, SyncPoint},
     connection::Header,
-    network::NetworkManager,
+    network::{NetworkEvent, NetworkManager},
 };
 
 #[module(
@@ -44,13 +44,7 @@ impl PeerNetworkInterface {
             SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
             _ => None,
         };
-
-        // Create background task to foward sync commands to NetworkManager
-        let mut cmd_rx = if cfg.sync_point == SyncPoint::Dynamic {
-            Some(Self::spawn_command_forwarder(context.clone(), &cfg.sync_command_topic).await?)
-        } else {
-            None
-        };
+        let command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -90,12 +84,12 @@ impl PeerNetworkInterface {
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    let mut manager = Self::init_manager(cfg, sink, None);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
-                    let mut manager = Self::init_manager(cfg, sink, None);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
@@ -103,7 +97,7 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
-                    let mut manager = Self::init_manager(cfg, sink, None);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
@@ -116,7 +110,7 @@ impl PeerNetworkInterface {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
                                 sink.last_epoch = Some(epoch);
                             }
-                            let mut manager = Self::init_manager(cfg, sink, None);
+                            let mut manager = Self::init_manager(cfg, sink, command_subscription);
                             manager.sync_to_point(point);
                             manager
                         }
@@ -126,36 +120,7 @@ impl PeerNetworkInterface {
                         }
                     }
                 }
-                SyncPoint::Dynamic => {
-                    let mut rx = match cmd_rx.take() {
-                        Some(rx) => rx,
-                        None => {
-                            warn!("Dynamic mode configured but cmd_rx is missing");
-                            return;
-                        }
-                    };
-
-                    let point = match Self::wait_sync_command(&mut rx).await {
-                        Ok(Point::Specific(slot, hash)) => {
-                            let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
-                            sink.last_epoch = Some(epoch);
-                            info!("Dynamic sync starting at slot {} (epoch {})", slot, epoch);
-                            Point::Specific(slot, hash)
-                        }
-                        Ok(Point::Origin) => {
-                            warn!("Dynamic sync received Point::Origin; ignoring");
-                            return;
-                        }
-                        Err(err) => {
-                            warn!("Failed to receive initial sync command: {err:#}");
-                            return;
-                        }
-                    };
-
-                    let mut manager = Self::init_manager(cfg, sink, Some(rx));
-                    manager.sync_to_point(point);
-                    manager
-                }
+                SyncPoint::Dynamic => Self::init_manager(cfg, sink, command_subscription),
             };
 
             if let Err(err) = manager.run().await {
@@ -169,15 +134,39 @@ impl PeerNetworkInterface {
     fn init_manager(
         cfg: InterfaceConfig,
         sink: BlockSink,
-        cmd_rx: Option<mpsc::Receiver<Point>>,
+        command_subscription: Box<dyn Subscription<Message>>,
     ) -> NetworkManager {
         let (events_sender, events) = mpsc::channel(1024);
-        let mut manager =
-            NetworkManager::new(cfg.magic_number, events, events_sender, sink, cmd_rx);
+        tokio::spawn(Self::forward_commands_to_events(
+            command_subscription,
+            events_sender.clone(),
+        ));
+        let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
         for address in cfg.node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
         manager
+    }
+
+    async fn forward_commands_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<()> {
+        while let Ok((_, msg)) = subscription.read().await {
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::ChangeSyncPoint {
+                slot,
+                hash,
+            })) = msg.as_ref()
+            {
+                let point = Point::new(*slot, hash.to_vec());
+
+                if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
+                    bail!("event channel closed");
+                }
+            }
+        }
+
+        bail!("subscription closed");
     }
 
     async fn init_cache(
@@ -225,37 +214,6 @@ impl PeerNetworkInterface {
             }
             msg => bail!("Unexpected message in snapshot completion topic: {msg:?}"),
         }
-    }
-
-    async fn wait_sync_command(rx: &mut mpsc::Receiver<Point>) -> Result<Point> {
-        match rx.recv().await {
-            Some(point) => Ok(point),
-            None => Err(anyhow::anyhow!(
-                "Channel closed before receiving a start point"
-            )),
-        }
-    }
-
-    async fn spawn_command_forwarder(
-        context: Arc<Context<Message>>,
-        topic: &str,
-    ) -> Result<mpsc::Receiver<Point>> {
-        let (tx, rx) = mpsc::channel::<Point>(32);
-
-        let mut sub = context.subscribe(topic).await?;
-        tokio::spawn(async move {
-            while let Ok((_, msg)) = sub.read().await {
-                if let Message::Command(Command::ChainSync(ChainSyncCommand::ChangeSyncPoint {
-                    slot,
-                    hash,
-                })) = msg.as_ref()
-                {
-                    let _ = tx.send(Point::new(*slot, hash.to_vec())).await;
-                }
-            }
-        });
-
-        Ok(rx)
     }
 }
 
