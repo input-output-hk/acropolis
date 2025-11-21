@@ -23,9 +23,13 @@ download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
 
-[module.upstream-chain-fetcher]
+[module.peer-network-interface]
 sync-point = "snapshot"
-node-address = "backbone.cardano.iog.io:3001"
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
+]
 magic-number = 764824073
 
 #[module.consensus]
@@ -110,7 +114,7 @@ store-history = false
 [module.accounts-state]
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
-spdd-db-path = "./spdd_db"
+spdd-db-path = "./fjall-spdd"
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"

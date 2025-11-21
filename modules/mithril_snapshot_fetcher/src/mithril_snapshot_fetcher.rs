@@ -7,7 +7,7 @@ use acropolis_common::{
     BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
@@ -30,9 +30,13 @@ use tracing::{debug, error, info, info_span, Instrument};
 mod pause;
 use pause::PauseType;
 
-const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.bootstrapped";
-const DEFAULT_BLOCK_TOPIC: &str = "cardano.block.available";
-const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
+const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+);
+const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
+    ("block-publish-topic", "cardano.block.available");
+const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -237,12 +241,14 @@ impl MithrilSnapshotFetcher {
         config: Arc<Config>,
         genesis: GenesisValues,
     ) -> Result<()> {
-        let block_topic =
-            config.get_string("block-topic").unwrap_or(DEFAULT_BLOCK_TOPIC.to_string());
-        info!("Publishing blocks on '{block_topic}'");
+        let block_publish_topic = config
+            .get_string(DEFAULT_BLOCK_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_BLOCK_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing blocks on '{block_publish_topic}'");
 
-        let completion_topic =
-            config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
+        let completion_topic = config
+            .get_string(DEFAULT_COMPLETION_TOPIC.0)
+            .unwrap_or(DEFAULT_COMPLETION_TOPIC.1.to_string());
         info!("Publishing completion on '{completion_topic}'");
 
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
@@ -356,7 +362,7 @@ impl MithrilSnapshotFetcher {
 
                         context
                             .message_bus
-                            .publish(&block_topic, Arc::new(message_enum))
+                            .publish(&block_publish_topic, Arc::new(message_enum))
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
 
@@ -389,21 +395,23 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let startup_topic =
-            config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
-        info!("Creating startup subscriber on '{startup_topic}'");
+        let bootstrapped_subscribe_topic = config
+            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
-        let mut subscription = context.subscribe(&startup_topic).await?;
+        let mut bootstrapped_subscription =
+            context.subscribe(&bootstrapped_subscribe_topic).await?;
         context.clone().run(async move {
-            let Ok((_, startup_message)) = subscription.read().await else {
+            let Ok((_, bootstrapped_message)) = bootstrapped_subscription.read().await else {
                 return;
             };
-            info!("Received startup message");
-            let genesis = match startup_message.as_ref() {
+            info!("Received bootstrapped message");
+            let genesis = match bootstrapped_message.as_ref() {
                 Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
                     complete.values.clone()
                 }
-                x => panic!("unexpected startup message: {x:?}"),
+                x => panic!("unexpected bootstrapped message: {x:?}"),
             };
 
             let mut delay = 1;

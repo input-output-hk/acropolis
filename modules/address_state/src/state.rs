@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use acropolis_common::{
     Address, AddressDelta, AddressTotals, BlockInfo, ShelleyAddress, TxIdentifier, TxTotals,
@@ -55,13 +51,8 @@ pub struct State {
 
 impl State {
     pub async fn new(config: &AddressStorageConfig) -> Result<Self> {
-        let db_path = if Path::new(&config.db_path).is_relative() {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&config.db_path)
-        } else {
-            PathBuf::from(&config.db_path)
-        };
-
-        let store = Arc::new(ImmutableAddressStore::new(&db_path, config.clear_on_start)?);
+        let db_path = Path::new(&config.db_path);
+        let store = Arc::new(ImmutableAddressStore::new(db_path, config.clear_on_start)?);
 
         let mut config = config.clone();
         config.skip_until = store.get_last_epoch_stored().await?;

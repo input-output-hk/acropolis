@@ -17,7 +17,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{error, info};
@@ -32,7 +32,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
 // Configuration defaults
-const DEFAULT_ADDRESS_DB_PATH: (&str, &str) = ("db-path", "./db");
+const DEFAULT_ADDRESS_DB_PATH: (&str, &str) = ("db-path", "./fjall-addresses");
 const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_TOTALS: (&str, bool) = ("store-totals", false);

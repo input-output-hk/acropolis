@@ -22,6 +22,7 @@ use acropolis_module_epochs_state::EpochsState;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
+use acropolis_module_historical_epochs_state::HistoricalEpochsState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
@@ -30,7 +31,6 @@ use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
-use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 use acropolis_module_utxo_state::UTXOState;
 
 use caryatid_module_clock::Clock;
@@ -103,7 +103,6 @@ pub async fn main() -> Result<()> {
     // Register modules
     GenesisBootstrapper::register(&mut process);
     MithrilSnapshotFetcher::register(&mut process);
-    UpstreamChainFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);
@@ -118,6 +117,7 @@ pub async fn main() -> Result<()> {
     AddressState::register(&mut process);
     AssetsState::register(&mut process);
     HistoricalAccountsState::register(&mut process);
+    HistoricalEpochsState::register(&mut process);
     BlockfrostREST::register(&mut process);
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);

@@ -206,6 +206,13 @@ impl FjallBlockStore {
     }
 
     fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
+        if max_number < min_number {
+            return Err(anyhow::anyhow!(
+                "Invalid number range min={min_number}, max={max_number}"
+            ));
+        }
+        let expected_count = max_number - min_number + 1;
+
         let min_number_bytes = min_number.to_be_bytes();
         let max_number_bytes = max_number.to_be_bytes();
         let mut blocks = vec![];
@@ -214,6 +221,12 @@ impl FjallBlockStore {
             if let Some(block) = self.get_by_hash(&hash)? {
                 blocks.push(block);
             }
+        }
+        if blocks.len() as u64 != expected_count {
+            return Err(anyhow::anyhow!(
+                "Expected {expected_count} blocks, got {}",
+                blocks.len()
+            ));
         }
         Ok(blocks)
     }

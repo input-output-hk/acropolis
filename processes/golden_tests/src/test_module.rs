@@ -7,7 +7,7 @@ use acropolis_common::{
     BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{Context as AnyhowContext, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use std::sync::Arc;
 

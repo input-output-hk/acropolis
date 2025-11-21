@@ -8,7 +8,7 @@ use acropolis_common::{
     messages::{Command, CommandResponse, Message},
 };
 use anyhow::{Context as _, Result, bail};
-use caryatid_sdk::{Context, Module, module};
+use caryatid_sdk::{Context, module};
 use config::Config;
 use futures::stream::{FuturesUnordered, StreamExt};
 use peer::PeerConfig;

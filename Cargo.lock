@@ -232,7 +232,6 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "dashmap",
  "hex",
  "imbl",
  "pallas 0.33.0",
@@ -286,6 +285,21 @@ dependencies = [
  "hex",
  "minicbor 0.25.1",
  "rayon",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_historical_epochs_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "minicbor 0.25.1",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -455,21 +469,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_upstream_chain_fetcher"
-version = "0.2.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "crossbeam",
- "pallas 0.33.0",
- "serde",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_utxo_state"
 version = "0.1.0"
 dependencies = [
@@ -505,6 +504,7 @@ dependencies = [
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_historical_accounts_state",
+ "acropolis_module_historical_epochs_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
@@ -513,7 +513,6 @@ dependencies = [
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
- "acropolis_module_upstream_chain_fetcher",
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",
@@ -547,12 +546,12 @@ dependencies = [
  "acropolis_module_governance_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
+ "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
- "acropolis_module_upstream_chain_fetcher",
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",
@@ -1456,9 +1455,9 @@ checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
 
 [[package]]
 name = "caryatid_macros"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c681bdd1364a75fc129d0c91f03619deacb6d543735c152b9e34d050c31a9ca"
+checksum = "64e4a0dac20a800a5b3b5dd90e019096d644724dcf96a780807680632f71d60a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1469,9 +1468,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90d35333c6c24e401b3cbf9e4169b863fa9771d98371614142bad4f1f70ab053"
+checksum = "951c0ab316e5557315c10b75011b30faeeb032f96c88507946ec154c7f9d4ddd"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1486,9 +1485,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04b3369fd37cc7c395feea110e0fc60075cb9fbc3c3470a4d3b0988da1606b72"
+checksum = "9c82ea79ce5ede49ce0dde01d204f21d39165d0abd8213281a7ce163a01519df"
 dependencies = [
  "anyhow",
  "axum",
@@ -1505,9 +1504,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a722a3a815c9f5d0868eaf7f7d208568ffc142c800310679de95365a586d9e2"
+checksum = "e53b7ce84ba23710e42d1fc497b2bb36463cbcb0af8aab39b7f14942b4682763"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1520,14 +1519,15 @@ dependencies = [
 
 [[package]]
 name = "caryatid_process"
-version = "0.12.2"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b75c2e960f783c2dc3879d632aa4643f2e21b41572313e7e22b878ecc8b4642"
+checksum = "c7b38bc5f68d7f2400987524d50300597b607f5f2d76773fdc40a0216d296b01"
 dependencies = [
  "anyhow",
  "async-trait",
  "caryatid_sdk",
  "config",
+ "dashmap",
  "futures",
  "lapin",
  "minicbor-serde",
@@ -1541,9 +1541,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.12.2"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a5226f72f658ec71e48c3e74a1bfa001798a08dc66179eabb9b70573c9ae72a"
+checksum = "b81e3dc1a35c175c7fc27f564b9ba9840fa25d24f08785a9cdfe2c2182965c77"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1910,28 +1910,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-deque",
- "crossbeam-epoch",
- "crossbeam-queue",
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1946,15 +1924,6 @@ name = "crossbeam-epoch"
 version = "0.9.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
 dependencies = [
  "crossbeam-utils",
 ]
