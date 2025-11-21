@@ -373,9 +373,15 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "async-compression",
  "caryatid_sdk",
  "config",
+ "futures-util",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -499,6 +505,7 @@ dependencies = [
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
+ "acropolis_module_snapshot_bootstrapper",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",

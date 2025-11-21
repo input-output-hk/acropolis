@@ -19,14 +19,15 @@ use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
-use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+// use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_historical_epochs_state::HistoricalEpochsState;
-use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
+// use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_snapshot_bootstrapper::SnapshotBootstrapper;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
@@ -101,8 +102,9 @@ pub async fn main() -> Result<()> {
     let mut process = Process::<Message>::create(config).await;
 
     // Register modules
-    GenesisBootstrapper::register(&mut process);
-    MithrilSnapshotFetcher::register(&mut process);
+    // GenesisBootstrapper::register(&mut process);
+    // MithrilSnapshotFetcher::register(&mut process);
+    SnapshotBootstrapper::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);
