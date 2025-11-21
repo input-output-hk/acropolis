@@ -20,10 +20,11 @@ tracing = { workspace = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.132"
 async-compression = { version = "0.4.32", features = ["tokio", "gzip"] }
-futures-util = "0.3"
-reqwest = "0.12"
+reqwest = { version = "0.12", features = ["stream"] }
 thiserror = "2.0.17"
-tokio-util = { version = "0.7", features = ["io"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 path = "src/snapshot_bootstrapper.rs"

@@ -102,16 +102,17 @@ pub async fn main() -> Result<()> {
     let mut process = Process::<Message>::create(config.clone()).await;
 
     // Get startup method from config
+    // TODO: Lift to constant
     let startup_method =
-        config.get_string("startup.method").unwrap_or_else(|_| "snapshot".to_string());
+        config.get_string("startup.method").unwrap_or_else(|_| "mithril".to_string());
 
     info!("Using startup method: {}", startup_method);
 
-    // Register bootstrap modules based on startup method
+    // Register bootstrap modules based on the startup method
     match startup_method.as_str() {
-        "genesis" => {
-            info!("Registering GenesisBootstrapper");
-            GenesisBootstrapper::register(&mut process);
+        "mithril" => {
+            info!("Registering MithrilSnapshotFetcher");
+            MithrilSnapshotFetcher::register(&mut process);
         }
         "snapshot" => {
             info!("Registering SnapshotBootstrapper");
@@ -119,14 +120,14 @@ pub async fn main() -> Result<()> {
         }
         _ => {
             panic!(
-                "Invalid startup method: {}. Must be one of: genesis, snapshot",
+                "Invalid startup method: {}. Must be one of: mithril, snapshot",
                 startup_method
             );
         }
     }
 
     // Register modules
-    MithrilSnapshotFetcher::register(&mut process);
+    GenesisBootstrapper::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);

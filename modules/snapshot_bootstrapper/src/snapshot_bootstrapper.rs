@@ -1,13 +1,10 @@
 use std::{
     path::{Path, PathBuf},
-    str::FromStr,
     sync::Arc,
 };
 
 use acropolis_common::{
-    genesis_values::GenesisValues,
-    hash::Hash,
-    messages::{CardanoMessage, GenesisCompleteMessage, Message},
+    messages::{CardanoMessage, Message},
     snapshot::{
         streaming_snapshot::{
             DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo, ProposalCallback,
@@ -16,13 +13,12 @@ use acropolis_common::{
         StreamingSnapshotParser,
     },
     stake_addresses::AccountState,
-    BlockHash, BlockInfo, BlockStatus, Era, GenesisDelegates,
+    BlockHash, BlockInfo, BlockStatus, Era,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_compression::tokio::bufread::GzipDecoder;
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
-use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -30,12 +26,12 @@ use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio::time::Instant;
-use tokio_util::io::StreamReader;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
-const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
+const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
+const DEFAULT_BOOTSTRAPPED_TOPIC: &str = "cardano.sequence.bootstrapped";
 
 #[derive(Debug, Error)]
 pub enum SnapshotBootstrapError {
@@ -62,6 +58,53 @@ pub enum SnapshotBootstrapError {
 
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
+    #[error("Snapshot parsing failed: {0}")]
+    ParseError(String),
+}
+
+/// Configuration for the snapshot bootstrapper
+#[derive(Debug, Clone)]
+struct SnapshotConfig {
+    network: String,
+    data_dir: String,
+    startup_topic: String,
+    snapshot_topic: String,
+    bootstrapped_topic: String,
+    completion_topic: String,
+}
+
+impl SnapshotConfig {
+    fn try_load(config: &Config) -> Result<Self> {
+        Ok(Self {
+            network: config.get_string("network").unwrap_or_else(|_| "mainnet".to_string()),
+            data_dir: config.get_string("data-dir").unwrap_or_else(|_| "./data".to_string()),
+            startup_topic: config
+                .get_string("startup-topic")
+                .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string()),
+            snapshot_topic: config
+                .get_string("snapshot-topic")
+                .unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string()),
+            bootstrapped_topic: config
+                .get_string("bootstrapped-subscribe-topic")
+                .unwrap_or(DEFAULT_BOOTSTRAPPED_TOPIC.to_string()),
+            completion_topic: config
+                .get_string("completion-topic")
+                .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string()),
+        })
+    }
+
+    fn network_dir(&self) -> String {
+        format!("{}/{}", self.data_dir, self.network)
+    }
+
+    fn config_path(&self) -> String {
+        format!("{}/config.json", self.network_dir())
+    }
+
+    fn snapshots_path(&self) -> String {
+        format!("{}/snapshots.json", self.network_dir())
+    }
 }
 
 /// Network configuration file (config.json)
@@ -89,12 +132,11 @@ struct SnapshotFileMetadata {
     url: String,
 }
 
-/// Callback handler that accumulates snapshot data and builds state
-pub struct SnapshotHandler {
+/// Handles publishing snapshot data to the message bus
+struct SnapshotPublisher {
     context: Arc<Context<Message>>,
+    completion_topic: String,
     snapshot_topic: String,
-
-    // Accumulated data from callbacks
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     pools: Vec<PoolInfo>,
@@ -103,17 +145,15 @@ pub struct SnapshotHandler {
     proposals: Vec<GovernanceProposal>,
 }
 
-#[module(
-    message_type(Message),
-    name = "snapshot-bootstrapper",
-    description = "Snapshot Bootstrapper to broadcast state"
-)]
-pub struct SnapshotBootstrapper;
-
-impl SnapshotHandler {
-    fn new(context: Arc<Context<Message>>, snapshot_topic: String) -> Self {
+impl SnapshotPublisher {
+    fn new(
+        context: Arc<Context<Message>>,
+        completion_topic: String,
+        snapshot_topic: String,
+    ) -> Self {
         Self {
             context,
+            completion_topic,
             snapshot_topic,
             metadata: None,
             utxo_count: 0,
@@ -124,76 +164,23 @@ impl SnapshotHandler {
         }
     }
 
-    /// Build BlockInfo from accumulated metadata
-    fn build_block_info(&self) -> Result<BlockInfo> {
-        let metadata =
-            self.metadata.as_ref().ok_or_else(|| anyhow::anyhow!("No metadata available"))?;
-
-        // Create a synthetic BlockInfo representing the snapshot state
-        // This represents the last block included in the snapshot
-        Ok(BlockInfo {
-            status: BlockStatus::Immutable, // Snapshot blocks are immutable
-            slot: 0,                        // TODO: Extract from snapshot metadata if available
-            number: 0,                      // TODO: Extract from snapshot metadata if available
-            hash: BlockHash::default(),     // TODO: Extract from snapshot metadata if available
-            epoch: metadata.epoch,
-            epoch_slot: 0,    // TODO: Extract from snapshot metadata if available
-            new_epoch: false, // Not necessarily a new epoch
-            timestamp: 0,     // TODO: Extract from snapshot metadata if available
-            era: Era::Conway, // TODO: Determine from snapshot or config
-        })
-    }
-
-    /// Build GenesisValues from snapshot data
-    fn build_genesis_values(&self) -> Result<GenesisValues> {
-        // TODO: These values should ideally come from the snapshot or configuration
-        // For now, using defaults for Conway era
-        Ok(GenesisValues {
-            byron_timestamp: 1506203091, // Byron mainnet genesis timestamp
-            shelley_epoch: 208,          // Shelley started at epoch 208 on mainnet
-            shelley_epoch_len: 432000,   // 5 days in seconds
-            // Shelley mainnet genesis hash (placeholder - should be from config)
-            shelley_genesis_hash: Hash::<32>::from_str(
-                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
-            )?,
-            genesis_delegs: GenesisDelegates::try_from(vec![])?,
-        })
-    }
-
     async fn publish_start(&self) -> Result<()> {
-        self.context
-            .message_bus
-            .publish(
-                &self.snapshot_topic,
-                Arc::new(Message::Snapshot(
-                    acropolis_common::messages::SnapshotMessage::Startup,
-                )),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish start message: {}", e))
+        let message = Arc::new(Message::Snapshot(
+            acropolis_common::messages::SnapshotMessage::Startup,
+        ));
+        self.context.publish(&self.snapshot_topic, message).await
     }
 
-    async fn publish_completion(
-        &self,
-        block_info: BlockInfo,
-        genesis_values: GenesisValues,
-    ) -> Result<()> {
-        let message = Message::Cardano((
+    async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
+        let message = Arc::new(Message::Cardano((
             block_info,
-            CardanoMessage::GenesisComplete(GenesisCompleteMessage {
-                values: genesis_values,
-            }),
-        ));
-
-        self.context
-            .message_bus
-            .publish(&self.snapshot_topic, Arc::new(message))
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to publish completion: {}", e))
+            CardanoMessage::SnapshotComplete,
+        )));
+        self.context.publish(&self.completion_topic, message).await
     }
 }
 
-impl UtxoCallback for SnapshotHandler {
+impl UtxoCallback for SnapshotPublisher {
     fn on_utxo(&mut self, _utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
 
@@ -206,49 +193,44 @@ impl UtxoCallback for SnapshotHandler {
     }
 }
 
-impl PoolCallback for SnapshotHandler {
+impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
         self.pools.extend(pools);
-        // TODO: Publish pool data.
         Ok(())
     }
 }
 
-impl StakeCallback for SnapshotHandler {
+impl StakeCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
-        // TODO: Publish account data.
         Ok(())
     }
 }
 
-impl DRepCallback for SnapshotHandler {
+impl DRepCallback for SnapshotPublisher {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
         self.dreps.extend(dreps);
-        // TODO: Publish DRep data.
-
         Ok(())
     }
 }
 
-impl ProposalCallback for SnapshotHandler {
+impl ProposalCallback for SnapshotPublisher {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
-        // TODO: Publish proposal data.
         Ok(())
     }
 }
 
-impl SnapshotCallbacks for SnapshotHandler {
+impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
-        info!("Received snapshot metadata for epoch {}", metadata.epoch);
-        info!("  - UTXOs: {:?}", metadata.utxo_count);
+        info!("Snapshot metadata for epoch {}", metadata.epoch);
+        info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
-            "  - Pot balances: treasury={}, reserves={}, deposits={}",
+            "  Pot balances: treasury={}, reserves={}, deposits={}",
             metadata.pot_balances.treasury,
             metadata.pot_balances.reserves,
             metadata.pot_balances.deposits
@@ -283,70 +265,63 @@ impl SnapshotCallbacks for SnapshotHandler {
     }
 }
 
+#[module(
+    message_type(Message),
+    name = "snapshot-bootstrapper",
+    description = "Snapshot Bootstrapper to broadcast state via streaming"
+)]
+pub struct SnapshotBootstrapper;
+
 impl SnapshotBootstrapper {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let network = config.get_string("network").unwrap_or_else(|_| "mainnet".to_string());
-        let data_dir = config.get_string("data-dir").unwrap_or_else(|_| "./data".to_string());
-        let startup_topic =
-            config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
-        let snapshot_topic =
-            config.get_string("snapshot-topic").unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
-        let completion_topic =
-            config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
-        info!("Publishing snapshots on '{snapshot_topic}'");
-        info!("Completing with '{completion_topic}'");
-        info!("Snapshot bootstrapper initializing");
-        info!("  Network: {}", network);
-        info!("  Data directory: {}", data_dir);
-        info!("  Publishing on '{}'", snapshot_topic);
+        let cfg = SnapshotConfig::try_load(&config)?;
 
-        let mut subscription = context.subscribe(&startup_topic).await?;
+        info!("Snapshot bootstrapper initializing");
+        info!("  Network: {}", cfg.network);
+        info!("  Data directory: {}", cfg.data_dir);
+        info!("  Publishing on '{}'", cfg.snapshot_topic);
+        info!("  Completing with '{}'", cfg.completion_topic);
+
+        let startup_sub = context.subscribe(&cfg.startup_topic).await?;
+        let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_topic).await?;
 
         context.clone().run(async move {
-            let Ok(_) = subscription.read().await else {
-                return;
-            };
-            info!("Received startup message");
-
-            // TODO:
-            // Read config file per docs in NOTES.md
-            // read nonces
-            // read headers
-            // read and process ALL of the snapshot files, not just one.
-
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
-                let network_dir = format!("{}/{}", data_dir, network);
-                let config_path = format!("{}/config.json", network_dir);
-                let snapshots_path = format!("{}/snapshots.json", network_dir);
+                // Wait for startup signal
+                if let Err(e) = Self::wait_startup(startup_sub).await {
+                    error!("Failed waiting for startup: {e:#}");
+                    return;
+                }
 
-                let network_config = match Self::read_network_config(&config_path) {
-                    Ok(cfg) => cfg,
+                // Wait for genesis bootstrap completion
+                if let Err(e) = Self::wait_genesis_completion(bootstrapped_sub).await {
+                    error!("Failed waiting for bootstrapped: {e:#}");
+                    return;
+                }
+
+                info!("Bootstrap prerequisites met, starting snapshot processing");
+
+                // Load network configuration
+                let network_config = match Self::read_network_config(&cfg.config_path()) {
+                    Ok(config) => config,
                     Err(e) => {
-                        error!("Failed to read network config: {}", e);
+                        error!("Failed to read network config: {e:#}");
                         return;
                     }
                 };
 
-                info!(
-                    "Loading snapshots for epochs: {:?}",
-                    network_config.snapshots
-                );
-
-                let all_snapshots = match Self::read_snapshots_metadata(&snapshots_path) {
-                    Ok(snaps) => snaps,
+                // Load snapshots metadata
+                let all_snapshots = match Self::read_snapshots_metadata(&cfg.snapshots_path()) {
+                    Ok(snapshots) => snapshots,
                     Err(e) => {
-                        error!("Failed to read snapshots metadata: {}", e);
+                        error!("Failed to read snapshots metadata: {e:#}");
                         return;
                     }
                 };
 
-                let target_snapshots: Vec<_> = all_snapshots
-                    .iter()
-                    .filter(|s| network_config.snapshots.contains(&s.epoch))
-                    .cloned()
-                    .collect();
-
+                // Filter snapshots based on network config
+                let target_snapshots = Self::filter_snapshots(&network_config, &all_snapshots);
                 if target_snapshots.is_empty() {
                     error!(
                         "No snapshots found for requested epochs: {:?}",
@@ -355,35 +330,22 @@ impl SnapshotBootstrapper {
                     return;
                 }
 
-                info!("Found {} snapshot files to process", target_snapshots.len());
+                info!("Found {} snapshot(s) to process", target_snapshots.len());
 
-                for snapshot_meta in &target_snapshots {
-                    let filename = format!("{}.cbor", snapshot_meta.point);
-                    let file_path = format!("{}/{}", network_dir, filename);
-
-                    if let Err(e) =
-                        Self::ensure_snapshot_downloaded(&file_path, snapshot_meta).await
-                    {
-                        error!("Failed to download snapshot: {}", e);
-                        return;
-                    }
+                // Download all snapshots
+                if let Err(e) =
+                    Self::download_snapshots(&target_snapshots, &cfg.network_dir()).await
+                {
+                    error!("Failed to download snapshots: {e:#}");
+                    return;
                 }
 
-                for snapshot_meta in target_snapshots {
-                    let filename = format!("{}.cbor", snapshot_meta.point);
-                    let file_path = format!("{}/{}", network_dir, filename);
-
-                    info!(
-                        "Processing snapshot for epoch {} from {}",
-                        snapshot_meta.epoch, file_path
-                    );
-
-                    if let Err(e) =
-                        Self::process_snapshot(&file_path, context.clone(), &completion_topic).await
-                    {
-                        error!("Failed to process snapshot: {}", e);
-                        return;
-                    }
+                // Process snapshots in order
+                if let Err(e) =
+                    Self::process_snapshots(&target_snapshots, &cfg, context.clone()).await
+                {
+                    error!("Failed to process snapshots: {e:#}");
+                    return;
                 }
 
                 info!("Snapshot bootstrap completed successfully");
@@ -395,7 +357,25 @@ impl SnapshotBootstrapper {
         Ok(())
     }
 
-    /// Read network configuration
+    async fn wait_startup(mut subscription: Box<dyn Subscription<Message>>) -> Result<()> {
+        let (_, _message) = subscription.read().await?;
+        info!("Received startup message");
+        Ok(())
+    }
+
+    async fn wait_genesis_completion(
+        mut subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        let (_, message) = subscription.read().await?;
+        match message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(_complete))) => {
+                info!("Received genesis complete message");
+                Ok(())
+            }
+            msg => bail!("Unexpected message in bootstrapped topic: {msg:?}"),
+        }
+    }
+
     fn read_network_config(path: &str) -> Result<NetworkConfig, SnapshotBootstrapError> {
         let path_buf = PathBuf::from(path);
         let content = fs::read_to_string(&path_buf)
@@ -407,7 +387,6 @@ impl SnapshotBootstrapper {
         Ok(config)
     }
 
-    /// Read snapshot metadata
     fn read_snapshots_metadata(
         path: &str,
     ) -> Result<Vec<SnapshotFileMetadata>, SnapshotBootstrapError> {
@@ -421,36 +400,48 @@ impl SnapshotBootstrapper {
         Ok(snapshots)
     }
 
-    /// Ensure the snapshot is downloaded
-    async fn ensure_snapshot_downloaded(
-        file_path: &str,
-        metadata: &SnapshotFileMetadata,
+    fn filter_snapshots(
+        network_config: &NetworkConfig,
+        all_snapshots: &[SnapshotFileMetadata],
+    ) -> Vec<SnapshotFileMetadata> {
+        all_snapshots
+            .iter()
+            .filter(|s| network_config.snapshots.contains(&s.epoch))
+            .cloned()
+            .collect()
+    }
+
+    async fn download_snapshots(
+        snapshots: &[SnapshotFileMetadata],
+        network_dir: &str,
     ) -> Result<(), SnapshotBootstrapError> {
-        let path = Path::new(file_path);
+        for snapshot_meta in snapshots {
+            let filename = format!("{}.cbor", snapshot_meta.point);
+            let file_path = format!("{}/{}", network_dir, filename);
 
-        if path.exists() {
-            info!("Snapshot file already exists: {}", file_path);
-            return Ok(());
+            Self::download_snapshot(&snapshot_meta.url, &file_path).await?;
         }
-
-        info!(
-            "Downloading snapshot from {} to {}",
-            metadata.url, file_path
-        );
-        Self::download_snapshot(&metadata.url, file_path).await?;
-        info!("Downloaded: {}", file_path);
         Ok(())
     }
 
     async fn download_snapshot(url: &str, output_path: &str) -> Result<(), SnapshotBootstrapError> {
-        if let Some(parent) = Path::new(output_path).parent() {
+        let path = Path::new(output_path);
+
+        if path.exists() {
+            info!("Snapshot already exists, skipping: {}", output_path);
+            return Ok(());
+        }
+
+        info!("Downloading snapshot from {}", url);
+
+        if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
                 .map_err(|e| SnapshotBootstrapError::CreateDirectory(parent.to_path_buf(), e))?;
         }
 
         let client = reqwest::Client::new();
-        let response = client
+        let mut response = client
             .get(url)
             .send()
             .await
@@ -463,52 +454,382 @@ impl SnapshotBootstrapper {
             ));
         }
 
-        let total_size = response.content_length().unwrap_or(0);
-        if total_size > 0 {
-            info!("Downloading {} MB (compressed)...", total_size / 1_000_000);
-        }
-
-        let tmp_path = Path::new(output_path).with_extension("partial");
+        let tmp_path = path.with_extension("partial");
         let mut file = File::create(&tmp_path).await?;
 
-        let raw_stream_reader =
-            StreamReader::new(response.bytes_stream().map_err(io::Error::other));
-        let buffered_reader = BufReader::new(raw_stream_reader);
-        let mut decoded_stream = GzipDecoder::new(buffered_reader);
+        let mut compressed_data = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?
+        {
+            compressed_data.extend_from_slice(&chunk);
+        }
 
-        tokio::io::copy(&mut decoded_stream, &mut file).await?;
+        let cursor = io::Cursor::new(&compressed_data);
+        let buffered = BufReader::new(cursor);
+        let mut decoder = GzipDecoder::new(buffered);
+        tokio::io::copy(&mut decoder, &mut file).await?;
+
         file.sync_all().await?;
         tokio::fs::rename(&tmp_path, output_path).await?;
+
+        info!("Downloaded snapshot to {}", output_path);
+        Ok(())
+    }
+
+    async fn process_snapshots(
+        snapshots: &[SnapshotFileMetadata],
+        cfg: &SnapshotConfig,
+        context: Arc<Context<Message>>,
+    ) -> Result<()> {
+        let mut publisher = SnapshotPublisher::new(
+            context,
+            cfg.completion_topic.clone(),
+            cfg.snapshot_topic.clone(),
+        );
+
+        // Publish start once at the beginning
+        publisher.publish_start().await?;
+
+        for snapshot_meta in snapshots {
+            let filename = format!("{}.cbor", snapshot_meta.point);
+            let file_path = format!("{}/{}", cfg.network_dir(), filename);
+
+            info!(
+                "Processing snapshot for epoch {} from {}",
+                snapshot_meta.epoch, file_path
+            );
+
+            Self::parse_snapshot(&file_path, &mut publisher).await?;
+        }
+
+        let metadata = publisher
+            .metadata
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No metadata received from snapshots"))?;
+
+        let block_info = build_block_info_from_metadata(metadata);
+        publisher.publish_completion(block_info).await?;
 
         Ok(())
     }
 
-    /// Process a single snapshot file
-    async fn process_snapshot(
-        file_path: &str,
-        context: Arc<Context<Message>>,
-        completion_topic: &str,
-    ) -> Result<()> {
-        let parser = StreamingSnapshotParser::new(file_path);
-        let mut callbacks = SnapshotHandler::new(context.clone(), completion_topic.to_string());
-
-        info!("Starting snapshot parsing: {}", file_path);
+    async fn parse_snapshot(file_path: &str, publisher: &mut SnapshotPublisher) -> Result<()> {
+        info!("Parsing snapshot: {}", file_path);
         let start = Instant::now();
 
-        callbacks.publish_start().await?;
-        parser.parse(&mut callbacks)?;
+        let parser = StreamingSnapshotParser::new(file_path);
+        parser.parse(publisher)?;
 
         let duration = start.elapsed();
         info!("Parsed snapshot in {:.2?}", duration);
 
-        // Build the final state from accumulated data
-        let block_info = callbacks.build_block_info()?;
-        let genesis_values = callbacks.build_genesis_values()?;
-
-        // Publish completion message to trigger next phase (e.g., Mithril)
-        callbacks.publish_completion(block_info, genesis_values).await?;
-
-        info!("Snapshot bootstrap completed successfully");
         Ok(())
+    }
+}
+
+fn build_block_info_from_metadata(metadata: &SnapshotMetadata) -> BlockInfo {
+    BlockInfo {
+        status: BlockStatus::Immutable,
+        slot: 0,
+        number: 0,
+        hash: BlockHash::default(),
+        epoch: metadata.epoch,
+        epoch_slot: 0,
+        new_epoch: false,
+        timestamp: 0,
+        era: Era::Conway,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn create_test_network_config(dir: &Path, snapshots: Vec<u64>) -> PathBuf {
+        let config = NetworkConfig {
+            snapshots,
+            points: vec![Point {
+                epoch: 500,
+                id: "test_block_hash".to_string(),
+                slot: 12345678,
+            }],
+        };
+
+        let config_path = dir.join("config.json");
+        let mut file = fs::File::create(&config_path).unwrap();
+        file.write_all(serde_json::to_string_pretty(&config).unwrap().as_bytes()).unwrap();
+        config_path
+    }
+
+    fn create_test_snapshots_metadata(dir: &Path, epochs: Vec<u64>, base_url: &str) -> PathBuf {
+        let snapshots: Vec<SnapshotFileMetadata> = epochs
+            .iter()
+            .map(|epoch| SnapshotFileMetadata {
+                epoch: *epoch,
+                point: format!("point_{}", epoch),
+                url: format!("{}/snapshot_{}.cbor.gz", base_url, epoch),
+            })
+            .collect();
+
+        let snapshots_path = dir.join("snapshots.json");
+        let mut file = fs::File::create(&snapshots_path).unwrap();
+        file.write_all(serde_json::to_string_pretty(&snapshots).unwrap().as_bytes()).unwrap();
+        snapshots_path
+    }
+
+    fn create_fake_snapshot(dir: &Path, point: &str) {
+        let snapshot_path = dir.join(format!("{}.cbor", point));
+        let mut file = fs::File::create(&snapshot_path).unwrap();
+        file.write_all(b"fake snapshot data").unwrap();
+    }
+
+    #[test]
+    fn test_read_network_config_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = create_test_network_config(temp_dir.path(), vec![500, 501]);
+
+        let result = SnapshotBootstrapper::read_network_config(config_path.to_str().unwrap());
+        assert!(result.is_ok());
+
+        let config = result.unwrap();
+        assert_eq!(config.snapshots, vec![500, 501]);
+        assert_eq!(config.points.len(), 1);
+    }
+
+    #[test]
+    fn test_read_network_config_missing_file() {
+        let result = SnapshotBootstrapper::read_network_config("/nonexistent/config.json");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SnapshotBootstrapError::ReadNetworkConfig(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_read_network_config_malformed_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.json");
+        let mut file = fs::File::create(&config_path).unwrap();
+        file.write_all(b"{ invalid json }").unwrap();
+
+        let result = SnapshotBootstrapper::read_network_config(config_path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SnapshotBootstrapError::MalformedNetworkConfig(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_read_snapshots_metadata_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let snapshots_path =
+            create_test_snapshots_metadata(temp_dir.path(), vec![500, 501], "https://example.com");
+
+        let result =
+            SnapshotBootstrapper::read_snapshots_metadata(snapshots_path.to_str().unwrap());
+        assert!(result.is_ok());
+
+        let snapshots = result.unwrap();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].epoch, 500);
+        assert_eq!(snapshots[1].epoch, 501);
+    }
+
+    #[test]
+    fn test_read_snapshots_metadata_missing_file() {
+        let result = SnapshotBootstrapper::read_snapshots_metadata("/nonexistent/snapshots.json");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SnapshotBootstrapError::ReadSnapshotsFile(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_filter_snapshots() {
+        let network_config = NetworkConfig {
+            snapshots: vec![500, 502],
+            points: vec![],
+        };
+
+        let all_snapshots = vec![
+            SnapshotFileMetadata {
+                epoch: 500,
+                point: "point_500".to_string(),
+                url: "url1".to_string(),
+            },
+            SnapshotFileMetadata {
+                epoch: 501,
+                point: "point_501".to_string(),
+                url: "url2".to_string(),
+            },
+            SnapshotFileMetadata {
+                epoch: 502,
+                point: "point_502".to_string(),
+                url: "url3".to_string(),
+            },
+        ];
+
+        let filtered = SnapshotBootstrapper::filter_snapshots(&network_config, &all_snapshots);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].epoch, 500);
+        assert_eq!(filtered[1].epoch, 502);
+    }
+
+    #[tokio::test]
+    async fn test_download_snapshot_skips_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let point = "point_500";
+        create_fake_snapshot(temp_dir.path(), point);
+
+        let file_path = temp_dir.path().join(format!("{}.cbor", point));
+
+        let result = SnapshotBootstrapper::download_snapshot(
+            "https://example.com/snapshot.cbor.gz",
+            file_path.to_str().unwrap(),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert!(file_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_download_snapshot_missing_file_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let point = "point_500";
+        let file_path = temp_dir.path().join(format!("{}.cbor", point));
+
+        let result = SnapshotBootstrapper::download_snapshot(
+            "https://invalid-url-that-does-not-exist.com/snapshot.cbor.gz",
+            file_path.to_str().unwrap(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_snapshot_filtering_by_epoch() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_network_config(temp_dir.path(), vec![500, 502]);
+        create_test_snapshots_metadata(
+            temp_dir.path(),
+            vec![500, 501, 502, 503],
+            "https://example.com",
+        );
+
+        let network_config = SnapshotBootstrapper::read_network_config(
+            temp_dir.path().join("config.json").to_str().unwrap(),
+        )
+        .unwrap();
+
+        let all_snapshots = SnapshotBootstrapper::read_snapshots_metadata(
+            temp_dir.path().join("snapshots.json").to_str().unwrap(),
+        )
+        .unwrap();
+
+        let target_snapshots =
+            SnapshotBootstrapper::filter_snapshots(&network_config, &all_snapshots);
+
+        assert_eq!(target_snapshots.len(), 2);
+        assert_eq!(target_snapshots[0].epoch, 500);
+        assert_eq!(target_snapshots[1].epoch, 502);
+    }
+
+    #[test]
+    fn test_empty_snapshots_list() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_network_config(temp_dir.path(), vec![999]);
+        create_test_snapshots_metadata(temp_dir.path(), vec![500, 501], "https://example.com");
+
+        let network_config = SnapshotBootstrapper::read_network_config(
+            temp_dir.path().join("config.json").to_str().unwrap(),
+        )
+        .unwrap();
+
+        let all_snapshots = SnapshotBootstrapper::read_snapshots_metadata(
+            temp_dir.path().join("snapshots.json").to_str().unwrap(),
+        )
+        .unwrap();
+
+        let target_snapshots =
+            SnapshotBootstrapper::filter_snapshots(&network_config, &all_snapshots);
+
+        assert!(target_snapshots.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_download_snapshot_creates_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let nested_path = temp_dir.path().join("nested").join("directory").join("snapshot.cbor");
+
+        let _ = SnapshotBootstrapper::download_snapshot(
+            "https://invalid-url.com/snapshot.cbor.gz",
+            nested_path.to_str().unwrap(),
+        )
+        .await;
+
+        assert!(nested_path.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn test_corrupted_config_json_fails_gracefully() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.json");
+        let mut file = fs::File::create(&config_path).unwrap();
+        file.write_all(b"{\"snapshots\": [500, 501]").unwrap();
+
+        let result = SnapshotBootstrapper::read_network_config(config_path.to_str().unwrap());
+        assert!(result.is_err());
+
+        if let Err(SnapshotBootstrapError::MalformedNetworkConfig(path, _)) = result {
+            assert_eq!(path, config_path);
+        } else {
+            panic!("Expected MalformedNetworkConfig error");
+        }
+    }
+
+    #[test]
+    fn test_corrupted_snapshots_json_fails_gracefully() {
+        let temp_dir = TempDir::new().unwrap();
+        let snapshots_path = temp_dir.path().join("snapshots.json");
+        let mut file = fs::File::create(&snapshots_path).unwrap();
+        file.write_all(b"[{\"epoch\": 500}").unwrap();
+
+        let result =
+            SnapshotBootstrapper::read_snapshots_metadata(snapshots_path.to_str().unwrap());
+        assert!(result.is_err());
+
+        if let Err(SnapshotBootstrapError::MalformedSnapshotsFile(path, _)) = result {
+            assert_eq!(path, snapshots_path);
+        } else {
+            panic!("Expected MalformedSnapshotsFile error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_download_creates_partial_file_then_renames() {
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("snapshot.cbor");
+
+        let result = SnapshotBootstrapper::download_snapshot(
+            "https://invalid-url.com/snapshot.cbor.gz",
+            output_path.to_str().unwrap(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!output_path.exists());
     }
 }

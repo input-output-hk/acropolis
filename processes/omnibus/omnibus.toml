@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [startup]
-method = "genesis"  # Options: "genesis" | "snapshot"
+method = "mithril"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================

@@ -1,6 +1,6 @@
 # Bootstrapping from a Snapshot file
 
-We can boot an Acropolis node either from geneis and replay all of the blocks up to
+We can boot an Acropolis node either from genesis and replay all of the blocks up to
 some point, or we can boot from a snapshot file. This module provides the components
 needed to boot from a snapshot file.
 See [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) for the process that
@@ -12,7 +12,7 @@ that rely only on that epoch of data. We're also skipping some of the problemati
 eras and will typically boot from Conway around epoch 305, 306, and 307. It takes
 three epochs to have enough context to correctly calculate the rewards.
 
-The required data for boostrapping are:
+The required data for bootstrapping are:
 
 - snapshot files (each has an associated epoch number and point)
 - nonces
@@ -51,7 +51,7 @@ a network name of `preview`, the expected layout for configuration files would b
 * `data/preview/nonces.json`: a list of `InitialNonces` values,
 * `data/preview/headers.json`: a list of `Point`s.
 
-These files are loaded by [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
+These files are loaded by [snapshot_bootstrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
 during bootup.
 
 ## Bootstrapping sequence
@@ -72,7 +72,7 @@ for each of the three snapshot files. Loading occurs in this order:
 
 Modules in the system will have subscribed to the Startup message and also
 to individual structural data update messages before the
-boostrapper runs the above sequence. Upon receiving the `Startup` message,
+bootstrapper runs the above sequence. Upon receiving the `Startup` message,
 they will use data messages to populate their state, history (for BlockFrost),
 and any other state required to achieve readiness to operate on reception of
 the `GenesisCompleteMessage`.
@@ -82,9 +82,9 @@ the `GenesisCompleteMessage`.
 The bootstrapper will publish data as it parses the snapshot files, nonces, and
 headers. Snapshot parsing is done while streaming the data to keep the memory
 footprint lower. As elements of the file are parsed, callbacks provide the data
-to the boostrapper which publishes the data on the message bus.
+to the bootstrapper which publishes the data on the message bus.
 
-There are TODO markers in [snapshot_bootsrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
+There are TODO markers in [snapshot_bootstrapper](../../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
 that show where to add the
 publishing of the parsed snapshot data.
 
