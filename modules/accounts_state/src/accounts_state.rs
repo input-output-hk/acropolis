@@ -9,7 +9,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use bigdecimal::Zero;
-use caryatid_sdk::{message_bus::Subscription, module, Context, Module};
+use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::{join, sync::Mutex};

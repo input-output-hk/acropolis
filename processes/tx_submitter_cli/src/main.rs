@@ -7,7 +7,7 @@ use acropolis_common::{
 use acropolis_module_tx_submitter::TxSubmitter;
 use anyhow::{Result, bail};
 use caryatid_process::Process;
-use caryatid_sdk::{Context, Module, module};
+use caryatid_sdk::{Context, module};
 use clap::Parser;
 use config::{Config, File};
 use tokio::{fs, select, sync::mpsc};

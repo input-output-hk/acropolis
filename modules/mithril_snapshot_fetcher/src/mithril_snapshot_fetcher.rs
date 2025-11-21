@@ -7,7 +7,7 @@ use acropolis_common::{
     BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{

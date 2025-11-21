@@ -6,7 +6,7 @@ use acropolis_common::{
     validation::ValidationStatus,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use futures::future::try_join_all;
 use std::sync::Arc;

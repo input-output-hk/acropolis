@@ -5,7 +5,7 @@ use acropolis_common::{
     rest_helper::handle_rest_with_query_parameters,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;

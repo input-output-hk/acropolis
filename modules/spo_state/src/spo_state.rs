@@ -17,7 +17,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus, Era, PoolId,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
