@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::{Command, Message},
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use std::{str::FromStr, sync::Arc};
 use tracing::info;
