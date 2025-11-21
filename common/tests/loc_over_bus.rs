@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::{sync::watch, time::timeout};

@@ -20,8 +20,7 @@ publish-topic = "cardano.txs"
 ## Messages
 
 The block unpacker subscribes for RawBlockMessages on
-`cardano.block.proposed` (see the [Upstream Chain
-Fetcher](../upstream_chain_fetcher) module for details).  It unpacks
+`cardano.block.proposed` (see the [Consensus](../consensus) module for details).  It unpacks
 this into transactions, which it publishes as a single RawTxsMessage
 on `cardano.txs`, containing the block information and an ordered vector of
 raw transaction CBOR.  This ensure the transactions are kept in order.

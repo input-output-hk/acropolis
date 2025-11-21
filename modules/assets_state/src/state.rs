@@ -5,9 +5,9 @@ use std::collections::HashSet;
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     queries::assets::{AssetHistory, PolicyAssets},
-    Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadataStandard,
-    AssetMintRecord, AssetName, Datum, Lovelace, NativeAssetsDelta, PolicyAsset, PolicyId,
-    ShelleyAddress, TxIdentifier, TxUTxODeltas,
+    Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadata,
+    AssetMetadataStandard, AssetMintRecord, AssetName, Datum, Lovelace, NativeAssets,
+    NativeAssetsDelta, PolicyAsset, PolicyId, ShelleyAddress, TxIdentifier, TxUTxODeltas,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -143,10 +143,8 @@ impl State {
         // Overwrite asset metadata if an associated CIP68 reference token is found
         if let Some(ref_info) = self.resolve_cip68_metadata(asset_id, registry) {
             if let Some(info_mut) = info.as_mut() {
-                info_mut.onchain_metadata = ref_info.onchain_metadata;
-                info_mut.metadata_standard = ref_info.metadata_standard;
-            } else {
-                info = Some(ref_info);
+                info_mut.metadata.cip68_metadata = ref_info.metadata.cip68_metadata;
+                info_mut.metadata.cip68_version = ref_info.metadata.cip68_version;
             }
         }
 
@@ -240,6 +238,44 @@ impl State {
         Ok(Some(result))
     }
 
+    pub fn get_assets_metadata(
+        &self,
+        assets: &NativeAssets,
+        registry: &AssetRegistry,
+    ) -> Result<Option<Vec<AssetMetadata>>> {
+        if !self.config.store_info || !self.config.store_assets {
+            return Err(anyhow::anyhow!("asset info storage disabled in config"));
+        }
+
+        let mut out = Vec::new();
+
+        for (policy_id, policy_assets) in assets {
+            for asset in policy_assets {
+                let asset_id = match registry.lookup_id(policy_id, &asset.name) {
+                    Some(id) => id,
+                    None => {
+                        return Ok(None);
+                    }
+                };
+
+                let info = match self.info.as_ref().and_then(|map| map.get(&asset_id)) {
+                    Some(rec) => rec,
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "asset info missing in state for {}:{}",
+                            hex::encode(policy_id),
+                            hex::encode(asset.name.as_slice())
+                        ));
+                    }
+                };
+
+                out.push(info.metadata.clone());
+            }
+        }
+
+        Ok(Some(out))
+    }
+
     pub fn tick(&self) -> Result<()> {
         if let Some(supply) = &self.supply {
             self.log_assets(supply.len());
@@ -312,8 +348,12 @@ impl State {
                             .or_insert(AssetInfoRecord {
                                 initial_mint_tx: *tx_identifier,
                                 mint_or_burn_count: 1,
-                                onchain_metadata: None,
-                                metadata_standard: None,
+                                metadata: AssetMetadata {
+                                    cip25_metadata: None,
+                                    cip25_version: None,
+                                    cip68_metadata: None,
+                                    cip68_version: None,
+                                },
                             });
                     }
 
@@ -525,8 +565,8 @@ impl State {
                         if let Some(asset_id) = registry.lookup_id(&policy_id, &asset_name) {
                             if let Ok(metadata_raw) = serde_cbor::to_vec(&metadata_val) {
                                 if let Some(record) = info_map.get_mut(&asset_id) {
-                                    record.onchain_metadata = Some(metadata_raw);
-                                    record.metadata_standard = Some(standard);
+                                    record.metadata.cip25_metadata = Some(metadata_raw);
+                                    record.metadata.cip25_version = Some(standard);
                                 }
                             }
                         }
@@ -554,6 +594,21 @@ impl State {
                     continue;
                 };
 
+                let mut cip68_version = Some(AssetMetadataStandard::CIP68v1);
+
+                if let Ok(serde_cbor::Value::Map(m)) =
+                    serde_cbor::from_slice::<serde_cbor::Value>(blob)
+                {
+                    let version_key = serde_cbor::Value::Text("version".to_string());
+
+                    if let Some(serde_cbor::Value::Text(ver)) = m.get(&version_key) {
+                        cip68_version = match ver.as_str() {
+                            "2.0" => Some(AssetMetadataStandard::CIP68v2),
+                            _ => Some(AssetMetadataStandard::CIP68v1),
+                        };
+                    }
+                }
+
                 for (policy_id, native_assets) in &output.value.assets {
                     for asset in native_assets {
                         let name = &asset.name;
@@ -562,13 +617,13 @@ impl State {
                             continue;
                         }
 
-                        // NOTE: CIP68 metadata version is included in the blob and is decoded in REST handler
                         match registry.lookup_id(policy_id, name) {
                             Some(asset_id) => {
                                 if let Some(record) =
                                     new_info.as_mut().and_then(|m| m.get_mut(&asset_id))
                                 {
-                                    record.onchain_metadata = Some(blob.clone());
+                                    record.metadata.cip68_metadata = Some(blob.clone());
+                                    record.metadata.cip68_version = cip68_version;
                                 }
                             }
                             None => {
@@ -607,8 +662,8 @@ impl State {
         match label {
             CIP68_LABEL_100 => self.info.as_ref()?.get(asset_id).cloned().map(|mut rec| {
                 // Hide metadata on the reference itself (Per Blockfrost spec)
-                rec.onchain_metadata = None;
-                rec.metadata_standard = None;
+                rec.metadata.cip68_metadata = None;
+                rec.metadata.cip68_version = None;
                 rec
             }),
 
@@ -631,13 +686,14 @@ mod tests {
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
-        state::{AssetsStorageConfig, State, StoreTransactions},
+        state::{AssetsStorageConfig, State, StoreTransactions, CIP67_LABEL_222, CIP68_LABEL_100},
     };
     use acropolis_common::{
-        Address, AddressDelta, AssetInfoRecord, AssetMetadataStandard, AssetName, Datum,
-        NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
+        Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName,
+        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
         TxUTxODeltas, UTxOIdentifier, Value,
     };
+    use serde_cbor::Value as CborValue;
 
     fn dummy_policy(byte: u8) -> PolicyId {
         [byte; 28]
@@ -998,10 +1054,10 @@ mod tests {
         let record = info.get(&asset_id).unwrap();
 
         // Onchain metadata has been set
-        assert!(record.onchain_metadata.is_some());
+        assert!(record.metadata.cip25_metadata.is_some());
         // Metadata standard defaults to v1 if not present in map
         assert_eq!(
-            record.metadata_standard,
+            record.metadata.cip25_version,
             Some(AssetMetadataStandard::CIP25v1)
         );
     }
@@ -1028,10 +1084,10 @@ mod tests {
         let record = info.get(&asset_id).unwrap();
 
         // Onchain metadata has been set
-        assert!(record.onchain_metadata.is_some());
+        assert!(record.metadata.cip25_metadata.is_some());
         // Metadata standard set to v2 when present in map
         assert_eq!(
-            record.metadata_standard,
+            record.metadata.cip25_version,
             Some(AssetMetadataStandard::CIP25v2)
         );
     }
@@ -1059,7 +1115,7 @@ mod tests {
 
         // Metadata for known asset unchanged by unknown asset
         assert!(
-            record.onchain_metadata.is_none(),
+            record.metadata.cip25_metadata.is_none(),
             "unknown asset should not update records"
         );
     }
@@ -1085,12 +1141,12 @@ mod tests {
 
         // Metadata not set when CBOR is invalid
         assert!(
-            record.onchain_metadata.is_none(),
+            record.metadata.cip25_metadata.is_none(),
             "invalid CBOR should be ignored"
         );
         // Metadata standard not set when CBOR is invalid
         assert!(
-            record.metadata_standard.is_none(),
+            record.metadata.cip25_version.is_none(),
             "invalid CBOR should not set a standard"
         );
     }
@@ -1124,7 +1180,7 @@ mod tests {
         let record = info.get(&reference_id).expect("record should exist");
 
         // Onchain metadata set when asset already exists and TxOutput with inline datum is processed
-        assert_eq!(record.onchain_metadata, Some(datum_blob));
+        assert_eq!(record.metadata.cip68_metadata, Some(datum_blob));
     }
 
     #[test]
@@ -1156,7 +1212,7 @@ mod tests {
         let record = info.get(&normal_id).expect("non reference asset should exist");
 
         // Onchain metadata not updated for non reference asset
-        assert_eq!(record.onchain_metadata, None);
+        assert_eq!(record.metadata.cip68_metadata, None);
     }
 
     #[test]
@@ -1223,8 +1279,48 @@ mod tests {
 
         // Metadata not populated for inputs or outputs without inline datum
         assert!(
-            record.onchain_metadata.is_none(),
+            record.metadata.cip68_metadata.is_none(),
             "inputs and outputs without datums should both be ignored"
+        );
+    }
+
+    #[test]
+    fn handle_cip68_version_detection() {
+        let mut registry = AssetRegistry::new();
+        let policy_id: PolicyId = [7u8; 28];
+
+        let (state, asset_id, name) = setup_state_with_asset(
+            &mut registry,
+            policy_id,
+            &[0x00, 0x06, 0x43, 0xb0, 0xAA],
+            true,
+            false,
+            StoreTransactions::None,
+        );
+
+        let mut map = BTreeMap::new();
+        map.insert(
+            CborValue::Text("version".to_string()),
+            CborValue::Text("2.0".to_string()),
+        );
+
+        let datum = serde_cbor::to_vec(&CborValue::Map(map)).unwrap();
+
+        let output = make_output(policy_id, name, Some(datum.clone()));
+
+        let tx = TxUTxODeltas {
+            tx_identifier: TxIdentifier::new(0, 0),
+            inputs: vec![],
+            outputs: vec![output],
+        };
+        let new_state = state.handle_cip68_metadata(&[tx], &registry).unwrap();
+        let record = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
+
+        // CIP68 version should be v2
+        assert_eq!(
+            record.metadata.cip68_version,
+            Some(AssetMetadataStandard::CIP68v2),
+            "CIP68 version should be set as CIP68v2"
         );
     }
 
@@ -1244,8 +1340,8 @@ mod tests {
 
         let mut info = state.info.take().unwrap();
         let rec = info.get_mut(&ref_id).unwrap();
-        rec.onchain_metadata = Some(vec![1, 2, 3]);
-        rec.metadata_standard = Some(AssetMetadataStandard::CIP68v1);
+        rec.metadata.cip68_metadata = Some(vec![1, 2, 3]);
+        rec.metadata.cip68_version = Some(AssetMetadataStandard::CIP68v1);
         state.info = Some(info);
 
         state.supply = Some(imbl::HashMap::new());
@@ -1257,59 +1353,57 @@ mod tests {
         // Supply unchanged
         assert_eq!(supply, 42);
         // Metadata removed for reference asset
-        assert!(rec.onchain_metadata.is_none());
+        assert!(rec.metadata.cip68_metadata.is_none());
         // Metadata standard removed for reference asset
-        assert!(rec.metadata_standard.is_none());
+        assert!(rec.metadata.cip68_version.is_none());
     }
 
     #[test]
-    fn resolve_cip68_metadata_overwrites_cip25_user_token_metadata() {
+    fn get_asset_info_resolves_user_token_metadata_from_reference_nft() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [10u8; 28];
+        let policy_id: PolicyId = [5u8; 28];
+        let asset_name = [0x53, 0x4E, 0x45, 0x4B];
 
-        let user_name = AssetName::new(&[0x00, 0x0d, 0xe1, 0x40, 0xaa]).unwrap();
-        let user_id = registry.get_or_insert(policy_id, user_name);
+        let mut user_name = CIP67_LABEL_222.to_vec();
+        user_name.extend_from_slice(&asset_name);
+        let user_token_name = AssetName::new(&user_name).unwrap();
+        let user_token_id = registry.get_or_insert(policy_id, user_token_name);
 
-        let mut ref_bytes = user_name.as_slice().to_vec();
-        ref_bytes[0..4].copy_from_slice(&[0x00, 0x06, 0x43, 0xb0]);
-        let ref_name = AssetName::new(&ref_bytes).unwrap();
-        let ref_id = registry.get_or_insert(policy_id, ref_name);
+        let mut reference_name = CIP68_LABEL_100.to_vec();
+        reference_name.extend_from_slice(&asset_name);
+        let reference_nft_name = AssetName::new(&reference_name).unwrap();
+        let reference_id = registry.get_or_insert(policy_id, reference_nft_name);
 
-        let mut state = State::new(AssetsStorageConfig {
-            store_info: true,
-            store_assets: true,
-            ..Default::default()
-        });
-        let mut info_map = imbl::HashMap::new();
+        let mut state = State::new(full_config());
+        state.info.as_mut().unwrap().insert(
+            reference_id,
+            AssetInfoRecord {
+                initial_mint_tx: dummy_tx_identifier(0),
+                mint_or_burn_count: 0,
+                metadata: AssetMetadata {
+                    cip25_metadata: None,
+                    cip25_version: None,
+                    cip68_metadata: Some(vec![1, 2, 3]),
+                    cip68_version: Some(AssetMetadataStandard::CIP68v1),
+                },
+            },
+        );
 
-        let user_record = AssetInfoRecord {
-            onchain_metadata: Some(vec![1, 2, 3]),
-            metadata_standard: Some(AssetMetadataStandard::CIP25v1),
-            ..Default::default()
-        };
-        info_map.insert(user_id, user_record);
+        let resolved = state.resolve_cip68_metadata(&user_token_id, &registry);
 
-        let ref_record = AssetInfoRecord {
-            onchain_metadata: Some(vec![9, 9, 9]),
-            metadata_standard: Some(AssetMetadataStandard::CIP68v2),
-            ..Default::default()
-        };
-        info_map.insert(ref_id, ref_record);
+        let record = resolved.expect("User token should resolve to reference NFT metadata");
 
-        state.info = Some(info_map);
+        assert_eq!(
+            record.metadata.cip68_metadata,
+            Some(vec![1, 2, 3]),
+            "User token should inherit CIP68 metadata from reference NFT"
+        );
 
-        state.supply = Some(imbl::HashMap::new());
-        state.supply.as_mut().unwrap().insert(user_id, 100);
-
-        let result = state.get_asset_info(&user_id, &registry).unwrap().unwrap();
-        let (supply, rec) = result;
-
-        // User asset supply unchanged
-        assert_eq!(supply, 100);
-        // User asset metadata overwritten with reference token metadata
-        assert_eq!(rec.onchain_metadata, Some(vec![9, 9, 9]));
-        // User asset metadata standard overwritten with reference token metadata standard
-        assert_eq!(rec.metadata_standard, Some(AssetMetadataStandard::CIP68v2));
+        assert_eq!(
+            record.metadata.cip68_version,
+            Some(AssetMetadataStandard::CIP68v1),
+            "User token should inherit CIP68 version from reference NFT"
+        );
     }
 
     #[test]

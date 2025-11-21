@@ -25,12 +25,12 @@ use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
+use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
-use acropolis_module_upstream_chain_fetcher::UpstreamChainFetcher;
 use acropolis_module_utxo_state::UTXOState;
 
 use caryatid_module_clock::Clock;
@@ -56,7 +56,7 @@ fn setup_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     tracing::info!("Collecting");
     GenesisBootstrapper::register(process);
     MithrilSnapshotFetcher::register(process);
-    UpstreamChainFetcher::register(process);
+    PeerNetworkInterface::register(process);
     BlockUnpacker::register(process);
     TxUnpacker::register(process);
     UTXOState::register(process);
@@ -83,7 +83,7 @@ fn setup_alonzo_governance_collect(process: &mut dyn ModuleRegistry<Message>) {
     tracing::info!("Collecting");
     GenesisBootstrapper::register(process);
     MithrilSnapshotFetcher::register(process);
-    UpstreamChainFetcher::register(process);
+    PeerNetworkInterface::register(process);
     BlockUnpacker::register(process);
     TxUnpacker::register(process);
     /*

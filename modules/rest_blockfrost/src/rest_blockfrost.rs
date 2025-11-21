@@ -8,7 +8,7 @@ use acropolis_common::{
     rest_helper::{handle_rest_with_path_and_query_parameters, handle_rest_with_path_parameter},
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use tracing::info;
 

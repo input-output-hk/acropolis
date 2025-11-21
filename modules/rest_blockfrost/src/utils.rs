@@ -166,4 +166,54 @@ mod tests {
             Ok(())
         );
     }
+
+    fn policy_bytes() -> [u8; 28] {
+        [0u8; 28]
+    }
+
+    #[test]
+    fn invalid_hex_string() {
+        let result = split_policy_and_asset("zzzz");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(
+            err.message(),
+            "Invalid hex string: Invalid character 'z' at position 0"
+        );
+    }
+
+    #[test]
+    fn too_short_input() {
+        let hex_str = hex::encode([1u8, 2, 3]);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
+    }
+
+    #[test]
+    fn invalid_asset_name_too_long() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend(vec![0u8; 33]);
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
+    }
+
+    #[test]
+    fn valid_policy_and_asset() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend_from_slice(b"MyToken");
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_ok());
+        let (policy, name) = result.unwrap();
+        assert_eq!(policy, policy_bytes());
+        assert_eq!(name.as_slice(), b"MyToken");
+    }
 }

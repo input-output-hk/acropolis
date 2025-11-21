@@ -1,7 +1,7 @@
 use crate::queries::errors::QueryError;
 use crate::{
-    AssetAddressEntry, AssetInfoRecord, AssetMintRecord, AssetName, PolicyAsset, PolicyId,
-    TxIdentifier,
+    AssetAddressEntry, AssetInfoRecord, AssetMetadata, AssetMintRecord, AssetName, NativeAssets,
+    PolicyAsset, PolicyId, TxIdentifier,
 };
 
 pub const DEFAULT_ASSETS_QUERY_TOPIC: (&str, &str) =
@@ -27,6 +27,7 @@ pub enum AssetsStateQuery {
     GetPolicyIdAssets { policy: PolicyId },
     GetAssetAddresses { policy: PolicyId, name: AssetName },
     GetAssetTransactions { policy: PolicyId, name: AssetName },
+    GetAssetsMetadata { assets: NativeAssets },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -37,5 +38,6 @@ pub enum AssetsStateQueryResponse {
     AssetAddresses(AssetAddresses),
     AssetTransactions(AssetTransactions),
     PolicyIdAssets(PolicyAssets),
+    AssetsMetadata(Vec<AssetMetadata>),
     Error(QueryError),
 }

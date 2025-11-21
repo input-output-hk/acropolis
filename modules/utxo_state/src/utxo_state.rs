@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 
 use acropolis_common::queries::errors::QueryError;
 use anyhow::{anyhow, Result};

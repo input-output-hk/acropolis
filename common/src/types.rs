@@ -2121,8 +2121,15 @@ pub struct TxCertificateWithPos {
 pub struct AssetInfoRecord {
     pub initial_mint_tx: TxIdentifier,
     pub mint_or_burn_count: u64,
-    pub onchain_metadata: Option<Vec<u8>>,
-    pub metadata_standard: Option<AssetMetadataStandard>,
+    pub metadata: AssetMetadata,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetMetadata {
+    pub cip25_metadata: Option<Vec<u8>>,
+    pub cip25_version: Option<AssetMetadataStandard>,
+    pub cip68_metadata: Option<Vec<u8>>,
+    pub cip68_version: Option<AssetMetadataStandard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
