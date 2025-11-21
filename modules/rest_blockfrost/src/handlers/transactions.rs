@@ -371,7 +371,7 @@ impl Serialize for TxRelay {
     {
         match &self.0 {
             Relay::SingleHostAddr(addr) => {
-                let mut state = serializer.serialize_struct("TxRelay", 3)?;
+                let mut state = serializer.serialize_struct("TxRelay", 5)?;
                 state.serialize_field("ipv4", &addr.ipv4)?;
                 state.serialize_field("ipv6", &addr.ipv6)?;
                 state.serialize_field("dns", &None::<String>)?;
@@ -380,7 +380,7 @@ impl Serialize for TxRelay {
                 state.end()
             }
             Relay::SingleHostName(name) => {
-                let mut state = serializer.serialize_struct("TxRelay", 2)?;
+                let mut state = serializer.serialize_struct("TxRelay", 5)?;
                 state.serialize_field("ipv4", &None::<Ipv4Addr>)?;
                 state.serialize_field("ipv6", &None::<Ipv6Addr>)?;
                 state.serialize_field("dns", &name.dns_name)?;
@@ -389,7 +389,7 @@ impl Serialize for TxRelay {
                 state.end()
             }
             Relay::MultiHostName(name) => {
-                let mut state = serializer.serialize_struct("TxRelay", 1)?;
+                let mut state = serializer.serialize_struct("TxRelay", 5)?;
                 state.serialize_field("ipv4", &None::<Ipv4Addr>)?;
                 state.serialize_field("ipv6", &None::<Ipv6Addr>)?;
                 state.serialize_field("dns", &name.dns_name)?;
