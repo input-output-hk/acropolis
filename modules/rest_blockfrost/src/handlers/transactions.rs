@@ -8,7 +8,7 @@ use acropolis_common::{
         parameters::{ParametersStateQuery, ParametersStateQueryResponse},
         transactions::{
             TransactionDelegationCertificate, TransactionInfo, TransactionMIR,
-            TransactionMetadataItem, TransactionPoolRetirementCertificate,
+            TransactionMetadataItem, TransactionOutputAmount, TransactionPoolRetirementCertificate,
             TransactionPoolUpdateCertificate, TransactionStakeCertificate, TransactionWithdrawal,
             TransactionsStateQuery, TransactionsStateQueryResponse,
         },
@@ -43,7 +43,10 @@ impl Serialize for TxInfo {
         state.serialize_field("block_time", &self.0.block_time)?;
         state.serialize_field("slot", &self.0.slot)?;
         state.serialize_field("index", &self.0.index)?;
-        state.serialize_field("output_amount", &self.0.output_amounts)?;
+        state.serialize_field(
+            "output_amount",
+            &self.0.output_amounts.clone().into_iter().map(TxOutputAmount).collect::<Vec<_>>(),
+        )?;
         state.serialize_field("fees", &self.1.to_string())?;
         state.serialize_field("deposit", &self.2.to_string())?;
         state.serialize_field("size", &self.0.size)?;
@@ -59,6 +62,28 @@ impl Serialize for TxInfo {
         state.serialize_field("asset_mint_or_burn_count", &self.0.asset_mint_or_burn_count)?;
         state.serialize_field("redeemer_count", &self.0.redeemer_count)?;
         state.serialize_field("valid_contract", &self.0.valid_contract)?;
+        state.end()
+    }
+}
+
+struct TxOutputAmount(TransactionOutputAmount);
+
+impl Serialize for TxOutputAmount {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("TransactionOutputAmount", 2)?;
+        match &self.0 {
+            TransactionOutputAmount::Lovelace(lovelace) => {
+                state.serialize_field("unit", "lovelace")?;
+                state.serialize_field("quantity", &lovelace.to_string())?;
+            }
+            TransactionOutputAmount::Asset(asset) => {
+                state.serialize_field("unit", &asset.name)?;
+                state.serialize_field("quantity", &asset.amount.to_string())?;
+            }
+        }
         state.end()
     }
 }

@@ -2,8 +2,6 @@ use crate::{
     BlockHash, InstantaneousRewardSource, Lovelace, Metadata, NativeAsset, PoolId,
     PoolRegistration, StakeAddress, TxHash,
 };
-use serde::ser::{Serialize, SerializeStruct, Serializer};
-use serde_with::serde_as;
 
 pub const DEFAULT_TRANSACTIONS_QUERY_TOPIC: (&str, &str) = (
     "transactions-state-query-topic",
@@ -47,33 +45,12 @@ pub enum TransactionsStateQueryResponse {
     Error(QueryError),
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TransactionOutputAmount {
     Lovelace(Lovelace),
     Asset(NativeAsset),
 }
 
-impl Serialize for TransactionOutputAmount {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("TransactionOutputAmount", 2)?;
-        match self {
-            TransactionOutputAmount::Lovelace(lovelace) => {
-                state.serialize_field("unit", "lovelace")?;
-                state.serialize_field("quantity", &lovelace.to_string())?;
-            }
-            TransactionOutputAmount::Asset(asset) => {
-                state.serialize_field("unit", &asset.name)?;
-                state.serialize_field("quantity", &asset.amount.to_string())?;
-            }
-        }
-        state.end()
-    }
-}
-
-#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionInfo {
     pub hash: TxHash,
