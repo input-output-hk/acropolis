@@ -16,7 +16,6 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
-tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lib]
