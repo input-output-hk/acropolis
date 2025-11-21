@@ -50,31 +50,21 @@ pub fn validate_time_to_live(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{test_utils::TestContext, validation_fixture};
     use pallas::{codec, ledger::primitives::alonzo::MintedTx as AlonzoMintedTx};
+    use test_case::test_case;
 
-    #[test]
-    fn test_ttl() {
-        let cbor_bytes = hex::decode(include_str!("tests/data/transactions/20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e/tx.cbor")).unwrap();
-        let mtx = codec::minicbor::decode::<AlonzoMintedTx>(&cbor_bytes).unwrap();
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+        matches Ok(());
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "invalid-ttl") =>
+        matches Err(TransactionValidationError::ExpiredUTxO { ttl: 7084747, current_slot: 7084748 });
+    )]
+    fn shelley_test(
+        (ctx, raw_tx): (TestContext, Vec<u8>),
+    ) -> Result<(), TransactionValidationError> {
+        let mtx = codec::minicbor::decode::<AlonzoMintedTx>(&raw_tx).unwrap();
         let metx = MultiEraTx::from_alonzo_compatible(&mtx, PallasEra::Shelley);
-
-        let result = validate_shelley_tx(&metx, 7084748);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_invalid_ttl() {
-        let cbor_bytes = hex::decode(include_str!("tests/data/transactions/20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e/invalid-ttl/tx.cbor")).unwrap();
-        let mtx = codec::minicbor::decode::<AlonzoMintedTx>(&cbor_bytes).unwrap();
-        let metx = MultiEraTx::from_alonzo_compatible(&mtx, PallasEra::Shelley);
-
-        let result = validate_shelley_tx(&metx, 7084748);
-        assert_eq!(
-            result.err().unwrap(),
-            TransactionValidationError::ExpiredUTxO {
-                ttl: 7084747,
-                current_slot: 7084748
-            }
-        );
+        validate_shelley_tx(&metx, ctx.current_slot)
     }
 }

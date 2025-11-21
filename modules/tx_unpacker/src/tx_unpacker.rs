@@ -22,6 +22,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 mod utxo_registry;
 mod validations;
 use crate::utxo_registry::UTxORegistry;
+mod test_utils;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.utxos";
