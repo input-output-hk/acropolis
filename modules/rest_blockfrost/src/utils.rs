@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use acropolis_common::{rest_error::RESTError, AssetName, PolicyId};
 use anyhow::Result;
 use blake2::digest::{Update, VariableOutput};
 use reqwest::Client;
@@ -83,6 +84,29 @@ pub fn verify_pool_metadata_hash(
 fn invalid_size_desc<T: std::fmt::Display>(e: T) -> String {
     format!("Invalid size for hashing pool metadata json {e}")
 }
+
+pub fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
+    let decoded = hex::decode(hex_str)?;
+
+    if decoded.len() < 28 {
+        return Err(RESTError::BadRequest(
+            "Asset identifier must be at least 28 bytes".to_string(),
+        ));
+    }
+
+    let (policy_part, asset_part) = decoded.split_at(28);
+
+    let policy_id: PolicyId = policy_part
+        .try_into()
+        .map_err(|_| RESTError::BadRequest("Policy id must be 28 bytes".to_string()))?;
+
+    let asset_name = AssetName::new(asset_part).ok_or_else(|| {
+        RESTError::BadRequest("Asset name must be less than 32 bytes".to_string())
+    })?;
+
+    Ok((policy_id, asset_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +165,55 @@ mod tests {
             verify_pool_metadata_hash(&pool_metadata, &expected_hash_as_arr),
             Ok(())
         );
+    }
+
+    fn policy_bytes() -> [u8; 28] {
+        [0u8; 28]
+    }
+
+    #[test]
+    fn invalid_hex_string() {
+        let result = split_policy_and_asset("zzzz");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(
+            err.message(),
+            "Invalid hex string: Invalid character 'z' at position 0"
+        );
+    }
+
+    #[test]
+    fn too_short_input() {
+        let hex_str = hex::encode([1u8, 2, 3]);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
+    }
+
+    #[test]
+    fn invalid_asset_name_too_long() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend(vec![0u8; 33]);
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.status_code(), 400);
+        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
+    }
+
+    #[test]
+    fn valid_policy_and_asset() {
+        let mut bytes = policy_bytes().to_vec();
+        bytes.extend_from_slice(b"MyToken");
+        let hex_str = hex::encode(bytes);
+        let result = split_policy_and_asset(&hex_str);
+        assert!(result.is_ok());
+        let (policy, name) = result.unwrap();
+        assert_eq!(policy, policy_bytes());
+        assert_eq!(name.as_slice(), b"MyToken");
     }
 }
