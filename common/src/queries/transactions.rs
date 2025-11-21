@@ -62,11 +62,11 @@ impl Serialize for TransactionOutputAmount {
         match self {
             TransactionOutputAmount::Lovelace(lovelace) => {
                 state.serialize_field("unit", "lovelace")?;
-                state.serialize_field("amount", &lovelace.to_string())?;
+                state.serialize_field("quantity", &lovelace.to_string())?;
             }
             TransactionOutputAmount::Asset(asset) => {
                 state.serialize_field("unit", &asset.name)?;
-                state.serialize_field("amount", &asset.amount.to_string())?;
+                state.serialize_field("quantity", &asset.amount.to_string())?;
             }
         }
         state.end()

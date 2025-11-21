@@ -22,7 +22,10 @@ use serde::{
     ser::{Error, SerializeMap, SerializeSeq, SerializeStruct},
     Serialize, Serializer,
 };
-use std::sync::Arc;
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 use crate::handlers_config::HandlersConfig;
 
@@ -36,8 +39,8 @@ impl Serialize for TxInfo {
         let mut state = serializer.serialize_struct("TxInfo", 22)?;
         state.serialize_field("hash", &self.0.hash)?;
         state.serialize_field("block", &self.0.block_hash)?;
-        state.serialize_field("height", &self.0.block_number)?;
-        state.serialize_field("time", &self.0.block_time)?;
+        state.serialize_field("block_height", &self.0.block_number)?;
+        state.serialize_field("block_time", &self.0.block_time)?;
         state.serialize_field("slot", &self.0.slot)?;
         state.serialize_field("index", &self.0.index)?;
         state.serialize_field("output_amount", &self.0.output_amounts)?;
@@ -45,7 +48,7 @@ impl Serialize for TxInfo {
         state.serialize_field("deposit", &self.2.to_string())?;
         state.serialize_field("size", &self.0.size)?;
         state.serialize_field("invalid_before", &self.0.invalid_before)?;
-        state.serialize_field("invalid_after", &self.0.invalid_after)?;
+        state.serialize_field("invalid_hereafter", &self.0.invalid_after)?;
         state.serialize_field("utxo_count", &self.0.utxo_count)?;
         state.serialize_field("withdrawal_count", &self.0.withdrawal_count)?;
         state.serialize_field("mir_cert_count", &self.0.mir_cert_count)?;
@@ -185,7 +188,7 @@ impl Serialize for TxStake {
             return Err(S::Error::custom("Can't stringify address"));
         };
         let mut state = serializer.serialize_struct("TxStake", 3)?;
-        state.serialize_field("index", &self.0.index)?;
+        state.serialize_field("cert_index", &self.0.index)?;
         state.serialize_field("address", &address)?;
         state.serialize_field("registration", &self.0.registration)?;
         state.end()
@@ -231,7 +234,7 @@ impl Serialize for TxDelegation {
             return Err(S::Error::custom("Can't stringify address"));
         };
         let mut state = serializer.serialize_struct("TxDelegation", 4)?;
-        state.serialize_field("index", &self.0.index)?;
+        state.serialize_field("cert_index", &self.0.index)?;
         state.serialize_field("address", &address)?;
         state.serialize_field("pool_id", &self.0.pool_id.to_string())?;
         state.serialize_field("active_epoch", &self.0.active_epoch)?;
@@ -323,8 +326,8 @@ impl Serialize for TxMIR {
             return Err(S::Error::custom("Can't stringify address"));
         };
         let mut state = serializer.serialize_struct("TxMIR", 4)?;
-        state.serialize_field("cert_index", &self.0.cert_index)?;
         state.serialize_field("pot", &self.0.pot.to_string().to_lowercase())?;
+        state.serialize_field("cert_index", &self.0.cert_index)?;
         state.serialize_field("address", &address)?;
         state.serialize_field("amount", &self.0.amount.to_string())?;
         state.end()
@@ -371,18 +374,27 @@ impl Serialize for TxRelay {
                 let mut state = serializer.serialize_struct("TxRelay", 3)?;
                 state.serialize_field("ipv4", &addr.ipv4)?;
                 state.serialize_field("ipv6", &addr.ipv6)?;
+                state.serialize_field("dns", &None::<String>)?;
+                state.serialize_field("dns_srv", &None::<String>)?;
                 state.serialize_field("port", &addr.port)?;
                 state.end()
             }
             Relay::SingleHostName(name) => {
                 let mut state = serializer.serialize_struct("TxRelay", 2)?;
+                state.serialize_field("ipv4", &None::<Ipv4Addr>)?;
+                state.serialize_field("ipv6", &None::<Ipv6Addr>)?;
                 state.serialize_field("dns", &name.dns_name)?;
+                state.serialize_field("dns_srv", &None::<String>)?;
                 state.serialize_field("port", &name.port)?;
                 state.end()
             }
             Relay::MultiHostName(name) => {
                 let mut state = serializer.serialize_struct("TxRelay", 1)?;
+                state.serialize_field("ipv4", &None::<Ipv4Addr>)?;
+                state.serialize_field("ipv6", &None::<Ipv6Addr>)?;
                 state.serialize_field("dns", &name.dns_name)?;
+                state.serialize_field("dns_srv", &None::<String>)?;
+                state.serialize_field("port", &None::<u16>)?;
                 state.end()
             }
         }
@@ -469,7 +481,7 @@ impl Serialize for TxPoolRetirementCertificate {
         let mut state = serializer.serialize_struct("TxPoolUpdateCertificate", 3)?;
         state.serialize_field("cert_index", &self.0.cert_index)?;
         state.serialize_field("pool_id", &self.0.pool_id.to_string())?;
-        state.serialize_field("retirement_epoch", &self.0.retirement_epoch)?;
+        state.serialize_field("retiring_epoch", &self.0.retirement_epoch)?;
         state.end()
     }
 }
