@@ -78,14 +78,35 @@ impl NetworkManager {
 
     pub async fn run(mut self) -> Result<()> {
         while let Some(event) = self.events.recv().await {
-            match event {
-                NetworkEvent::PeerUpdate { peer, event } => {
-                    self.handle_peer_update(peer, event);
-                    self.publish_blocks().await?;
+            self.on_network_event(event).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn on_network_event(&mut self, event: NetworkEvent) -> Result<()> {
+        match event {
+            NetworkEvent::PeerUpdate { peer, event } => {
+                self.handle_peer_update(peer, event);
+                self.publish_blocks().await?;
+            }
+            NetworkEvent::SyncPointUpdate { point } => {
+                self.chain = ChainState::new();
+
+                for peer in self.peers.values_mut() {
+                    peer.reqs.clear();
                 }
+
+                if let Point::Specific(slot, _) = point {
+                    let (epoch, _) = self.block_sink.genesis_values.slot_to_epoch(slot);
+                    self.block_sink.last_epoch = Some(epoch);
+                }
+
+                self.sync_to_point(point);
             }
         }
-        bail!("event sink closed")
+
+        Ok(())
     }
 
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) {
@@ -235,6 +256,7 @@ impl NetworkManager {
 
 pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
+    SyncPointUpdate { point: Point },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

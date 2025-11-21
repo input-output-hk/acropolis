@@ -1,0 +1,22 @@
+# Acropolis indexer module
+
+[package]
+name = "acropolis_module_indexer"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Core indexer logic"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
+tracing = { workspace = true }
+
+[lib]
+path = "src/indexer.rs"
