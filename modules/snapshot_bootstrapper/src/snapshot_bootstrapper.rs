@@ -12,7 +12,7 @@ use acropolis_common::{
         StreamingSnapshotParser,
     },
     stake_addresses::AccountState,
-    BlockHash, BlockInfo, BlockStatus, Era, GenesisDelegates,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, GenesisDelegates,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
@@ -68,6 +68,7 @@ impl SnapshotHandler {
         // This represents the last block included in the snapshot
         Ok(BlockInfo {
             status: BlockStatus::Immutable, // Snapshot blocks are immutable
+            intent: BlockIntent::Apply,     // Assume snapshot blocks are valid
             slot: 0,                        // TODO: Extract from snapshot metadata if available
             number: 0,                      // TODO: Extract from snapshot metadata if available
             hash: BlockHash::default(),     // TODO: Extract from snapshot metadata if available

@@ -121,7 +121,7 @@ mod tests {
     use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
-        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash,
+        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockIntent, BlockStatus, GenesisKeyhash,
         ProtocolParamUpdate,
     };
     use anyhow::Result;
@@ -157,6 +157,7 @@ mod tests {
             let mut proposal = Vec::new();
             let blk = BlockInfo {
                 status: BlockStatus::Immutable,
+                intent: BlockIntent::Apply,
                 slot,
                 number: slot,
                 epoch,

@@ -8,8 +8,8 @@ use acropolis_common::{
         CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
         UTXODeltasMessage,
     },
-    Address, BlockHash, BlockInfo, BlockStatus, ByronAddress, Era, GenesisDelegates, Lovelace,
-    LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
+    Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
+    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -133,6 +133,7 @@ impl GenesisBootstrapper {
                 // Construct messages
                 let block_info = BlockInfo {
                     status: BlockStatus::Bootstrap,
+                    intent: BlockIntent::Apply,
                     slot: 0,
                     number: 0,
                     hash: BlockHash::default(),

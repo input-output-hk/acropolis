@@ -296,6 +296,7 @@ mod tests {
         let timestamp = block.wallclock(&genesis);
         BlockInfo {
             status: acropolis_common::BlockStatus::Immutable,
+            intent: acropolis_common::BlockIntent::Apply,
             slot: block.slot(),
             number: block.number(),
             hash: BlockHash::from(*block.hash()),

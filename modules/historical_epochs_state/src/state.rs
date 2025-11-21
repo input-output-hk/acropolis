@@ -107,7 +107,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{BlockHash, BlockStatus, Era, PoolId};
+    use acropolis_common::{BlockHash, BlockIntent, BlockStatus, Era, PoolId};
     use tempfile::TempDir;
 
     fn make_ea(epoch: u64) -> EpochActivityMessage {
@@ -131,6 +131,7 @@ mod tests {
     fn make_block_info(epoch: u64, new_epoch: bool) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 0,
             hash: BlockHash::default(),
             epoch_slot: 0,
