@@ -19,11 +19,11 @@ use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
-// use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
+use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_historical_epochs_state::HistoricalEpochsState;
-// use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
+use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
@@ -99,12 +99,34 @@ pub async fn main() -> Result<()> {
     );
 
     // Create the process
-    let mut process = Process::<Message>::create(config).await;
+    let mut process = Process::<Message>::create(config.clone()).await;
+
+    // Get startup method from config
+    let startup_method =
+        config.get_string("startup.method").unwrap_or_else(|_| "snapshot".to_string());
+
+    info!("Using startup method: {}", startup_method);
+
+    // Register bootstrap modules based on startup method
+    match startup_method.as_str() {
+        "genesis" => {
+            info!("Registering GenesisBootstrapper");
+            GenesisBootstrapper::register(&mut process);
+        }
+        "snapshot" => {
+            info!("Registering SnapshotBootstrapper");
+            SnapshotBootstrapper::register(&mut process);
+        }
+        _ => {
+            panic!(
+                "Invalid startup method: {}. Must be one of: genesis, snapshot",
+                startup_method
+            );
+        }
+    }
 
     // Register modules
-    // GenesisBootstrapper::register(&mut process);
-    // MithrilSnapshotFetcher::register(&mut process);
-    SnapshotBootstrapper::register(&mut process);
+    MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);

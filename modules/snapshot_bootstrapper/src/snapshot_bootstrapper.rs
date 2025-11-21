@@ -1,4 +1,8 @@
-use std::{path::Path, str::FromStr, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+};
 
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -14,7 +18,7 @@ use acropolis_common::{
     stake_addresses::AccountState,
     BlockHash, BlockInfo, BlockStatus, Era, GenesisDelegates,
 };
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
 use caryatid_sdk::{module, Context, Module};
 use config::Config;
@@ -22,6 +26,7 @@ use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
+use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::BufReader;
 use tokio::time::Instant;
@@ -32,10 +37,48 @@ const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
 const DEFAULT_COMPLETION_TOPIC: &str = "cardano.sequence.bootstrapped";
 
+#[derive(Debug, Error)]
+pub enum SnapshotBootstrapError {
+    #[error("Cannot read network config file {0}: {1}")]
+    ReadNetworkConfig(PathBuf, io::Error),
+
+    #[error("Cannot read snapshots metadata file {0}: {1}")]
+    ReadSnapshotsFile(PathBuf, io::Error),
+
+    #[error("Failed to parse network config {0}: {1}")]
+    MalformedNetworkConfig(PathBuf, serde_json::Error),
+
+    #[error("Failed to parse snapshots JSON file {0}: {1}")]
+    MalformedSnapshotsFile(PathBuf, serde_json::Error),
+
+    #[error("Cannot create directory {0}: {1}")]
+    CreateDirectory(PathBuf, io::Error),
+
+    #[error("Failed to download snapshot from {0}: {1}")]
+    DownloadError(String, reqwest::Error),
+
+    #[error("Download failed from {0}: HTTP status {1}")]
+    DownloadInvalidStatusCode(String, reqwest::StatusCode),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+}
+
 /// Network configuration file (config.json)
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct NetworkConfig {
-    epochs: Vec<u64>,
+    snapshots: Vec<u64>,
+    points: Vec<Point>,
+}
+
+/// Point
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Point {
+    epoch: u64,
+    id: String,
+    slot: u64,
 }
 
 /// Snapshot metadata from snapshots.json
@@ -86,8 +129,6 @@ impl SnapshotHandler {
         let metadata =
             self.metadata.as_ref().ok_or_else(|| anyhow::anyhow!("No metadata available"))?;
 
-        // Create a synthetic BlockInfo representing the snapshot state
-        // This represents the last block included in the snapshot
         Ok(BlockInfo {
             status: BlockStatus::Immutable, // Snapshot blocks are immutable
             slot: 0,                        // TODO: Extract from snapshot metadata if available
@@ -112,25 +153,22 @@ impl SnapshotHandler {
             // Shelley mainnet genesis hash (placeholder - should be from config)
             shelley_genesis_hash: Hash::<32>::from_str(
                 "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
-            )
-            .unwrap(),
+            )?,
             genesis_delegs: GenesisDelegates::try_from(vec![]).unwrap(),
         })
     }
 
     async fn publish_start(&self) -> Result<()> {
-        anyhow::Context::context(
-            self.context
-                .message_bus
-                .publish(
-                    &self.snapshot_topic,
-                    Arc::new(Message::Snapshot(
-                        acropolis_common::messages::SnapshotMessage::Startup,
-                    )),
-                )
-                .await,
-            "Failed to publish start message",
-        )
+        self.context
+            .message_bus
+            .publish(
+                &self.snapshot_topic,
+                Arc::new(Message::Snapshot(
+                    acropolis_common::messages::SnapshotMessage::Startup,
+                )),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to publish start message: {}", e))
     }
 
     async fn publish_completion(
@@ -145,22 +183,20 @@ impl SnapshotHandler {
             }),
         ));
 
-        anyhow::Context::context(
-            self.context.message_bus.publish(&self.snapshot_topic, Arc::new(message)).await,
-            "Failed to publish completion",
-        )
+        self.context
+            .message_bus
+            .publish(&self.snapshot_topic, Arc::new(message))
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to publish completion: {}", e))
     }
 }
 
 impl UtxoCallback for SnapshotHandler {
     fn on_utxo(&mut self, _utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
-
-        // Log progress every million UTXOs
         if self.utxo_count.is_multiple_of(1_000_000) {
             info!("Processed {} UTXOs", self.utxo_count);
         }
-        // TODO: Accumulate UTXO data if needed or send in chunks to UTXOState processor
         Ok(())
     }
 }
@@ -169,7 +205,6 @@ impl PoolCallback for SnapshotHandler {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
         self.pools.extend(pools);
-        // TODO: Publish pool data.
         Ok(())
     }
 }
@@ -178,7 +213,6 @@ impl StakeCallback for SnapshotHandler {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
-        // TODO: Publish account data.
         Ok(())
     }
 }
@@ -187,8 +221,6 @@ impl DRepCallback for SnapshotHandler {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
         self.dreps.extend(dreps);
-        // TODO: Publish DRep data.
-
         Ok(())
     }
 }
@@ -197,7 +229,6 @@ impl ProposalCallback for SnapshotHandler {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
-        // TODO: Publish proposal data.
         Ok(())
     }
 }
@@ -233,28 +264,18 @@ impl SnapshotCallbacks for SnapshotHandler {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
-
-        // We could send a Resolver reference from here for large data, i.e. the UTXO set,
-        // which could be a file reference. For a file reference, we'd extend the parser to
-        // give us a callback value with the offset into the file; and we'd make the streaming
-        // UTXO parser public and reusable, adding it to the resolver implementation.
         Ok(())
     }
 }
 
 impl SnapshotBootstrapper {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // TODO: read a config file path, not the snapshot-path; implement TODOs below.
         let network = config.get_string("network").unwrap_or_else(|_| "mainnet".to_string());
-
         let data_dir = config.get_string("data-dir").unwrap_or_else(|_| "./data".to_string());
-
         let startup_topic =
             config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
-
         let snapshot_topic =
             config.get_string("snapshot-topic").unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
-
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
 
@@ -271,11 +292,6 @@ impl SnapshotBootstrapper {
             };
             info!("Received startup signal");
 
-            // TODO:
-            // Read config file per docs in NOTES.md
-            // read nonces
-            // read headers
-            // read and process ALL of the snapshot files, not just one.
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
                 let network_dir = format!("{}/{}", data_dir, network);
@@ -285,36 +301,34 @@ impl SnapshotBootstrapper {
                 let network_config = match Self::read_network_config(&config_path) {
                     Ok(cfg) => cfg,
                     Err(e) => {
-                        error!("Failed to read network config from {}: {}", config_path, e);
+                        error!("Failed to read network config: {}", e);
                         return;
                     }
                 };
 
-                info!("Loading snapshots for epochs: {:?}", network_config.epochs);
+                info!(
+                    "Loading snapshots for epochs: {:?}",
+                    network_config.snapshots
+                );
 
-                // Read snapshots metadata
                 let all_snapshots = match Self::read_snapshots_metadata(&snapshots_path) {
                     Ok(snaps) => snaps,
                     Err(e) => {
-                        error!(
-                            "Failed to read snapshots metadata from {}: {}",
-                            snapshots_path, e
-                        );
+                        error!("Failed to read snapshots metadata: {}", e);
                         return;
                     }
                 };
 
-                // Filter for requested epochs
                 let target_snapshots: Vec<_> = all_snapshots
                     .iter()
-                    .filter(|s| network_config.epochs.contains(&s.epoch))
+                    .filter(|s| network_config.snapshots.contains(&s.epoch))
                     .cloned()
                     .collect();
 
                 if target_snapshots.is_empty() {
                     error!(
                         "No snapshots found for requested epochs: {:?}",
-                        network_config.epochs
+                        network_config.snapshots
                     );
                     return;
                 }
@@ -328,7 +342,7 @@ impl SnapshotBootstrapper {
                     if let Err(e) =
                         Self::ensure_snapshot_downloaded(&file_path, snapshot_meta).await
                     {
-                        error!("Failed to download snapshot {}: {}", file_path, e);
+                        error!("Failed to download snapshot: {}", e);
                         return;
                     }
                 }
@@ -345,7 +359,7 @@ impl SnapshotBootstrapper {
                     if let Err(e) =
                         Self::process_snapshot(&file_path, context.clone(), &completion_topic).await
                     {
-                        error!("Failed to process snapshot {}: {}", file_path, e);
+                        error!("Failed to process snapshot: {}", e);
                         return;
                     }
                 }
@@ -360,28 +374,36 @@ impl SnapshotBootstrapper {
     }
 
     /// Read network configuration
-    fn read_network_config(path: &str) -> Result<NetworkConfig> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read network config: {}", path))?;
+    fn read_network_config(path: &str) -> Result<NetworkConfig, SnapshotBootstrapError> {
+        let path_buf = PathBuf::from(path);
+        let content = fs::read_to_string(&path_buf)
+            .map_err(|e| SnapshotBootstrapError::ReadNetworkConfig(path_buf.clone(), e))?;
+
         let config: NetworkConfig = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse network config: {}", path))?;
+            .map_err(|e| SnapshotBootstrapError::MalformedNetworkConfig(path_buf, e))?;
+
         Ok(config)
     }
 
-    /// Read snapshots metadata
-    fn read_snapshots_metadata(path: &str) -> Result<Vec<SnapshotFileMetadata>> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read snapshots metadata: {}", path))?;
+    /// Read snapshot metadata
+    fn read_snapshots_metadata(
+        path: &str,
+    ) -> Result<Vec<SnapshotFileMetadata>, SnapshotBootstrapError> {
+        let path_buf = PathBuf::from(path);
+        let content = fs::read_to_string(&path_buf)
+            .map_err(|e| SnapshotBootstrapError::ReadSnapshotsFile(path_buf.clone(), e))?;
+
         let snapshots: Vec<SnapshotFileMetadata> = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse snapshots metadata: {}", path))?;
+            .map_err(|e| SnapshotBootstrapError::MalformedSnapshotsFile(path_buf, e))?;
+
         Ok(snapshots)
     }
 
-    /// Ensure snapshot is downloaded
+    /// Ensure the snapshot is downloaded
     async fn ensure_snapshot_downloaded(
         file_path: &str,
         metadata: &SnapshotFileMetadata,
-    ) -> Result<()> {
+    ) -> Result<(), SnapshotBootstrapError> {
         let path = Path::new(file_path);
 
         if path.exists() {
@@ -393,22 +415,30 @@ impl SnapshotBootstrapper {
             "Downloading snapshot from {} to {}",
             metadata.url, file_path
         );
-        Self::download_and_decompress(&metadata.url, file_path).await?;
-
+        Self::download_snapshot(&metadata.url, file_path).await?;
         info!("Downloaded: {}", file_path);
         Ok(())
     }
 
-    async fn download_and_decompress(url: &str, output_path: &str) -> Result<()> {
+    async fn download_snapshot(url: &str, output_path: &str) -> Result<(), SnapshotBootstrapError> {
         if let Some(parent) = Path::new(output_path).parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| SnapshotBootstrapError::CreateDirectory(parent.to_path_buf(), e))?;
         }
 
         let client = reqwest::Client::new();
-        let response = client.get(url).send().await?;
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?;
 
         if !response.status().is_success() {
-            anyhow::bail!("Download failed with status: {}", response.status());
+            return Err(SnapshotBootstrapError::DownloadInvalidStatusCode(
+                url.to_string(),
+                response.status(),
+            ));
         }
 
         let total_size = response.content_length().unwrap_or(0);
@@ -416,22 +446,16 @@ impl SnapshotBootstrapper {
             info!("Downloading {} MB (compressed)...", total_size / 1_000_000);
         }
 
-        // Write to temporary file first (for atomic rename)
         let tmp_path = Path::new(output_path).with_extension("partial");
         let mut file = File::create(&tmp_path).await?;
 
-        // Stream, decompress, and write
         let raw_stream_reader =
             StreamReader::new(response.bytes_stream().map_err(io::Error::other));
         let buffered_reader = BufReader::new(raw_stream_reader);
         let mut decoded_stream = GzipDecoder::new(buffered_reader);
 
         tokio::io::copy(&mut decoded_stream, &mut file).await?;
-
-        // Ensure data is written to disk
         file.sync_all().await?;
-
-        // Atomic rename
         tokio::fs::rename(&tmp_path, output_path).await?;
 
         Ok(())

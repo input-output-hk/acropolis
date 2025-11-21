@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [startup]
-method = "snapshot"  # Options: "genesis" | "mithril" | "snapshot"
+method = "genesis"  # Options: "genesis" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -22,7 +22,7 @@ pause = "none"
 
 [module.snapshot-bootstrapper]
 network = "mainnet"
-data-dir = "./data"
+data-dir = "../../modules/snapshot_bootstrapper/data"
 
 # ============================================================================
 # Core Module Configurations
