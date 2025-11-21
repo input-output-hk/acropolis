@@ -20,7 +20,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
@@ -129,6 +129,8 @@ impl SnapshotHandler {
         let metadata =
             self.metadata.as_ref().ok_or_else(|| anyhow::anyhow!("No metadata available"))?;
 
+        // Create a synthetic BlockInfo representing the snapshot state
+        // This represents the last block included in the snapshot
         Ok(BlockInfo {
             status: BlockStatus::Immutable, // Snapshot blocks are immutable
             slot: 0,                        // TODO: Extract from snapshot metadata if available
@@ -154,7 +156,7 @@ impl SnapshotHandler {
             shelley_genesis_hash: Hash::<32>::from_str(
                 "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
             )?,
-            genesis_delegs: GenesisDelegates::try_from(vec![]).unwrap(),
+            genesis_delegs: GenesisDelegates::try_from(vec![])?,
         })
     }
 
@@ -194,9 +196,12 @@ impl SnapshotHandler {
 impl UtxoCallback for SnapshotHandler {
     fn on_utxo(&mut self, _utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
+
+        // Log progress every million UTXOs
         if self.utxo_count.is_multiple_of(1_000_000) {
             info!("Processed {} UTXOs", self.utxo_count);
         }
+        // TODO: Accumulate UTXO data if needed or send in chunks to UTXOState processor
         Ok(())
     }
 }
@@ -205,6 +210,7 @@ impl PoolCallback for SnapshotHandler {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
         self.pools.extend(pools);
+        // TODO: Publish pool data.
         Ok(())
     }
 }
@@ -213,6 +219,7 @@ impl StakeCallback for SnapshotHandler {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
+        // TODO: Publish account data.
         Ok(())
     }
 }
@@ -221,6 +228,8 @@ impl DRepCallback for SnapshotHandler {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
         self.dreps.extend(dreps);
+        // TODO: Publish DRep data.
+
         Ok(())
     }
 }
@@ -229,6 +238,7 @@ impl ProposalCallback for SnapshotHandler {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
+        // TODO: Publish proposal data.
         Ok(())
     }
 }
@@ -264,6 +274,11 @@ impl SnapshotCallbacks for SnapshotHandler {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
+
+        // We could send a Resolver reference from here for large data, i.e. the UTXO set,
+        // which could be a file reference. For a file reference, we'd extend the parser to
+        // give us a callback value with the offset into the file; and we'd make the streaming
+        // UTXO parser public and reusable, adding it to the resolver implementation.
         Ok(())
     }
 }
@@ -278,7 +293,8 @@ impl SnapshotBootstrapper {
             config.get_string("snapshot-topic").unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string());
         let completion_topic =
             config.get_string("completion-topic").unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
-
+        info!("Publishing snapshots on '{snapshot_topic}'");
+        info!("Completing with '{completion_topic}'");
         info!("Snapshot bootstrapper initializing");
         info!("  Network: {}", network);
         info!("  Data directory: {}", data_dir);
@@ -290,7 +306,13 @@ impl SnapshotBootstrapper {
             let Ok(_) = subscription.read().await else {
                 return;
             };
-            info!("Received startup signal");
+            info!("Received startup message");
+
+            // TODO:
+            // Read config file per docs in NOTES.md
+            // read nonces
+            // read headers
+            // read and process ALL of the snapshot files, not just one.
 
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
@@ -479,11 +501,14 @@ impl SnapshotBootstrapper {
         let duration = start.elapsed();
         info!("Parsed snapshot in {:.2?}", duration);
 
+        // Build the final state from accumulated data
         let block_info = callbacks.build_block_info()?;
         let genesis_values = callbacks.build_genesis_values()?;
 
+        // Publish completion message to trigger next phase (e.g., Mithril)
         callbacks.publish_completion(block_info, genesis_values).await?;
 
+        info!("Snapshot bootstrap completed successfully");
         Ok(())
     }
 }
