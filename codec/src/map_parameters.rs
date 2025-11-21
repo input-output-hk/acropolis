@@ -12,18 +12,18 @@ use pallas::ledger::{
     *,
 };
 
+use crate::map_parameters;
 use acropolis_common::hash::Hash;
+use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolVersion},
     rational_number::RationalNumber,
     *,
 };
 use pallas_primitives::conway::PseudoScript;
-use std::collections::{HashMap, HashSet};
 use pallas_traverse::{MultiEraInput, MultiEraOutput, MultiEraTx};
+use std::collections::{HashMap, HashSet};
 use tracing::error;
-use acropolis_common::validation::ValidationError;
-use crate::map_parameters;
 
 /// Map Pallas Network to our NetworkId
 pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
@@ -977,35 +977,46 @@ pub fn map_all_governance_voting_procedures(
     Ok(procs)
 }
 
-pub struct TransactionRefInfo {
+pub struct TransactionRefInfo {}
 
-}
-
-pub fn map_transaction_refs(inputs: &Vec<MultiEraInput>, outputs: &Vec<(usize, MultiEraOutput)>)
-    -> (Vec<TxOutRef>, Vec<TxOutRef>)
-{
+pub fn map_transaction_refs(
+    inputs: &Vec<MultiEraInput>,
+    outputs: &Vec<(usize, MultiEraOutput)>,
+) -> (Vec<TxOutRef>, Vec<TxOutRef>) {
     let mut ref_inps = Vec::new();
-    for input in inputs {  // MultiEraInput
+    for input in inputs {
+        // MultiEraInput
         let oref = input.output_ref();
         let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
         ref_inps.push(tx_ref);
-    };
+    }
 
     let mut ref_outs = Vec::new();
-    for (index, output) in outputs {
-
-    }
+    for (index, output) in outputs {}
 
     (ref_inps, ref_outs)
 }
 
-pub fn map_one_transaction(block_number: u32, tx_index: u16, tx: &MultiEraTx) ->
-    (Vec<TxOutRef>, Vec<(TxOutRef, TxOutput)>, u128, Vec<ValidationError>)
-{
+pub fn map_one_transaction(
+    block_number: u32,
+    tx_index: u16,
+    tx: &MultiEraTx,
+) -> (
+    Vec<TxOutRef>,
+    Vec<(TxOutRef, TxOutput)>,
+    u128,
+    Vec<ValidationError>,
+) {
     let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
-        return (vec![], vec![], 0, vec![ValidationError::MalformedTransaction(
-            tx_index, format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec())
-        )])
+        return (
+            vec![],
+            vec![],
+            0,
+            vec![ValidationError::MalformedTransaction(
+                tx_index,
+                format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
+            )],
+        );
     };
 
     let inputs = tx.consumes();
@@ -1016,7 +1027,8 @@ pub fn map_one_transaction(block_number: u32, tx_index: u16, tx: &MultiEraTx) ->
     let mut total_output = 0;
     let mut errors = Vec::new();
 
-    for input in inputs {  // MultiEraInput
+    for input in inputs {
+        // MultiEraInput
         let oref = input.output_ref();
         let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
@@ -1030,36 +1042,37 @@ pub fn map_one_transaction(block_number: u32, tx_index: u16, tx: &MultiEraTx) ->
             output_index: index as u16,
         };
 
-        let utxo_id = UTxOIdentifier::new(
-            block_number,
-            tx_index,
-            tx_out_ref.output_index,
-        );
+        let utxo_id = UTxOIdentifier::new(block_number, tx_index, tx_out_ref.output_index);
 
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
                     // Add TxOutput to utxo_deltas
-                    tx_outputs.push((tx_out_ref, TxOutput {
-                        utxo_identifier: utxo_id,
-                        address,
-                        value: map_value(&output.value()),
-                        datum: map_datum(&output.datum()),
-                        reference_script: map_reference_script(&output.script_ref())
-                    }));
+                    tx_outputs.push((
+                        tx_out_ref,
+                        TxOutput {
+                            utxo_identifier: utxo_id,
+                            address,
+                            value: map_value(&output.value()),
+                            datum: map_datum(&output.datum()),
+                            reference_script: map_reference_script(&output.script_ref()),
+                        },
+                    ));
 
                     // catch all output lovelaces
                     total_output += output.value().coin() as u128;
                 }
                 Err(e) => {
                     errors.push(ValidationError::MalformedTransaction(
-                        tx_index, format!("Output {index} in tx ignored: {e}")
+                        tx_index,
+                        format!("Output {index} in tx ignored: {e}"),
                     ));
-                },
+                }
             },
             Err(e) => errors.push(ValidationError::MalformedTransaction(
-                tx_index, format!("Can't parse output {index} in tx: {e}"))
-            )
+                tx_index,
+                format!("Can't parse output {index} in tx: {e}"),
+            )),
         }
     }
 

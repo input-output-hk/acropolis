@@ -60,6 +60,19 @@ impl From<String> for NetworkId {
     }
 }
 
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NetworkId::Mainnet => "mainnet",
+                NetworkId::Testnet => "testnet",
+            }
+        )
+    }
+}
+
 /// Protocol era
 #[derive(
     Debug,
@@ -322,7 +335,14 @@ impl AssetName {
 }
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    PartialEq,
+    Eq,
 )]
 pub struct NativeAsset {
     #[n(0)]
@@ -342,7 +362,7 @@ pub struct NativeAssetDelta {
 }
 
 /// Datum (inline or hash)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum Datum {
     Hash(Vec<u8>),
     Inline(Vec<u8>),
@@ -358,7 +378,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq, Eq)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -561,7 +581,7 @@ pub struct UTXOValue {
 }
 
 /// Transaction output (UTXO)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TxOutput {
     /// Identifier for this UTxO
     pub utxo_identifier: UTxOIdentifier,
@@ -701,6 +721,39 @@ impl fmt::Display for UTxOIdentifier {
             self.tx_index(),
             self.output_index()
         )
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct UTxOIdentifierSet(#[n(0)] pub HashSet<UTxOIdentifier>);
+
+impl fmt::Display for UTxOIdentifierSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let items: Vec<String> = self.0.iter().map(|id| id.to_string()).collect();
+        write!(f, "[{}]", items.join(", "))
+    }
+}
+
+impl From<HashSet<UTxOIdentifier>> for UTxOIdentifierSet {
+    fn from(set: HashSet<UTxOIdentifier>) -> Self {
+        UTxOIdentifierSet(set)
+    }
+}
+
+impl std::ops::Deref for UTxOIdentifierSet {
+    type Target = HashSet<UTxOIdentifier>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

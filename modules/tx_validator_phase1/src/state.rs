@@ -1,15 +1,18 @@
+use crate::TxValidatorPhase1StateConfig;
+use acropolis_codec::map_parameters;
+use acropolis_common::messages::{ProtocolParamsMessage, RawTxsMessage};
+use acropolis_common::validation::{ValidationError, ValidationStatus};
+use acropolis_common::{
+    AssetName, BlockInfo, NativeAsset, NativeAssets, TxHash, TxIdentifier, TxOutRef, TxOutput,
+    UTxOIdentifier, Value,
+};
+use anyhow::Result;
+use pallas::ledger::primitives::{alonzo, byron};
+use pallas::ledger::traverse::{MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
-use pallas::ledger::primitives::{alonzo, byron};
-use pallas::ledger::traverse::{MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
-use acropolis_common::{AssetName, BlockInfo, NativeAsset, NativeAssets, TxHash, TxIdentifier, TxOutRef, TxOutput, UTxOIdentifier, Value};
-use acropolis_common::messages::{ProtocolParamsMessage, RawTxsMessage};
-use acropolis_common::validation::{ValidationError, ValidationStatus};
-use crate::TxValidatorPhase1StateConfig;
-use anyhow::Result;
 use tracing::error;
-use acropolis_codec::map_parameters;
 
 // TODO: make something with separate utxo registres
 #[derive(Clone, Default)]
@@ -92,63 +95,76 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
 
 struct Transaction {
     inputs: Vec<UTxOIdentifier>,
-    outputs: Vec<TxOutput>
+    outputs: Vec<TxOutput>,
 }
 
 impl State {
     pub fn new(config: Arc<TxValidatorPhase1StateConfig>) -> Self {
-        Self { config, params: None, utxos_registry: UTxORegistry::default() }
+        Self {
+            config,
+            params: None,
+            utxos_registry: UTxORegistry::default(),
+        }
     }
 
     pub async fn process_params(
-        &mut self, _blk: BlockInfo, prm: ProtocolParamsMessage
+        &mut self,
+        _blk: BlockInfo,
+        prm: ProtocolParamsMessage,
     ) -> Result<()> {
         self.params = Some(prm);
         Ok(())
     }
 
     /// Byron validation is not acutally performed, so it's always returns 'Go'
-    fn validate_byron<'b>(&self, _tx: Box<Cow<'b, byron::MintedTxPayload<'b>>>)
-        -> Result<ValidationStatus>
-    {
+    fn validate_byron<'b>(
+        &self,
+        _tx: Box<Cow<'b, byron::MintedTxPayload<'b>>>,
+    ) -> Result<ValidationStatus> {
         Ok(ValidationStatus::Go)
     }
 
-    fn convert_from_pallas_tx<'b>(&self, block_info: &BlockInfo, tx_index: u16, tx: &MultiEraTx)
-        -> Result<ConversionResult<Transaction>>
-    {
+    fn convert_from_pallas_tx<'b>(
+        &self,
+        block_info: &BlockInfo,
+        tx_index: u16,
+        tx: &MultiEraTx,
+    ) -> Result<ConversionResult<Transaction>> {
         let _certs = tx.certs();
         let _tx_withdrawals = tx.withdrawals_sorted_set();
 
-        let (tx_in_ref,tx_out,_total,err) =
+        let (tx_in_ref, tx_out, _total, err) =
             map_parameters::map_one_transaction(block_info.number as u32, tx_index, tx);
 
         if let Some(first_err) = err.into_iter().next() {
-            return Ok(ConversionResult::Error(first_err))
+            return Ok(ConversionResult::Error(first_err));
         }
 
         let mut converted_inputs = Vec::new();
         let mut converted_outputs = Vec::new();
 
-        for tx_ref in tx_in_ref {  // MultiEraInput
+        for tx_ref in tx_in_ref {
+            // MultiEraInput
             // Lookup and remove UTxOIdentifier from registry
             match self.utxos_registry.live_map.get(&tx_ref) {
                 Some(tx_identifier) => {
                     // Add TxInput to utxo_deltas
                     converted_inputs.push(UTxOIdentifier::new(
-                            tx_identifier.block_number(),
-                            tx_identifier.tx_index(),
-                            tx_ref.output_index,
-                        )
-                    );
+                        tx_identifier.block_number(),
+                        tx_identifier.tx_index(),
+                        tx_ref.output_index,
+                    ));
                 }
                 None => {
-                    return Ok(ConversionResult::Error(ValidationError::MalformedTransaction(
-                        tx_index,
-                        format!("Tx not found, tx {}, output index {}",
-                            tx_ref.tx_hash, tx_ref.output_index
-                        )
-                    )));
+                    return Ok(ConversionResult::Error(
+                        ValidationError::MalformedTransaction(
+                            tx_index,
+                            format!(
+                                "Tx not found, tx {}, output index {}",
+                                tx_ref.tx_hash, tx_ref.output_index
+                            ),
+                        ),
+                    ));
                 }
             }
         }
@@ -172,25 +188,26 @@ impl State {
     }
 
     pub fn process_transactions(
-        &mut self, blk: &BlockInfo, txs_msg: &RawTxsMessage
+        &mut self,
+        blk: &BlockInfo,
+        txs_msg: &RawTxsMessage,
     ) -> Result<ValidationStatus> {
-        for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
+        for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
             // Parse the tx
             let res = match MultiEraTx::decode(raw_tx) {
-                Err(e) =>
-                    ValidationStatus::NoGo(
-                        ValidationError::CborDecodeError(tx_index, e.to_string())
-                    ),
+                Err(e) => ValidationStatus::NoGo(ValidationError::CborDecodeError(
+                    tx_index,
+                    e.to_string(),
+                )),
                 Ok(MultiEraTx::Byron(byron_tx)) => self.validate_byron(byron_tx)?,
 
                 Ok(tx) => {
                     let tx = match self.convert_from_pallas_tx(blk, tx_index as u16, &tx)? {
                         ConversionResult::Ok(res) => res,
-                        ConversionResult::Error(err) =>
-                            return Ok(ValidationStatus::NoGo(err))
+                        ConversionResult::Error(err) => return Ok(ValidationStatus::NoGo(err)),
                     };
                     self.validate_tx(&tx)?
-                },
+                }
             };
 
             if let ValidationStatus::NoGo(_) = &res {
@@ -200,4 +217,3 @@ impl State {
         Ok(ValidationStatus::Go)
     }
 }
-

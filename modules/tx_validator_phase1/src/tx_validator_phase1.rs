@@ -4,9 +4,7 @@
 mod state;
 
 use acropolis_common::{
-    messages::{
-        CardanoMessage, Message, ProtocolParamsMessage, RawTxsMessage
-    },
+    messages::{CardanoMessage, Message, ProtocolParamsMessage, RawTxsMessage},
     *,
 };
 
@@ -15,11 +13,11 @@ use acropolis_codec::map_parameters;
 use caryatid_sdk::{module, Context, Module, Subscription};
 use std::{clone::Clone, sync::Arc};
 
+use crate::state::State;
+use acropolis_common::validation::ValidationStatus;
 use anyhow::{anyhow, bail, Result};
 use config::Config;
 use tracing::{error, info};
-use acropolis_common::validation::ValidationStatus;
-use crate::state::State;
 //mod utxo_registry;
 //use crate::utxo_registry::UTxORegistry;
 
@@ -27,8 +25,10 @@ const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("parameters-topic", "cardano.protocol.parameters");
-const DEFAULT_VALIDATION_RESULT_TOPIC: (&str, &str) =
-    ("publish-valiadtion-result-topic", "cardano.validation.tx-phase-1");
+const DEFAULT_VALIDATION_RESULT_TOPIC: (&str, &str) = (
+    "publish-valiadtion-result-topic",
+    "cardano.validation.tx-phase-1",
+);
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 
 //const CIP25_METADATA_LABEL: u64 = 721;
@@ -92,9 +92,7 @@ impl TxValidatorPhase1 {
             Message::Cardano((blk, CardanoMessage::ReceivedTxs(tx))) => {
                 Ok((blk.clone(), tx.clone()))
             }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for transaction topic"
-            )),
+            msg => Err(anyhow!("Unexpected message {msg:?} for transaction topic")),
         }
     }
 
@@ -106,7 +104,7 @@ impl TxValidatorPhase1 {
         if let ValidationStatus::NoGo(res) = &result {
             error!("Cannot validate transaction: {:?}", res);
         }
-        
+
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::BlockValidation(result),
@@ -124,10 +122,11 @@ impl TxValidatorPhase1 {
         Ok(())
     }
 
-    async fn run(state: &mut State,
-                 mut _gen: Box<dyn Subscription<Message>>,
-                 mut txs: Box<dyn Subscription<Message>>,
-                 mut params: Box<dyn Subscription<Message>>
+    async fn run(
+        state: &mut State,
+        mut _gen: Box<dyn Subscription<Message>>,
+        mut txs: Box<dyn Subscription<Message>>,
+        mut params: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         loop {
             let (trx_b, trx) = Self::read_transactions(&mut txs).await?;
@@ -156,7 +155,8 @@ impl TxValidatorPhase1 {
         context.clone().run(async move {
             let mut state = State::new(config.clone());
             TxValidatorPhase1::run(&mut state, gen_sub, txs_sub, params_sub)
-                .await.unwrap_or_else(|e| error!("TX validator failed: {e}"));
+                .await
+                .unwrap_or_else(|e| error!("TX validator failed: {e}"));
         });
 
         Ok(())
