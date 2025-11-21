@@ -6,7 +6,7 @@ use acropolis_common::{
     NetworkId,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use serde::Deserialize;
 use std::{path::Path, sync::Arc};

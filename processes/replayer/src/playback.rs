@@ -8,7 +8,7 @@ use acropolis_common::{
     BlockHash, BlockInfo,
 };
 use anyhow::{anyhow, bail, ensure, Result};
-use caryatid_sdk::{module, Context, Module};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use std::collections::HashMap;
 use std::fs::read_to_string;
