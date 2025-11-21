@@ -153,7 +153,7 @@ impl PeerNetworkInterface {
         events_sender: mpsc::Sender<NetworkEvent>,
     ) -> Result<()> {
         while let Ok((_, msg)) = subscription.read().await {
-            if let Message::Command(Command::ChainSync(ChainSyncCommand::ChangeSyncPoint {
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect {
                 slot,
                 hash,
             })) = msg.as_ref()

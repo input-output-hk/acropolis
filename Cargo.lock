@@ -303,6 +303,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "serde",
  "tokio",
  "tracing",
 ]
