@@ -19,6 +19,7 @@ use anyhow::{bail, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -132,6 +133,12 @@ struct SnapshotFileMetadata {
     url: String,
 }
 
+impl SnapshotFileMetadata {
+    fn file_path(&self, network_dir: &str) -> String {
+        format!("{}/{}.cbor", network_dir, self.point)
+    }
+}
+
 /// Handles publishing snapshot data to the message bus
 struct SnapshotPublisher {
     context: Arc<Context<Message>>,
@@ -197,6 +204,7 @@ impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
         self.pools.extend(pools);
+        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
         Ok(())
     }
 }
@@ -205,6 +213,7 @@ impl StakeCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
+        // TODO: Accumulate account data if needed or send in chunks to AccountState processor
         Ok(())
     }
 }
@@ -213,6 +222,7 @@ impl DRepCallback for SnapshotPublisher {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
         self.dreps.extend(dreps);
+        // TODO: Accumulate DRep data if needed or send in chunks to DRepState processor
         Ok(())
     }
 }
@@ -221,6 +231,7 @@ impl ProposalCallback for SnapshotPublisher {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
+        // TODO: Accumulate proposal data if needed or send in chunks to ProposalState processor
         Ok(())
     }
 }
@@ -256,7 +267,6 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
-
         // We could send a Resolver reference from here for large data, i.e. the UTXO set,
         // which could be a file reference. For a file reference, we'd extend the parser to
         // give us a callback value with the offset into the file; and we'd make the streaming
@@ -273,6 +283,7 @@ impl SnapshotCallbacks for SnapshotPublisher {
 pub struct SnapshotBootstrapper;
 
 impl SnapshotBootstrapper {
+    /// Initializes the snapshot bootstrapper.
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = SnapshotConfig::try_load(&config)?;
 
@@ -288,7 +299,7 @@ impl SnapshotBootstrapper {
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
-                // Wait for startup signal
+                // Wait for the startup signal
                 if let Err(e) = Self::wait_startup(startup_sub).await {
                     error!("Failed waiting for startup: {e:#}");
                     return;
@@ -415,16 +426,24 @@ impl SnapshotBootstrapper {
         snapshots: &[SnapshotFileMetadata],
         network_dir: &str,
     ) -> Result<(), SnapshotBootstrapError> {
-        for snapshot_meta in snapshots {
-            let filename = format!("{}.cbor", snapshot_meta.point);
-            let file_path = format!("{}/{}", network_dir, filename);
+        let client = Client::new();
 
-            Self::download_snapshot(&snapshot_meta.url, &file_path).await?;
+        for snapshot_meta in snapshots {
+            let file_path = snapshot_meta.file_path(network_dir);
+            Self::download_snapshot(&client, &snapshot_meta.url, &file_path).await?;
         }
         Ok(())
     }
 
-    async fn download_snapshot(url: &str, output_path: &str) -> Result<(), SnapshotBootstrapError> {
+    /// Downloads a gzip-compressed snapshot from the given URL, decompresses it on-the-fly,
+    /// and saves the decompressed CBOR data to the specified output path.
+    /// The data is first written to a `.partial` temporary file to ensure atomicity
+    /// and then renamed to the final output path upon successful completion.
+    async fn download_snapshot(
+        client: &Client,
+        url: &str,
+        output_path: &str,
+    ) -> Result<(), SnapshotBootstrapError> {
         let path = Path::new(output_path);
 
         if path.exists() {
@@ -440,42 +459,53 @@ impl SnapshotBootstrapper {
                 .map_err(|e| SnapshotBootstrapError::CreateDirectory(parent.to_path_buf(), e))?;
         }
 
-        let client = reqwest::Client::new();
-        let mut response = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?;
-
-        if !response.status().is_success() {
-            return Err(SnapshotBootstrapError::DownloadInvalidStatusCode(
-                url.to_string(),
-                response.status(),
-            ));
-        }
-
         let tmp_path = path.with_extension("partial");
-        let mut file = File::create(&tmp_path).await?;
 
-        let mut compressed_data = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?
-        {
-            compressed_data.extend_from_slice(&chunk);
+        // Ensure cleanup on failure
+        let result = async {
+            let mut response = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?;
+
+            if !response.status().is_success() {
+                return Err(SnapshotBootstrapError::DownloadInvalidStatusCode(
+                    url.to_string(),
+                    response.status(),
+                ));
+            }
+
+            let mut file = File::create(&tmp_path).await?;
+
+            let mut compressed_data = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
+                .await
+                .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?
+            {
+                compressed_data.extend_from_slice(&chunk);
+            }
+
+            let cursor = io::Cursor::new(&compressed_data);
+            let buffered = BufReader::new(cursor);
+            let mut decoder = GzipDecoder::new(buffered);
+            tokio::io::copy(&mut decoder, &mut file).await?;
+
+            file.sync_all().await?;
+            tokio::fs::rename(&tmp_path, output_path).await?;
+
+            info!("Downloaded snapshot to {}", output_path);
+            Ok(())
+        }
+        .await;
+
+        // Clean up partial file on error
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
         }
 
-        let cursor = io::Cursor::new(&compressed_data);
-        let buffered = BufReader::new(cursor);
-        let mut decoder = GzipDecoder::new(buffered);
-        tokio::io::copy(&mut decoder, &mut file).await?;
-
-        file.sync_all().await?;
-        tokio::fs::rename(&tmp_path, output_path).await?;
-
-        info!("Downloaded snapshot to {}", output_path);
-        Ok(())
+        result
     }
 
     async fn process_snapshots(
@@ -493,8 +523,7 @@ impl SnapshotBootstrapper {
         publisher.publish_start().await?;
 
         for snapshot_meta in snapshots {
-            let filename = format!("{}.cbor", snapshot_meta.point);
-            let file_path = format!("{}/{}", cfg.network_dir(), filename);
+            let file_path = snapshot_meta.file_path(&cfg.network_dir());
 
             info!(
                 "Processing snapshot for epoch {} from {}",
@@ -694,6 +723,7 @@ mod tests {
         let file_path = temp_dir.path().join(format!("{}.cbor", point));
 
         let result = SnapshotBootstrapper::download_snapshot(
+            &Client::new(),
             "https://example.com/snapshot.cbor.gz",
             file_path.to_str().unwrap(),
         )
@@ -710,6 +740,7 @@ mod tests {
         let file_path = temp_dir.path().join(format!("{}.cbor", point));
 
         let result = SnapshotBootstrapper::download_snapshot(
+            &Client::new(),
             "https://invalid-url-that-does-not-exist.com/snapshot.cbor.gz",
             file_path.to_str().unwrap(),
         )
@@ -775,6 +806,7 @@ mod tests {
         let nested_path = temp_dir.path().join("nested").join("directory").join("snapshot.cbor");
 
         let _ = SnapshotBootstrapper::download_snapshot(
+            &Client::new(),
             "https://invalid-url.com/snapshot.cbor.gz",
             nested_path.to_str().unwrap(),
         )
@@ -824,6 +856,7 @@ mod tests {
         let output_path = temp_dir.path().join("snapshot.cbor");
 
         let result = SnapshotBootstrapper::download_snapshot(
+            &Client::new(),
             "https://invalid-url.com/snapshot.cbor.gz",
             output_path.to_str().unwrap(),
         )
