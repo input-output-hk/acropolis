@@ -99,9 +99,8 @@ impl SnapshotDownloader {
             let mut file = File::create(&tmp_path).await?;
 
             let stream = response.bytes_stream();
-            let async_read = tokio_util::io::StreamReader::new(
-                stream.map_err(|e| io::Error::new(std::io::ErrorKind::Other, e)),
-            );
+            let async_read =
+                tokio_util::io::StreamReader::new(stream.map_err(|_| std::io::Error::other));
 
             let progress_reader = ProgressReader::new(async_read, content_length, 200);
             let buffered = BufReader::new(progress_reader);
