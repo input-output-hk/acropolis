@@ -3,6 +3,7 @@ mod progress_reader;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time,
 };
 
 use crate::progress_reader::ProgressReader;
@@ -57,6 +58,9 @@ pub enum SnapshotBootstrapError {
 
     #[error("Failed to download snapshot from {0}: {1}")]
     DownloadError(String, reqwest::Error),
+
+    #[error("Failed to initalize HTTP client: {0:?}")]
+    ClientError(reqwest::Error),
 
     #[error("Download failed from {0}: HTTP status {1}")]
     DownloadInvalidStatusCode(String, reqwest::StatusCode),
@@ -430,7 +434,11 @@ impl SnapshotBootstrapper {
         snapshots: &[SnapshotFileMetadata],
         network_dir: &str,
     ) -> Result<(), SnapshotBootstrapError> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_mins(5))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| SnapshotBootstrapError::ClientError(e))?;
 
         for snapshot_meta in snapshots {
             let file_path = snapshot_meta.file_path(network_dir);
@@ -484,10 +492,10 @@ impl SnapshotBootstrapper {
 
             let stream = response.bytes_stream();
             let async_read = tokio_util::io::StreamReader::new(
-                stream.map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+                stream.map_err(|e| io::Error::new(std::io::ErrorKind::Other, e)),
             );
 
-            let progress_reader = ProgressReader::new(async_read, content_length, 100);
+            let progress_reader = ProgressReader::new(async_read, content_length, 200);
             let buffered = BufReader::new(progress_reader);
             let mut decoder = GzipDecoder::new(buffered);
 
