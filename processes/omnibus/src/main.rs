@@ -45,6 +45,10 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
+const STARTUP_METHOD_MITHRIL: &str = "mithril";
+const STARTUP_METHOD_SNAPSHOT: &str = "snapshot";
+const CONFIG_KEY_STARTUP_METHOD: &str = "startup.method";
+
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 #[cfg(not(target_env = "msvc"))]
@@ -94,27 +98,26 @@ pub async fn main() -> Result<()> {
         Config::builder()
             .add_source(File::with_name(&args.config))
             .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()
-            .unwrap(),
+            .build()?,
     );
 
     // Create the process
     let mut process = Process::<Message>::create(config.clone()).await;
 
     // Get startup method from config
-    // TODO: Lift to constant
-    let startup_method =
-        config.get_string("startup.method").unwrap_or_else(|_| "mithril".to_string());
+    let startup_method = config
+        .get_string(CONFIG_KEY_STARTUP_METHOD)
+        .unwrap_or_else(|_| STARTUP_METHOD_MITHRIL.to_string());
 
     info!("Using startup method: {}", startup_method);
 
     // Register bootstrap modules based on the startup method
     match startup_method.as_str() {
-        "mithril" => {
+        STARTUP_METHOD_MITHRIL => {
             info!("Registering MithrilSnapshotFetcher");
             MithrilSnapshotFetcher::register(&mut process);
         }
-        "snapshot" => {
+        STARTUP_METHOD_SNAPSHOT => {
             info!("Registering SnapshotBootstrapper");
             SnapshotBootstrapper::register(&mut process);
         }

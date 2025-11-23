@@ -376,12 +376,14 @@ dependencies = [
  "async-compression",
  "caryatid_sdk",
  "config",
+ "futures-util",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

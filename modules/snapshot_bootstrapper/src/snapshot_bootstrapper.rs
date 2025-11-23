@@ -1,8 +1,11 @@
+mod progress_reader;
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
+use crate::progress_reader::ProgressReader;
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     snapshot::{
@@ -19,6 +22,7 @@ use anyhow::{bail, Result};
 use async_compression::tokio::bufread::GzipDecoder;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
+use futures_util::TryStreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -461,9 +465,8 @@ impl SnapshotBootstrapper {
 
         let tmp_path = path.with_extension("partial");
 
-        // Ensure cleanup on failure
         let result = async {
-            let mut response = client
+            let response = client
                 .get(url)
                 .send()
                 .await
@@ -476,31 +479,28 @@ impl SnapshotBootstrapper {
                 ));
             }
 
+            let content_length = response.content_length();
             let mut file = File::create(&tmp_path).await?;
 
-            let mut compressed_data = Vec::new();
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(|e| SnapshotBootstrapError::DownloadError(url.to_string(), e))?
-            {
-                compressed_data.extend_from_slice(&chunk);
-            }
+            let stream = response.bytes_stream();
+            let async_read = tokio_util::io::StreamReader::new(
+                stream.map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            );
 
-            let cursor = io::Cursor::new(&compressed_data);
-            let buffered = BufReader::new(cursor);
+            let progress_reader = ProgressReader::new(async_read, content_length, 100);
+            let buffered = BufReader::new(progress_reader);
             let mut decoder = GzipDecoder::new(buffered);
+
             tokio::io::copy(&mut decoder, &mut file).await?;
 
             file.sync_all().await?;
             tokio::fs::rename(&tmp_path, output_path).await?;
 
-            info!("Downloaded snapshot to {}", output_path);
+            info!("Downloaded and decompressed snapshot to {}", output_path);
             Ok(())
         }
         .await;
 
-        // Clean up partial file on error
         if result.is_err() {
             let _ = tokio::fs::remove_file(&tmp_path).await;
         }

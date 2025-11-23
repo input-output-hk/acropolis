@@ -92,8 +92,8 @@ The `SnapshotPublisher` implements the streaming snapshot callbacks:
 - `ProposalCallback`: Receives governance proposals
 - `SnapshotCallbacks`: Receives metadata and completion signals
 
-Currently the publisher accumulates this data for statistics and future use. Publishing
-of detailed snapshot data to downstream modules can be added by implementing the
+Currently the publisher just accumulates this data, but this will need to be extended to publish the corresponding
+message types. Publishing of detailed snapshot data to downstream modules can be added by implementing the
 appropriate message bus publishes in the callback methods.
 
 ## Configuration
