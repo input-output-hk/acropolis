@@ -29,4 +29,4 @@ tokio-util = "0.7.17"
 tempfile = "3"
 
 [lib]
-path = "src/snapshot_bootstrapper.rs"
+path = "src/bootstrapper.rs"

@@ -3,7 +3,7 @@
 We can boot an Acropolis node either from genesis and replay all of the blocks up to
 some point, or we can boot from a snapshot file. This module provides the components
 needed to boot from a snapshot file.
-See [snapshot_bootstrapper](../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs) for the process that
+See [snapshot_bootstrapper](src/bootstrapper.rs) for the process that
 references and runs with these helpers.
 
 Booting from a snapshot takes minutes instead of the hours it takes to boot from
@@ -49,7 +49,7 @@ a network name of `preview`, the expected layout for configuration files would b
 * `data/preview/config.json`: a list of epochs to load and points
 * `data/preview/snapshots.json`: a list of `SnapshotFileMetadata` values (epoch, point, url)
 
-These files are loaded by [snapshot_bootstrapper](../../modules/snapshot_bootstrapper/src/snapshot_bootstrapper.rs)
+These files are loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
 
 ## Bootstrapping sequence
