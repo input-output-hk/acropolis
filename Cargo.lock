@@ -37,7 +37,7 @@ dependencies = [
  "futures",
  "hex",
  "memmap2",
- "minicbor 0.26.5",
+ "minicbor 2.1.2",
  "num-rational",
  "num-traits",
  "rayon",
@@ -3576,10 +3576,11 @@ dependencies = [
 
 [[package]]
 name = "minicbor"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f182275033b808ede9427884caa8e05fa7db930801759524ca7925bd8aa7a82"
+checksum = "fcdf88f4e6c97939dc99797448e722d618ab7e34f96d2c030d60fb8023793fa0"
 dependencies = [
+ "half 2.7.1",
  "minicbor-derive 0.18.2",
 ]
 
@@ -3622,7 +3623,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546cc904f35809921fa57016a84c97e68d9d27c012e87b9dadc28c233705f783"
 dependencies = [
- "minicbor 2.1.1",
+ "minicbor 2.1.2",
  "serde",
 ]
 
