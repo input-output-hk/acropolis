@@ -24,9 +24,6 @@ pub enum DownloadError {
     #[error("Cannot create directory {0}: {1}")]
     CreateDirectory(PathBuf, io::Error),
 
-    #[error("Stream read failed: {0}")]
-    StreamRead(#[source] io::Error),
-
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 }
@@ -101,11 +98,8 @@ impl SnapshotDownloader {
             let content_length = response.content_length();
             let mut file = File::create(&tmp_path).await?;
 
-            let stream = response.bytes_stream();
-            let async_read = tokio_util::io::StreamReader::new(
-                stream.map_err(|e| DownloadError::StreamRead(io::Error::other(e))),
-            );
-
+            let stream = response.bytes_stream().map_err(io::Error::other);
+            let async_read = tokio_util::io::StreamReader::new(stream);
             let progress_reader = ProgressReader::new(async_read, content_length, 200);
             let buffered = BufReader::new(progress_reader);
             let mut decoder = GzipDecoder::new(buffered);
