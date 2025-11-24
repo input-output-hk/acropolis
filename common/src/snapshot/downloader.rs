@@ -1,5 +1,5 @@
-use crate::config::SnapshotFileMetadata;
-use crate::progress_reader::ProgressReader;
+use crate::snapshot::config::SnapshotFileMetadata;
+use crate::snapshot::progress_reader::ProgressReader;
 use async_compression::tokio::bufread::GzipDecoder;
 use futures_util::TryStreamExt;
 use reqwest::Client;

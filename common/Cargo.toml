@@ -29,7 +29,6 @@ regex = "1"
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["base64"] }
-tempfile = "3"
 tokio = { workspace = true }
 tracing = { workspace = true }
 futures = "0.3.31"
@@ -40,8 +39,17 @@ rayon = "1.11.0"
 cryptoxide = "0.5.1"
 thiserror = "2.0.17"
 sha2 = "0.10.8"
+async-compression = { version = "0.4.32", features = ["tokio", "gzip"] }
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3.31"
+tokio-util = "0.7.17"
 caryatid_process = { workspace = true }
 config = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.23"
+wiremock = "0.6.5"
+flate2 = "1.1.5"
 
 [lib]
 crate-type = ["rlib"]
