@@ -99,6 +99,10 @@ pub enum TransactionValidationError {
     /// **Cause:** The transaction size is too big.
     #[error("Max tx size: supplied={supplied}, max={max}")]
     MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Validation error
