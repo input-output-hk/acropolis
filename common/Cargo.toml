@@ -18,6 +18,7 @@ bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
 blake2 = "0.10.6"
+bytes = "1.11.0"
 bs58 = "0.5"
 chrono = { workspace = true }
 crc = "3"
