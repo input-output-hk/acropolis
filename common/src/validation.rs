@@ -64,7 +64,7 @@ pub enum VrfValidationError {
     PraosBadVrfProof(#[from] PraosBadVrfProofError),
     /// **Cause:** The VRF output is too large for this pool's stake.
     /// The pool lost the slot lottery
-    #[error("VRF Leader Value Too Big")]
+    #[error("{0}")]
     VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
     /// **Cause:** This slot is in the overlay schedule but marked as non-active.
     /// It's an intentional gap slot where no blocks should be produced.
