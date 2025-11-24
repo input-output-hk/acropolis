@@ -1,9 +1,11 @@
+mod configuration;
+mod downloader;
+mod progress_reader;
 mod publisher;
 
+use crate::configuration::{ConfigError, NetworkConfig, SnapshotConfig, SnapshotFileMetadata};
+use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
-use ::config::Config;
-use acropolis_common::snapshot::config::{NetworkConfig, SnapshotConfig, SnapshotFileMetadata};
-use acropolis_common::snapshot::downloader::{DownloadError, SnapshotDownloader};
 use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
 use acropolis_common::{
     messages::{CardanoMessage, Message},
@@ -11,7 +13,7 @@ use acropolis_common::{
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
-use config::ConfigError;
+use config::Config;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::time::Instant;

@@ -19,7 +19,6 @@ name = "acropolis_common"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "async-compression",
  "bech32 0.11.0",
  "bigdecimal",
  "bitmask-enum",
@@ -35,9 +34,7 @@ dependencies = [
  "crc",
  "cryptoxide 0.5.1",
  "dashmap",
- "flate2",
  "futures",
- "futures-util",
  "hex",
  "memmap2",
  "minicbor 0.26.5",
@@ -45,7 +42,6 @@ dependencies = [
  "num-traits",
  "rayon",
  "regex",
- "reqwest 0.12.24",
  "serde",
  "serde_json",
  "serde_with 3.15.1",
@@ -53,9 +49,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
- "tokio-util",
  "tracing",
- "wiremock",
 ]
 
 [[package]]
@@ -379,13 +373,20 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "async-compression",
  "caryatid_sdk",
  "config",
+ "flate2",
+ "futures-util",
+ "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
