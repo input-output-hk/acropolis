@@ -125,23 +125,25 @@ impl SnapshotDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::io::Write;
     use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn create_fake_snapshot(dir: &Path, point: &str) {
-        let snapshot_path = dir.join(format!("{}.cbor", point));
-        let mut file = fs::File::create(&snapshot_path).unwrap();
-        file.write_all(b"fake snapshot data").unwrap();
+    fn gzip_compress(data: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
     }
 
     #[tokio::test]
     async fn test_downloader_skips_existing_file() {
         let temp_dir = TempDir::new().unwrap();
-        let point = "point_500";
-        create_fake_snapshot(temp_dir.path(), point);
+        let file_path = temp_dir.path().join("snapshot.cbor");
+        std::fs::write(&file_path, b"existing data").unwrap();
 
-        let file_path = temp_dir.path().join(format!("{}.cbor", point));
         let downloader =
             SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
 
@@ -153,60 +155,101 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-        assert!(file_path.exists());
+        assert_eq!(std::fs::read(&file_path).unwrap(), b"existing data");
     }
 
     #[tokio::test]
-    async fn test_downloader_missing_file_fails() {
+    async fn test_downloader_downloads_and_decompresses() {
+        let mock_server = MockServer::start().await;
+        let compressed = gzip_compress(b"snapshot content");
+
+        Mock::given(method("GET"))
+            .and(path("/snapshot.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .mount(&mock_server)
+            .await;
+
         let temp_dir = TempDir::new().unwrap();
-        let point = "point_500";
-        let file_path = temp_dir.path().join(format!("{}.cbor", point));
+        let file_path = temp_dir.path().join("snapshot.cbor");
         let downloader =
             SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
 
-        let result = downloader
-            .download_single(
-                "https://invalid-url-that-does-not-exist.com/snapshot.cbor.gz",
-                file_path.to_str().unwrap(),
-            )
+        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
+        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+
+        assert!(result.is_ok());
+        assert_eq!(std::fs::read(&file_path).unwrap(), b"snapshot content");
+    }
+
+    #[tokio::test]
+    async fn test_downloader_handles_http_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/snapshot.cbor.gz"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
             .await;
 
-        assert!(result.is_err());
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("snapshot.cbor");
+        let downloader =
+            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+
+        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
+        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+
+        assert!(matches!(
+            result,
+            Err(DownloadError::InvalidStatusCode(_, _))
+        ));
         assert!(!file_path.exists());
     }
 
     #[tokio::test]
-    async fn test_downloader_creates_directory() {
+    async fn test_downloader_creates_parent_directories() {
+        let mock_server = MockServer::start().await;
+        let compressed = gzip_compress(b"data");
+
+        Mock::given(method("GET"))
+            .and(path("/snapshot.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .mount(&mock_server)
+            .await;
+
         let temp_dir = TempDir::new().unwrap();
-        let nested_path = temp_dir.path().join("nested").join("directory").join("snapshot.cbor");
+        let file_path = temp_dir.path().join("nested").join("dir").join("snapshot.cbor");
         let downloader =
             SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
 
-        let _ = downloader
-            .download_single(
-                "https://invalid-url.com/snapshot.cbor.gz",
-                nested_path.to_str().unwrap(),
-            )
-            .await;
+        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
+        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
 
-        assert!(nested_path.parent().unwrap().exists());
+        assert!(result.is_ok());
+        assert!(file_path.exists());
     }
 
     #[tokio::test]
-    async fn test_downloader_creates_partial_file_then_renames() {
+    async fn test_downloader_cleans_up_partial_on_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/snapshot.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"not valid gzip"))
+            .mount(&mock_server)
+            .await;
+
         let temp_dir = TempDir::new().unwrap();
-        let output_path = temp_dir.path().join("snapshot.cbor");
+        let file_path = temp_dir.path().join("snapshot.cbor");
+        let partial_path = temp_dir.path().join("snapshot.partial");
         let downloader =
             SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
 
-        let result = downloader
-            .download_single(
-                "https://invalid-url.com/snapshot.cbor.gz",
-                output_path.to_str().unwrap(),
-            )
-            .await;
+        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
+        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
 
         assert!(result.is_err());
-        assert!(!output_path.exists());
+        assert!(!file_path.exists());
+        assert!(!partial_path.exists());
     }
 }
