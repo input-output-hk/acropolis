@@ -142,11 +142,23 @@ pub enum BlockStatus {
     RolledBack, // Volatile, restarted after rollback
 }
 
+/// Block status
+#[bitmask(u8)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum BlockIntent {
+    Validate = 0b00000001, // Just validate the block
+    Apply = 0b00000010,    // Apply the block
+    ValidateAndApply = BlockIntent::Validate.bits | BlockIntent::Apply.bits, // Validate and apply block
+}
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
     /// Block status
     pub status: BlockStatus,
+
+    /// Block intent
+    pub intent: BlockIntent,
 
     /// Slot number
     pub slot: u64,

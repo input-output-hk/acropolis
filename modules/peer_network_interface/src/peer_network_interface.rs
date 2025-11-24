@@ -4,7 +4,7 @@ mod connection;
 mod network;
 
 use acropolis_common::{
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockIntent, BlockStatus,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -230,6 +230,7 @@ impl BlockSink {
             } else {
                 BlockStatus::Volatile
             },
+            intent: BlockIntent::Apply,
             slot,
             number: header.number,
             hash: header.hash,
