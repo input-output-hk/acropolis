@@ -57,7 +57,7 @@ mod tests {
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
         matches Ok(());
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "invalid-ttl") =>
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "wrong_ttl") =>
         matches Err(TransactionValidationError::ExpiredUTxO { ttl: 7084747, current_slot: 7084748 });
     )]
     fn shelley_test(
