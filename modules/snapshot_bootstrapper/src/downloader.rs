@@ -16,7 +16,7 @@ pub enum DownloadError {
     ClientInit(#[from] reqwest::Error),
 
     #[error("Failed to download snapshot from {0}: {1}")]
-    Download(String, reqwest::Error),
+    RequestFailed(String, reqwest::Error),
 
     #[error("Download failed from {0}: HTTP status {1}")]
     InvalidStatusCode(String, reqwest::StatusCode),
@@ -86,7 +86,7 @@ impl SnapshotDownloader {
                 .get(url)
                 .send()
                 .await
-                .map_err(|e| DownloadError::Download(url.to_string(), e))?;
+                .map_err(|e| DownloadError::RequestFailed(url.to_string(), e))?;
 
             if !response.status().is_success() {
                 return Err(DownloadError::InvalidStatusCode(
@@ -100,7 +100,7 @@ impl SnapshotDownloader {
 
             let stream = response.bytes_stream();
             let async_read =
-                tokio_util::io::StreamReader::new(stream.map_err(|_| std::io::Error::other));
+                tokio_util::io::StreamReader::new(stream.map_err(|e| std::io::Error::other(e)));
 
             let progress_reader = ProgressReader::new(async_read, content_length, 200);
             let buffered = BufReader::new(progress_reader);
