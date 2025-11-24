@@ -9,15 +9,14 @@ use acropolis_common::{
     },
     *,
 };
-use caryatid_sdk::{module, Context, Module};
-use std::{clone::Clone, fmt::Debug, str::FromStr, sync::Arc};
-
 use anyhow::Result;
+use caryatid_sdk::{module, Context};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
+use std::{clone::Clone, fmt::Debug, sync::Arc};
 use tracing::{debug, error, info, info_span, Instrument};
 mod utxo_registry;
 mod validations;
@@ -172,9 +171,6 @@ impl TxUnpacker {
                                 match MultiEraTx::decode(raw_tx) {
                                     Ok(tx) => {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
-                                        if tx_hash == TxHash::from_str("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e").unwrap() {
-                                            println!("Tx Cbor: {:?}", hex::encode(raw_tx));
-                                        }
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
                                         let inputs = tx.consumes();

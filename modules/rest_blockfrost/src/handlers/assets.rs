@@ -1,8 +1,8 @@
 use crate::{
     handlers_config::HandlersConfig,
     types::{
-        AssetAddressRest, AssetInfoRest, AssetMetadata, AssetMintRecordRest, AssetTransactionRest,
-        PolicyAssetRest,
+        AssetAddressRest, AssetInfoRest, AssetMetadataREST, AssetMintRecordRest,
+        AssetTransactionRest, PolicyAssetRest,
     },
 };
 use acropolis_common::queries::errors::QueryError;
@@ -14,7 +14,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AssetMetadataStandard, AssetName, PolicyId,
+    AssetName, PolicyId,
 };
 use blake2::{digest::consts::U20, Blake2b, Digest};
 use caryatid_sdk::Context;
@@ -94,7 +94,7 @@ pub async fn handle_asset_single_blockfrost(
             )) => Ok((quantity, info)),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
-            )) => Err(QueryError::not_found("Asset")),
+            )) => Err(QueryError::not_found("Asset not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -105,13 +105,16 @@ pub async fn handle_asset_single_blockfrost(
     )
     .await?;
 
-    let (onchain_metadata_json, onchain_metadata_extra, cip68_version) = info
-        .onchain_metadata
-        .as_ref()
-        .map(|raw_meta| normalize_onchain_metadata(raw_meta.as_slice()))
-        .unwrap_or((None, None, None));
-
-    let onchain_metadata_standard = cip68_version.or(info.metadata_standard);
+    let (onchain_metadata_json, onchain_metadata_extra, onchain_metadata_standard) =
+        if let Some(raw) = info.metadata.cip68_metadata.as_ref() {
+            let (json, extra) = normalize_onchain_metadata(raw);
+            (json, extra, info.metadata.cip68_version)
+        } else if let Some(raw) = info.metadata.cip25_metadata.as_ref() {
+            let (json, _) = normalize_onchain_metadata(raw);
+            (json, None, info.metadata.cip25_version)
+        } else {
+            (None, None, None)
+        };
 
     // TODO: Query transaction_state once implemented to fetch inital_mint_tx_hash based on TxIdentifier
     let response = AssetInfoRest {
@@ -153,7 +156,7 @@ pub async fn handle_asset_history_blockfrost(
             )) => Ok(history),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
-            )) => Err(QueryError::not_found("Asset history")),
+            )) => Err(QueryError::not_found("Asset history not found")),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -189,8 +192,8 @@ pub async fn handle_asset_transactions_blockfrost(
                 AssetsStateQueryResponse::AssetTransactions(txs),
             )) => Ok(txs),
             Message::StateQueryResponse(StateQueryResponse::Assets(
-                AssetsStateQueryResponse::Error(QueryError::NotFound { .. }),
-            )) => Err(QueryError::not_found("Asset")),
+                AssetsStateQueryResponse::Error(QueryError::NotFound { resource }),
+            )) => Err(QueryError::not_found(resource)),
             Message::StateQueryResponse(StateQueryResponse::Assets(
                 AssetsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -320,7 +323,7 @@ fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTEr
 pub async fn fetch_asset_metadata(
     asset: &str,
     offchain_registry_url: &str,
-) -> Option<AssetMetadata> {
+) -> Option<AssetMetadataREST> {
     let url = format!("{}{}.json", offchain_registry_url, asset);
 
     let client = Client::new();
@@ -348,7 +351,7 @@ pub async fn fetch_asset_metadata(
         .and_then(|v| v.as_u64())
         .and_then(|n| u8::try_from(n).ok());
 
-    Some(AssetMetadata {
+    Some(AssetMetadataREST {
         name,
         description,
         ticker,
@@ -360,12 +363,10 @@ pub async fn fetch_asset_metadata(
 
 /// Normalize on-chain metadata for CIP-25 and CIP-68.
 /// Returns (metadata_json, metadata_extra, cip68_version).
-pub fn normalize_onchain_metadata(
-    raw: &[u8],
-) -> (Option<Value>, Option<String>, Option<AssetMetadataStandard>) {
+pub fn normalize_onchain_metadata(raw: &[u8]) -> (Option<Value>, Option<String>) {
     let decoded: CborValue = match serde_cbor::from_slice(raw) {
         Ok(val) => val,
-        Err(_) => return (None, None, None),
+        Err(_) => return (None, None),
     };
 
     match decoded {
@@ -376,12 +377,6 @@ pub fn normalize_onchain_metadata(
         // CIP-68
         CborValue::Array(mut arr) if arr.len() >= 2 => {
             let metadata = arr.remove(0);
-            let version = match arr.remove(0) {
-                CborValue::Integer(1) => Some(AssetMetadataStandard::CIP68v1),
-                CborValue::Integer(2) => Some(AssetMetadataStandard::CIP68v2),
-                CborValue::Integer(3) => Some(AssetMetadataStandard::CIP68v3),
-                _ => Some(AssetMetadataStandard::CIP68v1),
-            };
             let extra = arr.pop().unwrap_or(CborValue::Array(vec![]));
 
             let json_meta = match metadata {
@@ -406,7 +401,7 @@ pub fn normalize_onchain_metadata(
                 .ok()
                 .map(hex::encode)
                 .filter(|val| !matches!(val.as_str(), "80" | "f6"));
-            (json_meta, extra_hex, version)
+            (json_meta, extra_hex)
         }
 
         // CIP-25: plain map
@@ -417,10 +412,10 @@ pub fn normalize_onchain_metadata(
                     obj.insert(key, cbor_to_json(v));
                 }
             }
-            (Some(Value::Object(obj)), None, None)
+            (Some(Value::Object(obj)), None)
         }
 
-        _ => (None, None, None),
+        _ => (None, None),
     }
 }
 
