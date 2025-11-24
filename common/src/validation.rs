@@ -7,7 +7,10 @@ use std::array::TryFromSliceError;
 
 use thiserror::Error;
 
-use crate::{protocol_params::Nonce, GenesisKeyhash, PoolId, Slot, VrfKeyHash};
+use crate::{
+    protocol_params::Nonce, rational_number::RationalNumber, GenesisKeyhash, PoolId, Slot,
+    VrfKeyHash,
+};
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -166,8 +169,12 @@ impl PartialEq for PraosBadVrfProofError {
 // ------------------------------------------------------------ VrfLeaderValueTooBigError
 #[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum VrfLeaderValueTooBigError {
-    #[error("VRF Leader Value Too Big")]
-    VrfLeaderValueTooBig,
+    #[error("VRF Leader Value Too Big: pool_id={pool_id}, active_stake={active_stake}, relative_stake={relative_stake}")]
+    VrfLeaderValueTooBig {
+        pool_id: PoolId,
+        active_stake: u64,
+        relative_stake: RationalNumber,
+    },
 }
 
 // ------------------------------------------------------------ BadVrfProofError
