@@ -24,7 +24,6 @@ dependencies = [
  "bitmask-enum",
  "blake2 0.10.6",
  "bs58",
- "bytes",
  "caryatid_module_clock",
  "caryatid_module_rest_server",
  "caryatid_process",
@@ -1454,9 +1453,6 @@ name = "bytes"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "byteview"
