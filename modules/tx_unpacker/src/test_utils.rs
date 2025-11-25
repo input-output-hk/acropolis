@@ -1,7 +1,8 @@
-use acropolis_common::Slot;
+use acropolis_common::{protocol_params::ShelleyParams, Slot};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct TestContext {
+    pub shelley_params: ShelleyParams,
     pub current_slot: Slot,
 }
 
