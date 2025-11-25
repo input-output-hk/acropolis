@@ -378,6 +378,7 @@ dependencies = [
  "config",
  "flate2",
  "futures-util",
+ "hex",
  "reqwest 0.12.24",
  "serde",
  "serde_json",

@@ -347,6 +347,7 @@ pub struct SnapshotDumpMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
+    EpochState(EpochActivityMessage),
 }
 
 // === Global message enum ===

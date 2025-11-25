@@ -7,9 +7,11 @@ use acropolis_common::snapshot::streaming_snapshot::{
     ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, StreamingSnapshotParser,
     UtxoCallback, UtxoEntry,
 };
+use acropolis_common::snapshot::{EpochBootstrapData, EpochCallback};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
+use tracing::info;
 
 // Simple counter callback that doesn't store data in memory
 #[derive(Default)]
@@ -154,6 +156,18 @@ impl ProposalCallback for CountingCallbacks {
         // Keep first 10 for summary
         self.sample_proposals = proposals.into_iter().take(10).collect();
         Ok(())
+    }
+}
+
+impl EpochCallback for CountingCallbacks {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
+        info!(
+            "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
+            data.epoch,
+            data.total_blocks_current,
+            data.total_blocks_previous
+        );
+        todo!()
     }
 }
 

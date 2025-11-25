@@ -59,6 +59,9 @@ pub struct State {
 
     // protocol parameter for Praos and TPraos
     praos_params: Option<PraosParams>,
+
+    // Flag to indicate if state was bootstrapped from snapshot
+    bootstrapped: bool,
 }
 
 impl State {
@@ -83,7 +86,53 @@ impl State {
             epoch_fees: 0,
             nonces: None,
             praos_params: None,
+            bootstrapped: false,
         }
+    }
+
+    /// Bootstrap state from snapshot data
+    /// This initializes the epoch state with block production data from a snapshot
+    pub fn bootstrap_from_snapshot(&mut self, epoch_data: &EpochActivityMessage) {
+        info!(
+            "Bootstrapping state from snapshot for epoch {}",
+            epoch_data.epoch
+        );
+
+        self.epoch = epoch_data.epoch;
+        self.epoch_start_time = epoch_data.epoch_start_time;
+        self.first_block_time = epoch_data.first_block_time;
+        self.first_block_height = epoch_data.first_block_height;
+        self.last_block_time = epoch_data.last_block_time;
+        self.last_block_height = epoch_data.last_block_height;
+        self.epoch_blocks = epoch_data.total_blocks;
+        self.epoch_txs = epoch_data.total_txs;
+        self.epoch_outputs = epoch_data.total_outputs;
+        self.epoch_fees = epoch_data.total_fees;
+
+        // Initialize blocks_minted from spo_blocks
+        self.blocks_minted =
+            epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
+
+        // Set nonce if available
+        if let Some(nonce) = &epoch_data.nonce {
+            self.nonces = Some(Nonces {
+                epoch: epoch_data.epoch,
+                active: nonce.clone(),
+                candidate: nonce.clone(),
+                evolving: nonce.clone(),
+                lab: Default::default(),
+                prev_lab: Default::default(),
+            });
+        }
+
+        self.bootstrapped = true;
+
+        info!(
+            "Bootstrapped epoch state: epoch={}, blocks={}, unique_spos={}",
+            self.epoch,
+            self.epoch_blocks,
+            self.blocks_minted.len()
+        );
     }
 
     /// Handle protocol parameters updates
@@ -327,6 +376,48 @@ mod tests {
         assert_eq!(state.epoch_outputs, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
+        assert!(!state.bootstrapped);
+    }
+
+    #[test]
+    fn test_bootstrap_from_snapshot() {
+        let mut state = State::new(&GenesisValues::mainnet());
+
+        let pool_id_1 = PoolId::from(keyhash_224(b"pool1"));
+        let pool_id_2 = PoolId::from(keyhash_224(b"pool2"));
+
+        let epoch_data = EpochActivityMessage {
+            epoch: 500,
+            epoch_start_time: 1700000000,
+            epoch_end_time: 1700432000,
+            first_block_time: 1700000100,
+            first_block_height: 10000000,
+            last_block_time: 1700431900,
+            last_block_height: 10021599,
+            total_blocks: 21600,
+            total_txs: 500000,
+            total_outputs: 1000000000000,
+            total_fees: 50000000,
+            spo_blocks: vec![(pool_id_1, 100), (pool_id_2, 200)],
+            nonce: None,
+        };
+
+        state.bootstrap_from_snapshot(&epoch_data);
+
+        assert!(state.bootstrapped);
+        assert_eq!(state.epoch, 500);
+        assert_eq!(state.epoch_blocks, 21600);
+        assert_eq!(state.epoch_txs, 500000);
+        assert_eq!(state.epoch_fees, 50000000);
+        assert_eq!(state.blocks_minted.len(), 2);
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&pool_id_1),
+            100
+        );
+        assert_eq!(
+            state.get_latest_epoch_blocks_minted_by_pool(&pool_id_2),
+            200
+        );
     }
 
     #[test]

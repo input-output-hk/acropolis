@@ -2,7 +2,10 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    messages::{
+        CardanoMessage, EpochActivityMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse,
+    },
     queries::epochs::{
         EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
     },
@@ -16,7 +19,7 @@ use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, warn};
 mod epoch_activity_publisher;
 mod state;
 use crate::epoch_activity_publisher::EpochActivityPublisher;
@@ -34,6 +37,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
 );
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
@@ -47,10 +52,71 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
 pub struct EpochsState;
 
 impl EpochsState {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, epoch_data: &EpochActivityMessage) {
+        info!(
+            "Bootstrapping epoch state from snapshot: epoch={}, blocks={}, spo_count={}",
+            epoch_data.epoch,
+            epoch_data.total_blocks,
+            epoch_data.spo_blocks.len()
+        );
+
+        // Initialize epoch state from snapshot data
+        state.bootstrap_from_snapshot(epoch_data);
+
+        info!(
+            "Epoch state bootstrapped successfully for epoch {}",
+            epoch_data.epoch
+        );
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+        genesis: &acropolis_common::genesis_values::GenesisValues,
+    ) -> Result<()> {
+        info!("Waiting for snapshot bootstrap messages...");
+
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::EpochState(epoch_data),
+                )) => {
+                    let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
+                    Self::handle_bootstrap(&mut state, epoch_data);
+                    // Commit the bootstrapped state at block 0 (genesis equivalent for snapshot)
+                    history.lock().await.commit(0, state);
+                    info!("Epoch state bootstrap complete");
+                    return Ok(());
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
+                    _,
+                ))) => {
+                    // Ignore SPO state messages - not relevant for epochs state
+                }
+                Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
+                    // Snapshot complete without epoch bootstrap data
+                    warn!("Snapshot complete without epoch bootstrap data, using default state");
+                    return Ok(());
+                }
+                _ => {
+                    // Ignore other messages during bootstrap
+                }
+            }
+        }
+    }
+
     /// Run loop
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
+        snapshot_subscription: Box<dyn Subscription<Message>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
@@ -63,6 +129,9 @@ impl EpochsState {
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
+
+        // Wait for snapshot bootstrap (if available)
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
 
         // Consume initial protocol parameters
         let _ = protocol_parameters_subscription.read().await?;
@@ -185,6 +254,11 @@ impl EpochsState {
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
 
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+
         // Publish topic
         let epoch_activity_publish_topic = config
             .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
@@ -210,6 +284,7 @@ impl EpochsState {
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
+        let snapshot_subscription = context.subscribe(&snapshot_subscribe_topic).await?;
 
         // Publisher
         let epoch_activity_publisher =
@@ -257,6 +332,7 @@ impl EpochsState {
             Self::run(
                 history,
                 bootstrapped_subscription,
+                snapshot_subscription,
                 block_subscription,
                 block_txs_subscription,
                 protocol_parameters_subscription,

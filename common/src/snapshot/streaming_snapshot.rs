@@ -771,6 +771,48 @@ pub struct SnapshotMetadata {
     pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EpochBootstrapData {
+    ///  Current epoch number
+    pub epoch: u64,
+    ///  Pool ID (hex) → block count
+    pub blocks_previous_epoch: Vec<(String, u64)>,
+    ///  Pool ID (hex) → block count
+    pub blocks_current_epoch: Vec<(String, u64)>,
+    ///  Sum of current epoch blocks
+    pub total_blocks_current: u64,
+    ///  Sum of previous epoch blocks
+    pub total_blocks_previous: u64,
+}
+
+impl EpochBootstrapData {
+    /// Create from SnapshotMetadata
+    pub fn from_metadata(metadata: &SnapshotMetadata) -> Self {
+        let blocks_previous: Vec<(String, u64)> = metadata
+            .blocks_previous_epoch
+            .iter()
+            .map(|p| (p.pool_id.clone(), p.block_count as u64))
+            .collect();
+
+        let blocks_current: Vec<(String, u64)> = metadata
+            .blocks_current_epoch
+            .iter()
+            .map(|p| (p.pool_id.clone(), p.block_count as u64))
+            .collect();
+
+        let total_previous: u64 = blocks_previous.iter().map(|(_, c)| c).sum();
+        let total_current: u64 = blocks_current.iter().map(|(_, c)| c).sum();
+
+        Self {
+            epoch: metadata.epoch,
+            blocks_previous_epoch: blocks_previous,
+            blocks_current_epoch: blocks_current,
+            total_blocks_current: total_current,
+            total_blocks_previous: total_previous,
+        }
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Callback Traits
 // -----------------------------------------------------------------------------
@@ -779,6 +821,10 @@ pub struct SnapshotMetadata {
 pub trait UtxoCallback {
     /// Called once per UTXO entry
     fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()>;
+}
+
+pub trait EpochCallback {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()>;
 }
 
 /// Callback invoked with bulk stake pool data
@@ -807,7 +853,7 @@ pub trait ProposalCallback {
 
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
-    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback
+    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback + EpochCallback
 {
     /// Called before streaming begins with metadata
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()>;
@@ -1168,9 +1214,22 @@ impl StreamingSnapshotParser {
                 deposits,
             },
             utxo_count: Some(utxo_count),
+            blocks_previous_epoch: blocks_previous_epoch.clone(),
+            blocks_current_epoch: blocks_current_epoch.clone(),
+        })?;
+
+        let epoch_bootstrap = EpochBootstrapData::from_metadata(&SnapshotMetadata {
+            epoch,
+            pot_balances: PotBalances {
+                reserves,
+                treasury,
+                deposits,
+            },
+            utxo_count: Some(utxo_count),
             blocks_previous_epoch,
             blocks_current_epoch,
-        })?;
+        });
+        callbacks.on_epoch(epoch_bootstrap)?;
 
         // Emit completion callback
         callbacks.on_complete()?;
@@ -2167,11 +2226,19 @@ pub struct CollectingCallbacks {
     pub accounts: Vec<AccountState>,
     pub dreps: Vec<DRepInfo>,
     pub proposals: Vec<GovernanceProposal>,
+    epoch: EpochBootstrapData,
 }
 
 impl UtxoCallback for CollectingCallbacks {
     fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()> {
         self.utxos.push(utxo);
+        Ok(())
+    }
+}
+
+impl EpochCallback for CollectingCallbacks {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
+        self.epoch = data;
         Ok(())
     }
 }
