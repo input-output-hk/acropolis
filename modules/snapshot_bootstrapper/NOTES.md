@@ -6,27 +6,27 @@ needed to boot from a snapshot file.
 See [snapshot_bootstrapper](src/bootstrapper.rs) for the process that
 references and runs with these helpers.
 
-Booting from a snapshot takes minutes instead of the hours it takes to boot from
-genesis. It also allows booting from a given epoch which allows one to create tests
+Booting from a snapshot should take minutes instead of the hours it takes to boot from
+genesis. It also allows booting from a given epoch, which allows one to create tests
 that rely only on that epoch of data. We're also skipping some of the problematic
-eras and will typically boot from Conway around epoch 305, 306, and 307. It takes
-three epochs to have enough context to correctly calculate the rewards.
+eras and will typically boot from Conway. At the moment, we're confident
+it takes only 1 NewEpochState cbor dump to bootstrap the node.
 
 The required data for bootstrapping are:
 
-- snapshot files (each has an associated epoch number and point)
-- nonces
-- headers
+- snapshot files (each has an associated epoch number and point (slot + block hash))
+- nonces (not implemented yet)
+- headers (not implemented yet)
 
 ## Snapshot Files
 
-The snapshots come from the Amaru project. In their words,
-"the snapshots we generated are different [from a Mithril snapshot]: they're
-the actual ledger state; i.e. the in-memory state that is constructed by iterating over each block up to a specific
-point. So, it's all the UTxOs, the set of pending governance actions, the account balance, etc.
-If you get this from a trusted source, you don't need to do any replay, you can just start up and load this from disk.
-The format of these is completely non-standard; we just forked the haskell node and spit out whatever we needed to in
-CBOR."
+The snapshot approach comes from the Amaru project. In their words,
+"the snapshots we generated are different from a NewEpochState dump that's requested from an Ogmios GetCBOR endpoint
+with a synchronizing node: they're the actual ledger state; i.e. the in-memory state that is constructed by iterating
+over each block up to a specific point. So, it's all the UTxOs, the set of pending governance actions, the account
+balance, etc.
+If you get this from a trusted source, you don't need to do any replay, you can just start up and load this from the
+disk."
 
 Snapshot files are referenced by their epoch number in the config.json file below.
 
@@ -68,20 +68,19 @@ for each of the three snapshot files. Loading occurs in this order:
 5. Filter snapshots based on epochs specified in config.json
 6. Download snapshot files (skips if already present)
 7. Publish `SnapshotMessage::Startup` to the snapshot topic
-8. Parse each snapshot file using the streaming parser
+8. Parse each snapshot file sequentially using the [streaming_snapshot](../../common/src/snapshot/streaming_snapshot.rs)
 9. Publish `CardanoMessage::SnapshotComplete` with final block info to the completion topic
 
 Modules in the system will have subscribed to the startup and completion topics before the
 bootstrapper runs the above sequence. Upon receiving snapshot data messages,
-they will use the data to populate their state, history (for BlockFrost),
-and any other state required to achieve readiness to operate.
+they will use the data to populate their state, and any other state required to achieve readiness to operate.
 
 ## Data update messages
 
 The bootstrapper publishes data as it parses the snapshot files using the `SnapshotPublisher`.
 Snapshot parsing is done while streaming the data to keep the memory
 footprint lower. As elements of the file are parsed, callbacks provide the data
-to the publisher which can then publish structured data on the message bus.
+to the publisher, which can then publish structured data on the message bus.
 
 The `SnapshotPublisher` implements the streaming snapshot callbacks:
 
@@ -92,9 +91,9 @@ The `SnapshotPublisher` implements the streaming snapshot callbacks:
 - `ProposalCallback`: Receives governance proposals
 - `SnapshotCallbacks`: Receives metadata and completion signals
 
-Currently the publisher just accumulates this data, but this will need to be extended to publish the corresponding
+Currently, the publisher just accumulates this data, but this will need to be extended to publish the corresponding
 message types. Publishing of detailed snapshot data to downstream modules can be added by implementing the
-appropriate message bus publishes in the callback methods.
+appropriate message bus publishing in the callback methods.
 
 ## Configuration
 
