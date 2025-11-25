@@ -120,9 +120,10 @@ impl UtxoCallback for SnapshotPublisher {
         self.utxo_count += 1;
 
         // Log progress every million UTXOs
-        if self.utxo_count % 1_000_000 == 0 {
+        if self.utxo_count.is_multiple_of(1_000_000) {
             info!("Processed {} UTXOs", self.utxo_count);
         }
+        // TODO: Accumulate UTXO data if needed or send in chunks to UTXOState processor
         Ok(())
     }
 }
@@ -131,6 +132,7 @@ impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
         info!("Received {} pools", pools.len());
         self.pools.extend(pools);
+        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
         Ok(())
     }
 }
@@ -139,6 +141,7 @@ impl StakeCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
+        // TODO: Accumulate account data if needed or send in chunks to AccountState processor
         Ok(())
     }
 }
@@ -147,6 +150,7 @@ impl DRepCallback for SnapshotPublisher {
     fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
         info!("Received {} DReps", dreps.len());
         self.dreps.extend(dreps);
+        // TODO: Accumulate DRep data if needed or send in chunks to DRepState processor
         Ok(())
     }
 }
@@ -226,6 +230,10 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
+        // We could send a Resolver reference from here for large data, i.e. the UTXO set,
+        // which could be a file reference. For a file reference, we'd extend the parser to
+        // give us a callback value with the offset into the file; and we'd make the streaming
+        // UTXO parser public and reusable, adding it to the resolver implementation.
         Ok(())
     }
 }
