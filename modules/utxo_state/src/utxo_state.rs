@@ -101,6 +101,15 @@ impl UTXOState {
                         .await;
                     }
 
+                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                        let mut state = state1.lock().await;
+                        state
+                            .handle_rollback(message)
+                            .await
+                            .inspect_err(|e| error!("Rollback handling error: {e}"))
+                            .ok();
+                    }
+
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }

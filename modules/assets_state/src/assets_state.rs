@@ -13,6 +13,7 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
+    subscription::SubscriptionExt,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -58,7 +59,7 @@ impl AssetsState {
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         if let Some(sub) = utxo_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
+            let _ = sub.read_ignoring_rollbacks().await?;
             info!("Consumed initial message from utxo_deltas_subscription");
         }
         if let Some(sub) = address_deltas_subscription.as_mut() {
@@ -118,7 +119,7 @@ impl AssetsState {
 
             // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
             if let Some(sub) = utxo_deltas_subscription.as_mut() {
-                let (_, utxo_msg) = sub.read().await?;
+                let (_, utxo_msg) = sub.read_ignoring_rollbacks().await?;
                 match utxo_msg.as_ref() {
                     Message::Cardano((
                         ref block_info,

@@ -13,7 +13,7 @@ pub struct EpochActivityPublisher {
     /// Topic to publish on
     topic: String,
 
-    // Whether the last message we published was a rollback
+    // When did we publish our last non-rollback message
     last_activity_at: Option<u64>,
 }
 
