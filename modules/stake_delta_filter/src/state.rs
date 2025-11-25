@@ -26,32 +26,53 @@ pub struct PointerOccurrence {
 
 pub struct DeltaPublisher {
     pub params: Arc<StakeDeltaFilterParams>,
+
+    // When did we publish our last non-rollback message
+    last_activity_at: Option<u64>,
 }
 
 impl DeltaPublisher {
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
-        Self { params }
+        Self {
+            params,
+            last_activity_at: None,
+        }
     }
 
     pub async fn publish(
-        &self,
+        &mut self,
         block: &BlockInfo,
         message: StakeAddressDeltasMessage,
     ) -> Result<()> {
+        self.last_activity_at = Some(block.slot);
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::StakeAddressDeltas(message),
         )));
-        let params = self.params.clone();
 
-        params
+        self.params
             .context
             .message_bus
-            .publish(&params.stake_address_delta_topic, packed_message)
+            .publish(&self.params.stake_address_delta_topic, packed_message)
             .await
             .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
 
         Ok(())
+    }
+
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        let Message::Cardano((block_info, CardanoMessage::Rollback(_))) = message.as_ref() else {
+            return Ok(());
+        };
+        if self.last_activity_at.is_none_or(|slot| slot < block_info.slot) {
+            return Ok(());
+        }
+        self.last_activity_at = None;
+        self.params
+            .context
+            .message_bus
+            .publish(&self.params.stake_address_delta_topic, message)
+            .await
     }
 }
 
@@ -96,6 +117,10 @@ impl State {
             }
         }
         Ok(())
+    }
+
+    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        self.delta_publisher.publish_rollback(message).await
     }
 
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {

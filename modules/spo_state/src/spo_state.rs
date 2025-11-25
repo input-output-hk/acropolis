@@ -113,15 +113,14 @@ impl SPOState {
             let mut current_block: Option<BlockInfo> = None;
 
             // read per-block topics in parallel
-            let certs_message_f = certificates_subscription.read();
             let block_message_f = block_subscription.read();
             let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
             let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
 
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certificates_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -130,6 +129,11 @@ impl SPOState {
 
                     // new_epoch?
                     block_info.new_epoch && block_info.epoch > 0
+                }
+
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    spo_state_publisher.publish_rollback(certs_message.clone()).await?;
+                    false
                 }
 
                 _ => {
@@ -208,6 +212,10 @@ impl SPOState {
                     }
                     .instrument(span)
                     .await;
+                }
+
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // Do nothing, we handled rollback earlier
                 }
 
                 _ => error!("Unexpected message type: {certs_message:?}"),

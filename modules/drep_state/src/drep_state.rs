@@ -79,19 +79,20 @@ impl DRepState {
             };
             let mut current_block: Option<BlockInfo> = None;
 
-            // Read per-block messages in parallel
-            let certs_message_f = certs_subscription.read();
-
             // Certificates are the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((ref block_info, _)) => {
+                Message::Cardano((ref block_info, CardanoMessage::TxCertificates(_))) => {
                     // rollback only on certs
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
+                }
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    drep_state_publisher.publish_rollback(certs_message.clone()).await?;
+                    false
                 }
                 _ => false,
             };
@@ -149,6 +150,10 @@ impl DRepState {
                     }
                     .instrument(span)
                     .await;
+                }
+
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // Do nothing, we handled the rollback earlier
                 }
 
                 _ => error!("Unexpected message type: {certs_message:?}"),

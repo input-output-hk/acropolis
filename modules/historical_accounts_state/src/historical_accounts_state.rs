@@ -87,13 +87,12 @@ impl HistoricalAccountsState {
         // Main loop of synchronised messages
         loop {
             // Create all per-block message futures upfront before processing messages sequentially
-            let certs_message_f = certs_subscription.read();
             let stake_address_deltas_message_f = stake_address_deltas_subscription.read();
 
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read_ignoring_rollbacks().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
