@@ -466,6 +466,39 @@ impl TxUnpacker {
                         }.instrument(span).await;
                     }
 
+                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                        let mut futures = Vec::new();
+                        if let Some(ref topic) = publish_utxo_deltas_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_asset_deltas_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_withdrawals_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_certificates_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_governance_procedures_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_block_txs_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        join_all(futures)
+                            .await
+                            .into_iter()
+                            .filter_map(Result::err)
+                            .for_each(|e| error!("Failed to publish: {e}"));
+                    }
+
                     _ => error!("Unexpected message type: {message:?}")
                 }
             }
