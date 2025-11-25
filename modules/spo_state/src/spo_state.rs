@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
     messages::{
@@ -217,7 +218,6 @@ impl SPOState {
             if new_epoch {
                 let spdd_message_f = spdd_subscription.read();
                 let spo_rewards_message_f = spo_rewards_subscription.as_mut().map(|s| s.read());
-                let ea_message_f = epoch_activity_subscription.read();
                 let stake_reward_deltas_message_f =
                     stake_reward_deltas_subscription.as_mut().map(|s| s.read());
 
@@ -278,7 +278,7 @@ impl SPOState {
                 }
 
                 // Handle EpochActivityMessage
-                let (_, ea_message) = ea_message_f.await?;
+                let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((
                     block_info,
                     CardanoMessage::EpochActivity(epoch_activity_message),

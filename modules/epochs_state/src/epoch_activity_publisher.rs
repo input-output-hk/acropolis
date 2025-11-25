@@ -20,7 +20,11 @@ pub struct EpochActivityPublisher {
 impl EpochActivityPublisher {
     /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
-        Self { context, topic, last_activity_at: None }
+        Self {
+            context,
+            topic,
+            last_activity_at: None,
+        }
     }
 
     /// Publish the Epoch Activity Message
@@ -43,10 +47,7 @@ impl EpochActivityPublisher {
     }
 
     /// Publish a rollback message, if we have anything to roll back
-    pub async fn publish_rollback(
-        &mut self,
-        message: Arc<Message>,
-    ) -> anyhow::Result<()> {
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
         let Message::Cardano((block_info, CardanoMessage::Rollback(_))) = message.as_ref() else {
             return Ok(());
         };
@@ -54,9 +55,6 @@ impl EpochActivityPublisher {
             return Ok(());
         }
         self.last_activity_at = None;
-        self.context
-            .message_bus
-            .publish(&self.topic, message)
-            .await
+        self.context.message_bus.publish(&self.topic, message).await
     }
 }

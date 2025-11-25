@@ -22,6 +22,7 @@ pub mod serialization;
 pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
+pub mod subscription;
 pub mod types;
 pub mod upstream_cache;
 pub mod validation;

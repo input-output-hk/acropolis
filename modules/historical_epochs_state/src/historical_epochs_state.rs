@@ -7,6 +7,7 @@ use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
 };
+use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQueryResponse},
     queries::epochs::EpochsStateQueryResponse,
@@ -92,7 +93,6 @@ impl HistoricalEpochsState {
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
                 let params_message_f = params_subscription.read();
-                let epoch_activity_message_f = epoch_activity_subscription.read();
 
                 let (_, params_msg) = params_message_f.await?;
                 match params_msg.as_ref() {
@@ -114,7 +114,8 @@ impl HistoricalEpochsState {
                     _ => error!("Unexpected message type: {params_msg:?}"),
                 }
 
-                let (_, epoch_activity_msg) = epoch_activity_message_f.await?;
+                let (_, epoch_activity_msg) =
+                    epoch_activity_subscription.read_ignoring_rollbacks().await?;
                 match epoch_activity_msg.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea))) => {
                         let span = info_span!(

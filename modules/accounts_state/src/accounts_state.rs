@@ -5,6 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
+    subscription::SubscriptionExt,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -151,7 +152,6 @@ impl AccountsState {
             if new_epoch {
                 let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
-                let ea_message_f = ea_subscription.read();
                 let params_message_f = parameters_subscription.read();
 
                 let spdd_store_guard = match spdd_store.as_ref() {
@@ -241,7 +241,7 @@ impl AccountsState {
                 }
 
                 // Handle epoch activity
-                let (_, message) = ea_message_f.await?;
+                let (_, message) = ea_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
                         let span = info_span!(
