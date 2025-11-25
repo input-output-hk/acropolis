@@ -124,7 +124,6 @@ impl AccountsState {
             // Read per-block topics in parallel
             let certs_message_f = certs_subscription.read();
             let stake_message_f = stake_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.read();
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser, but we have to handle it after the
@@ -301,7 +300,7 @@ impl AccountsState {
             }
 
             // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
+            let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(

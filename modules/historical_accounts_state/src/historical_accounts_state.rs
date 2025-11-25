@@ -5,6 +5,7 @@ use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     BlockInfo, BlockStatus,
@@ -88,7 +89,6 @@ impl HistoricalAccountsState {
             // Create all per-block message futures upfront before processing messages sequentially
             let certs_message_f = certs_subscription.read();
             let stake_address_deltas_message_f = stake_address_deltas_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.read();
 
             let mut current_block: Option<BlockInfo> = None;
 
@@ -153,7 +153,7 @@ impl HistoricalAccountsState {
             }
 
             // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
+            let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(

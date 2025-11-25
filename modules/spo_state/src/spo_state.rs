@@ -115,7 +115,6 @@ impl SPOState {
             // read per-block topics in parallel
             let certs_message_f = certificates_subscription.read();
             let block_message_f = block_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
             let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
             let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
 
@@ -304,8 +303,8 @@ impl SPOState {
             }
 
             // Handle withdrawals
-            if let Some(withdrawals_message_f) = withdrawals_message_f {
-                let (_, message) = withdrawals_message_f.await?;
+            if let Some(withdrawals_subscription) = withdrawals_subscription.as_mut() {
+                let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
