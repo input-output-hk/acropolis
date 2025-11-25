@@ -76,7 +76,7 @@ impl AssetsState {
             let current_block: BlockInfo;
 
             // Asset deltas are the synchroniser
-            let (_, asset_msg) = asset_deltas_subscription.read().await?;
+            let (_, asset_msg) = asset_deltas_subscription.read_ignoring_rollbacks().await?;
             match asset_msg.as_ref() {
                 Message::Cardano((ref block_info, CardanoMessage::AssetDeltas(deltas_msg))) => {
                     // rollback only on asset deltas
