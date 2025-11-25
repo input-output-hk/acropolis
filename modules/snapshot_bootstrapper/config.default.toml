@@ -1,0 +1,13 @@
+# Snapshot bootstrapper default configuration
+
+# Network to use
+network = "mainnet"
+
+# Directory for data storage
+data-dir = "./data"
+
+# Topics
+startup-topic = "cardano.sequence.start"
+snapshot-topic = "cardano.snapshot"
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
+completion-topic = "cardano.snapshot.complete"

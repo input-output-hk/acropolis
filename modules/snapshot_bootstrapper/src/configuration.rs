@@ -21,40 +21,28 @@ pub enum ConfigError {
     MalformedSnapshotsFile(PathBuf, serde_json::Error),
 }
 
-const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
-const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
-const DEFAULT_COMPLETION_TOPIC: &str = "cardano.snapshot.complete";
-const DEFAULT_BOOTSTRAPPED_TOPIC: &str = "cardano.sequence.bootstrapped";
-
 /// Configuration for the snapshot bootstrapper
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct SnapshotConfig {
     pub network: String,
     pub data_dir: String,
     pub startup_topic: String,
     pub snapshot_topic: String,
-    pub bootstrapped_topic: String,
+    pub bootstrapped_subscribe_topic: String,
     pub completion_topic: String,
 }
 
 impl SnapshotConfig {
     pub fn try_load(config: &Config) -> Result<Self> {
-        Ok(Self {
-            network: config.get_string("network").unwrap_or_else(|_| "mainnet".to_string()),
-            data_dir: config.get_string("data-dir").unwrap_or_else(|_| "./data".to_string()),
-            startup_topic: config
-                .get_string("startup-topic")
-                .unwrap_or(DEFAULT_STARTUP_TOPIC.to_string()),
-            snapshot_topic: config
-                .get_string("snapshot-topic")
-                .unwrap_or(DEFAULT_SNAPSHOT_TOPIC.to_string()),
-            bootstrapped_topic: config
-                .get_string("bootstrapped-subscribe-topic")
-                .unwrap_or(DEFAULT_BOOTSTRAPPED_TOPIC.to_string()),
-            completion_topic: config
-                .get_string("completion-topic")
-                .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string()),
-        })
+        let full_config = Config::builder()
+            .add_source(config::File::from_str(
+                include_str!("../config.default.toml"),
+                config::FileFormat::Toml,
+            ))
+            .add_source(config.clone())
+            .build()?;
+        Ok(full_config.try_deserialize()?)
     }
 
     pub fn network_dir(&self) -> String {
@@ -175,7 +163,7 @@ mod tests {
             data_dir: "./data".to_string(),
             startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
-            bootstrapped_topic: "bootstrapped".to_string(),
+            bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
         };
 
@@ -189,7 +177,7 @@ mod tests {
             data_dir: "/var/data".to_string(),
             startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
-            bootstrapped_topic: "bootstrapped".to_string(),
+            bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
         };
 
@@ -203,7 +191,7 @@ mod tests {
             data_dir: "./data".to_string(),
             startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
-            bootstrapped_topic: "bootstrapped".to_string(),
+            bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
         };
 
