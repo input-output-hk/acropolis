@@ -1,0 +1,24 @@
+# Acropolis indexer process
+[package]
+name = "acropolis_process_indexer"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Acropolis indexer process containing core modules"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
+acropolis_module_peer_network_interface = { path = "../../modules/peer_network_interface" }
+acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
+acropolis_module_indexer = { path = "../../modules/indexer" }
+
+caryatid_process = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+config = { workspace = true }
+tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
+tokio = { workspace = true }
+

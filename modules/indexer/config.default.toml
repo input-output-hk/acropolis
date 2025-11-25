@@ -1,0 +1,2 @@
+# The topic to publish sync commands on
+sync-command-topic = "cardano.sync.command"

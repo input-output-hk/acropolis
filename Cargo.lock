@@ -296,6 +296,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_mithril_snapshot_fetcher"
 version = "0.1.0"
 dependencies = [
@@ -473,6 +485,23 @@ dependencies = [
  "sled",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "acropolis_process_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "acropolis_module_block_unpacker",
+ "acropolis_module_genesis_bootstrapper",
+ "acropolis_module_indexer",
+ "acropolis_module_peer_network_interface",
+ "anyhow",
+ "caryatid_process",
+ "clap 4.5.51",
+ "config",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]

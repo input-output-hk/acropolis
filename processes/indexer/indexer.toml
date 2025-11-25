@@ -1,0 +1,32 @@
+# Top-level configuration for Acropolis indexer process
+
+[module.genesis-bootstrapper]
+
+[module.peer-network-interface]
+sync-point = "dynamic"
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
+]
+magic-number = 764824073
+
+[module.block-unpacker]
+
+[module.indexer]
+
+[startup]
+topic = "cardano.sequence.start"
+
+[message-bus.internal]
+class = "in-memory"
+workers = 50
+dispatch-queue-size = 1000
+worker-queue-size = 100
+bulk-block-capacity = 50
+bulk-resume-capacity = 75
+
+# Message routing
+[[message-router.route]]  # Everything is internal only
+pattern = "#"
+bus = "internal"
