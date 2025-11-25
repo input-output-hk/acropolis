@@ -53,7 +53,7 @@ impl SnapshotBootstrapper {
         info!("  Completing with '{}'", cfg.completion_topic);
 
         let startup_sub = context.subscribe(&cfg.startup_topic).await?;
-        let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_topic).await?;
+        let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_subscribe_topic).await?;
 
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper.handle");
