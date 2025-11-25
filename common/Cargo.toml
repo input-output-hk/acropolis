@@ -29,7 +29,6 @@ regex = "1"
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["base64"] }
-tempfile = "3"
 tokio = { workspace = true }
 tracing = { workspace = true }
 futures = "0.3.31"
