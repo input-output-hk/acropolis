@@ -136,6 +136,13 @@ impl EpochsState {
                         }
                     });
                 }
+                
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // publish epoch activity rollback message
+                    epoch_activity_publisher.publish_rollback(message).await.unwrap_or_else(
+                        |e| error!("Failed to publish epoch activity rollback: {e}"),
+                    );
+                }
 
                 _ => error!("Unexpected message type: {message:?}"),
             }

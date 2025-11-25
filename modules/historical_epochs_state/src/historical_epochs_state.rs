@@ -72,7 +72,7 @@ impl HistoricalEpochsState {
             // Use certs_message as the synchroniser
             let (_, blocks_message) = blocks_subscription.read().await?;
             let new_epoch = match blocks_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
+                Message::Cardano((block_info, CardanoMessage::BlockAvailable(_))) => {
                     // Handle rollbacks on this topic only
                     let mut state = state_mutex.lock().await;
                     if block_info.status == BlockStatus::RolledBack {
@@ -81,6 +81,10 @@ impl HistoricalEpochsState {
 
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
+                }
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // do nothing, rollbacks are handled on BlockAvailable message
+                    false
                 }
                 _ => false,
             };

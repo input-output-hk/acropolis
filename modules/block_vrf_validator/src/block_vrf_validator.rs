@@ -163,6 +163,9 @@ impl BlockVrfValidator {
                     .instrument(span)
                     .await;
                 }
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // do nothing in here; we handle rollbacks in BlockAvailable
+                }
                 _ => error!("Unexpected message type: {message:?}"),
             }
 

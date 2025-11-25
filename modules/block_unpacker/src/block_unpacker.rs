@@ -81,6 +81,11 @@ impl BlockUnpacker {
                         }
                     }
 
+                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                        // forward the rollback downstream
+                        context.message_bus.publish(&publish_topic, message).await.unwrap_or_else(|e| error!("Failed to publish rollback: {e}"));
+                    }
+
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }

@@ -134,6 +134,15 @@ impl Consensus {
                         .await;
                     }
 
+                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                        // Send rollback to all validators and state modules
+                        context
+                            .message_bus
+                            .publish(&publish_blocks_topic, message.clone())
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                    }
+
                     _ => error!("Unexpected message type: {message:?}"),
                 }
             }
