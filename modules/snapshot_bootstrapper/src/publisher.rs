@@ -58,10 +58,6 @@ impl SnapshotPublisher {
         )));
         self.context.publish(&self.completion_topic, message).await
     }
-
-    pub fn metadata(&self) -> Option<&SnapshotMetadata> {
-        self.metadata.as_ref()
-    }
 }
 
 impl UtxoCallback for SnapshotPublisher {

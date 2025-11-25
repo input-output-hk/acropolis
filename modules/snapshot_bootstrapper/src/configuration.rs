@@ -108,6 +108,17 @@ impl SnapshotFileMetadata {
         Ok(snapshots)
     }
 
+    pub fn parse_point(&self) -> Option<(u64, String)> {
+        let parts: Vec<&str> = self.point.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            let slot = parts[0].parse().ok()?;
+            let hash = parts[1].to_string();
+            Some((slot, hash))
+        } else {
+            None
+        }
+    }
+
     pub fn file_path(&self, network_dir: &str) -> String {
         format!("{}/{}.cbor", network_dir, self.point)
     }
