@@ -4,6 +4,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
+    subscription::SubscriptionExt,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -70,7 +71,7 @@ impl BlockKesValidator {
             let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
 
-            let (_, message) = block_subscription.read().await?;
+            let (_, message) = block_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -83,7 +84,6 @@ impl BlockKesValidator {
                     if is_new_epoch {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
-                        let spo_state_message_f = spo_state_subscription.read();
 
                         let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
                         let span = info_span!(
@@ -98,7 +98,8 @@ impl BlockKesValidator {
                             _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
                         });
 
-                        let (_, spo_state_msg) = spo_state_message_f.await?;
+                        let (_, spo_state_msg) =
+                            spo_state_subscription.read_ignoring_rollbacks().await?;
                         let span = info_span!(
                             "block_kes_validator.handle_spo_state",
                             epoch = block_info.epoch
@@ -136,9 +137,6 @@ impl BlockKesValidator {
                     }
                     .instrument(span)
                     .await;
-                }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
-                    // do nothing in here; we handle rollbacks in BlockAvailable
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }
