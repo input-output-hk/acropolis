@@ -112,7 +112,7 @@ impl GovernanceState {
     async fn read_spo(
         spo_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, SPOStakeDistributionMessage)> {
-        match spo_s.read().await?.1.as_ref() {
+        match spo_s.read_ignoring_rollbacks().await?.1.as_ref() {
             Message::Cardano((blk, CardanoMessage::SPOStakeDistribution(distr))) => {
                 Ok((blk.clone(), distr.clone()))
             }

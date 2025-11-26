@@ -92,7 +92,6 @@ impl BlockVrfValidator {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
                         let spo_state_message_f = spo_state_subscription.read();
-                        let spdd_msg_f = spdd_subscription.read();
 
                         let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
                         let span = info_span!(
@@ -122,7 +121,7 @@ impl BlockVrfValidator {
                         });
 
                         let (_, spo_state_msg) = spo_state_message_f.await?;
-                        let (_, spdd_msg) = spdd_msg_f.await?;
+                        let (_, spdd_msg) = spdd_subscription.read_ignoring_rollbacks().await?;
                         let span = info_span!(
                             "block_vrf_validator.handle_new_snapshot",
                             epoch = block_info.epoch
