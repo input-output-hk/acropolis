@@ -107,7 +107,7 @@ impl HistoricalAccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let (_, params_msg) = params_subscription.read().await?;
+                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     params_msg.as_ref()
                 {

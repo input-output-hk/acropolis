@@ -83,9 +83,8 @@ impl BlockKesValidator {
 
                     if is_new_epoch {
                         // read epoch boundary messages
-                        let protocol_parameters_message_f = protocol_parameters_subscription.read();
-
-                        let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
+                        let (_, protocol_parameters_msg) =
+                            protocol_parameters_subscription.read_ignoring_rollbacks().await?;
                         let span = info_span!(
                             "block_kes_validator.handle_protocol_parameters",
                             epoch = block_info.epoch

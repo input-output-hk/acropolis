@@ -102,7 +102,7 @@ impl DRepState {
             if new_epoch {
                 // Read params subscription if store-info is enabled to obtain DRep expiration param. Update expirations on epoch transition
                 if let Some(sub) = params_subscription.as_mut() {
-                    let (_, message) = sub.read().await?;
+                    let (_, message) = sub.read_ignoring_rollbacks().await?;
                     match message.as_ref() {
                         Message::Cardano((
                             ref block_info,

@@ -92,9 +92,7 @@ impl HistoricalEpochsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let params_message_f = params_subscription.read();
-
-                let (_, params_msg) = params_message_f.await?;
+                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
                 match params_msg.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
                         let span = info_span!(

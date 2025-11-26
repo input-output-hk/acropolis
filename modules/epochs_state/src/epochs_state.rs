@@ -89,7 +89,7 @@ impl EpochsState {
                     // read protocol parameters if new epoch
                     if is_new_epoch {
                         let (_, protocol_parameters_msg) =
-                            protocol_parameters_subscription.read().await?;
+                            protocol_parameters_subscription.read_ignoring_rollbacks().await?;
                         if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
                             protocol_parameters_msg.as_ref()
                         {

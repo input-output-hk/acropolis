@@ -87,7 +87,7 @@ impl AddressState {
             // Read params message on epoch bounday to update rollback window
             // length if needed and set epoch start block for volatile pruning
             if new_epoch {
-                let (_, message) = params_subscription.read().await?;
+                let (_, message) = params_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     message.as_ref()
                 {

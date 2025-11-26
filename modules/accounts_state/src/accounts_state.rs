@@ -153,8 +153,6 @@ impl AccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let params_message_f = parameters_subscription.read();
-
                 let spdd_store_guard = match spdd_store.as_ref() {
                     Some(s) => Some(s.lock().await),
                     None => None,
@@ -220,7 +218,7 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                let (_, message) = params_message_f.await?;
+                let (_, message) = parameters_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
                         let span = info_span!(

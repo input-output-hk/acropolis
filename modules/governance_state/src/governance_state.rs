@@ -86,7 +86,7 @@ impl GovernanceState {
     async fn read_parameters(
         parameters_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
-        match parameters_s.read().await?.1.as_ref() {
+        match parameters_s.read_ignoring_rollbacks().await?.1.as_ref() {
             Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => {
                 Ok((blk.clone(), params.clone()))
             }
