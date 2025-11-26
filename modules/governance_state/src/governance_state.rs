@@ -1,8 +1,8 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, Message, ProtocolParamsMessage,

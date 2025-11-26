@@ -2,6 +2,7 @@
 
 use crate::StakeDeltaFilterParams;
 use crate::{process_message, PointerCache, Tracker};
+use acropolis_common::caryatid::RollbackAwarePublisher;
 use acropolis_common::{
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StakeAddressDeltasMessage,
@@ -24,19 +25,14 @@ pub struct PointerOccurrence {
     pub occurrence: HashMap<ShelleyAddressPointer, Vec<(Option<Address>, BlockInfo, Address)>>,
 }
 
-pub struct DeltaPublisher {
-    pub params: Arc<StakeDeltaFilterParams>,
-
-    // When did we publish our last non-rollback message
-    last_activity_at: Option<u64>,
-}
+pub struct DeltaPublisher(RollbackAwarePublisher<Message>);
 
 impl DeltaPublisher {
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
-        Self {
-            params,
-            last_activity_at: None,
-        }
+        Self(RollbackAwarePublisher::new(
+            params.context.clone(),
+            params.stake_address_delta_topic.clone(),
+        ))
     }
 
     pub async fn publish(
@@ -44,35 +40,15 @@ impl DeltaPublisher {
         block: &BlockInfo,
         message: StakeAddressDeltasMessage,
     ) -> Result<()> {
-        self.last_activity_at = Some(block.slot);
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::StakeAddressDeltas(message),
         )));
-
-        self.params
-            .context
-            .message_bus
-            .publish(&self.params.stake_address_delta_topic, packed_message)
-            .await
-            .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
-
-        Ok(())
+        self.0.publish(packed_message).await
     }
 
     pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
-        let Message::Cardano((block_info, CardanoMessage::Rollback(_))) = message.as_ref() else {
-            return Ok(());
-        };
-        if self.last_activity_at.is_none_or(|slot| slot < block_info.slot) {
-            return Ok(());
-        }
-        self.last_activity_at = None;
-        self.params
-            .context
-            .message_bus
-            .publish(&self.params.stake_address_delta_topic, message)
-            .await
+        self.0.publish(message).await
     }
 }
 

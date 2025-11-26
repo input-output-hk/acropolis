@@ -1,9 +1,9 @@
 //! Acropolis DRDD state module for Caryatid
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_query_parameters,
-    subscription::SubscriptionExt,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context};

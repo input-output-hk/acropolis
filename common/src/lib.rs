@@ -2,6 +2,7 @@
 
 pub mod address;
 pub mod calculations;
+pub mod caryatid;
 pub mod cbor;
 pub mod cip19;
 pub mod commands;
@@ -22,7 +23,6 @@ pub mod serialization;
 pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
-pub mod subscription;
 pub mod types;
 pub mod upstream_cache;
 pub mod validation;

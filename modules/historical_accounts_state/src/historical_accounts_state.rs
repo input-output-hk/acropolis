@@ -1,11 +1,11 @@
 //! Acropolis historical accounts state module for Caryatid
 //! Manages optional state data needed for Blockfrost alignment
 
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     BlockInfo, BlockStatus,

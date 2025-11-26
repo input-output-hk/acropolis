@@ -8,6 +8,7 @@ use crate::{
     immutable_address_store::ImmutableAddressStore,
     state::{AddressStorageConfig, State},
 };
+use acropolis_common::{caryatid::SubscriptionExt, queries::errors::QueryError};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -15,7 +16,6 @@ use acropolis_common::{
     },
     BlockInfo, BlockStatus,
 };
-use acropolis_common::{queries::errors::QueryError, subscription::SubscriptionExt};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;

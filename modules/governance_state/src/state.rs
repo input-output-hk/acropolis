@@ -1,6 +1,7 @@
 //! Acropolis Governance State: State storage
 
 use acropolis_common::{
+    caryatid::RollbackAwarePublisher,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
@@ -20,8 +21,7 @@ use crate::{
 };
 
 pub struct State {
-    pub enact_state_topic: String,
-    pub context: Arc<Context<Message>>,
+    publisher: RollbackAwarePublisher<Message>,
 
     pub drep_stake_messages_count: usize,
 
@@ -33,9 +33,6 @@ pub struct State {
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,
-
-    // When did we publish our last non-rollback message
-    last_activity_at: Option<u64>,
 }
 
 impl State {
@@ -45,8 +42,7 @@ impl State {
         verification_output_file: Option<String>,
     ) -> Self {
         Self {
-            context,
-            enact_state_topic,
+            publisher: RollbackAwarePublisher::new(context, enact_state_topic),
 
             drep_stake_messages_count: 0,
 
@@ -59,8 +55,6 @@ impl State {
             drep_no_confidence: 0,
             drep_abstain: 0,
             spo_stake: HashMap::new(),
-
-            last_activity_at: None,
         }
     }
 
@@ -236,34 +230,16 @@ impl State {
         block: &BlockInfo,
         message: GovernanceOutcomesMessage,
     ) -> Result<()> {
-        self.last_activity_at = Some(block.slot);
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::GovernanceOutcomes(message),
         )));
-        let context = self.context.clone();
-        let enact_state_topic = self.enact_state_topic.clone();
-
-        tokio::spawn(async move {
-            context
-                .message_bus
-                .publish(&enact_state_topic, packed_message)
-                .await
-                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
-        });
-        Ok(())
+        self.publisher.publish(packed_message).await
     }
 
     /// Publish a rollback message, if we have anything to roll back
     pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
-        let Message::Cardano((block_info, CardanoMessage::Rollback(_))) = message.as_ref() else {
-            return Ok(());
-        };
-        if self.last_activity_at.is_none_or(|slot| slot < block_info.slot) {
-            return Ok(());
-        }
-        self.last_activity_at = None;
-        self.context.message_bus.publish(&self.enact_state_topic, message).await
+        self.publisher.publish(message).await
     }
 
     /// Get list of actual voting proposals

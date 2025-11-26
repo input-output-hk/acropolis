@@ -1,8 +1,8 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
     messages::{

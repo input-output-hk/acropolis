@@ -1,7 +1,7 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse, DEFAULT_SPDD_QUERY_TOPIC},

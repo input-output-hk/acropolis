@@ -2,8 +2,8 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message},
-    subscription::SubscriptionExt,
     NetworkId,
 };
 use anyhow::{anyhow, Result};

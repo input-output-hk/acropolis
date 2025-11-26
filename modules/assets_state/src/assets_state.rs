@@ -7,13 +7,13 @@ use crate::{
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    subscription::SubscriptionExt,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;

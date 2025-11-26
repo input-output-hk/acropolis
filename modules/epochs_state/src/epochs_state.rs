@@ -2,6 +2,7 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::{
         epochs::{
@@ -10,7 +11,6 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    subscription::SubscriptionExt,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;

@@ -2,9 +2,9 @@ mod stores;
 
 use crate::stores::{fjall::FjallStore, Block, Store};
 use acropolis_codec::{block::map_to_block_issuer, map_parameters};
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},

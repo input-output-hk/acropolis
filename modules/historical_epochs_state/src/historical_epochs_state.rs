@@ -3,11 +3,11 @@
 
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
 };
-use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQueryResponse},
     queries::epochs::EpochsStateQueryResponse,
