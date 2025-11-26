@@ -4,7 +4,7 @@
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era, StartupMethod,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
@@ -37,6 +37,8 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
 const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
 const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
+
+const CONFIG_KEY_START_UP_METHOD: &str = "startup-method";
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -395,6 +397,19 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Check if this module is the selected startup method
+        let startup_method = config
+            .get::<StartupMethod>(CONFIG_KEY_START_UP_METHOD)
+            .unwrap_or_else(|_| StartupMethod::Mithril);
+
+        if startup_method != StartupMethod::Mithril {
+            info!(
+                "Mithril Snapshot Fetcher not enabled (startup.method = '{}')",
+                startup_method
+            );
+            return Ok(());
+        }
+
         let bootstrapped_subscribe_topic = config
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());

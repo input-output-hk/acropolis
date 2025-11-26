@@ -3,8 +3,8 @@
 # ============================================================================
 # Startup Configuration
 # ============================================================================
-[startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+[global.startup]
+method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================

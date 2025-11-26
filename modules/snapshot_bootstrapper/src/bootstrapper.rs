@@ -10,7 +10,7 @@ use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    BlockHash, BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockStatus, Era, StartupMethod,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -19,6 +19,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::time::Instant;
 use tracing::{error, info, info_span, Instrument};
+
+const CONFIG_KEY_START_UP_METHOD: &str = "startup-method";
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
@@ -48,6 +50,20 @@ pub struct SnapshotBootstrapper;
 impl SnapshotBootstrapper {
     /// Initializes the snapshot bootstrapper.
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        info!("Config {}", format!("{:?}", config));
+        // Check if this module is the selected startup method
+        let startup_method = config
+            .get::<StartupMethod>(CONFIG_KEY_START_UP_METHOD)
+            .unwrap_or_else(|_| StartupMethod::Mithril);
+
+        if startup_method != StartupMethod::Snapshot {
+            info!(
+                "Snapshot bootstrapper not enabled (startup.method = '{}')",
+                startup_method
+            );
+            return Ok(());
+        }
+
         let cfg = SnapshotConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");
