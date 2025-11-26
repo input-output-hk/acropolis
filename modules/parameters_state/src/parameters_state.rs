@@ -1,6 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -145,7 +146,10 @@ impl ParametersState {
                     .instrument(span)
                     .await?;
                 }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     // forward the rollback downstream
                     config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }

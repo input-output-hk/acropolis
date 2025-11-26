@@ -1,7 +1,7 @@
 //! Acropolis Block unpacker module for Caryatid
 //! Unpacks block bodies into transactions
 
-use acropolis_common::messages::{CardanoMessage, Message, RawTxsMessage};
+use acropolis_common::messages::{CardanoMessage, Message, RawTxsMessage, StateTransitionMessage};
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
 use config::Config;
@@ -81,7 +81,10 @@ impl BlockUnpacker {
                         }
                     }
 
-                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
                         // forward the rollback downstream
                         context
                             .message_bus

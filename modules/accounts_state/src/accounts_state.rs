@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -136,7 +136,10 @@ impl AccountsState {
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
                 }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     drep_publisher.publish_rollback(certs_message.clone()).await?;
                     spo_publisher.publish_rollback(certs_message.clone()).await?;
                     spo_rewards_publisher.publish_rollback(certs_message.clone()).await?;
@@ -296,7 +299,10 @@ impl AccountsState {
                     .await;
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     // Ignore this, we already handled rollbacks
                 }
 

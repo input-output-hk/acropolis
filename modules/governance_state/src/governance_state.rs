@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{
@@ -223,7 +224,10 @@ impl GovernanceState {
                 Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
                     (blk.clone(), msg.clone())
                 }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     let mut state = state.lock().await;
                     state.publish_rollback(message).await?;
                     continue;

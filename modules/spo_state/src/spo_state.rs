@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
@@ -126,7 +127,10 @@ impl SPOState {
                     block_info.new_epoch && block_info.epoch > 0
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     spo_state_publisher.publish_rollback(certs_message.clone()).await?;
                     false
                 }
@@ -205,7 +209,10 @@ impl SPOState {
                     .await;
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     // Do nothing, we handled rollback earlier
                 }
 

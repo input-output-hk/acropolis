@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -91,7 +92,10 @@ impl DRepState {
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
                 }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     drep_state_publisher.publish_rollback(certs_message.clone()).await?;
                     false
                 }
@@ -153,7 +157,10 @@ impl DRepState {
                     .await;
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     // Do nothing, we handled the rollback earlier
                 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
 
-use crate::messages::{CardanoMessage, Message};
+use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
 
 #[async_trait]
 pub trait SubscriptionExt<M: MessageBounds> {
@@ -17,7 +17,10 @@ impl SubscriptionExt<Message> for Box<dyn Subscription<Message>> {
             let (stream, message) = self.read().await?;
             if matches!(
                 message.as_ref(),
-                Message::Cardano((_, CardanoMessage::Rollback(_)))
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_))
+                ))
             ) {
                 continue;
             }
@@ -49,7 +52,10 @@ impl RollbackAwarePublisher<Message> {
 
     pub async fn publish(&mut self, message: Arc<Message>) -> Result<()> {
         match message.as_ref() {
-            Message::Cardano((block, CardanoMessage::Rollback(_))) => {
+            Message::Cardano((
+                block,
+                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+            )) => {
                 if self.last_activity_at.is_some_and(|slot| slot >= block.slot) {
                     self.last_activity_at = None;
                     self.context.publish(&self.topic, message).await?;

@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message},
+    messages::{CardanoMessage, Message, StateTransitionMessage},
     NetworkId,
 };
 use anyhow::{anyhow, Result};
@@ -186,7 +186,10 @@ impl StakeDeltaFilter {
                         .await;
                     }
 
-                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
                         publisher
                             .publish_rollback(message)
                             .await
@@ -269,7 +272,10 @@ impl StakeDeltaFilter {
                         .await;
                     }
 
-                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
                         let mut state = state_deltas.lock().await;
                         state
                             .handle_rollback(message)

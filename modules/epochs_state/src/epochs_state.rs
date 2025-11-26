@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::{
         epochs::{
             EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
@@ -136,7 +136,10 @@ impl EpochsState {
                     });
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
                     // publish epoch activity rollback message
                     epoch_activity_publisher.publish_rollback(message).await.unwrap_or_else(|e| {
                         error!("Failed to publish epoch activity rollback: {e}")

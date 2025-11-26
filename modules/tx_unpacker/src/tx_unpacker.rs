@@ -5,7 +5,7 @@ use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
+        StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
 };
@@ -466,7 +466,7 @@ impl TxUnpacker {
                         }.instrument(span).await;
                     }
 
-                    Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    Message::Cardano((_, CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)))) => {
                         let mut futures = Vec::new();
                         if let Some(ref topic) = publish_utxo_deltas_topic {
                             futures.push(context.message_bus.publish(topic, message.clone()));
