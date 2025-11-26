@@ -6,6 +6,7 @@ mod publisher;
 use crate::configuration::{ConfigError, NetworkConfig, SnapshotConfig, SnapshotFileMetadata};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
 use acropolis_common::{
     messages::{CardanoMessage, Message},
@@ -53,7 +54,7 @@ impl SnapshotBootstrapper {
         info!("  Completing with '{}'", cfg.completion_topic);
 
         let startup_sub = context.subscribe(&cfg.startup_topic).await?;
-        let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_topic).await?;
+        let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_subscribe_topic).await?;
 
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper.handle");
@@ -180,11 +181,15 @@ impl SnapshotBootstrapper {
             Self::parse_snapshot(&file_path, &mut publisher).await?;
         }
 
-        let metadata = publisher
-            .metadata()
-            .ok_or_else(|| anyhow::anyhow!("No metadata received from snapshots"))?;
+        let last_snapshot =
+            snapshots.last().ok_or_else(|| anyhow::anyhow!("No snapshots to process"))?;
 
-        let block_info = build_block_info_from_metadata(metadata);
+        let block_info = build_block_info_from_metadata(last_snapshot).map_err(|e| {
+            BootstrapError::Parse(format!(
+                "Failed to build block info from snapshot metadata: {e}"
+            ))
+        })?;
+
         publisher.publish_completion(block_info).await?;
 
         Ok(())
@@ -204,18 +209,32 @@ impl SnapshotBootstrapper {
     }
 }
 
-fn build_block_info_from_metadata(
-    metadata: &acropolis_common::snapshot::streaming_snapshot::SnapshotMetadata,
-) -> BlockInfo {
-    BlockInfo {
+fn build_block_info_from_metadata(metadata: &SnapshotFileMetadata) -> Result<BlockInfo> {
+    let (slot, block_hash_str) = metadata
+        .parse_point()
+        .ok_or_else(|| anyhow::anyhow!("Invalid point format: {}", metadata.point))?;
+
+    let hash = BlockHash::try_from(hex::decode(block_hash_str)?)
+        .map_err(|e| anyhow::anyhow!("Invalid block hash hex: {:?}", e))?;
+
+    let genesis = GenesisValues::mainnet();
+    let epoch_slot = slot - genesis.epoch_to_first_slot(slot);
+    let timestamp = genesis.slot_to_timestamp(slot);
+
+    info!(
+        "Block info built: slot={}, hash={}, epoch={}, slot_in_epoch={}, timestamp={}",
+        slot, hash, metadata.epoch, epoch_slot, timestamp
+    );
+
+    Ok(BlockInfo {
         status: BlockStatus::Immutable,
-        slot: 0,
+        slot,
         number: 0,
-        hash: BlockHash::default(),
+        hash,
         epoch: metadata.epoch,
-        epoch_slot: 0,
+        epoch_slot,
         new_epoch: false,
-        timestamp: 0,
+        timestamp,
         era: Era::Conway,
-    }
+    })
 }

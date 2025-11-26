@@ -398,6 +398,67 @@ mod tests {
     }
 
     #[test]
+    fn should_ignore_irrelevant_block_fetch_after_rollback() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(0, "first block");
+        let (h2a, b2a) = make_block(1, "second block pre-rollback");
+        let (h3a, b3a) = make_block(2, "third block pre-rollback");
+        let (h2b, b2b) = make_block(1, "second block post-rollback");
+        let (h3b, b3b) = make_block(1, "third block post-rollback");
+
+        // publish the first block
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h1, b1.as_slice(), false))
+        );
+        state.handle_block_published();
+
+        // publish the second block
+        assert_eq!(state.handle_roll_forward(p1, h2a.clone()), vec![p1]);
+        state.handle_body_fetched(h2a.slot, h2a.hash, b2a.clone());
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h2a, b2a.as_slice(), false))
+        );
+        state.handle_block_published();
+        assert_eq!(state.next_unpublished_block(), None);
+
+        // roll forward to the third block, but don't receive the body yet
+        assert_eq!(state.handle_roll_forward(p1, h3a.clone()), vec![p1]);
+
+        // now, roll the chain back to the first block
+        state.handle_roll_backward(p1, Point::Specific(h1.slot, h1.hash.to_vec()));
+        assert_eq!(state.next_unpublished_block(), None);
+
+        // and when we advance to the new second block, the system should report it as a rollback
+        assert_eq!(state.handle_roll_forward(p1, h2b.clone()), vec![p1]);
+        state.handle_body_fetched(h2b.slot, h2b.hash, b2b.clone());
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h2b, b2b.as_slice(), true))
+        );
+        state.handle_block_published();
+
+        // we should not take any action on receiving the original third block
+        state.handle_body_fetched(h3a.slot, h3a.hash, b3a);
+        assert_eq!(state.next_unpublished_block(), None);
+
+        // and the new third block should not be a rollback
+        assert_eq!(state.handle_roll_forward(p1, h3b.clone()), vec![p1]);
+        state.handle_body_fetched(h3b.slot, h3b.hash, b3b.clone());
+        assert_eq!(
+            state.next_unpublished_block(),
+            Some((&h3b, b3b.as_slice(), false))
+        );
+        state.handle_block_published();
+    }
+
+    #[test]
     fn should_not_report_rollback_for_unpublished_portion_of_chain() {
         let mut state = ChainState::new();
         let p1 = PeerId(0);
