@@ -33,6 +33,9 @@ pub struct State {
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,
+
+    // When did we publish our last non-rollback message
+    last_activity_at: Option<u64>,
 }
 
 impl State {
@@ -56,6 +59,8 @@ impl State {
             drep_no_confidence: 0,
             drep_abstain: 0,
             spo_stake: HashMap::new(),
+
+            last_activity_at: None,
         }
     }
 
@@ -226,7 +231,12 @@ impl State {
         );
     }
 
-    pub async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
+    pub async fn send(
+        &mut self,
+        block: &BlockInfo,
+        message: GovernanceOutcomesMessage,
+    ) -> Result<()> {
+        self.last_activity_at = Some(block.slot);
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::GovernanceOutcomes(message),
@@ -242,6 +252,18 @@ impl State {
                 .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
         });
         Ok(())
+    }
+
+    /// Publish a rollback message, if we have anything to roll back
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+        let Message::Cardano((block_info, CardanoMessage::Rollback(_))) = message.as_ref() else {
+            return Ok(());
+        };
+        if self.last_activity_at.is_none_or(|slot| slot < block_info.slot) {
+            return Ok(());
+        }
+        self.last_activity_at = None;
+        self.context.message_bus.publish(&self.enact_state_topic, message).await
     }
 
     /// Get list of actual voting proposals

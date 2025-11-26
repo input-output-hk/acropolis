@@ -112,9 +112,6 @@ impl SPOState {
             let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
             let mut current_block: Option<BlockInfo> = None;
 
-            // read per-block topics in parallel
-            let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
-
             // Use certs_message as the synchroniser
             let (_, certs_message) = certificates_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
@@ -359,8 +356,8 @@ impl SPOState {
             }
 
             // Handle governance
-            if let Some(governance_message_f) = governance_message_f {
-                let (_, message) = governance_message_f.await?;
+            if let Some(governance_subscription) = governance_subscription.as_mut() {
+                let (_, message) = governance_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,

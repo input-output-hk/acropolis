@@ -4,8 +4,8 @@
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
+        CardanoMessage, DRepStakeDistributionMessage, Message, ProtocolParamsMessage,
+        SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
     },
     queries::governance::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     BlockInfo,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -82,19 +82,6 @@ impl GovernanceStateConfig {
 }
 
 impl GovernanceState {
-    async fn read_governance(
-        governance_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, GovernanceProceduresMessage)> {
-        match governance_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
-                Ok((blk.clone(), msg.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for governance procedures topic"
-            )),
-        }
-    }
-
     async fn read_parameters(
         parameters_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
@@ -229,7 +216,19 @@ impl GovernanceState {
         });
 
         loop {
-            let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+            let (_, message) = governance_s.read().await?;
+            //let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+            let (blk_g, gov_procs) = match message.as_ref() {
+                Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
+                    (blk.clone(), msg.clone())
+                }
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    let mut state = state.lock().await;
+                    state.publish_rollback(message).await?;
+                    continue;
+                }
+                _ => bail!("Unexpected message {message:?} for governance procedures topic"),
+            };
 
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {

@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::governance::{
@@ -161,7 +162,7 @@ impl DRepState {
 
             // Handle governance message
             if let Some(sub) = gov_subscription.as_mut() {
-                let (_, message) = sub.read().await?;
+                let (_, message) = sub.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
