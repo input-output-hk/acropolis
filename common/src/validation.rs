@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     protocol_params::Nonce, Address, Era, GenesisKeyhash, Lovelace, NetworkId, PoolId, Slot,
-    StakeAddress, TxOutput, UTxOIdentifierSet, Value, VrfKeyHash,
+    StakeAddress, TxOutRef, TxOutput, Value, VrfKeyHash,
 };
 
 /// Transaction Validation Error
@@ -52,8 +52,11 @@ pub enum TransactionValidationError {
     },
 
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
-    #[error("Bad inputs: bad_inputs={bad_inputs}")]
-    BadInputsUTxO { bad_inputs: UTxOIdentifierSet },
+    #[error(
+        "Bad inputs: bad_inputs=[{}]", 
+        bad_inputs.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ")
+    )]
+    BadInputsUTxO { bad_inputs: Vec<TxOutRef> },
 
     /// **Cause:** Some of transaction outputs are on a different network than the expected one.
     #[error(

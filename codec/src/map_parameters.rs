@@ -12,7 +12,6 @@ use pallas::ledger::{
     *,
 };
 
-use crate::map_parameters;
 use acropolis_common::hash::Hash;
 use acropolis_common::validation::ValidationError;
 use acropolis_common::{
@@ -23,7 +22,6 @@ use acropolis_common::{
 use pallas_primitives::conway::PseudoScript;
 use pallas_traverse::{MultiEraInput, MultiEraOutput, MultiEraTx};
 use std::collections::{HashMap, HashSet};
-use tracing::error;
 
 /// Map Pallas Network to our NetworkId
 pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
@@ -997,15 +995,16 @@ pub fn map_transaction_refs(
     (ref_inps, ref_outs)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn map_one_transaction(
     block_number: u32,
     tx_index: u16,
     tx: &MultiEraTx,
 ) -> (
-    Vec<TxOutRef>,
-    Vec<(TxOutRef, TxOutput)>,
-    u128,
-    Vec<ValidationError>,
+    Vec<TxOutRef>,             // inputs
+    Vec<(TxOutRef, TxOutput)>, // outputs
+    u128,                      // total
+    Vec<ValidationError>,      // errors
 ) {
     let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
         return (
@@ -1065,7 +1064,7 @@ pub fn map_one_transaction(
                 Err(e) => {
                     errors.push(ValidationError::MalformedTransaction(
                         tx_index,
-                        format!("Output {index} in tx ignored: {e}"),
+                        format!("Output {index} has been ignored: {e}"),
                     ));
                 }
             },

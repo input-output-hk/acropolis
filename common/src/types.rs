@@ -724,39 +724,6 @@ impl fmt::Display for UTxOIdentifier {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    PartialEq,
-    Eq,
-)]
-pub struct UTxOIdentifierSet(#[n(0)] pub HashSet<UTxOIdentifier>);
-
-impl fmt::Display for UTxOIdentifierSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let items: Vec<String> = self.0.iter().map(|id| id.to_string()).collect();
-        write!(f, "[{}]", items.join(", "))
-    }
-}
-
-impl From<HashSet<UTxOIdentifier>> for UTxOIdentifierSet {
-    fn from(set: HashSet<UTxOIdentifier>) -> Self {
-        UTxOIdentifierSet(set)
-    }
-}
-
-impl std::ops::Deref for UTxOIdentifierSet {
-    type Target = HashSet<UTxOIdentifier>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 // Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TxOutRef {
@@ -770,6 +737,12 @@ impl TxOutRef {
             tx_hash,
             output_index,
         }
+    }
+}
+
+impl Display for TxOutRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
 }
 
