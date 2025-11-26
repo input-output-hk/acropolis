@@ -36,6 +36,7 @@ members = [
     "processes/replayer",           # All-inclusive process to replay messages
     "processes/golden_tests",       # All-inclusive golden tests process
     "processes/tx_submitter_cli",   # CLI wrapper for TX submitter
+    "processes/indexer",            # Minimal example indexer
 ]
 resolver = "2"
 

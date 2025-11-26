@@ -4,6 +4,7 @@ use crate::{
         AssetAddressRest, AssetInfoRest, AssetMetadataREST, AssetMintRecordRest,
         AssetTransactionRest, PolicyAssetRest,
     },
+    utils::split_policy_and_asset,
 };
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::rest_error::RESTError;
@@ -14,7 +15,7 @@ use acropolis_common::{
         utils::query_state,
     },
     serialization::Bech32WithHrp,
-    AssetName, PolicyId,
+    PolicyId,
 };
 use blake2::{digest::consts::U20, Blake2b, Digest};
 use caryatid_sdk::Context;
@@ -298,28 +299,6 @@ pub async fn handle_policy_assets_blockfrost(
     Ok(RESTResponse::with_json(200, &json))
 }
 
-fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RESTError> {
-    let decoded = hex::decode(hex_str)?;
-
-    if decoded.len() < 28 {
-        return Err(RESTError::BadRequest(
-            "Asset identifier must be at least 28 bytes".to_string(),
-        ));
-    }
-
-    let (policy_part, asset_part) = decoded.split_at(28);
-
-    let policy_id: PolicyId = policy_part
-        .try_into()
-        .map_err(|_| RESTError::BadRequest("Policy id must be 28 bytes".to_string()))?;
-
-    let asset_name = AssetName::new(asset_part).ok_or_else(|| {
-        RESTError::BadRequest("Asset name must be less than 32 bytes".to_string())
-    })?;
-
-    Ok((policy_id, asset_name))
-}
-
 pub async fn fetch_asset_metadata(
     asset: &str,
     offchain_registry_url: &str,
@@ -446,61 +425,5 @@ fn cbor_to_json(val: CborValue) -> Value {
             Value::Object(obj)
         }
         _ => Value::Null,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::handlers::assets::split_policy_and_asset;
-    use hex;
-
-    fn policy_bytes() -> [u8; 28] {
-        [0u8; 28]
-    }
-
-    #[test]
-    fn invalid_hex_string() {
-        let result = split_policy_and_asset("zzzz");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(
-            err.message(),
-            "Invalid hex string: Invalid character 'z' at position 0"
-        );
-    }
-
-    #[test]
-    fn too_short_input() {
-        let hex_str = hex::encode([1u8, 2, 3]);
-        let result = split_policy_and_asset(&hex_str);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(err.message(), "Asset identifier must be at least 28 bytes");
-    }
-
-    #[test]
-    fn invalid_asset_name_too_long() {
-        let mut bytes = policy_bytes().to_vec();
-        bytes.extend(vec![0u8; 33]);
-        let hex_str = hex::encode(bytes);
-        let result = split_policy_and_asset(&hex_str);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.status_code(), 400);
-        assert_eq!(err.message(), "Asset name must be less than 32 bytes");
-    }
-
-    #[test]
-    fn valid_policy_and_asset() {
-        let mut bytes = policy_bytes().to_vec();
-        bytes.extend_from_slice(b"MyToken");
-        let hex_str = hex::encode(bytes);
-        let result = split_policy_and_asset(&hex_str);
-        assert!(result.is_ok());
-        let (policy, name) = result.unwrap();
-        assert_eq!(policy, policy_bytes());
-        assert_eq!(name.as_slice(), b"MyToken");
     }
 }

@@ -5,8 +5,9 @@ mod network;
 
 use acropolis_common::{
     BlockInfo, BlockStatus,
+    commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, Message, RawBlockMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -21,7 +22,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use crate::{
     configuration::{InterfaceConfig, SyncPoint},
     connection::Header,
-    network::NetworkManager,
+    network::{NetworkEvent, NetworkManager},
 };
 
 #[module(
@@ -43,6 +44,7 @@ impl PeerNetworkInterface {
             SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
             _ => None,
         };
+        let command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -82,12 +84,12 @@ impl PeerNetworkInterface {
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
@@ -95,7 +97,7 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
@@ -108,7 +110,7 @@ impl PeerNetworkInterface {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
                                 sink.last_epoch = Some(epoch);
                             }
-                            let mut manager = Self::init_manager(cfg, sink);
+                            let mut manager = Self::init_manager(cfg, sink, command_subscription);
                             manager.sync_to_point(point);
                             manager
                         }
@@ -118,6 +120,7 @@ impl PeerNetworkInterface {
                         }
                     }
                 }
+                SyncPoint::Dynamic => Self::init_manager(cfg, sink, command_subscription),
             };
 
             if let Err(err) = manager.run().await {
@@ -128,13 +131,42 @@ impl PeerNetworkInterface {
         Ok(())
     }
 
-    fn init_manager(cfg: InterfaceConfig, sink: BlockSink) -> NetworkManager {
+    fn init_manager(
+        cfg: InterfaceConfig,
+        sink: BlockSink,
+        command_subscription: Box<dyn Subscription<Message>>,
+    ) -> NetworkManager {
         let (events_sender, events) = mpsc::channel(1024);
+        tokio::spawn(Self::forward_commands_to_events(
+            command_subscription,
+            events_sender.clone(),
+        ));
         let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
         for address in cfg.node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
         manager
+    }
+
+    async fn forward_commands_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<()> {
+        while let Ok((_, msg)) = subscription.read().await {
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect {
+                slot,
+                hash,
+            })) = msg.as_ref()
+            {
+                let point = Point::new(*slot, hash.to_vec());
+
+                if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
+                    bail!("event channel closed");
+                }
+            }
+        }
+
+        bail!("subscription closed");
     }
 
     async fn init_cache(
