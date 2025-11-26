@@ -102,7 +102,8 @@ impl ParametersState {
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         loop {
-            match enact_s.read().await?.1.as_ref() {
+            let (_, message) = enact_s.read().await?;
+            match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let span = info_span!("parameters_state.handle", epoch = block.epoch);
                     async {
@@ -143,6 +144,9 @@ impl ParametersState {
                     }
                     .instrument(span)
                     .await?;
+                }
+                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
