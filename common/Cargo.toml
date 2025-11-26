@@ -41,9 +41,10 @@ thiserror = "2.0.17"
 sha2 = "0.10.8"
 
 [dev-dependencies]
-caryatid_process = { workspace = true }
+tempfile = "3.23"
 config = { workspace = true }
-tempfile = "3"
+caryatid_process = { workspace = true }
+
 
 [lib]
 crate-type = ["rlib"]

@@ -1,0 +1,35 @@
+# Snapshot bootstrapper default configuration
+
+# The Cardano network to connect to (e.g., "mainnet", "preprod", "preview")
+network = "mainnet"
+
+# Base directory for storing network data, snapshots, and configuration files.
+# Network-specific files will be stored in a subdirectory: <data-dir>/<network>/
+# Expected files: config.json (network config) and snapshots.json (snapshot metadata)
+data-dir = "./data"
+
+# Topic for publishing snapshot data during processing.
+# Publishes a Startup message when snapshot processing begins, followed by
+# snapshot content (UTXOs, pools, accounts, DReps, governance proposals).
+snapshot-topic = "cardano.snapshot"
+
+# Topic to subscribe to for genesis bootstrap completion.
+# The bootstrapper waits for a GenesisComplete message on this topic
+# before proceeding with snapshot processing.
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
+
+# Topic for publishing the final SnapshotComplete message.
+# Signals that all snapshots have been fully processed and the
+# blockchain state is ready for downstream consumers.
+completion-topic = "cardano.snapshot.complete"
+
+[download]
+# Total request timeout in seconds (default: 5 minutes)
+timeout-secs = 300
+
+# Connection timeout in seconds
+connect-timeout-secs = 30
+
+# How often to log download progress, measured in number of bytes received.
+# Lower values provide more frequent updates but will increase log volume.
+progress-log-interval = 200

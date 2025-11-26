@@ -1568,7 +1568,7 @@ impl StreamingSnapshotParser {
                         if utxo_count.is_multiple_of(1000000) {
                             let buffer_usage = buffer.len();
                             info!(
-                                "    Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
+                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
                                 utxo_count,
                                 buffer_usage / 1024 / 1024,
                                 max_single_entry_size
@@ -1625,20 +1625,17 @@ impl StreamingSnapshotParser {
             }
         }
 
-        info!("  🎯 STREAMING RESULTS:");
-        info!("    • UTXOs processed: {}", utxo_count);
+        info!("Streaming results:");
+        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "    • Total data streamed: {:.2} MB",
+            "  Total data streamed: {:.2} MB",
             total_bytes_processed as f64 / 1024.0 / 1024.0
         );
         info!(
-            "    • Peak buffer usage: {} MB (vs 2.1GB before!)",
+            "  Peak buffer usage: {} MB",
             PARSE_BUFFER_SIZE / 1024 / 1024
         );
-        info!(
-            "    • Largest single entry: {} bytes",
-            max_single_entry_size
-        );
+        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
         Ok(utxo_count)
     }
