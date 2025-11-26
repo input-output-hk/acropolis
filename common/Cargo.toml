@@ -40,11 +40,11 @@ cryptoxide = "0.5.1"
 thiserror = "2.0.17"
 sha2 = "0.10.8"
 
-[lib]
-crate-type = ["rlib"]
-path = "src/lib.rs"
-
 [dev-dependencies]
 caryatid_process = { workspace = true }
 config = { workspace = true }
 tempfile = "3"
+
+[lib]
+crate-type = ["rlib"]
+path = "src/lib.rs"

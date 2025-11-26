@@ -3,6 +3,7 @@
 // We don't use these messages in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
@@ -454,6 +455,7 @@ pub enum StateQueryResponse {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Transactions(TransactionsCommand),
+    ChainSync(ChainSyncCommand),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
