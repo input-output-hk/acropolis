@@ -119,7 +119,7 @@ impl HistoricalAccountsState {
                     }
                 }
 
-                let (_, rewards_msg) = rewards_subscription.read().await?;
+                let (_, rewards_msg) = rewards_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((
                     block_info,
                     CardanoMessage::StakeRewardDeltas(rewards_msg),
