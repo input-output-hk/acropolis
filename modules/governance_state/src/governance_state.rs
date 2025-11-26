@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::subscription::SubscriptionExt;
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, Message, ProtocolParamsMessage,
@@ -98,7 +99,7 @@ impl GovernanceState {
     async fn read_drep(
         drep_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, DRepStakeDistributionMessage)> {
-        match drep_s.read().await?.1.as_ref() {
+        match drep_s.read_ignoring_rollbacks().await?.1.as_ref() {
             Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) => {
                 Ok((blk.clone(), distr.clone()))
             }

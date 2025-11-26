@@ -3,6 +3,7 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_query_parameters,
+    subscription::SubscriptionExt,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
@@ -50,7 +51,8 @@ impl DRDDState {
             let mut message_subscription = context.subscribe(&subscribe_topic).await?;
             context.run(async move {
                 loop {
-                    let Ok((_, message)) = message_subscription.read().await else {
+                    let Ok((_, message)) = message_subscription.read_ignoring_rollbacks().await
+                    else {
                         return;
                     };
                     match message.as_ref() {
