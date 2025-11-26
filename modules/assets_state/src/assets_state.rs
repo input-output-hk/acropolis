@@ -63,7 +63,7 @@ impl AssetsState {
             info!("Consumed initial message from utxo_deltas_subscription");
         }
         if let Some(sub) = address_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
+            let _ = sub.read_ignoring_rollbacks().await?;
             info!("Consumed initial message from address_deltas_subscription");
         }
         // Main loop of synchronised messages
@@ -155,7 +155,7 @@ impl AssetsState {
             }
 
             if let Some(sub) = address_deltas_subscription.as_mut() {
-                let (_, address_msg) = sub.read().await?;
+                let (_, address_msg) = sub.read_ignoring_rollbacks().await?;
                 match address_msg.as_ref() {
                     Message::Cardano((
                         ref block_info,

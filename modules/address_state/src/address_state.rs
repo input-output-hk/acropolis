@@ -8,7 +8,6 @@ use crate::{
     immutable_address_store::ImmutableAddressStore,
     state::{AddressStorageConfig, State},
 };
-use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -16,6 +15,7 @@ use acropolis_common::{
     },
     BlockInfo, BlockStatus,
 };
+use acropolis_common::{queries::errors::QueryError, subscription::SubscriptionExt};
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
@@ -72,7 +72,7 @@ impl AddressState {
         // Main loop of synchronised messages
         loop {
             // Address deltas are the synchroniser
-            let (_, deltas_msg) = address_deltas_subscription.read().await?;
+            let (_, deltas_msg) = address_deltas_subscription.read_ignoring_rollbacks().await?;
             let (current_block, new_epoch) = match deltas_msg.as_ref() {
                 Message::Cardano((info, _)) => (info.clone(), info.new_epoch && info.epoch > 0),
                 _ => continue,
