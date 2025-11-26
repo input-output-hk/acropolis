@@ -218,7 +218,6 @@ impl SPOState {
 
             // read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let spo_rewards_message_f = spo_rewards_subscription.as_mut().map(|s| s.read());
                 let stake_reward_deltas_message_f =
                     stake_reward_deltas_subscription.as_mut().map(|s| s.read());
 
@@ -238,8 +237,9 @@ impl SPOState {
                 }
 
                 // Handle SPO rewards
-                if let Some(spo_rewards_message_f) = spo_rewards_message_f {
-                    let (_, spo_rewards_message) = spo_rewards_message_f.await?;
+                if let Some(spo_rewards_subscription) = spo_rewards_subscription.as_mut() {
+                    let (_, spo_rewards_message) =
+                        spo_rewards_subscription.read_ignoring_rollbacks().await?;
                     if let Message::Cardano((
                         block_info,
                         CardanoMessage::SPORewards(spo_rewards_message),
