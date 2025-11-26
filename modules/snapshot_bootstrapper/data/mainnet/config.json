@@ -1,9 +1,5 @@
 {
-  "snapshots": [
-    507,
-    508,
-    509
-  ],
+  "snapshot": 507,
   "points": [
     {
       "epoch": 507,

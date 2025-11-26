@@ -31,6 +31,9 @@ pub enum BootstrapError {
     #[error("Snapshot parsing failed: {0}")]
     Parse(String),
 
+    #[error("Snapshot not found for epoch {0}")]
+    SnapshotNotFound(u64),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -52,6 +55,14 @@ impl SnapshotBootstrapper {
         info!("  Data directory: {}", cfg.data_dir);
         info!("  Publishing on '{}'", cfg.snapshot_topic);
         info!("  Completing with '{}'", cfg.completion_topic);
+        info!(
+            "  Download timeouts: {}s total, {}s connect",
+            cfg.download.timeout_secs, cfg.download.connect_timeout_secs
+        );
+        info!(
+            "  Progress log interval: {} chunks",
+            cfg.download.progress_log_interval
+        );
 
         let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_subscribe_topic).await?;
 
@@ -85,23 +96,28 @@ impl SnapshotBootstrapper {
                         }
                     };
 
-                // Filter snapshots based on network config
-                let target_snapshots = SnapshotFileMetadata::filter_by_epochs(
+                // Find the target snapshot based on network config
+                let target_snapshot = match SnapshotFileMetadata::find_by_epoch(
                     &all_snapshots,
-                    &network_config.snapshots,
+                    network_config.snapshot,
+                ) {
+                    Some(snapshot) => snapshot,
+                    None => {
+                        error!(
+                            "No snapshot found for requested epoch: {}",
+                            network_config.snapshot
+                        );
+                        return;
+                    }
+                };
+
+                info!(
+                    "Found snapshot for epoch {} at point {}",
+                    target_snapshot.epoch, target_snapshot.point
                 );
-                if target_snapshots.is_empty() {
-                    error!(
-                        "No snapshots found for requested epochs: {:?}",
-                        network_config.snapshots
-                    );
-                    return;
-                }
 
-                info!("Found {} snapshot(s) to process", target_snapshots.len());
-
-                // Create downloader and download all snapshots
-                let downloader = match SnapshotDownloader::new(cfg.network_dir()) {
+                // Create downloader and download the snapshot
+                let downloader = match SnapshotDownloader::new(cfg.network_dir(), &cfg.download) {
                     Ok(d) => d,
                     Err(e) => {
                         error!("Failed to create snapshot downloader: {e:#}");
@@ -109,16 +125,20 @@ impl SnapshotBootstrapper {
                     }
                 };
 
-                if let Err(e) = downloader.download_all(&target_snapshots).await {
-                    error!("Failed to download snapshots: {e:#}");
-                    return;
-                }
+                let file_path = match downloader.download(&target_snapshot).await {
+                    Ok(path) => path,
+                    Err(e) => {
+                        error!("Failed to download snapshot: {e:#}");
+                        return;
+                    }
+                };
 
-                // Process snapshots in order
+                // Process the snapshot
                 if let Err(e) =
-                    Self::process_snapshots(&target_snapshots, &cfg, context.clone()).await
+                    Self::process_snapshot(&target_snapshot, &file_path, &cfg, context.clone())
+                        .await
                 {
-                    error!("Failed to process snapshots: {e:#}");
+                    error!("Failed to process snapshot: {e:#}");
                     return;
                 }
 
@@ -144,8 +164,9 @@ impl SnapshotBootstrapper {
         }
     }
 
-    async fn process_snapshots(
-        snapshots: &[SnapshotFileMetadata],
+    async fn process_snapshot(
+        snapshot_meta: &SnapshotFileMetadata,
+        file_path: &str,
         cfg: &SnapshotConfig,
         context: Arc<Context<Message>>,
     ) -> Result<()> {
@@ -157,21 +178,14 @@ impl SnapshotBootstrapper {
 
         publisher.publish_start().await?;
 
-        for snapshot_meta in snapshots {
-            let file_path = snapshot_meta.file_path(&cfg.network_dir());
+        info!(
+            "Processing snapshot for epoch {} from {}",
+            snapshot_meta.epoch, file_path
+        );
 
-            info!(
-                "Processing snapshot for epoch {} from {}",
-                snapshot_meta.epoch, file_path
-            );
+        Self::parse_snapshot(file_path, &mut publisher).await?;
 
-            Self::parse_snapshot(&file_path, &mut publisher).await?;
-        }
-
-        let last_snapshot =
-            snapshots.last().ok_or_else(|| anyhow::anyhow!("No snapshots to process"))?;
-
-        let block_info = build_block_info_from_metadata(last_snapshot).map_err(|e| {
+        let block_info = build_block_info_from_metadata(snapshot_meta).map_err(|e| {
             BootstrapError::Parse(format!(
                 "Failed to build block info from snapshot metadata: {e}"
             ))

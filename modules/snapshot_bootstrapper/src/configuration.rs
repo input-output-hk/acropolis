@@ -30,8 +30,52 @@ pub struct SnapshotConfig {
     pub snapshot_topic: String,
     pub bootstrapped_subscribe_topic: String,
     pub completion_topic: String,
+    #[serde(default)]
+    pub download: DownloadConfig,
 }
 
+/// Configuration for snapshot downloads
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct DownloadConfig {
+    /// Total request timeout in seconds
+    #[serde(default = "DownloadConfig::default_timeout_secs")]
+    pub timeout_secs: u64,
+
+    /// Connection timeout in seconds
+    #[serde(default = "DownloadConfig::default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+
+    /// How often to log download progress (in number of chunks)
+    #[serde(default = "DownloadConfig::default_progress_log_interval")]
+    pub progress_log_interval: u64,
+}
+
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: Self::default_timeout_secs(),
+            connect_timeout_secs: Self::default_connect_timeout_secs(),
+            progress_log_interval: Self::default_progress_log_interval(),
+        }
+    }
+}
+
+impl DownloadConfig {
+    fn default_timeout_secs() -> u64 {
+        300 // 5 minutes
+    }
+
+    fn default_connect_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_progress_log_interval() -> u64 {
+        200
+    }
+}
+
+/// Snapshot bootstrapper configuration
 impl SnapshotConfig {
     pub fn try_load(config: &Config) -> Result<Self> {
         let full_config = Config::builder()
@@ -61,7 +105,7 @@ impl SnapshotConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkConfig {
-    pub snapshots: Vec<u64>,
+    pub snapshot: u64,
     pub points: Vec<Point>,
 }
 
@@ -122,8 +166,8 @@ impl SnapshotFileMetadata {
         format!("{}/{}.cbor", network_dir, self.point)
     }
 
-    pub fn filter_by_epochs(snapshots: &[Self], epochs: &[u64]) -> Vec<Self> {
-        snapshots.iter().filter(|s| epochs.contains(&s.epoch)).cloned().collect()
+    pub fn find_by_epoch(snapshots: &[Self], epoch: u64) -> Option<Self> {
+        snapshots.iter().find(|s| s.epoch == epoch).cloned()
     }
 }
 
@@ -134,9 +178,9 @@ mod tests {
     use std::path::Path;
     use tempfile::TempDir;
 
-    fn create_test_network_config(dir: &Path, snapshots: Vec<u64>) -> PathBuf {
+    fn create_test_network_config(dir: &Path, snapshot: u64) -> PathBuf {
         let config = NetworkConfig {
-            snapshots,
+            snapshot,
             points: vec![Point {
                 epoch: 500,
                 id: "test_block_hash".to_string(),
@@ -167,6 +211,14 @@ mod tests {
     }
 
     #[test]
+    fn test_download_config_defaults() {
+        let config = DownloadConfig::default();
+        assert_eq!(config.timeout_secs, 300);
+        assert_eq!(config.connect_timeout_secs, 30);
+        assert_eq!(config.progress_log_interval, 200);
+    }
+
+    #[test]
     fn test_snapshot_config_network_dir() {
         let config = SnapshotConfig {
             network: "mainnet".to_string(),
@@ -174,6 +226,7 @@ mod tests {
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
+            download: DownloadConfig::default(),
         };
 
         assert_eq!(config.network_dir(), "./data/mainnet");
@@ -187,6 +240,7 @@ mod tests {
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
+            download: DownloadConfig::default(),
         };
 
         assert_eq!(config.config_path(), "/var/data/preprod/config.json");
@@ -200,6 +254,7 @@ mod tests {
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
+            download: DownloadConfig::default(),
         };
 
         assert_eq!(config.snapshots_path(), "./data/mainnet/snapshots.json");
@@ -220,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_by_epochs() {
+    fn test_find_by_epoch_found() {
         let all_snapshots = vec![
             SnapshotFileMetadata {
                 epoch: 500,
@@ -239,23 +294,37 @@ mod tests {
             },
         ];
 
-        let filtered = SnapshotFileMetadata::filter_by_epochs(&all_snapshots, &[500, 502]);
+        let found = SnapshotFileMetadata::find_by_epoch(&all_snapshots, 501);
 
-        assert_eq!(filtered.len(), 2);
-        assert_eq!(filtered[0].epoch, 500);
-        assert_eq!(filtered[1].epoch, 502);
+        assert!(found.is_some());
+        let snapshot = found.unwrap();
+        assert_eq!(snapshot.epoch, 501);
+        assert_eq!(snapshot.point, "point_501");
+    }
+
+    #[test]
+    fn test_find_by_epoch_not_found() {
+        let all_snapshots = vec![SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: "url1".to_string(),
+        }];
+
+        let found = SnapshotFileMetadata::find_by_epoch(&all_snapshots, 999);
+
+        assert!(found.is_none());
     }
 
     #[test]
     fn test_read_network_config_success() {
         let temp_dir = TempDir::new().unwrap();
-        let config_path = create_test_network_config(temp_dir.path(), vec![500, 501]);
+        let config_path = create_test_network_config(temp_dir.path(), 500);
 
         let result = NetworkConfig::read_from_file(config_path.to_str().unwrap());
         assert!(result.is_ok());
 
         let config = result.unwrap();
-        assert_eq!(config.snapshots, vec![500, 501]);
+        assert_eq!(config.snapshot, 500);
         assert_eq!(config.points.len(), 1);
     }
 
@@ -314,7 +383,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.json");
         let mut file = fs::File::create(&config_path).unwrap();
-        file.write_all(b"{\"snapshots\": [500, 501]").unwrap();
+        file.write_all(b"{\"snapshot\": 500").unwrap();
 
         let result = NetworkConfig::read_from_file(config_path.to_str().unwrap());
         assert!(result.is_err());
