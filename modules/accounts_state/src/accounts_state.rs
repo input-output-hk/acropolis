@@ -153,7 +153,6 @@ impl AccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let dreps_message_f = drep_state_subscription.read();
                 let spos_message_f = spos_subscription.read();
                 let params_message_f = parameters_subscription.read();
 
@@ -163,7 +162,7 @@ impl AccountsState {
                 };
 
                 // Handle DRep
-                let (_, message) = dreps_message_f.await?;
+                let (_, message) = drep_state_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
                         let span = info_span!(
