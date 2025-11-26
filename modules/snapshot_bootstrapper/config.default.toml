@@ -8,10 +8,6 @@ network = "mainnet"
 # Expected files: config.json (network config) and snapshots.json (snapshot metadata)
 data-dir = "./data"
 
-# Topic to subscribe to for receiving the initial startup signal.
-# The bootstrapper waits for a message on this topic before beginning any work.
-startup-topic = "cardano.sequence.start"
-
 # Topic for publishing snapshot data during processing.
 # Publishes a Startup message when snapshot processing begins, followed by
 # snapshot content (UTXOs, pools, accounts, DReps, governance proposals).

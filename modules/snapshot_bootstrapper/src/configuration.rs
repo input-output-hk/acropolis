@@ -27,7 +27,6 @@ pub enum ConfigError {
 pub struct SnapshotConfig {
     pub network: String,
     pub data_dir: String,
-    pub startup_topic: String,
     pub snapshot_topic: String,
     pub bootstrapped_subscribe_topic: String,
     pub completion_topic: String,
@@ -172,7 +171,6 @@ mod tests {
         let config = SnapshotConfig {
             network: "mainnet".to_string(),
             data_dir: "./data".to_string(),
-            startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
@@ -186,7 +184,6 @@ mod tests {
         let config = SnapshotConfig {
             network: "preprod".to_string(),
             data_dir: "/var/data".to_string(),
-            startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),
@@ -200,7 +197,6 @@ mod tests {
         let config = SnapshotConfig {
             network: "mainnet".to_string(),
             data_dir: "./data".to_string(),
-            startup_topic: "startup".to_string(),
             snapshot_topic: "snapshot".to_string(),
             bootstrapped_subscribe_topic: "bootstrapped".to_string(),
             completion_topic: "completion".to_string(),

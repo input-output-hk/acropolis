@@ -53,18 +53,11 @@ impl SnapshotBootstrapper {
         info!("  Publishing on '{}'", cfg.snapshot_topic);
         info!("  Completing with '{}'", cfg.completion_topic);
 
-        let startup_sub = context.subscribe(&cfg.startup_topic).await?;
         let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_subscribe_topic).await?;
 
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper.handle");
             async {
-                // Wait for the startup signal
-                if let Err(e) = Self::wait_startup(startup_sub).await {
-                    error!("Failed waiting for startup: {e:#}");
-                    return;
-                }
-
                 // Wait for genesis bootstrap completion
                 if let Err(e) = Self::wait_genesis_completion(bootstrapped_sub).await {
                     error!("Failed waiting for bootstrapped: {e:#}");
@@ -135,12 +128,6 @@ impl SnapshotBootstrapper {
             .await;
         });
 
-        Ok(())
-    }
-
-    async fn wait_startup(mut subscription: Box<dyn Subscription<Message>>) -> Result<()> {
-        let (_, _message) = subscription.read().await?;
-        info!("Received startup message");
         Ok(())
     }
 
