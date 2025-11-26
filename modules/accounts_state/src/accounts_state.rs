@@ -159,6 +159,23 @@ impl AccountsState {
                     None => None,
                 };
 
+                // Publish SPDD message before anything else and store spdd history if enabled
+                if let Some(block_info) = current_block.as_ref() {
+                    let spdd = state.generate_spdd();
+                    if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                        error!("Error publishing SPO stake distribution: {e:#}")
+                    }
+
+                    // if we store spdd history
+                    let spdd_state = state.dump_spdd_state();
+                    if let Some(mut spdd_store) = spdd_store_guard {
+                        // active stakes taken at beginning of epoch i is for epoch + 1
+                        if let Err(e) = spdd_store.store_spdd(block_info.epoch + 1, spdd_state) {
+                            error!("Error storing SPDD state: {e:#}")
+                        }
+                    }
+                }
+
                 // Handle DRep
                 let (_, message) = dreps_message_f.await?;
                 match message.as_ref() {
@@ -195,22 +212,6 @@ impl AccountsState {
                                 .handle_spo_state(spo_msg)
                                 .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                                 .ok();
-
-                            let spdd = state.generate_spdd();
-                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
-                                error!("Error publishing SPO stake distribution: {e:#}")
-                            }
-
-                            // if we store spdd history
-                            let spdd_state = state.dump_spdd_state();
-                            if let Some(mut spdd_store) = spdd_store_guard {
-                                // active stakes taken at beginning of epoch i is for epoch + 1
-                                if let Err(e) =
-                                    spdd_store.store_spdd(block_info.epoch + 1, spdd_state)
-                                {
-                                    error!("Error storing SPDD state: {e:#}")
-                                }
-                            }
                         }
                         .instrument(span)
                         .await;
