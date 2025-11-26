@@ -78,7 +78,7 @@ impl BlockVrfValidator {
             let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
 
-            let (_, message) = block_subscription.read().await?;
+            let (_, message) = block_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -161,9 +161,6 @@ impl BlockVrfValidator {
                     }
                     .instrument(span)
                     .await;
-                }
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
-                    // do nothing in here; we handle rollbacks in BlockAvailable
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }

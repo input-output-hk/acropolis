@@ -171,10 +171,6 @@ impl SPOState {
                     });
                 }
 
-                Message::Cardano((_, CardanoMessage::Rollback(_))) => {
-                    // Do nothing, rollbacks were handled above
-                }
-
                 _ => error!("Unexpected message type: {block_message:?}"),
             }
 

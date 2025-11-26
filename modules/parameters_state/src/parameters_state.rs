@@ -146,6 +146,7 @@ impl ParametersState {
                     .await?;
                 }
                 Message::Cardano((_, CardanoMessage::Rollback(_))) => {
+                    // forward the rollback downstream
                     config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
