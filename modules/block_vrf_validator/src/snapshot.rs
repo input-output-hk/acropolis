@@ -26,7 +26,7 @@ impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {
             .collect();
         let active_stakes: HashMap<PoolId, u64> =
             spdd_msg.spos.iter().map(|(pool_id, stake)| (*pool_id, stake.live)).collect();
-        let total_active_stakes = active_stakes.values().sum();
+        let total_active_stakes = spdd_msg.spos.iter().map(|(_, stake)| stake.active).sum();
         Self {
             active_spos,
             active_stakes,
