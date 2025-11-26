@@ -121,14 +121,11 @@ impl AccountsState {
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
 
-            // Read per-block topics in parallel
-            let certs_message_f = certs_subscription.read();
-            let stake_message_f = stake_subscription.read();
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
                     // Handle rollbacks on this topic only
@@ -333,7 +330,7 @@ impl AccountsState {
             }
 
             // Handle stake address deltas
-            let (_, message) = stake_message_f.await?;
+            let (_, message) = stake_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
                     let span = info_span!(

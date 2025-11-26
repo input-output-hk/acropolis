@@ -86,9 +86,6 @@ impl HistoricalAccountsState {
         });
         // Main loop of synchronised messages
         loop {
-            // Create all per-block message futures upfront before processing messages sequentially
-            let stake_address_deltas_message_f = stake_address_deltas_subscription.read();
-
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser
@@ -170,7 +167,7 @@ impl HistoricalAccountsState {
             }
 
             // Handle address deltas
-            let (_, message) = stake_address_deltas_message_f.await?;
+            let (_, message) = stake_address_deltas_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
                     let span = info_span!(

@@ -113,9 +113,7 @@ impl SPOState {
             let mut current_block: Option<BlockInfo> = None;
 
             // read per-block topics in parallel
-            let block_message_f = block_subscription.read();
             let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
-            let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certificates_subscription.read().await?;
@@ -144,7 +142,7 @@ impl SPOState {
 
             // handle blocks (handle_mint) before handle_tx_certs
             // in case of epoch boundary
-            let (_, block_message) = block_message_f.await?;
+            let (_, block_message) = block_subscription.read_ignoring_rollbacks().await?;
             match block_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     let span =
@@ -336,8 +334,8 @@ impl SPOState {
             }
 
             // Handle stake deltas
-            if let Some(stake_deltas_message_f) = stake_deltas_message_f {
-                let (_, message) = stake_deltas_message_f.await?;
+            if let Some(stake_deltas_subscription) = stake_deltas_subscription.as_mut() {
+                let (_, message) = stake_deltas_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
