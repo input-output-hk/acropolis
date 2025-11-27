@@ -4,6 +4,7 @@ use acropolis_common::{
 };
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
+use acropolis_common::validation::ValidationStatus;
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
@@ -35,9 +36,9 @@ impl AlonzoBabbageVoting {
         &mut self,
         block_info: &BlockInfo,
         updates: &[AlonzoBabbageUpdateProposal],
-    ) -> Result<()> {
+    ) -> Result<ValidationStatus> {
         if updates.is_empty() {
-            return Ok(());
+            return Ok(ValidationStatus::Go);
         }
 
         if block_info.era < Era::Shelley {

@@ -263,3 +263,54 @@ publishes update, then parameter state module catches it and publishes new param
 ### Testing
 
 https://cexplorer.io/params
+
+### Ledger validation errors collection
+
+All governance messages from transactions are collected and processed.
+Other messages (parameter state update, drep updates) are considered non-verifiable.
+
+List of Haskell governance verification failures:
+("GOV" rule)
+
+```
+data ConwayGovPredFailure era
+  = GovActionsDoNotExist (NonEmpty GovActionId)
+  | MalformedProposal (GovAction era)
+  | ProposalProcedureNetworkIdMismatch RewardAccount Network
+  | TreasuryWithdrawalsNetworkIdMismatch (Set.Set RewardAccount) Network
+  | ProposalDepositIncorrect (Mismatch 'RelEQ Coin)
+  | -- | Some governance actions are not allowed to be voted on by certain types of
+    -- Voters. This failure lists all governance action ids with their respective voters
+    -- that are not allowed to vote on those governance actions.
+    DisallowedVoters (NonEmpty (Voter, GovActionId))
+  | ConflictingCommitteeUpdate
+      -- | Credentials that are mentioned as members to be both removed and added
+      (Set.Set (Credential 'ColdCommitteeRole))
+  | ExpirationEpochTooSmall
+      -- | Members for which the expiration epoch has already been reached
+      (Map.Map (Credential 'ColdCommitteeRole) EpochNo)
+  | InvalidPrevGovActionId (ProposalProcedure era)
+  | VotingOnExpiredGovAction (NonEmpty (Voter, GovActionId))
+  | ProposalCantFollow
+      -- | The PrevGovActionId of the HardForkInitiation that fails
+      (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+      -- | Its protocol version and the protocal version of the previous gov-action pointed to by the proposal
+      (Mismatch 'RelGT ProtVer)
+  | InvalidPolicyHash
+      -- | The policy script hash in the proposal
+      (StrictMaybe ScriptHash)
+      -- | The policy script hash of the current constitution
+      (StrictMaybe ScriptHash)
+  | DisallowedProposalDuringBootstrap (ProposalProcedure era)
+  | DisallowedVotesDuringBootstrap
+      (NonEmpty (Voter, GovActionId))
+  | -- | Predicate failure for votes by entities that are not present in the ledger state
+    VotersDoNotExist (NonEmpty Voter)
+  | -- | Treasury withdrawals that sum up to zero are not allowed
+    ZeroTreasuryWithdrawals (GovAction era)
+  | -- | Proposals that have an invalid reward account for returns of the deposit
+    ProposalReturnAccountDoesNotExist RewardAccount
+  | -- | Treasury withdrawal proposals to an invalid reward account
+    TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
+  deriving (Eq, Show, Generic)
+```

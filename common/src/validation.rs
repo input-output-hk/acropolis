@@ -7,7 +7,7 @@ use std::array::TryFromSliceError;
 
 use thiserror::Error;
 
-use crate::{protocol_params::Nonce, GenesisKeyhash, PoolId, Slot, VrfKeyHash};
+use crate::{protocol_params::Nonce, GenesisKeyhash, GovActionId, PoolId, Slot, VrfKeyHash};
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -326,4 +326,57 @@ pub enum OperationalCertificateError {
     /// **Cause:** No counter found for this key hash (not a stake pool or genesis delegate)
     #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
     NoCounterForKeyHashOcert { pool_id: PoolId },
+}
+
+/// See Haskell node, "GOV" rule in Conway epoch, data ConwayGovPredFailure era
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum GovernanceValidationError {
+/*
+    #[error("Governance actions {action_id} do not exist")]
+    GovActionsDoNotExist { action_id: Vec<GovActionId> },
+
+    #[error("Malformed proposal")]
+    MalformedProposal,                   // TODO: add parameter (GovAction era)
+
+    #[error("Proposal procedure network id mismatch: {account} and {network}")]
+    ProposalProcedureNetworkIdMismatch { reward_account: RewardAccount, network: Network },
+*/
+
+/*
+  | TreasuryWithdrawalsNetworkIdMismatch (Set.Set RewardAccount) Network
+  | ProposalDepositIncorrect (Mismatch 'RelEQ Coin)
+  | -- | Some governance actions are not allowed to be voted on by certain types of
+    -- Voters. This failure lists all governance action ids with their respective voters
+    -- that are not allowed to vote on those governance actions.
+    DisallowedVoters (NonEmpty (Voter, GovActionId))
+  | ConflictingCommitteeUpdate
+      -- | Credentials that are mentioned as members to be both removed and added
+      (Set.Set (Credential 'ColdCommitteeRole))
+  | ExpirationEpochTooSmall
+      -- | Members for which the expiration epoch has already been reached
+      (Map.Map (Credential 'ColdCommitteeRole) EpochNo)
+  | InvalidPrevGovActionId (ProposalProcedure era)
+  | VotingOnExpiredGovAction (NonEmpty (Voter, GovActionId))
+  | ProposalCantFollow
+      -- | The PrevGovActionId of the HardForkInitiation that fails
+      (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+      -- | Its protocol version and the protocal version of the previous gov-action pointed to by the proposal
+      (Mismatch 'RelGT ProtVer)
+  | InvalidPolicyHash
+      -- | The policy script hash in the proposal
+      (StrictMaybe ScriptHash)
+      -- | The policy script hash of the current constitution
+      (StrictMaybe ScriptHash)
+  | DisallowedProposalDuringBootstrap (ProposalProcedure era)
+  | DisallowedVotesDuringBootstrap
+      (NonEmpty (Voter, GovActionId))
+  | -- | Predicate failure for votes by entities that are not present in the ledger state
+    VotersDoNotExist (NonEmpty Voter)
+  | -- | Treasury withdrawals that sum up to zero are not allowed
+    ZeroTreasuryWithdrawals (GovAction era)
+  | -- | Proposals that have an invalid reward account for returns of the deposit
+    ProposalReturnAccountDoesNotExist RewardAccount
+  | -- | Treasury withdrawal proposals to an invalid reward account
+    TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
+*/
 }
