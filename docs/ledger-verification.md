@@ -14,7 +14,7 @@ But the reaction to the errors can be different.
 We have basically two variants of behaviour if the error in application/verification occurred:
 
 1. Print an error message. This happens when an incorrect block apply happened, which probably
-   broke the state. We can only hope that further blockchain rollbacks will correct it.
+   broke the state. Here we can no automatic response here.
 
 2. Send a ValidationStatus::NoGo message via corresponding channel (each module has a validation
    outcome channel). These channels are listened by Consensus module, and if at least one of them
@@ -28,8 +28,8 @@ We have basically two variants of behaviour if the error in application/verifica
    * Mithril/other trusted source --- blocks, already accepted by the blockchain.
      If everything is ok, then the block is applied, internal structures updated, and next block
      is processed.
-     If something is not correct, then the whole blockchain is broken, and outside intervention
-     is required.
+     If something is not correct, then either the whole blockchain is broken, or our code is
+     incorrect (inconsistent with bugs in Haskell node); outside intervention is required.
 
    * Mempool or consensus blocks --- proposals for the blockchain. If the block/transaction is not 
      successfully verified, then it could be refused.
@@ -60,17 +60,20 @@ We have basically two variants of behaviour if the error in application/verifica
 
 ## Block number and rollbacks
 
-1. `BlockInfo` keeps track of the current block number. Blocks are numbered sequentially. So if the
+Rollback happens in one for the following situation:
+
+* `BlockInfo` keeps track of the current block number. Blocks are numbered sequentially. So if the
    number equal to the previous one (or smaller than it), then Rollback takes place (all info from
    blocks with this or greater number should be deleted, and new attempt to apply block is done).
    In another words, applying of block N may be possible only if module state is actual for block N-1.
 
-2. So, if the block applied unsuccessfully (and internal structures are broken), the situation 
-   can be corrected by rolling back to last correct block and applying different (correct) block 
-   after it.
+* Explicit `BlockStatus::RolledBack` message, which remvoes tip of the blockchain, and specifies
+   last good state.
 
-   However, after unsucessful application and before successful rollback the state of the node is
-   incorrect.
+If the block(s) are applied unsuccessfully (and internal structures are broken), the situation 
+can be corrected by rolling back to last correct block and applying different (correct) block 
+after it. However, after unsucessful application and before successful rollback the state of the 
+node is incorrect.
 
 ## Mulit-module ledger specifics
 
@@ -84,4 +87,4 @@ Ledger is split into several modules, so it gives additional challenges to the v
    but also block data (hash, etc), and skip all replies that do not correspond to current verification.
 
    Instead, it should wait either for all 'Go' (from all modules), or for at least one 'NoGo',
-   and do not wait for further messages.
+   and should not wait for further messages.
