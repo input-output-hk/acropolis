@@ -38,7 +38,7 @@ const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
 const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
 
-const CONFIG_KEY_START_UP_METHOD: &str = "startup-method";
+const CONFIG_KEY_START_UP_METHOD: &str = "startup.method";
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";

@@ -20,7 +20,7 @@ use thiserror::Error;
 use tokio::time::Instant;
 use tracing::{error, info, info_span, Instrument};
 
-const CONFIG_KEY_START_UP_METHOD: &str = "startup-method";
+const CONFIG_KEY_START_UP_METHOD: &str = "startup.method";
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
