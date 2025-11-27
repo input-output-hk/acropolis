@@ -1,10 +1,11 @@
-use crate::configuration::SnapshotFileMetadata;
+use crate::configuration::{DownloadConfig, SnapshotFileMetadata};
 use crate::progress_reader::ProgressReader;
 use async_compression::tokio::bufread::GzipDecoder;
 use futures_util::TryStreamExt;
 use reqwest::Client;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::BufReader;
@@ -32,37 +33,36 @@ pub enum DownloadError {
 pub struct SnapshotDownloader {
     client: Client,
     network_dir: String,
+    cfg: DownloadConfig,
 }
 
 impl SnapshotDownloader {
-    pub fn new(network_dir: String) -> Result<Self, DownloadError> {
+    pub fn new(network_dir: String, config: &DownloadConfig) -> Result<Self, DownloadError> {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_mins(5))
-            .connect_timeout(std::time::Duration::from_secs(30))
+            .timeout(Duration::from_secs(config.timeout_secs))
+            .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
             .build()?;
 
         Ok(Self {
             client,
             network_dir,
+            cfg: config.clone(),
         })
     }
 
-    pub async fn download_all(
-        &self,
-        snapshots: &[SnapshotFileMetadata],
-    ) -> Result<(), DownloadError> {
-        for snapshot_meta in snapshots {
-            let file_path = snapshot_meta.file_path(&self.network_dir);
-            self.download_single(&snapshot_meta.url, &file_path).await?;
-        }
-        Ok(())
+    /// Downloads the snapshot file specified by the metadata.
+    /// Returns the path to the downloaded file.
+    pub async fn download(&self, snapshot: &SnapshotFileMetadata) -> Result<String, DownloadError> {
+        let file_path = snapshot.file_path(&self.network_dir);
+        self.download_from_url(&snapshot.url, &file_path).await?;
+        Ok(file_path)
     }
 
     /// Downloads a gzip-compressed snapshot from the given URL, decompresses it on-the-fly,
     /// and saves the decompressed CBOR data to the specified output path.
     /// The data is first written to a `.partial` temporary file to ensure atomicity
     /// and then renamed to the final output path upon successful completion.
-    pub async fn download_single(&self, url: &str, output_path: &str) -> Result<(), DownloadError> {
+    async fn download_from_url(&self, url: &str, output_path: &str) -> Result<(), DownloadError> {
         let path = Path::new(output_path);
 
         if path.exists() {
@@ -100,7 +100,8 @@ impl SnapshotDownloader {
 
             let stream = response.bytes_stream().map_err(io::Error::other);
             let async_read = tokio_util::io::StreamReader::new(stream);
-            let progress_reader = ProgressReader::new(async_read, content_length, 200);
+            let progress_reader =
+                ProgressReader::new(async_read, content_length, self.cfg.progress_log_interval);
             let buffered = BufReader::new(progress_reader);
             let mut decoder = GzipDecoder::new(buffered);
 
@@ -138,21 +139,29 @@ mod tests {
         encoder.finish().unwrap()
     }
 
+    fn default_config() -> DownloadConfig {
+        DownloadConfig::default()
+    }
+
     #[tokio::test]
     async fn test_downloader_skips_existing_file() {
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("snapshot.cbor");
+        let file_path = temp_dir.path().join("point_500.cbor");
         std::fs::write(&file_path, b"existing data").unwrap();
 
-        let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+        let downloader = SnapshotDownloader::new(
+            temp_dir.path().to_str().unwrap().to_string(),
+            &default_config(),
+        )
+        .unwrap();
 
-        let result = downloader
-            .download_single(
-                "https://example.com/snapshot.cbor.gz",
-                file_path.to_str().unwrap(),
-            )
-            .await;
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: "https://example.com/snapshot.cbor.gz".to_string(),
+        };
+
+        let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
         assert_eq!(std::fs::read(&file_path).unwrap(), b"existing data");
@@ -170,14 +179,22 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("snapshot.cbor");
-        let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+        let downloader = SnapshotDownloader::new(
+            temp_dir.path().to_str().unwrap().to_string(),
+            &default_config(),
+        )
+        .unwrap();
 
-        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
-        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
+        };
+
+        let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
+        let file_path = result.unwrap();
         assert_eq!(std::fs::read(&file_path).unwrap(), b"snapshot content");
     }
 
@@ -192,17 +209,26 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("snapshot.cbor");
-        let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+        let downloader = SnapshotDownloader::new(
+            temp_dir.path().to_str().unwrap().to_string(),
+            &default_config(),
+        )
+        .unwrap();
 
-        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
-        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
+        };
+
+        let result = downloader.download(&snapshot).await;
 
         assert!(matches!(
             result,
             Err(DownloadError::InvalidStatusCode(_, _))
         ));
+
+        let file_path = temp_dir.path().join("point_500.cbor");
         assert!(!file_path.exists());
     }
 
@@ -218,14 +244,21 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("nested").join("dir").join("snapshot.cbor");
+        let network_dir = temp_dir.path().join("nested").join("dir");
         let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+            SnapshotDownloader::new(network_dir.to_str().unwrap().to_string(), &default_config())
+                .unwrap();
 
-        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
-        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
+        };
+
+        let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
+        let file_path = network_dir.join("point_500.cbor");
         assert!(file_path.exists());
     }
 
@@ -240,16 +273,56 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("snapshot.cbor");
-        let partial_path = temp_dir.path().join("snapshot.partial");
-        let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string()).unwrap();
+        let downloader = SnapshotDownloader::new(
+            temp_dir.path().to_str().unwrap().to_string(),
+            &default_config(),
+        )
+        .unwrap();
 
-        let url = format!("{}/snapshot.cbor.gz", mock_server.uri());
-        let result = downloader.download_single(&url, file_path.to_str().unwrap()).await;
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
+        };
+
+        let result = downloader.download(&snapshot).await;
 
         assert!(result.is_err());
+        let file_path = temp_dir.path().join("point_500.cbor");
+        let partial_path = temp_dir.path().join("point_500.partial");
         assert!(!file_path.exists());
         assert!(!partial_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_downloader_with_custom_config() {
+        let mock_server = MockServer::start().await;
+        let compressed = gzip_compress(b"data");
+
+        Mock::given(method("GET"))
+            .and(path("/snapshot.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .mount(&mock_server)
+            .await;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config = DownloadConfig {
+            timeout_secs: 600,
+            connect_timeout_secs: 60,
+            progress_log_interval: 100,
+        };
+
+        let downloader =
+            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string(), &config)
+                .unwrap();
+
+        let snapshot = SnapshotFileMetadata {
+            epoch: 500,
+            point: "point_500".to_string(),
+            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
+        };
+
+        let result = downloader.download(&snapshot).await;
+        assert!(result.is_ok());
     }
 }

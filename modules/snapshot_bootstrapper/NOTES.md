@@ -9,12 +9,12 @@ references and runs with these helpers.
 Booting from a snapshot should take minutes instead of the hours it takes to boot from
 genesis. It also allows booting from a given epoch, which allows one to create tests
 that rely only on that epoch of data. We're also skipping some of the problematic
-eras and will typically boot from Conway. At the moment, we're confident
-it takes only 1 NewEpochState cbor dump to bootstrap the node.
+eras and will typically boot from Conway. It takes only 1 NewEpochState cbor dump
+to bootstrap the node.
 
 The required data for bootstrapping are:
 
-- snapshot files (each has an associated epoch number and point (slot + block hash))
+- snapshot file (with an associated epoch number and point (slot + block hash))
 - nonces (not implemented yet)
 - headers (not implemented yet)
 
@@ -28,7 +28,7 @@ balance, etc.
 If you get this from a trusted source, you don't need to do any replay, you can just start up and load this from the
 disk."
 
-Snapshot files are referenced by their epoch number in the config.json file below.
+The snapshot file is referenced by its epoch number in the config.json file below.
 
 See [Amaru snapshot format](../../docs/amaru-snapshot-structure.md)
 
@@ -46,7 +46,7 @@ be used as a prefix to resolve per-network configuration files
 needed for bootstrapping. Given a source directory `data`, and a
 a network name of `preview`, the expected layout for configuration files would be:
 
-* `data/preview/config.json`: a list of epochs to load and points
+* `data/preview/config.json`: the epoch to load and points
 * `data/preview/snapshots.json`: a list of `SnapshotFileMetadata` values (epoch, point, url)
 
 These files are loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
@@ -57,19 +57,18 @@ during bootup.
 The bootstrapper will be started with a configuration that specifies a network,
 e.g. "mainnet". From the network, it will build a path to the configuration
 and snapshot files as shown above, then load the data contained or described
-in those files. config.json holds a list of typically 3 epochs that can be
-used to index into snapshots.json to find the corresponding URLs and meta-data
-for each of the three snapshot files. Loading occurs in this order:
+in those files. config.json holds a single epoch that is used to look up the
+corresponding URL and metadata in snapshots.json for the snapshot file.
+Loading occurs in this order:
 
-1. Wait for `startup-topic` message (typically `cardano.sequence.start`)
-2. Wait for `bootstrapped-topic` message with genesis values (typically `cardano.sequence.bootstrapped`)
-3. Load network configuration from `config.json`
-4. Load snapshot metadata from `snapshots.json`
-5. Filter snapshots based on epochs specified in config.json
-6. Download snapshot files (skips if already present)
-7. Publish `SnapshotMessage::Startup` to the snapshot topic
-8. Parse each snapshot file sequentially using the [streaming_snapshot](../../common/src/snapshot/streaming_snapshot.rs)
-9. Publish `CardanoMessage::SnapshotComplete` with final block info to the completion topic
+1. Wait for `bootstrapped-topic` message with genesis values (typically `cardano.sequence.bootstrapped`)
+2. Load network configuration from `config.json`
+3. Load snapshot metadata from `snapshots.json`
+4. Find snapshot matching the epoch specified in config.json
+5. Download snapshot file (skips if already present)
+6. Publish `SnapshotMessage::Startup` to the snapshot topic
+7. Parse the snapshot file using the [streaming_snapshot](../../common/src/snapshot/streaming_snapshot.rs)
+8. Publish `CardanoMessage::SnapshotComplete` with final block info to the completion topic
 
 Modules in the system will have subscribed to the startup and completion topics before the
 bootstrapper runs the above sequence. Upon receiving snapshot data messages,
@@ -77,7 +76,7 @@ they will use the data to populate their state, and any other state required to 
 
 ## Data update messages
 
-The bootstrapper publishes data as it parses the snapshot files using the `SnapshotPublisher`.
+The bootstrapper publishes data as it parses the snapshot file using the `SnapshotPublisher`.
 Snapshot parsing is done while streaming the data to keep the memory
 footprint lower. As elements of the file are parsed, callbacks provide the data
 to the publisher, which can then publish structured data on the message bus.
@@ -101,7 +100,21 @@ The bootstrapper supports the following configuration options:
 
 - `network`: Network name (default: "mainnet")
 - `data-dir`: Base directory for network data (default: "./data")
-- `startup-topic`: Topic to wait for startup signal (default: "cardano.sequence.start")
 - `snapshot-topic`: Topic to publish snapshot messages (default: "cardano.snapshot")
 - `bootstrapped-subscribe-topic`: Topic to receive genesis completion (default: "cardano.sequence.bootstrapped")
 - `completion-topic`: Topic to publish completion signal (default: "cardano.snapshot.complete")
+
+## Example config.json
+
+```json
+{
+  "snapshot": 500,
+  "points": [
+    {
+      "epoch": 500,
+      "id": "abc123...",
+      "slot": 12345678
+    }
+  ]
+}
+```

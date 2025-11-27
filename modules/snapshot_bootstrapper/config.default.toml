@@ -8,10 +8,6 @@ network = "mainnet"
 # Expected files: config.json (network config) and snapshots.json (snapshot metadata)
 data-dir = "./data"
 
-# Topic to subscribe to for receiving the initial startup signal.
-# The bootstrapper waits for a message on this topic before beginning any work.
-startup-topic = "cardano.sequence.start"
-
 # Topic for publishing snapshot data during processing.
 # Publishes a Startup message when snapshot processing begins, followed by
 # snapshot content (UTXOs, pools, accounts, DReps, governance proposals).
@@ -26,3 +22,14 @@ bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 # Signals that all snapshots have been fully processed and the
 # blockchain state is ready for downstream consumers.
 completion-topic = "cardano.snapshot.complete"
+
+[download]
+# Total request timeout in seconds (default: 5 minutes)
+timeout-secs = 300
+
+# Connection timeout in seconds
+connect-timeout-secs = 30
+
+# How often to log download progress, measured in number of bytes received.
+# Lower values provide more frequent updates but will increase log volume.
+progress-log-interval = 200
