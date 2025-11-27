@@ -27,6 +27,7 @@ use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_snapshot_bootstrapper::SnapshotBootstrapper;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
@@ -44,6 +45,10 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
+
+const STARTUP_METHOD_MITHRIL: &str = "mithril";
+const STARTUP_METHOD_SNAPSHOT: &str = "snapshot";
+const CONFIG_KEY_STARTUP_METHOD: &str = "startup.method";
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -94,16 +99,39 @@ pub async fn main() -> Result<()> {
         Config::builder()
             .add_source(File::with_name(&args.config))
             .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()
-            .unwrap(),
+            .build()?,
     );
 
     // Create the process
-    let mut process = Process::<Message>::create(config).await;
+    let mut process = Process::<Message>::create(config.clone()).await;
+
+    // Get startup method from config
+    let startup_method = config
+        .get_string(CONFIG_KEY_STARTUP_METHOD)
+        .unwrap_or_else(|_| STARTUP_METHOD_MITHRIL.to_string());
+
+    info!("Using startup method: {}", startup_method);
+
+    // Register bootstrap modules based on the startup method
+    match startup_method.as_str() {
+        STARTUP_METHOD_MITHRIL => {
+            info!("Registering MithrilSnapshotFetcher");
+            MithrilSnapshotFetcher::register(&mut process);
+        }
+        STARTUP_METHOD_SNAPSHOT => {
+            info!("Registering SnapshotBootstrapper");
+            SnapshotBootstrapper::register(&mut process);
+        }
+        _ => {
+            panic!(
+                "Invalid startup method: {}. Must be one of: mithril, snapshot",
+                startup_method
+            );
+        }
+    }
 
     // Register modules
     GenesisBootstrapper::register(&mut process);
-    MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);
