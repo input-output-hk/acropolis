@@ -54,7 +54,7 @@ impl SnapshotBootstrapper {
         // Check if this module is the selected startup method
         let startup_method = config
             .get::<StartupMethod>(CONFIG_KEY_START_UP_METHOD)
-            .unwrap_or_else(|_| StartupMethod::Mithril);
+            .unwrap_or(StartupMethod::Mithril);
 
         if startup_method != StartupMethod::Snapshot {
             info!(
