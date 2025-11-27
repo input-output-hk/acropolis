@@ -29,6 +29,7 @@ use std::{
 /// Network identifier
 #[derive(
     Debug,
+    Copy,
     Clone,
     Default,
     PartialEq,

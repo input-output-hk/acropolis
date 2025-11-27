@@ -1,11 +1,39 @@
-use acropolis_common::{protocol_params::ShelleyParams, Slot};
+use std::{collections::HashMap, str::FromStr};
+
+use acropolis_common::{protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, TxOutRef};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct TestContextJson {
+    pub shelley_params: ShelleyParams,
+    pub current_slot: Slot,
+    // Vec<((TxHash, TxIndex), (BlockNumber, TxIndex))>
+    pub utxos: Vec<((String, u16), (u32, u16))>,
+}
+
 pub struct TestContext {
     pub shelley_params: ShelleyParams,
     pub current_slot: Slot,
+    pub utxos: HashMap<TxOutRef, TxIdentifier>,
 }
 
+impl From<TestContextJson> for TestContext {
+    fn from(json: TestContextJson) -> Self {
+        Self {
+            shelley_params: json.shelley_params,
+            current_slot: json.current_slot,
+            utxos: json
+                .utxos
+                .into_iter()
+                .map(|((tx_hash, output_index), (block_number, tx_index))| {
+                    (
+                        TxOutRef::new(TxHash::from_str(&tx_hash).unwrap(), output_index),
+                        TxIdentifier::new(block_number, tx_index),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
 #[macro_export]
 macro_rules! include_cbor {
     ($filepath:expr) => {
@@ -21,12 +49,13 @@ macro_rules! include_cbor {
 #[macro_export]
 macro_rules! include_context {
     ($filepath:expr) => {
-        serde_json::from_str::<$crate::test_utils::TestContext>(include_str!(concat!(
+        serde_json::from_str::<$crate::test_utils::TestContextJson>(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/data/",
             $filepath,
         )))
         .expect(concat!("invalid context file: ", $filepath))
+        .into()
     };
 }
 

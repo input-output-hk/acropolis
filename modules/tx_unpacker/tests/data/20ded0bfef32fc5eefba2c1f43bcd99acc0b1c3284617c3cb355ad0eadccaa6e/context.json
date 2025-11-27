@@ -37,5 +37,11 @@
     "systemStart": "2017-09-23T21:44:51Z",
     "updateQuorum": 5,
     "genDelegs": {}
-  }
+  },
+  "utxos": [
+    [
+      ["20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", 0],
+      [360, 12]
+    ]
+  ]
 }
