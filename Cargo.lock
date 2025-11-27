@@ -491,18 +491,11 @@ dependencies = [
  "acropolis_codec",
  "acropolis_common",
  "anyhow",
- "async-trait",
  "caryatid_sdk",
  "config",
- "csv",
- "hex",
  "pallas 0.33.0",
- "serde",
- "serde_json",
- "serde_with 3.16.0",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
