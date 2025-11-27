@@ -40,8 +40,8 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-caryatid_sdk = "0.14"
-caryatid_process = "0.13.1"
+caryatid_sdk = "0.14.0"
+caryatid_process = "0.13"
 caryatid_module_rest_server = "0.15"
 caryatid_module_clock = "0.13"
 caryatid_module_spy = "0.13"
