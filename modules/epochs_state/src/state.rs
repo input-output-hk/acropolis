@@ -114,6 +114,7 @@ impl State {
             epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
 
         // Set nonce if available
+        // TODO: use single active nonce
         if let Some(nonce) = &epoch_data.nonce {
             self.nonces = Some(Nonces {
                 epoch: epoch_data.epoch,

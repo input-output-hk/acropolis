@@ -20,7 +20,6 @@ imbl = { workspace = true }
 pallas = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-log = "0.4.28"
 
 [lib]
 path = "src/epochs_state.rs"

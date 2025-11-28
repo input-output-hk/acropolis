@@ -225,7 +225,6 @@ dependencies = [
  "config",
  "hex",
  "imbl",
- "log",
  "pallas 0.33.0",
  "tokio",
  "tracing",

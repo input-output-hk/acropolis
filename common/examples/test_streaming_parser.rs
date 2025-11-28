@@ -167,7 +167,6 @@ impl EpochCallback for CountingCallbacks {
             data.total_blocks_current,
             data.total_blocks_previous
         );
-        todo!()
     }
 }
 
