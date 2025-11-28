@@ -60,10 +60,6 @@ impl SnapshotPublisher {
         self.context.publish(&self.completion_topic, message).await
     }
 
-    pub fn metadata(&self) -> Option<&SnapshotMetadata> {
-        self.metadata.as_ref()
-    }
-
     /// Convert hex pool ID string to PoolId
     fn parse_pool_id(pool_id_hex: &str) -> Option<PoolId> {
         match hex::decode(pool_id_hex) {

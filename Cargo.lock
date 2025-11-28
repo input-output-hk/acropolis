@@ -391,6 +391,8 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "minicbor 0.25.1",
+ "pallas-primitives 0.33.0",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
