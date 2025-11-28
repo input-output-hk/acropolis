@@ -188,8 +188,11 @@ pub fn validate_wrong_network(
                 })
             })?;
 
-        let address = match address {
-            Address::Shelley(shelley_address) => shelley_address,
+        let is_network_correct = match &address {
+            // NOTE:
+            // need to parse byron address's attributes and get network magic
+            Address::Byron(_) => true,
+            Address::Shelley(shelley_address) => shelley_address.network == network_id,
             _ => {
                 return Err(Box::new(UTxOValidationError::MalformedUTxO {
                     era: Era::Shelley,
@@ -197,10 +200,10 @@ pub fn validate_wrong_network(
                 }))
             }
         };
-        if address.network != network_id {
+        if !is_network_correct {
             return Err(Box::new(UTxOValidationError::WrongNetwork {
                 expected: network_id,
-                wrong_address: Address::Shelley(address),
+                wrong_address: address,
                 output_index: index,
             }));
         }
