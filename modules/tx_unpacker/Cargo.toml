@@ -13,11 +13,11 @@ acropolis_common = { path = "../../common" }
 acropolis_codec = { path = "../../codec" }
 
 caryatid_sdk = { workspace = true }
-
 anyhow = { workspace = true }
 config = { workspace = true }
 futures = "0.3.31"
 hex = { workspace = true }
+tokio = { workspace = true }
 pallas = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

@@ -16,20 +16,6 @@ use pallas::{
     },
 };
 
-fn get_alonzo_comp_tx_size(mtx: &alonzo::MintedTx) -> u32 {
-    match &mtx.auxiliary_data {
-        pallas_codec::utils::Nullable::Some(aux_data) => {
-            (aux_data.raw_cbor().len()
-                + mtx.transaction_body.raw_cbor().len()
-                + mtx.transaction_witness_set.raw_cbor().len()) as u32
-        }
-        _ => {
-            (mtx.transaction_body.raw_cbor().len() + mtx.transaction_witness_set.raw_cbor().len())
-                as u32
-        }
-    }
-}
-
 fn get_lovelace_from_alonzo_value(val: &alonzo::Value) -> Lovelace {
     match val {
         alonzo::Value::Coin(res) => *res,
