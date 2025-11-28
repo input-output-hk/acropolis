@@ -807,29 +807,41 @@ impl ChainStore {
         let mut stake_cert_count = 0;
         let mut pool_update_count = 0;
         let mut pool_retire_count = 0;
+        // TODO: check counts use all correct certs
         for cert in tx_decoded.certs() {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    alonzo::Certificate::StakeDeregistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    alonzo::Certificate::StakeDelegation { .. } => delegation_count += 1,
                     alonzo::Certificate::PoolRegistration { .. } => {
                         pool_update_count += 1;
                     }
                     alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
                     alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
-                    alonzo::Certificate::StakeRegistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    alonzo::Certificate::StakeDelegation { .. } => delegation_count += 1,
                     _ => (),
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    conway::Certificate::StakeDeregistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
                     conway::Certificate::PoolRegistration { .. } => {
                         pool_update_count += 1;
                     }
                     conway::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
-                    conway::Certificate::StakeRegistration { .. } => {
-                        stake_cert_count += 1;
-                    }
-                    conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
+                    conway::Certificate::Reg { .. } => stake_cert_count += 1,
+                    conway::Certificate::UnReg { .. } => stake_cert_count += 1,
+                    conway::Certificate::StakeRegDeleg { .. } => delegation_count += 1,
+                    conway::Certificate::VoteRegDeleg { .. } => delegation_count += 1,
+                    conway::Certificate::StakeVoteRegDeleg { .. } => delegation_count += 1,
                     _ => (),
                 },
                 _ => (),
@@ -874,6 +886,7 @@ impl ChainStore {
             return Err(anyhow!("Transaction not found in block for given index"));
         };
         let mut certs = Vec::new();
+        // TODO: check cert types
         for (index, cert) in tx_decoded.certs().iter().enumerate() {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
@@ -906,6 +919,20 @@ impl ChainStore {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
                             registration: false,
+                        });
+                    }
+                    conway::Certificate::StakeRegDeleg(cred, _, _) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    conway::Certificate::StakeVoteRegDeleg(cred, _, _, _) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            registration: true,
                         });
                     }
                     _ => (),
