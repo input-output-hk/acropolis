@@ -21,7 +21,10 @@ use acropolis_common::{
 };
 use pallas_primitives::conway::PseudoScript;
 use pallas_traverse::{MultiEraInput, MultiEraOutput, MultiEraTx};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 /// Map Pallas Network to our NetworkId
 pub fn map_network(network: addresses::Network) -> Result<NetworkId> {
@@ -206,7 +209,7 @@ fn map_constitution(constitution: &conway::Constitution) -> Constitution {
 }
 
 /// Map a Pallas Relay to ours
-fn map_relay(relay: &PallasRelay) -> Relay {
+pub fn map_relay(relay: &PallasRelay) -> Relay {
     match relay {
         PallasRelay::SingleHostAddr(port, ipv4, ipv6) => Relay::SingleHostAddr(SingleHostAddr {
             port: match port {
@@ -214,11 +217,11 @@ fn map_relay(relay: &PallasRelay) -> Relay {
                 _ => None,
             },
             ipv4: match ipv4 {
-                Nullable::Some(ipv4) => ipv4.try_into().ok(),
+                Nullable::Some(ipv4) => <[u8; 4]>::try_from(ipv4).ok().map(Ipv4Addr::from),
                 _ => None,
             },
             ipv6: match ipv6 {
-                Nullable::Some(ipv6) => ipv6.try_into().ok(),
+                Nullable::Some(ipv6) => <[u8; 16]>::try_from(ipv6).ok().map(Ipv6Addr::from),
                 _ => None,
             },
         }),
@@ -238,6 +241,51 @@ fn map_relay(relay: &PallasRelay) -> Relay {
 //
 // Certificates
 //
+#[allow(clippy::too_many_arguments)]
+pub fn to_pool_reg(
+    operator: &pallas_primitives::PoolKeyhash,
+    vrf_keyhash: &pallas_primitives::VrfKeyhash,
+    pledge: &pallas_primitives::Coin,
+    cost: &pallas_primitives::Coin,
+    margin: &pallas_primitives::UnitInterval,
+    reward_account: &pallas_primitives::RewardAccount,
+    pool_owners: &[pallas_primitives::AddrKeyhash],
+    relays: &[pallas_primitives::Relay],
+    pool_metadata: &Nullable<pallas_primitives::PoolMetadata>,
+    network_id: NetworkId,
+    force_reward_network_id: bool,
+) -> Result<PoolRegistration> {
+    Ok(PoolRegistration {
+        operator: to_pool_id(operator),
+        vrf_key_hash: to_vrf_key(vrf_keyhash),
+        pledge: *pledge,
+        cost: *cost,
+        margin: Ratio {
+            numerator: margin.numerator,
+            denominator: margin.denominator,
+        },
+        reward_account: if force_reward_network_id {
+            StakeAddress::new(
+                StakeAddress::from_binary(reward_account)?.credential,
+                network_id,
+            )
+        } else {
+            StakeAddress::from_binary(reward_account)?
+        },
+        pool_owners: pool_owners
+            .iter()
+            .map(|v| StakeAddress::new(StakeCredential::AddrKeyHash(to_hash(v)), network_id))
+            .collect(),
+        relays: relays.iter().map(map_relay).collect(),
+        pool_metadata: match pool_metadata {
+            Nullable::Some(md) => Some(PoolMetadata {
+                url: md.url.clone(),
+                hash: md.hash.to_vec(),
+            }),
+            _ => None,
+        },
+    })
+}
 
 /// Derive our TxCertificate from a Pallas Certificate
 pub fn map_certificate(
@@ -279,34 +327,19 @@ pub fn map_certificate(
                 relays,
                 pool_metadata,
             } => Ok(TxCertificateWithPos {
-                cert: TxCertificate::PoolRegistration(PoolRegistration {
-                    operator: to_pool_id(operator),
-                    vrf_key_hash: to_vrf_key(vrf_keyhash),
-                    pledge: *pledge,
-                    cost: *cost,
-                    margin: Ratio {
-                        numerator: margin.numerator,
-                        denominator: margin.denominator,
-                    },
-                    reward_account: StakeAddress::from_binary(reward_account)?,
-                    pool_owners: pool_owners
-                        .iter()
-                        .map(|v| {
-                            StakeAddress::new(
-                                StakeCredential::AddrKeyHash(to_hash(v)),
-                                network_id.clone(),
-                            )
-                        })
-                        .collect(),
-                    relays: relays.iter().map(map_relay).collect(),
-                    pool_metadata: match pool_metadata {
-                        Nullable::Some(md) => Some(PoolMetadata {
-                            url: md.url.clone(),
-                            hash: md.hash.to_vec(),
-                        }),
-                        _ => None,
-                    },
-                }),
+                cert: TxCertificate::PoolRegistration(to_pool_reg(
+                    operator,
+                    vrf_keyhash,
+                    pledge,
+                    cost,
+                    margin,
+                    reward_account,
+                    pool_owners,
+                    relays,
+                    pool_metadata,
+                    network_id,
+                    false,
+                )?),
                 tx_identifier,
                 cert_index: cert_index as u64,
             }),
@@ -346,7 +379,7 @@ pub fn map_certificate(
                             InstantaneousRewardTarget::StakeAddresses(
                                 creds
                                     .iter()
-                                    .map(|(sc, v)| (map_stake_address(sc, network_id.clone()), *v))
+                                    .map(|(sc, v)| (map_stake_address(sc, network_id), *v))
                                     .collect(),
                             )
                         }
@@ -399,41 +432,23 @@ pub fn map_certificate(
                     relays,
                     pool_metadata,
                 } => Ok(TxCertificateWithPos {
-                    cert: TxCertificate::PoolRegistration(PoolRegistration {
-                        operator: to_pool_id(operator),
-                        vrf_key_hash: to_vrf_key(vrf_keyhash),
-                        pledge: *pledge,
-                        cost: *cost,
-                        margin: Ratio {
-                            numerator: margin.numerator,
-                            denominator: margin.denominator,
-                        },
+                    cert: TxCertificate::PoolRegistration(to_pool_reg(
+                        operator,
+                        vrf_keyhash,
+                        pledge,
+                        cost,
+                        margin,
+                        reward_account,
+                        pool_owners,
+                        relays,
+                        pool_metadata,
+                        network_id,
                         // Force networkId - in mainnet epoch 208, one SPO (c63dab6d780a) uses
                         // an e0 (testnet!) address, and this then fails to match their actual
                         // reward account (e1).  Feels like this should have been
                         // a validation failure, but clearly wasn't!
-                        reward_account: StakeAddress::new(
-                            StakeAddress::from_binary(reward_account)?.credential,
-                            network_id.clone(),
-                        ),
-                        pool_owners: pool_owners
-                            .into_iter()
-                            .map(|v| {
-                                StakeAddress::new(
-                                    StakeCredential::AddrKeyHash(to_hash(v)),
-                                    network_id.clone(),
-                                )
-                            })
-                            .collect(),
-                        relays: relays.iter().map(map_relay).collect(),
-                        pool_metadata: match pool_metadata {
-                            Nullable::Some(md) => Some(PoolMetadata {
-                                url: md.url.clone(),
-                                hash: md.hash.to_vec(),
-                            }),
-                            _ => None,
-                        },
-                    }),
+                        true,
+                    )?),
                     tx_identifier,
                     cert_index: cert_index as u64,
                 }),
@@ -1222,5 +1237,21 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
             Some(ReferenceScript::PlutusV3(script.as_ref().to_vec()))
         }
         None => None,
+    }
+}
+
+pub fn map_metadata(metadata: &pallas_primitives::Metadatum) -> Metadata {
+    match metadata {
+        pallas_primitives::Metadatum::Int(pallas_primitives::Int(i)) => {
+            Metadata::Int(MetadataInt(*i))
+        }
+        pallas_primitives::Metadatum::Bytes(b) => Metadata::Bytes(b.to_vec()),
+        pallas_primitives::Metadatum::Text(s) => Metadata::Text(s.clone()),
+        pallas_primitives::Metadatum::Array(a) => {
+            Metadata::Array(a.iter().map(map_metadata).collect())
+        }
+        pallas_primitives::Metadatum::Map(m) => {
+            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(k), map_metadata(v))).collect())
+        }
     }
 }
