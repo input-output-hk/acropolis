@@ -19,6 +19,8 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+use acropolis_common::messages::CardanoMessage::BlockValidation;
+use acropolis_common::validation::ValidationStatus;
 
 mod alonzo_babbage_voting;
 mod conway_voting;
@@ -37,6 +39,8 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str,&str) =
+    ("validation-outcome-topic", "cardano.validation.governance");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -55,6 +59,7 @@ pub struct GovernanceStateConfig {
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
+    validation_outcome_topic: String,
     verification_output_file: Option<String>,
 }
 
@@ -73,6 +78,7 @@ impl GovernanceStateConfig {
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
+            validation_outcome_topic: Self::conf(config, DEFAULT_VALIDATION_OUTCOME_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
@@ -132,6 +138,18 @@ impl GovernanceState {
                 "Unexpected message {msg:?} for SPO distribution topic"
             )),
         }
+    }
+
+    async fn publish_validation_outcome(
+        context: &Arc<Context<Message>>,
+        config: &GovernanceStateConfig,
+        block: BlockInfo,
+        outcome: ValidationStatus
+    ) -> Result<()> {
+        let outcome_msg = Arc::new(
+            Message::Cardano((block, BlockValidation(outcome)))
+        );
+        context.message_bus.publish(&config.validation_outcome_topic, outcome_msg).await
     }
 
     async fn run(
@@ -231,6 +249,7 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
 
+            let mut response = ValidationStatus::Go;
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
                 if blk_g.new_epoch {
@@ -243,7 +262,7 @@ impl GovernanceState {
 
                 // Governance may present in any block -- not only in 'new epoch' blocks.
                 {
-                    state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+                    response.compose(state.lock().await.handle_governance(&blk_g, &gov_procs).await?);
                 }
 
                 if blk_g.new_epoch {
@@ -288,6 +307,8 @@ impl GovernanceState {
                 }
                 Ok::<(), anyhow::Error>(())
             }.instrument(span).await?;
+
+            Self::publish_validation_outcome(&context, &config, blk_g, response).await?;
         }
     }
 

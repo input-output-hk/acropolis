@@ -4,7 +4,7 @@ use acropolis_common::{
 };
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
-use acropolis_common::validation::ValidationStatus;
+use acropolis_common::validation::{ValidationError, ValidationStatus};
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
@@ -57,7 +57,7 @@ impl AlonzoBabbageVoting {
             }
         }
 
-        Ok(())
+        Ok(ValidationStatus::Go)
     }
 
     pub fn finalize_voting(

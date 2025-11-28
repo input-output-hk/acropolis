@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
 use std::ops::Deref;
 use std::{collections::HashMap, fmt::Display};
+use std::fmt::Formatter;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -235,6 +236,12 @@ pub struct ConwayParams {
 pub struct ProtocolVersion {
     pub major: u64,
     pub minor: u64,
+}
+
+impl Display for ProtocolVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
 }
 
 impl ProtocolVersion {

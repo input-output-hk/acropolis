@@ -7,7 +7,8 @@ use std::array::TryFromSliceError;
 
 use thiserror::Error;
 
-use crate::{protocol_params::Nonce, GenesisKeyhash, GovActionId, PoolId, Slot, VrfKeyHash};
+use crate::{protocol_params::Nonce, GenesisKeyhash, GovActionId, NetworkId, PoolId, ProposalProcedure, Slot, StakeAddress, VrfKeyHash};
+use crate::protocol_params::ProtocolVersion;
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -17,6 +18,9 @@ pub enum ValidationError {
 
     #[error("KES failure: {0}")]
     BadKES(#[from] KesValidationError),
+
+    #[error("Governance failure: {0}")]
+    BadGovernance(#[from] GovernanceValidationError),
 
     #[error("Doubly spent UTXO: {0}")]
     DoubleSpendUTXO(String),
@@ -30,6 +34,18 @@ pub enum ValidationStatus {
 
     /// Error
     NoGo(ValidationError),
+}
+
+impl ValidationStatus {
+    pub fn is_go(&self) -> bool {
+        matches!(self, ValidationStatus::Go)
+    }
+
+    pub fn compose(&mut self, status: ValidationStatus) {
+        if self.is_go() {
+            *self = status;
+        }
+    }
 }
 
 /// Reference
@@ -329,21 +345,43 @@ pub enum OperationalCertificateError {
 }
 
 /// See Haskell node, "GOV" rule in Conway epoch, data ConwayGovPredFailure era
+/// also, "PPUP" rule in Shelley epoch, data ShelleyPpupPredFailure era
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum GovernanceValidationError {
-/*
-    #[error("Governance actions {action_id} do not exist")]
+    /// An update was proposed by a key hash that is not one of the genesis keys.
+    /// `mismatchSupplied` ~ key hashes which were a part of the update.
+    /// `mismatchExpected` ~ key hashes of the genesis keys.
+    #[error("Parameter update from non-genesis key hash")]
+    NonGenesisUpdatePPUP, //(Mismatch 'RelSubset (Set (KeyHash 'Genesis)))
+
+    /// | An update was proposed for the wrong epoch.
+    /// The first 'EpochNo' is the current epoch.
+    /// The second 'EpochNo' is the epoch listed in the update.
+    /// The last parameter indicates if the update was intended
+    /// for the current (true) or the next epoch (false).
+    #[error("Parameter update for wrong epoch: current {0}, requested {1}, requested epoch is current {2}")]
+    PPUpdateWrongEpoch(u64, u64, bool),
+
+    /// | An update was proposed which contains an invalid protocol version.
+    /// New protocol versions must either increase the major
+    /// number by exactly one and set the minor version to zero,
+    /// or keep the major version the same and increase the minor
+    /// version by exactly one.
+    #[error("Protocol update contains impossible new protocol version {0}")]
+    PVCannotFollowPPUP(ProtocolVersion),
+
+    #[error("Governance actions {action_id:?} do not exist")]
     GovActionsDoNotExist { action_id: Vec<GovActionId> },
 
-    #[error("Malformed proposal")]
-    MalformedProposal,                   // TODO: add parameter (GovAction era)
+    #[error("Malformed conway proposal {action:?}")]
+    MalformedConwayProposal { action: ProposalProcedure }, // TODO: add parameter (GovAction era)
 
-    #[error("Proposal procedure network id mismatch: {account} and {network}")]
-    ProposalProcedureNetworkIdMismatch { reward_account: RewardAccount, network: Network },
-*/
+    #[error("Proposal procedure network id mismatch: {reward_account:?} and {network:?}")]
+    ProposalProcedureNetworkIdMismatch { reward_account: StakeAddress, network: NetworkId },
 
+    #[error("Treasury withdrawals network id mismatch: {reward_accounts:?} and {network:?}")]
+    TreasuryWithdrawalsNetworkIdMismatch { reward_accounts: Vec<StakeAddress>, network: NetworkId },
 /*
-  | TreasuryWithdrawalsNetworkIdMismatch (Set.Set RewardAccount) Network
   | ProposalDepositIncorrect (Mismatch 'RelEQ Coin)
   | -- | Some governance actions are not allowed to be voted on by certain types of
     -- Voters. This failure lists all governance action ids with their respective voters

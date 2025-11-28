@@ -269,8 +269,8 @@ https://cexplorer.io/params
 All governance messages from transactions are collected and processed.
 Other messages (parameter state update, drep updates) are considered non-verifiable.
 
-List of Haskell governance verification failures:
-("GOV" rule)
+List of Haskell Conway governance verification failures:
+(Conway "GOV" rule)
 
 ```
 data ConwayGovPredFailure era
@@ -314,3 +314,29 @@ data ConwayGovPredFailure era
     TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
   deriving (Eq, Show, Generic)
 ```
+
+List of Haskell Shelley (Alonzo-Babbage in Acropolis) governance verification failures:
+
+```data ShelleyPpupPredFailure era
+  = -- | An update was proposed by a key hash that is not one of the genesis keys.
+    --  `mismatchSupplied` ~ key hashes which were a part of the update.
+    --  `mismatchExpected` ~ key hashes of the genesis keys.
+    NonGenesisUpdatePPUP
+      (Mismatch 'RelSubset (Set (KeyHash 'Genesis)))
+  | -- | An update was proposed for the wrong epoch.
+    --  The first 'EpochNo' is the current epoch.
+    --  The second 'EpochNo' is the epoch listed in the update.
+    --  The last parameter indicates if the update was intended
+    --  for the current or the next epoch.
+    PPUpdateWrongEpoch
+      EpochNo
+      EpochNo
+      VotingPeriod
+  | -- | An update was proposed which contains an invalid protocol version.
+    --  New protocol versions must either increase the major
+    --  number by exactly one and set the minor version to zero,
+    --  or keep the major version the same and increase the minor
+    --  version by exactly one.
+    PVCannotFollowPPUP
+      ProtVer
+  deriving (Show, Eq, Generic)```

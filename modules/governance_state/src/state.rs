@@ -13,7 +13,7 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
-
+use acropolis_common::validation::ValidationStatus;
 use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
@@ -107,7 +107,7 @@ impl State {
         &mut self,
         block: &BlockInfo,
         governance_message: &GovernanceProceduresMessage,
-    ) -> Result<()> {
+    ) -> Result<ValidationStatus> {
         if block.era < Era::Conway {
             // Alonzo-Babbage governance
             if !(governance_message.proposal_procedures.is_empty()
@@ -117,12 +117,10 @@ impl State {
             }
 
             if !governance_message.alonzo_babbage_updates.is_empty() {
-                if let Err(e) = self
+                return self
                     .alonzo_babbage_voting
                     .process_update_proposals(block, &governance_message.alonzo_babbage_updates)
-                {
-                    error!("Error handling Babbage governance_message: '{e}'");
-                }
+                    .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"));
             }
         } else {
             // Conway governance
@@ -151,7 +149,7 @@ impl State {
             }
         }
 
-        Ok(())
+        Ok(ValidationStatus::Go)
     }
 
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {

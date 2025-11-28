@@ -1732,7 +1732,7 @@ pub struct AlonzoBabbageUpdateProposal {
     pub enactment_epoch: u64,
 }
 
-#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
+#[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
@@ -1752,21 +1752,21 @@ impl Committee {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
     pub script_hash: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
     #[serde_as(as = "Vec<(_, _)>")]
     pub rewards: HashMap<Vec<u8>, Lovelace>,
@@ -1774,7 +1774,7 @@ pub struct TreasuryWithdrawalsAction {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
@@ -1782,19 +1782,19 @@ pub struct CommitteeChange {
     pub terms: RationalNumber,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
     pub data: CommitteeChange,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewConstitutionAction {
     pub previous_action_id: Option<GovActionId>,
     pub new_constitution: Constitution,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GovernanceAction {
     ParameterChange(ParameterChangeAction),
     HardForkInitiation(HardForkInitiationAction),
@@ -2004,7 +2004,7 @@ pub struct VotingOutcome {
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: StakeAddress,
