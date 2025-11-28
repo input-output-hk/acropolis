@@ -11,6 +11,7 @@ pub mod hash;
 pub mod ledger_state;
 pub mod math;
 pub mod messages;
+pub mod metadata;
 pub mod params;
 pub mod protocol_params;
 pub mod queries;
@@ -28,4 +29,5 @@ pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
+pub use self::metadata::*;
 pub use self::types::*;
