@@ -967,10 +967,8 @@ impl ChainStore {
                         });
                     }
                 }
-                MultiEraCert::Conway(cert) => {
-                    if let conway::Certificate::StakeDelegation(cred, pool_key_hash) =
-                        cert.as_ref().as_ref()
-                    {
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
                             address: map_stake_address(cred, network_id.clone()),
@@ -978,7 +976,24 @@ impl ChainStore {
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
-                }
+                    conway::Certificate::StakeRegDeleg(cred, pool_key_hash, _) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            pool_id: to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, _, _) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: map_stake_address(cred, network_id.clone()),
+                            pool_id: to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    _ => (),
+                },
                 _ => (),
             }
         }
