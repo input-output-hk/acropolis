@@ -88,7 +88,7 @@ impl Serialize for TxOutputAmount {
     }
 }
 
-/// Handle `/txs/{hash}`
+/// Handle `/txs/{hash}[/param][/param2]`
 pub async fn handle_transactions_blockfrost(
     context: Arc<Context<Message>>,
     params: Vec<String>,
@@ -183,6 +183,7 @@ async fn handle_transaction_query(
                 };
                 // TODO: calc from outputs and inputs if recorded_fee is None
                 let fee = txs_info.recorded_fee.unwrap_or_default();
+                // TODO: Check whether updates require a deposit or not
                 let deposit = match calculate_deposit(
                     txs_info.pool_update_count,
                     txs_info.stake_cert_count,
