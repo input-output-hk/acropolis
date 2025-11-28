@@ -1096,7 +1096,8 @@ impl ChainStore {
                                 network_id.clone(),
                                 false,
                             )?,
-                            active_epoch: tx.block.extra.epoch + 1,
+                            // Pool registration/updates become active after 2 epochs
+                            active_epoch: tx.block.extra.epoch + 2,
                         });
                     }
                 }
@@ -1128,7 +1129,8 @@ impl ChainStore {
                                 network_id.clone(),
                                 false,
                             )?,
-                            active_epoch: tx.block.extra.epoch + 1,
+                            // Pool registration/updates become active after 2 epochs
+                            active_epoch: tx.block.extra.epoch + 2,
                         });
                     }
                 }
