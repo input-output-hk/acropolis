@@ -173,24 +173,21 @@ impl TxUnpacker {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                        let inputs = tx.consumes();
-                                        let outputs = tx.produces();
                                         let certs = tx.certs();
                                         let tx_withdrawals = tx.withdrawals_sorted_set();
                                         let mut props = None;
                                         let mut votes = None;
 
-                                        let (txs_ref_in, tx_out, total, errors) =
-                                            map_parameters::map_one_transaction(
+                                        let (tx_inputs, tx_outputs, errors) =
+                                            map_parameters::map_transaction_inputs_outputs(
                                                 block_number, tx_index, &tx
                                             );
 
                                         if tracing::enabled!(tracing::Level::DEBUG) {
                                             debug!(
                                                 "Decoded tx with {} inputs, {} outputs, {} certs, {} errors",
-                                               //inputs.len(), outputs.len(), certs.len());
-                                                txs_ref_in.len(),
-                                                tx_out.len(),
+                                                tx_inputs.len(),
+                                                tx_outputs.len(),
                                                 certs.len(),
                                                 errors.len()
                                             )
@@ -200,30 +197,9 @@ impl TxUnpacker {
                                             // Lookup and remove UTxOIdentifier from registry
                                             // Group deltas by tx
                                             let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
-/*
+
                                             // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
-                                            for input in inputs {
-                                                let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-                                                match utxo_registry.consume(&tx_ref) {
-                                                    Ok(tx_identifier) => {
-                                                        tx_utxo_deltas.inputs.push(
-                                                            UTxOIdentifier::new(
-                                                                tx_identifier.block_number(),
-                                                                tx_identifier.tx_index(),
-                                                                tx_ref.output_index,
-                                                            ),
-                                                      );
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to consume input {}: {e}", tx_ref.output_index);
-                                                    }
-                                                }
-                                            }
- */
-
-                                            for tx_ref in txs_ref_in {
+                                            for tx_ref in tx_inputs {
                                                 match utxo_registry.consume(&tx_ref) {
                                                     Ok(tx_identifier) => {
                                                         // Add TxInput to utxo_deltas
@@ -241,45 +217,9 @@ impl TxUnpacker {
                                                 }
                                             }
 
-                                            // Add outputs to UTxORegistry and push TxOutputs to delta
-                                            /*
-                                            for (index, output) in outputs {
-                                                match utxo_registry.add(
-                                                    block_number,
-                                                    tx_index,
-                                                    TxOutRef {
-                                                        tx_hash,
-                                                        output_index: index as u16,
-                                                    },
-                                                ) {
-                                                    Ok(utxo_id) => {
-                                                        match output.address() {
-                                                            Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
-                                                                Ok(address) => {
-                                                                    tx_utxo_deltas.outputs.push(TxOutput {
-                                                                        utxo_identifier: utxo_id,
-                                                                        address,
-                                                                        value: map_parameters::map_value(&output.value()),
-                                                                        datum: map_parameters::map_datum(&output.datum()),
-                                                                        reference_script: map_parameters::map_reference_script(&output.script_ref())
-                                                                    });
+                                            for (tx_ref, output) in tx_outputs.into_iter() {
+                                                total_output += output.value.coin() as u128;
 
-                                                                    // catch all output lovelaces
-                                                                    total_output += output.value().coin() as u128;
-                                                                }
-                                                                Err(e) => error!("Output {index} in tx ignored: {e}"),
-                                                            },
-                                                            Err(e) => error!("Can't parse output {index} in tx: {e}"),
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to insert output into registry: {e}");
-                                                    }
-                                                }
-                                            }
-                                             */
-
-                                            for (tx_ref, output) in tx_out.into_iter() {
                                                 if let Err(e) = utxo_registry.add(
                                                     block_number,
                                                     tx_index,
@@ -292,7 +232,6 @@ impl TxUnpacker {
                                                 }
                                             }
 
-                                            total_output += total;
                                             utxo_deltas.push(tx_utxo_deltas);
                                         }
 
@@ -325,7 +264,7 @@ impl TxUnpacker {
 
                                         if publish_certificates_topic.is_some() {
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
+                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },

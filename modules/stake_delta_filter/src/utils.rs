@@ -354,12 +354,12 @@ pub fn process_message(
                 let stake_address = match &shelley.delegation {
                     // Base addresses (stake delegated to itself)
                     ShelleyAddressDelegationPart::StakeKeyHash(keyhash) => StakeAddress {
-                        network: shelley.network.clone(),
+                        network: shelley.network,
                         credential: StakeCredential::AddrKeyHash(*keyhash),
                     },
 
                     ShelleyAddressDelegationPart::ScriptHash(scripthash) => StakeAddress {
-                        network: shelley.network.clone(),
+                        network: shelley.network,
                         credential: StakeCredential::ScriptHash(*scripthash),
                     },
 

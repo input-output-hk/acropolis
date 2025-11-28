@@ -20,7 +20,7 @@ use acropolis_common::{
     *,
 };
 use pallas_primitives::conway::PseudoScript;
-use pallas_traverse::{MultiEraInput, MultiEraOutput, MultiEraTx};
+use pallas_traverse::{MultiEraInput, MultiEraTx};
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, Ipv6Addr},
@@ -990,66 +990,71 @@ pub fn map_all_governance_voting_procedures(
     Ok(procs)
 }
 
-pub struct TransactionRefInfo {}
+// pub struct TransactionRefInfo {}
 
-pub fn map_transaction_refs(
-    inputs: &Vec<MultiEraInput>,
-    outputs: &Vec<(usize, MultiEraOutput)>,
-) -> (Vec<TxOutRef>, Vec<TxOutRef>) {
-    let mut ref_inps = Vec::new();
+// pub fn map_transaction_refs(
+//     inputs: &Vec<MultiEraInput>,
+//     outputs: &Vec<(usize, MultiEraOutput)>,
+// ) -> (Vec<TxOutRef>, Vec<TxOutRef>) {
+//     let mut ref_inps = Vec::new();
+//     for input in inputs {
+//         // MultiEraInput
+//         let oref = input.output_ref();
+//         let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
+//         ref_inps.push(tx_ref);
+//     }
+
+//     let mut ref_outs = Vec::new();
+//     for (index, output) in outputs {}
+
+//     (ref_inps, ref_outs)
+// }
+
+pub fn map_transaction_inputs(inputs: &Vec<MultiEraInput>) -> Vec<TxOutRef> {
+    let mut parsed_inputs = Vec::new();
     for input in inputs {
         // MultiEraInput
         let oref = input.output_ref();
         let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
-        ref_inps.push(tx_ref);
+
+        parsed_inputs.push(tx_ref);
     }
 
-    let mut ref_outs = Vec::new();
-    for (index, output) in outputs {}
-
-    (ref_inps, ref_outs)
+    parsed_inputs
 }
 
-#[allow(clippy::type_complexity)]
-pub fn map_one_transaction(
+pub fn map_transaction_inputs_outputs(
     block_number: u32,
     tx_index: u16,
     tx: &MultiEraTx,
 ) -> (
-    Vec<TxOutRef>,             // inputs
-    Vec<(TxOutRef, TxOutput)>, // outputs
-    u128,                      // total
-    Vec<ValidationError>,      // errors
+    Vec<TxOutRef>,
+    Vec<(TxOutRef, TxOutput)>,
+    Vec<ValidationError>,
 ) {
+    let mut parsed_inputs = Vec::new();
+    let mut parsed_outputs = Vec::new();
+    let mut errors = Vec::new();
+
     let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
-        return (
-            vec![],
-            vec![],
-            0,
-            vec![ValidationError::MalformedTransaction(
-                tx_index,
-                format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
-            )],
-        );
+        errors.push(ValidationError::MalformedTransaction(
+            tx_index,
+            format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
+        ));
+        return (parsed_inputs, parsed_outputs, errors);
     };
 
     let inputs = tx.consumes();
     let outputs = tx.produces();
 
-    let mut tx_input_refs = Vec::new();
-    let mut tx_outputs = Vec::new();
-    let mut total_output = 0;
-    let mut errors = Vec::new();
-
     for input in inputs {
-        // MultiEraInput
-        let oref = input.output_ref();
-        let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-        tx_input_refs.push(tx_ref);
+        let tx_ref = TxOutRef::new(
+            TxHash::from(**input.output_ref().hash()),
+            input.output_ref().index() as u16,
+        );
+        parsed_inputs.push(tx_ref);
     }
 
-    // Add all the outputs
     for (index, output) in outputs {
         let tx_out_ref = TxOutRef {
             tx_hash,
@@ -1062,7 +1067,7 @@ pub fn map_one_transaction(
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
                     // Add TxOutput to utxo_deltas
-                    tx_outputs.push((
+                    parsed_outputs.push((
                         tx_out_ref,
                         TxOutput {
                             utxo_identifier: utxo_id,
@@ -1072,9 +1077,6 @@ pub fn map_one_transaction(
                             reference_script: map_reference_script(&output.script_ref()),
                         },
                     ));
-
-                    // catch all output lovelaces
-                    total_output += output.value().coin() as u128;
                 }
                 Err(e) => {
                     errors.push(ValidationError::MalformedTransaction(
@@ -1090,7 +1092,7 @@ pub fn map_one_transaction(
         }
     }
 
-    (tx_input_refs, tx_outputs, total_output, errors)
+    (parsed_inputs, parsed_outputs, errors)
 }
 
 pub fn map_value(pallas_value: &MultiEraValue) -> Value {

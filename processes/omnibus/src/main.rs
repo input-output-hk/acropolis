@@ -32,7 +32,6 @@ use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
 use acropolis_module_tx_unpacker::TxUnpacker;
-use acropolis_module_tx_validator_phase1::TxValidatorPhase1;
 use acropolis_module_utxo_state::UTXOState;
 
 use caryatid_module_clock::Clock;
@@ -152,7 +151,6 @@ pub async fn main() -> Result<()> {
     DRDDState::register(&mut process);
     Consensus::register(&mut process);
     ChainStore::register(&mut process);
-    TxValidatorPhase1::register(&mut process);
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
 

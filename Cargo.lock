@@ -495,20 +495,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_tx_validator_phase1"
-version = "0.1.0"
-dependencies = [
- "acropolis_codec",
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "pallas 0.33.0",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_utxo_state"
 version = "0.1.0"
 dependencies = [
@@ -571,7 +557,6 @@ dependencies = [
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
  "acropolis_module_tx_unpacker",
- "acropolis_module_tx_validator_phase1",
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",

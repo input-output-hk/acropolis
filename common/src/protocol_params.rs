@@ -208,7 +208,7 @@ impl From<&ShelleyParams> for PraosParams {
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
-            network_id: params.network_id.clone(),
+            network_id: params.network_id,
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
 

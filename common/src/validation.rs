@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     protocol_params::Nonce, Address, Era, GenesisKeyhash, Lovelace, NetworkId, PoolId, Slot,
-    StakeAddress, TxOutRef, TxOutput, Value, VrfKeyHash,
+    StakeAddress, TxOutRef, Value, VrfKeyHash,
 };
 
 /// Transaction Validation Error
