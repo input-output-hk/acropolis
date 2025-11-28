@@ -219,7 +219,6 @@ impl GovernanceState {
 
         loop {
             let (_, message) = governance_s.read().await?;
-            //let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
             let (blk_g, gov_procs) = match message.as_ref() {
                 Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
                     (blk.clone(), msg.clone())

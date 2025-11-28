@@ -37,7 +37,7 @@ pub struct RollbackAwarePublisher<M: MessageBounds> {
     /// Topic to publish on
     topic: String,
 
-    // When did we publish our last non-rollback message
+    // At which slot did we publish our last non-rollback message
     last_activity_at: Option<u64>,
 }
 
