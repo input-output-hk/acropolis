@@ -1,5 +1,15 @@
 # Top-level configuration for Acropolis omnibus process
 
+# ============================================================================
+# Startup Configuration
+# ============================================================================
+[startup]
+method = "mithril"  # Options: "mithril" | "snapshot"
+topic = "cardano.sequence.start"
+
+# ============================================================================
+# Bootstrap Module Configurations
+# ============================================================================
 [module.genesis-bootstrapper]
 
 [module.mithril-snapshot-fetcher]
@@ -10,6 +20,13 @@ download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
 
+[module.snapshot-bootstrapper]
+network = "mainnet"
+data-dir = "../../modules/snapshot_bootstrapper/data"
+
+# ============================================================================
+# Core Module Configurations
+# ============================================================================
 [module.peer-network-interface]
 sync-point = "snapshot"
 node-addresses = [
@@ -170,9 +187,9 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.#"
 
-[startup]
-topic = "cardano.sequence.start"
-
+# ============================================================================
+# Message Bus Configuration
+# ============================================================================
 [message-bus.external]
 class = "rabbit-mq"
 url = "amqp://127.0.0.1:5672/%2f"

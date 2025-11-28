@@ -26,6 +26,7 @@ serde_json = { workspace = true }
 serde_with = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+acropolis_cardano = { version = "0.1.0", path = "../../cardano" }
 
 [lib]
 path = "src/rest_blockfrost.rs"

@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "acropolis_cardano"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+]
+
+[[package]]
 name = "acropolis_codec"
 version = "0.1.0"
 dependencies = [
@@ -37,7 +45,7 @@ dependencies = [
  "futures",
  "hex",
  "memmap2",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "num-rational",
  "num-traits",
  "rayon",
@@ -82,7 +90,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -165,7 +173,8 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
+ "pallas 0.33.0",
  "pallas-traverse 0.33.0",
  "tempfile",
  "tokio",
@@ -274,7 +283,7 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "rayon",
  "tokio",
  "tracing",
@@ -289,7 +298,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -362,6 +371,7 @@ dependencies = [
 name = "acropolis_module_rest_blockfrost"
 version = "0.1.0"
 dependencies = [
+ "acropolis_cardano",
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
@@ -385,10 +395,21 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "async-compression",
  "caryatid_sdk",
  "config",
+ "flate2",
+ "futures-util",
+ "hex",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -528,6 +549,7 @@ dependencies = [
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
+ "acropolis_module_snapshot_bootstrapper",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
@@ -858,6 +880,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.109",
+]
+
+[[package]]
+name = "assert-json-diff"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e4f2b81832e72834d7518d8487a0396a28cc408186a2e8854c0f98011faf12"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1459,9 +1491,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 dependencies = [
  "serde",
 ]
@@ -2170,6 +2202,24 @@ name = "data-encoding"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
+
+[[package]]
+name = "deadpool"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
+dependencies = [
+ "deadpool-runtime",
+ "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 
 [[package]]
 name = "der"
@@ -3014,6 +3064,7 @@ dependencies = [
  "http 1.3.1",
  "http-body 1.0.1",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "pin-utils",
@@ -3590,27 +3641,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0452a60c1863c1f50b5f77cd295e8d2786849f35883f0b9e18e7e6e1b5691b0"
 dependencies = [
  "half 2.7.1",
- "minicbor-derive 0.15.3",
+ "minicbor-derive",
 ]
 
 [[package]]
 name = "minicbor"
-version = "0.26.5"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a309f581ade7597820083bc275075c4c6986e57e53f8d26f88507cfefc8c987"
-dependencies = [
- "half 2.7.1",
- "minicbor-derive 0.16.2",
-]
-
-[[package]]
-name = "minicbor"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f182275033b808ede9427884caa8e05fa7db930801759524ca7925bd8aa7a82"
-dependencies = [
- "minicbor-derive 0.18.2",
-]
+checksum = "f9a1119e42fbacc2bb65d860de6eb7c930562bc71d42dca026d06b0228231f77"
 
 [[package]]
 name = "minicbor-derive"
@@ -3624,34 +3662,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "minicbor-derive"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9882ef5c56df184b8ffc107fc6c61e33ee3a654b021961d790a78571bb9d67a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
-name = "minicbor-derive"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17290c95158a760027059fe3f511970d6857e47ff5008f9e09bffe3d3e1c6af"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
 name = "minicbor-serde"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546cc904f35809921fa57016a84c97e68d9d27c012e87b9dadc28c233705f783"
 dependencies = [
- "minicbor 2.1.1",
+ "minicbor 2.1.3",
  "serde",
 ]
 
@@ -7433,6 +7449,29 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wiremock"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
+dependencies = [
+ "assert-json-diff",
+ "base64 0.22.1",
+ "deadpool",
+ "futures",
+ "http 1.3.1",
+ "http-body-util",
+ "hyper 1.7.0",
+ "hyper-util",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

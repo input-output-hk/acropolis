@@ -10,6 +10,9 @@ compose the Acropolis Architecture
   Fetches a chain snapshot from Mithril and replays all the blocks in it
 * [Genesis Bootstrapper](genesis_bootstrapper) - reads the Genesis
   file for a chain and generates initial UTXOs
+* [Snapshot Bootstrapper](snapshot_bootstrapper) - downloads ledger state snapshot files for configured epochs,
+  streams and parses the CBOR data (UTXOs, pools, accounts, DReps, proposals), and publishes completion messages to
+  signal snapshot readiness to other modules.
 * [Block Unpacker](block_unpacker) - unpacks received blocks
   into individual transactions
 * [Tx Unpacker](tx_unpacker) - parses transactions and generates UTXO
@@ -19,7 +22,6 @@ compose the Acropolis Architecture
 * [DRep State](drep_state) - tracks DRep registrations
 * [Governance State](governance_state) - tracks Governance Actions and voting
 * [Stake Delta Filter](stake_delta_filter) - filters out stake address changes and handles stake pointer references
-* [Epoch Activity Counter](epoch_activity_couinter) - counts fees and block production for rewards
 * [Accounts State](accounts_state) - stake and reward accounts tracker
 
 ## How to add a new module
@@ -88,7 +90,7 @@ to call `MyModule::register()` in the process `main()`:
 use acropolis_module_my_module::MyModule;
 
 // in main()...
-    MyModule::register(&mut process);
+MyModule::register( & mut process);
 ```
 
 You also need to mention the module in (e.g.) `omnibus.toml` to get it created, even if all
