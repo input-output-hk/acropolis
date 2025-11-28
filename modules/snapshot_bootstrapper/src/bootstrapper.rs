@@ -1,23 +1,11 @@
-//! Snapshot Bootstrapper Module
-//!
-//! Bootstraps Cardano node state from pre-computed snapshots.
-//!
-//! This module:
-//! 1. Waits for genesis bootstrap completion
-//! 2. Loads bootstrap configuration files (config, snapshots, nonces, headers)
-//! 3. Downloads the target snapshot if needed
-//! 4. Parses and publishes snapshot data to the message bus
-//! 5. Publishes completion with correct BlockInfo and Nonces
 mod configuration;
 mod downloader;
 mod progress_reader;
 mod publisher;
 
-use crate::configuration::{
-    BootstrapFiles, ConfigError, HeaderFileData, NoncesData, SnapshotConfig,
-};
+use crate::configuration::{BootstrapFiles, ConfigError, HeaderFileData, SnapshotConfig};
 use crate::downloader::{DownloadError, SnapshotDownloader};
-use crate::publisher::SnapshotPublisher;
+use crate::publisher::{BootstrapContext, SnapshotPublisher};
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
 use acropolis_common::{
@@ -25,7 +13,7 @@ use acropolis_common::{
     BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{bail, Result};
-use caryatid_sdk::{module, Context as CaryatidContext, Subscription};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use pallas_primitives::babbage::MintedHeader;
 use pallas_primitives::conway::Header;
@@ -64,11 +52,7 @@ pub struct SnapshotBootstrapper;
 
 impl SnapshotBootstrapper {
     /// Initialize the snapshot bootstrapper.
-    pub async fn init(
-        &self,
-        context: Arc<CaryatidContext<Message>>,
-        config: Arc<Config>,
-    ) -> Result<()> {
+    pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = SnapshotConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");
@@ -101,7 +85,7 @@ impl SnapshotBootstrapper {
     async fn run_bootstrap(
         bootstrapped_sub: Box<dyn Subscription<Message>>,
         cfg: SnapshotConfig,
-        context: Arc<CaryatidContext<Message>>,
+        context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
         // Wait for genesis bootstrap completion
         Self::wait_genesis_completion(bootstrapped_sub).await?;
@@ -122,23 +106,35 @@ impl SnapshotBootstrapper {
             target_snapshot.epoch, target_snapshot.point
         );
 
+        // Build nonces from config files
         let nonces = bootstrap_files.build_nonces()?;
         Self::log_nonces(&nonces);
 
-        // Build block info
+        // Build block info from header
         let block_info = Self::build_block_info(&bootstrap_files, &cfg)?;
         info!(
             "Built block info: slot={}, number={}, hash={}",
             block_info.slot, block_info.number, block_info.hash
         );
 
+        // Build bootstrap context with nonces and timing
+        // TODO: Make genesis configurable based on network
+        let genesis = GenesisValues::mainnet();
+        let bootstrap_context = BootstrapContext::new(
+            nonces,
+            block_info.slot,
+            block_info.number,
+            block_info.epoch,
+            &genesis,
+        );
+
         // Download snapshot if needed
         let downloader = SnapshotDownloader::new(cfg.network_dir(), &cfg.download)?;
         downloader.download(&target_snapshot).await?;
 
-        // Process the snapshot
+        // Process the snapshot with full context
         let file_path = target_snapshot.file_path(&cfg.network_dir());
-        Self::process_snapshot(&file_path, block_info, Some(nonces), &cfg, context).await?;
+        Self::process_snapshot(&file_path, block_info, bootstrap_context, &cfg, context).await?;
 
         info!("Snapshot bootstrap completed successfully");
         Ok(())
@@ -159,7 +155,7 @@ impl SnapshotBootstrapper {
     }
 
     /// Log nonces for debugging.
-    fn log_nonces(nonces: &NoncesData) {
+    fn log_nonces(nonces: &configuration::NoncesData) {
         let (active, evolving, candidate, tail) = nonces.to_hex_strings();
         info!("Built nonces for epoch {}", nonces.epoch);
         info!("  Active:    {}...", &active[..16]);
@@ -177,7 +173,7 @@ impl SnapshotBootstrapper {
         let header_data = &bootstrap_files.target_header;
 
         // Decode header to get block height
-        let block_height = Self::extract_block_height(header_data)?;
+        let header = Self::extract_block_header(header_data)?;
 
         // Get hash from header data
         let hash_bytes = header_data.hash_bytes()?;
@@ -187,13 +183,13 @@ impl SnapshotBootstrapper {
         // Calculate epoch slot and timestamp
         // TODO: Make genesis configurable based on network
         let genesis = GenesisValues::mainnet();
-        let epoch_start_slot = genesis.epoch_to_first_slot(header_data.slot);
-        let epoch_slot = header_data.slot - epoch_start_slot;
+        let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
         let timestamp = genesis.slot_to_timestamp(header_data.slot);
+        let block_height = header.header_body.block_number;
 
         info!(
             "Building BlockInfo: slot={}, height={}, epoch={}, epoch_slot={}",
-            header_data.slot, block_height, epoch, epoch_slot
+            header_data.slot, block_height, epoch, epoch_start_slot
         );
 
         Ok(BlockInfo {
@@ -202,15 +198,15 @@ impl SnapshotBootstrapper {
             number: block_height,
             hash,
             epoch,
-            epoch_slot,
+            epoch_slot: epoch_start_slot,
             new_epoch: true,
             timestamp,
             era: Era::Conway,
         })
     }
 
-    /// Extract block height from header CBOR.
-    fn extract_block_height(header_data: &HeaderFileData) -> Result<u64, BootstrapError> {
+    /// Extract block header from CBOR bytes.
+    fn extract_block_header(header_data: &HeaderFileData) -> Result<Header, BootstrapError> {
         let minted_header: MintedHeader<'_> =
             minicbor::decode(&header_data.cbor_bytes).map_err(|e| {
                 BootstrapError::HeaderDecode(format!(
@@ -220,27 +216,24 @@ impl SnapshotBootstrapper {
             })?;
 
         let header = Header::from(minted_header);
-        Ok(header.header_body.block_number)
+        Ok(header)
     }
 
-    /// Process a snapshot file.
+    /// Process a snapshot file with bootstrap context.
     async fn process_snapshot(
         file_path: &str,
         block_info: BlockInfo,
-        nonces: Option<NoncesData>,
+        bootstrap_context: BootstrapContext,
         cfg: &SnapshotConfig,
-        context: Arc<CaryatidContext<Message>>,
+        context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
+        // Create publisher with bootstrap context for nonces/timing
         let mut publisher = SnapshotPublisher::new(
             context,
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
-        );
-
-        // TODO: Pass nonces to publisher when the type conversion is implemented
-        if let Some(n) = &nonces {
-            info!("Nonces ready for epoch {} (conversion pending)", n.epoch);
-        }
+        )
+        .with_bootstrap_context(bootstrap_context);
 
         publisher.publish_start().await?;
 

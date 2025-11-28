@@ -54,12 +54,24 @@ pub struct EpochsState;
 impl EpochsState {
     /// Handle bootstrap message from snapshot
     fn handle_bootstrap(state: &mut State, epoch_data: &EpochActivityMessage) {
+        // Print entire epoch activity message
         info!(
-            "Bootstrapping epoch state from snapshot: epoch={}, blocks={}, spo_count={}",
+            "Bootstrapping epoch state from snapshot epoch={}, epoch_start_time={}, epoch_end_time={}, first_block_time={}, first_block_height={}, last_block_time={}, last_block_height={}, total_blocks={}, total_txs={}, total_outputs={}, total_fees={}",
             epoch_data.epoch,
+            epoch_data.epoch_start_time,
+            epoch_data.epoch_end_time,
+            epoch_data.first_block_time,
+            epoch_data.first_block_height,
+            epoch_data.last_block_time,
+            epoch_data.last_block_height,
             epoch_data.total_blocks,
-            epoch_data.spo_blocks.len()
+            epoch_data.total_txs,
+            epoch_data.total_outputs,
+            epoch_data.total_fees,
         );
+
+        info!("Nonces: {:?}", epoch_data.nonce);
+        info!("SPO blocks {:?}", epoch_data.spo_blocks);
 
         // Initialize epoch state from snapshot data
         state.bootstrap_from_snapshot(epoch_data);

@@ -1,12 +1,4 @@
-//! Configuration types for the snapshot bootstrapper.
-//!
-//! This module provides:
-//! - `SnapshotConfig` - Main application configuration (from TOML/environment)
-//! - `NetworkConfig` - Network-specific config from `config.json`
-//! - `SnapshotFileMetadata` - Snapshot metadata from `snapshots.json`
-//! - `NoncesFileData` - Nonce state from `nonces.json`
-//! - `HeadersFileData` / `HeaderFileData` - Header references and CBOR data
-//! - `BootstrapFiles` - Combined loader for all bootstrap data
+use acropolis_common::hash::Hash;
 use anyhow::Result;
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -289,7 +281,7 @@ impl NoncesFileData {
     }
 
     /// Decode a hex string into 32 bytes.
-    fn decode_hash32(hex_str: &str) -> Result<[u8; 32], ConfigError> {
+    fn decode_hash32(hex_str: &str) -> Result<Hash<32>, ConfigError> {
         let bytes =
             hex::decode(hex_str).map_err(|_| ConfigError::InvalidHex(hex_str.to_string()))?;
 
@@ -298,34 +290,31 @@ impl NoncesFileData {
         })
     }
 
-    fn active_bytes(&self) -> Result<[u8; 32], ConfigError> {
+    fn active_bytes(&self) -> Result<Hash<32>, ConfigError> {
         Self::decode_hash32(&self.active)
     }
 
-    fn candidate_bytes(&self) -> Result<[u8; 32], ConfigError> {
+    fn candidate_bytes(&self) -> Result<Hash<32>, ConfigError> {
         Self::decode_hash32(&self.candidate)
     }
 
-    fn evolving_bytes(&self) -> Result<[u8; 32], ConfigError> {
+    fn evolving_bytes(&self) -> Result<Hash<32>, ConfigError> {
         Self::decode_hash32(&self.evolving)
     }
 
-    fn tail_bytes(&self) -> Result<[u8; 32], ConfigError> {
+    fn tail_bytes(&self) -> Result<Hash<32>, ConfigError> {
         Self::decode_hash32(&self.tail)
     }
 }
 
-/// Raw nonces as bytes, ready for conversion to domain types.
-///
-/// This is an intermediate representation before converting to
-/// the actual `Nonces` type from amaru_kernel.
+/// Raw nonces as bytes, ready for conversion to Hash<32> type.
 #[derive(Debug, Clone)]
 pub struct NoncesData {
     pub epoch: u64,
-    pub active: [u8; 32],
-    pub evolving: [u8; 32],
-    pub candidate: [u8; 32],
-    pub tail: [u8; 32],
+    pub active: Hash<32>,
+    pub evolving: Hash<32>,
+    pub candidate: Hash<32>,
+    pub tail: Hash<32>,
 }
 
 impl NoncesData {
@@ -415,7 +404,7 @@ impl HeaderFileData {
     }
 
     /// Get the hash as 32 bytes.
-    pub fn hash_bytes(&self) -> Result<[u8; 32], ConfigError> {
+    pub fn hash_bytes(&self) -> Result<Hash<32>, ConfigError> {
         NoncesFileData::decode_hash32(&self.hash)
     }
 }
@@ -529,7 +518,6 @@ mod tests {
         path
     }
 
-    // --- SnapshotConfig Tests ---
     #[test]
     fn test_snapshot_config_paths() {
         let config = SnapshotConfig {
@@ -548,7 +536,6 @@ mod tests {
         assert_eq!(config.headers_path(), "./data/mainnet/headers.json");
     }
 
-    // --- NetworkConfig Tests ---
     #[test]
     fn test_network_config_read() {
         let temp_dir = TempDir::new().unwrap();
@@ -567,7 +554,6 @@ mod tests {
         assert!(matches!(result, Err(ConfigError::ReadNetworkConfig(_, _))));
     }
 
-    // --- SnapshotFileMetadata Tests ---
     #[test]
     fn test_snapshot_metadata_find_by_epoch() {
         let temp_dir = TempDir::new().unwrap();
@@ -598,7 +584,6 @@ mod tests {
         );
     }
 
-    // --- NoncesFileData Tests ---
     #[test]
     fn test_nonces_file_data() {
         let temp_dir = TempDir::new().unwrap();
@@ -644,7 +629,6 @@ mod tests {
         ));
     }
 
-    // --- Utility Tests ---
     #[test]
     fn test_parse_point_string() {
         let (slot, hash) = parse_point_string("134956789.abc123def").unwrap();

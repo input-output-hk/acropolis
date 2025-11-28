@@ -1,7 +1,11 @@
+use crate::configuration::NoncesData;
 use acropolis_common::{
+    genesis_values::GenesisValues,
     messages::{
         CardanoMessage, EpochActivityMessage, Message, SnapshotMessage, SnapshotStateMessage,
     },
+    params::EPOCH_LENGTH,
+    protocol_params::{Nonce, NonceHash},
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochBootstrapData, EpochCallback, GovernanceProposal,
         PoolCallback, PoolInfo, ProposalCallback, SnapshotCallbacks, SnapshotMetadata,
@@ -15,7 +19,65 @@ use caryatid_sdk::Context;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-/// Handles publishing snapshot data to the message bus
+/// External bootstrap context providing nonces and timing information.
+///
+/// This data comes from bootstrap configuration files (nonces.json, headers/{slot}.{block_header_hash}.cbor, etc)
+/// and is not available to the CBOR parser. It's injected into the publisher
+/// so that `EpochActivityMessage` can include complete information, among other things.
+#[derive(Debug, Clone)]
+pub struct BootstrapContext {
+    /// Nonces for the target epoch
+    pub nonces: NoncesData,
+    /// Epoch start time (UNIX timestamp)
+    pub epoch_start_time: u64,
+    /// Epoch end time (UNIX timestamp)
+    pub epoch_end_time: u64,
+    /// Last block timestamp from header
+    pub last_block_time: u64,
+    /// Last block height from header
+    pub last_block_height: u64,
+}
+
+impl BootstrapContext {
+    /// Build context from nonces, header data, and genesis values.
+    ///
+    /// # Arguments
+    /// * `nonces` - Nonces loaded from nonces.json
+    /// * `header_slot` - Slot number from the target block header
+    /// * `header_block_height` - Block height from the target block header
+    /// * `epoch` - Target epoch number
+    /// * `genesis` - Genesis values for timestamp calculations
+    pub fn new(
+        nonces: NoncesData,
+        header_slot: u64,
+        header_block_height: u64,
+        epoch: u64,
+        genesis: &GenesisValues,
+    ) -> Self {
+        let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
+        let epoch_start_time = genesis.slot_to_timestamp(epoch_start_slot);
+        let epoch_end_time = epoch_start_time + EPOCH_LENGTH;
+        let last_block_time = genesis.slot_to_timestamp(header_slot);
+
+        Self {
+            nonces,
+            epoch_start_time,
+            epoch_end_time,
+            last_block_time,
+            last_block_height: header_block_height,
+        }
+    }
+
+    /// Convert the active nonce to the protocol Nonce type.
+    fn active_nonce(&self) -> Option<Nonce> {
+        NonceHash::try_from(self.nonces.active.as_slice()).ok().map(Nonce::from)
+    }
+}
+
+/// Handles publishing snapshot data to the message bus.
+///
+/// Implements the sink traits that the streaming parser calls during parsing.
+/// External context (nonces, timing) can be added via `with_bootstrap_context()`.
 pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     completion_topic: String,
@@ -26,9 +88,13 @@ pub struct SnapshotPublisher {
     accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
+
+    /// Optional external context with nonces and timing
+    bootstrap_context: Option<BootstrapContext>,
 }
 
 impl SnapshotPublisher {
+    /// Create a new publisher without external context.
     pub fn new(
         context: Arc<Context<Message>>,
         completion_topic: String,
@@ -44,14 +110,23 @@ impl SnapshotPublisher {
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
+            bootstrap_context: None,
         }
     }
 
+    /// Add external bootstrap context (nonces, timing info).
+    pub fn with_bootstrap_context(mut self, ctx: BootstrapContext) -> Self {
+        self.bootstrap_context = Some(ctx);
+        self
+    }
+
+    /// Publish a startup message to signal bootstrap is beginning.
     pub async fn publish_start(&self) -> Result<()> {
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Startup));
         self.context.publish(&self.snapshot_topic, message).await
     }
 
+    /// Publish a completion message with final block info.
     pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
         let message = Arc::new(Message::Cardano((
             block_info,
@@ -60,7 +135,7 @@ impl SnapshotPublisher {
         self.context.publish(&self.completion_topic, message).await
     }
 
-    /// Convert hex pool ID string to PoolId
+    /// Convert hex pool ID string to PoolId.
     fn parse_pool_id(pool_id_hex: &str) -> Option<PoolId> {
         match hex::decode(pool_id_hex) {
             Ok(bytes) if bytes.len() == 28 => {
@@ -83,8 +158,8 @@ impl SnapshotPublisher {
         }
     }
 
-    /// Build EpochActivityMessage from EpochBootstrapData
-    fn build_epoch_activity_message(data: &EpochBootstrapData) -> EpochActivityMessage {
+    /// Build EpochActivityMessage from parsed data and external context.
+    fn build_epoch_activity_message(&self, data: &EpochBootstrapData) -> EpochActivityMessage {
         let spo_blocks: Vec<(PoolId, usize)> = data
             .blocks_current_epoch
             .iter()
@@ -93,20 +168,46 @@ impl SnapshotPublisher {
             })
             .collect();
 
+        // Extract timing and nonces from external context if available
+        let (
+            epoch_start_time,
+            epoch_end_time,
+            first_block_time,
+            first_block_height,
+            last_block_time,
+            last_block_height,
+            nonce,
+        ) = match &self.bootstrap_context {
+            Some(ctx) => {
+                // Estimate first block height: last height minus blocks in current epoch
+                let first_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
+                (
+                    ctx.epoch_start_time,
+                    ctx.epoch_end_time,
+                    ctx.epoch_start_time, // Approximate: first block near epoch start
+                    first_height,
+                    ctx.last_block_time,
+                    ctx.last_block_height,
+                    ctx.active_nonce(),
+                )
+            }
+            None => (0, 0, 0, 0, 0, 0, None),
+        };
+
         EpochActivityMessage {
             epoch: data.epoch,
-            epoch_start_time: 0,   // TODO: Calculate / enhance EpochBoostrapData
-            epoch_end_time: 0,     // TODO: Calculate / enhance EpochBoostrapData
-            first_block_time: 0,   // TODO: Calculate / enhance EpochBoostrapData
-            first_block_height: 0, // TODO: Calculate / enhance EpochBoostrapData
-            last_block_time: 0,    // TODO: Calculate / enhance EpochBoostrapData
-            last_block_height: 0,  // TODO: Calculate / enhance EpochBoostrapData
+            epoch_start_time,
+            epoch_end_time,
+            first_block_time,
+            first_block_height,
+            last_block_time,
+            last_block_height,
             total_blocks: data.total_blocks_current as usize,
-            total_txs: 0,     // TODO: Calculate / enhance EpochBoostrapData
-            total_outputs: 0, // TODO: Calculate / enhance EpochBoostrapData
-            total_fees: 0,    // TODO: Calculate / enhance EpochBoostrapData
+            total_txs: 0,     // Not available from snapshot
+            total_outputs: 0, // Not available from snapshot
+            total_fees: 0,    // Not available from snapshot
             spo_blocks,
-            nonce: None, // TODO: Calculate / enhance EpochBoostrapData
+            nonce,
         }
     }
 }
@@ -168,12 +269,14 @@ impl EpochCallback for SnapshotPublisher {
             data.total_blocks_previous
         );
 
-        let epoch_activity = Self::build_epoch_activity_message(&data);
+        let epoch_activity = self.build_epoch_activity_message(&data);
 
+        let has_nonce = epoch_activity.nonce.is_some();
         info!(
-            "Publishing epoch bootstrap for epoch {} with {} SPO entries",
+            "Publishing epoch bootstrap for epoch {} with {} SPO entries, nonce: {}",
             data.epoch,
-            epoch_activity.spo_blocks.len()
+            epoch_activity.spo_blocks.len(),
+            if has_nonce { "present" } else { "none" }
         );
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -231,5 +334,73 @@ impl SnapshotCallbacks for SnapshotPublisher {
         // give us a callback value with the offset into the file; and we'd make the streaming
         // UTXO parser public and reusable, adding it to the resolver implementation.
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::hash::Hash;
+
+    fn make_test_nonces() -> NoncesData {
+        NoncesData {
+            epoch: 509,
+            active: Hash::from([0u8; 32]),
+            evolving: Hash::from([1u8; 32]),
+            candidate: Hash::from([2u8; 32]),
+            tail: Hash::from([3u8; 32]),
+        }
+    }
+
+    #[test]
+    fn test_bootstrap_context_new() {
+        let nonces = make_test_nonces();
+        let genesis = GenesisValues::mainnet();
+
+        let ctx = BootstrapContext::new(
+            nonces.clone(),
+            134956789, // slot
+            11000000,  // block height
+            509,       // epoch
+            &genesis,
+        );
+
+        assert_eq!(ctx.nonces.epoch, 509);
+        assert_eq!(ctx.last_block_height, 11000000);
+        assert!(ctx.epoch_start_time > 0);
+        assert!(ctx.epoch_end_time > ctx.epoch_start_time);
+    }
+
+    #[test]
+    fn test_build_epoch_activity_with_context() {
+        // This would require mocking Context, so just test the data flow concept
+        let nonces = make_test_nonces();
+        let genesis = GenesisValues::mainnet();
+
+        let ctx = BootstrapContext::new(nonces, 134956789, 11000000, 509, &genesis);
+
+        // Verify nonce conversion works
+        assert!(ctx.active_nonce().is_some());
+    }
+
+    #[test]
+    fn test_parse_pool_id_valid() {
+        let valid_hex = "0".repeat(56); // 28 bytes = 56 hex chars
+        let result = SnapshotPublisher::parse_pool_id(&valid_hex);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_pool_id_invalid_length() {
+        let invalid_hex = "0".repeat(40); // Wrong length
+        let result = SnapshotPublisher::parse_pool_id(&invalid_hex);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_pool_id_invalid_hex() {
+        let invalid_hex = "not_valid_hex";
+        let result = SnapshotPublisher::parse_pool_id(invalid_hex);
+        assert!(result.is_none());
     }
 }
