@@ -152,6 +152,12 @@ pub enum BlockIntent {
     ValidateAndApply = BlockIntent::Validate.bits | BlockIntent::Apply.bits, // Validate and apply block
 }
 
+impl BlockIntent {
+    pub fn do_validation(&self) -> bool {
+        (*self & BlockIntent::Validate) == BlockIntent::Validate
+    }
+}
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {

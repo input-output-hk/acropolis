@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 use acropolis_common::messages::CardanoMessage::BlockValidation;
-use acropolis_common::validation::ValidationStatus;
+use acropolis_common::validation::{ValidationError, ValidationStatus};
 
 mod alonzo_babbage_voting;
 mod conway_voting;
@@ -63,6 +63,38 @@ pub struct GovernanceStateConfig {
     verification_output_file: Option<String>,
 }
 
+macro_rules! declare_cardano_reader {
+    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
+        async fn $name(s: &mut Box<dyn Subscription<Message>>) -> Result<(BlockInfo, $msg_type)> {
+            match s.read().await?.1.as_ref() {
+                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
+                    Ok((blk.clone(), body.clone()))
+                }
+                msg => Err(anyhow!(
+                    "Unexpected message {msg:?} for {} topic", stringify!($msg_constructor)
+                )),
+            }
+        }
+    };
+}
+async fn publish_validation_outcome(
+    context: &Arc<Context<Message>>,
+    topic_field: &str,
+    block: &BlockInfo,
+    outcome: ValidationStatus,
+) -> Result<()> {
+    if block.intent.do_validation() {
+        let outcome_msg = Arc::new(
+            Message::Cardano((block.clone(), BlockValidation(outcome)))
+        );
+        context.message_bus.publish(topic_field, outcome_msg).await?;
+    }
+    else if let ValidationStatus::NoGo(e) = outcome {
+        error!("Error in validation, block {block:?}: {e}");
+    }
+    Ok(())
+}
+
 impl GovernanceStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
@@ -88,6 +120,12 @@ impl GovernanceStateConfig {
 }
 
 impl GovernanceState {
+    declare_cardano_reader!(read_governance, GovernanceProcedures, GovernanceProceduresMessage);
+    declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
+    declare_cardano_reader!(read_drep, DRepStakeDistribution, DRepStakeDistributionMessage);
+    declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
+
+/*
     async fn read_governance(
         governance_s: &mut Box<dyn Subscription<Message>>,
     ) -> Result<(BlockInfo, GovernanceProceduresMessage)> {
@@ -139,7 +177,8 @@ impl GovernanceState {
             )),
         }
     }
-
+ */
+/*
     async fn publish_validation_outcome(
         context: &Arc<Context<Message>>,
         config: &GovernanceStateConfig,
@@ -151,7 +190,7 @@ impl GovernanceState {
         );
         context.message_bus.publish(&config.validation_outcome_topic, outcome_msg).await
     }
-
+*/
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
@@ -308,7 +347,9 @@ impl GovernanceState {
                 Ok::<(), anyhow::Error>(())
             }.instrument(span).await?;
 
-            Self::publish_validation_outcome(&context, &config, blk_g, response).await?;
+            publish_validation_outcome(
+                &context, &config.validation_outcome_topic, &blk_g, response
+            ).await?;
         }
     }
 

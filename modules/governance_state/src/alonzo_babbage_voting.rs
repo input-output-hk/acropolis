@@ -1,10 +1,7 @@
-use acropolis_common::{
-    AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash,
-    ProtocolParamUpdate,
-};
+use acropolis_common::{AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash, GovActionId, ProtocolParamUpdate};
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
-use acropolis_common::validation::{ValidationError, ValidationStatus};
+use acropolis_common::validation::{GovernanceValidationError, ValidationError, ValidationStatus};
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);

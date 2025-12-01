@@ -80,6 +80,8 @@ impl Consensus {
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
+                            info!("Published {message:?}, waiting {} responses", validator_subscriptions.len());
+
                             // Read validation responses from all validators in parallel
                             // and check they are all positive, with a safety timeout
                             let all_say_go = match timeout(

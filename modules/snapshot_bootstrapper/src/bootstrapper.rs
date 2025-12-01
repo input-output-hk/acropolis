@@ -8,10 +8,7 @@ use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
-use acropolis_common::{
-    messages::{CardanoMessage, Message},
-    BlockHash, BlockInfo, BlockStatus, Era,
-};
+use acropolis_common::{messages::{CardanoMessage, Message}, BlockHash, BlockInfo, BlockIntent, BlockStatus, Era};
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
@@ -229,6 +226,7 @@ fn build_block_info_from_metadata(metadata: &SnapshotFileMetadata) -> Result<Blo
 
     Ok(BlockInfo {
         status: BlockStatus::Immutable,
+        intent: BlockIntent::Apply,
         slot,
         number: 0,
         hash,

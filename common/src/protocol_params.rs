@@ -249,6 +249,8 @@ impl ProtocolVersion {
         Self { major, minor }
     }
 
+    pub fn conway() -> Self { Self { major: 9, minor: 0 } }
+    
     pub fn is_chang(&self) -> Result<bool> {
         if self.major == 9 {
             if self.minor != 0 {

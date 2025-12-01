@@ -13,7 +13,8 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
-use acropolis_common::validation::ValidationStatus;
+use acropolis_common::protocol_params::ProtocolVersion;
+use acropolis_common::validation::{GovernanceValidationError, ValidationError, ValidationStatus};
 use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
@@ -33,6 +34,10 @@ pub struct State {
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,
+}
+
+fn gov_error(e: GovernanceValidationError) -> ValidationStatus {
+    ValidationStatus::NoGo(ValidationError::BadGovernance(e))
 }
 
 impl State {
@@ -58,7 +63,7 @@ impl State {
             spo_stake: HashMap::new(),
         }
     }
-
+    
     /// Update current fields to new epoch values. The function should be called
     /// after all block processing is done.
     pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) -> Result<()> {
@@ -113,7 +118,9 @@ impl State {
             if !(governance_message.proposal_procedures.is_empty()
                 && governance_message.voting_procedures.is_empty())
             {
-                bail!("Unexpected Conway governance procedures in pre-Conway block {block:?}");
+                return Ok(gov_error(GovernanceValidationError::WrongProtocolForGovernance(
+                    ProtocolVersion::conway()
+                )));
             }
 
             if !governance_message.alonzo_babbage_updates.is_empty() {

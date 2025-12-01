@@ -348,6 +348,9 @@ pub enum OperationalCertificateError {
 /// also, "PPUP" rule in Shelley epoch, data ShelleyPpupPredFailure era
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum GovernanceValidationError {
+    #[error("Governance action from protocol {0} is not allowed in current protocol version")]
+    WrongProtocolForGovernance(ProtocolVersion),
+    
     /// An update was proposed by a key hash that is not one of the genesis keys.
     /// `mismatchSupplied` ~ key hashes which were a part of the update.
     /// `mismatchExpected` ~ key hashes of the genesis keys.
