@@ -195,18 +195,16 @@ impl GovernanceState {
                         GovernanceStateQueryResponse::ProposalsList(ProposalsList { proposals })
                     }
 
-                    GovernanceStateQuery::GetProposalInfo { proposal } => {
-                        match locked.get_proposal(proposal) {
-                            Some(proc) => {
-                                GovernanceStateQueryResponse::ProposalInfo(ProposalInfo {
-                                    procedure: proc.clone(),
-                                })
-                            }
-                            None => GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                format!("Proposal {} not found", proposal),
-                            )),
-                        }
-                    }
+                    GovernanceStateQuery::GetProposalInfo { proposal } => match locked
+                        .get_proposal(proposal)
+                    {
+                        Some(proc) => GovernanceStateQueryResponse::ProposalInfo(ProposalInfo {
+                            procedure: proc.clone(),
+                        }),
+                        None => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                            format!("Proposal {} not found", proposal),
+                        )),
+                    },
                     GovernanceStateQuery::GetProposalVotes { proposal } => {
                         match locked.get_proposal_votes(proposal) {
                             Ok(votes) => {
@@ -249,9 +247,7 @@ impl GovernanceState {
                 if blk_g.new_epoch {
                     let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                     if blk_g != blk_p {
-                        error!(
-                            "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                        );
+                        error!("Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync");
                     }
 
                     {
@@ -267,16 +263,11 @@ impl GovernanceState {
 
                         let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                         if blk_g != blk_spo {
-                            error!(
-                                "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                            );
+                            error!("Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync");
                         }
 
                         if blk_spo.epoch != d_spo.epoch + 1 {
-                            error!(
-                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                d_spo.epoch
-                            );
+                            error!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch);
                         }
 
                         state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
@@ -287,7 +278,9 @@ impl GovernanceState {
                     }
                 }
                 Ok::<(), anyhow::Error>(())
-            }.instrument(span).await?;
+            }
+            .instrument(span)
+            .await?;
         }
     }
 

@@ -132,12 +132,14 @@ impl TxUnpacker {
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
 
+                            // Validate transaction
+                            if let Err(e) = state.validate_transaction(block, raw_tx, &utxo_registry) {
+                                error!("Failed to validate transaction; tx_index={}, block={}: {e}", tx_index, block.number);
+                            };
+
                             // Parse the tx
                             match MultiEraTx::decode(raw_tx) {
                                 Ok(tx) => {
-                                    // Validate transaction
-                                    let _ = state.validate_transaction(block, &tx, &utxo_registry);
-
                                     let tx_hash: TxHash =
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);

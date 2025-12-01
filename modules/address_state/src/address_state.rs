@@ -207,26 +207,23 @@ impl AddressState {
 
                 let state = state_mutex.lock().await;
                 let response = match query {
-                    AddressStateQuery::GetAddressUTxOs { address } => {
-                        match state.get_address_utxos(address).await {
-                            Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
-                            Ok(None) => match address.to_string() {
-                                Ok(addr_str) => {
-                                    AddressStateQueryResponse::Error(QueryError::not_found(
-                                        format!("Address {} not found", addr_str),
-                                    ))
-                                }
-                                Err(e) => {
-                                    AddressStateQueryResponse::Error(QueryError::internal_error(
-                                        format!("Could not convert address to string: {}", e),
-                                    ))
-                                }
-                            },
+                    AddressStateQuery::GetAddressUTxOs { address } => match state
+                        .get_address_utxos(address)
+                        .await
+                    {
+                        Ok(Some(utxos)) => AddressStateQueryResponse::AddressUTxOs(utxos),
+                        Ok(None) => match address.to_string() {
+                            Ok(addr_str) => AddressStateQueryResponse::Error(
+                                QueryError::not_found(format!("Address {} not found", addr_str)),
+                            ),
                             Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
-                                e.to_string(),
+                                format!("Could not convert address to string: {}", e),
                             )),
-                        }
-                    }
+                        },
+                        Err(e) => AddressStateQueryResponse::Error(QueryError::internal_error(
+                            e.to_string(),
+                        )),
+                    },
                     AddressStateQuery::GetAddressTransactions { address } => {
                         match state.get_address_transactions(address).await {
                             Ok(Some(txs)) => AddressStateQueryResponse::AddressTransactions(txs),

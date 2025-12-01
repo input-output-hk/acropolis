@@ -28,7 +28,10 @@ impl PauseType {
         let parts: Vec<&str> = pause_str.split(':').collect();
 
         if parts.len() != 2 {
-            error!("Invalid pause format: {}. Expected format: 'type:value' (e.g., 'epoch:214', 'block:1200')", pause_str);
+            error!(
+                "Invalid pause format: {}. Expected format: 'type:value' (e.g., 'epoch:214', 'block:1200')",
+                pause_str
+            );
             return None;
         }
 

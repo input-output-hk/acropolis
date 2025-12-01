@@ -4,7 +4,6 @@ use acropolis_common::{
     validation::TransactionValidationError, BlockInfo, Era,
 };
 use anyhow::Result;
-use pallas::ledger::traverse::MultiEraTx;
 
 #[derive(Default, Clone)]
 pub struct State {
@@ -25,7 +24,7 @@ impl State {
     pub fn validate_transaction(
         &self,
         block_info: &BlockInfo,
-        tx: &MultiEraTx,
+        raw_tx: &[u8],
         utxo_registry: &UTxORegistry,
     ) -> Result<(), TransactionValidationError> {
         match block_info.era {
@@ -35,9 +34,12 @@ impl State {
                         "Shelley params are not set".to_string(),
                     ));
                 };
-                validations::validate_shelley_tx(tx, shelley_params, block_info.slot, |tx_ref| {
-                    utxo_registry.lookup_by_hash(tx_ref)
-                })
+                validations::validate_shelley_tx(
+                    raw_tx,
+                    shelley_params,
+                    block_info.slot,
+                    |tx_ref| utxo_registry.lookup_by_hash(tx_ref),
+                )
             }
             _ => Ok(()),
         }

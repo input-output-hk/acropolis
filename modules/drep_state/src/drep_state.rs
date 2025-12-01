@@ -332,75 +332,65 @@ impl DRepState {
                             ),
                         }
                     }
-                    GovernanceStateQuery::GetDRepDelegators { drep_credential } => {
-                        match locked.current() {
-                            Some(state) => match state.get_drep_delegators(drep_credential) {
-                                Ok(Some(delegators)) => {
-                                    GovernanceStateQueryResponse::DRepDelegators(
-                                        DRepDelegatorAddresses {
-                                            addresses: delegators.clone(),
-                                        },
-                                    )
-                                }
-                                Ok(None) => GovernanceStateQueryResponse::Error(
-                                    QueryError::not_found(format!(
-                                        "DRep delegators for {:?} not found",
-                                        drep_credential
-                                    )),
-                                ),
-                                Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::internal_error(msg),
-                                ),
-                            },
-                            None => GovernanceStateQueryResponse::Error(
-                                QueryError::internal_error("No current state"),
+                    GovernanceStateQuery::GetDRepDelegators { drep_credential } => match locked
+                        .current()
+                    {
+                        Some(state) => match state.get_drep_delegators(drep_credential) {
+                            Ok(Some(delegators)) => GovernanceStateQueryResponse::DRepDelegators(
+                                DRepDelegatorAddresses {
+                                    addresses: delegators.clone(),
+                                },
                             ),
-                        }
-                    }
-                    GovernanceStateQuery::GetDRepMetadata { drep_credential } => {
-                        match locked.current() {
-                            Some(state) => match state.get_drep_anchor(drep_credential) {
-                                Ok(Some(anchor)) => GovernanceStateQueryResponse::DRepMetadata(
-                                    Some(Some(anchor.clone())),
-                                ),
-                                Ok(None) => GovernanceStateQueryResponse::Error(
-                                    QueryError::not_found(format!(
-                                        "DRep metadata for {:?} not found",
-                                        drep_credential
-                                    )),
-                                ),
-                                Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::internal_error(msg),
-                                ),
-                            },
-                            None => GovernanceStateQueryResponse::Error(
-                                QueryError::internal_error("No current state"),
-                            ),
-                        }
-                    }
+                            Ok(None) => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                format!("DRep delegators for {:?} not found", drep_credential),
+                            )),
+                            Err(msg) => {
+                                GovernanceStateQueryResponse::Error(QueryError::internal_error(msg))
+                            }
+                        },
+                        None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
+                            "No current state",
+                        )),
+                    },
+                    GovernanceStateQuery::GetDRepMetadata { drep_credential } => match locked
+                        .current()
+                    {
+                        Some(state) => match state.get_drep_anchor(drep_credential) {
+                            Ok(Some(anchor)) => GovernanceStateQueryResponse::DRepMetadata(Some(
+                                Some(anchor.clone()),
+                            )),
+                            Ok(None) => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                format!("DRep metadata for {:?} not found", drep_credential),
+                            )),
+                            Err(msg) => {
+                                GovernanceStateQueryResponse::Error(QueryError::internal_error(msg))
+                            }
+                        },
+                        None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
+                            "No current state",
+                        )),
+                    },
 
-                    GovernanceStateQuery::GetDRepUpdates { drep_credential } => {
-                        match locked.current() {
-                            Some(state) => match state.get_drep_updates(drep_credential) {
-                                Ok(Some(updates)) => {
-                                    GovernanceStateQueryResponse::DRepUpdates(DRepUpdates {
-                                        updates: updates.to_vec(),
-                                    })
-                                }
-                                Ok(None) => {
-                                    GovernanceStateQueryResponse::Error(QueryError::not_found(
-                                        format!("DRep updates for {:?} not found", drep_credential),
-                                    ))
-                                }
-                                Err(msg) => GovernanceStateQueryResponse::Error(
-                                    QueryError::internal_error(msg),
-                                ),
-                            },
-                            None => GovernanceStateQueryResponse::Error(
-                                QueryError::internal_error("No current state"),
-                            ),
-                        }
-                    }
+                    GovernanceStateQuery::GetDRepUpdates { drep_credential } => match locked
+                        .current()
+                    {
+                        Some(state) => match state.get_drep_updates(drep_credential) {
+                            Ok(Some(updates)) => {
+                                GovernanceStateQueryResponse::DRepUpdates(DRepUpdates {
+                                    updates: updates.to_vec(),
+                                })
+                            }
+                            Ok(None) => GovernanceStateQueryResponse::Error(QueryError::not_found(
+                                format!("DRep updates for {:?} not found", drep_credential),
+                            )),
+                            Err(msg) => {
+                                GovernanceStateQueryResponse::Error(QueryError::internal_error(msg))
+                            }
+                        },
+                        None => GovernanceStateQueryResponse::Error(QueryError::internal_error(
+                            "No current state",
+                        )),
+                    },
                     GovernanceStateQuery::GetDRepVotes { drep_credential } => {
                         match locked.current() {
                             Some(state) => match state.get_drep_votes(drep_credential) {

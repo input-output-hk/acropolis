@@ -15,6 +15,7 @@ use pallas::{
         traverse::{Era as PallasEra, MultiEraTx},
     },
 };
+use tracing::error;
 
 fn get_lovelace_from_alonzo_value(val: &alonzo::Value) -> Lovelace {
     match val {
@@ -58,6 +59,7 @@ where
     let mtx = match tx {
         MultiEraTx::AlonzoCompatible(mtx, PallasEra::Shelley) => mtx,
         _ => {
+            error!("Not a Shelley transaction: {:?}", tx);
             return Err(Box::new(UTxOValidationError::MalformedUTxO {
                 era: Era::Shelley,
                 reason: "Not a Shelley transaction".to_string(),
@@ -287,19 +289,24 @@ pub fn validate_max_tx_size_utxo(
 mod tests {
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
-    use pallas::{codec as pallas_codec, ledger::primitives::alonzo::MintedTx as AlonzoMintedTx};
+    use pallas::ledger::traverse;
     use test_case::test_case;
 
+    #[test_case(validation_fixture!("cd9037018278826d8ee2a80fe233862d0ff20bf61fc9f74543d682828c7cdb9f") =>
+        matches Ok(());
+    )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
         matches Ok(());
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "wrong_ttl") =>
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "expired_utxo") =>
         matches Err(UTxOValidationError::ExpiredUTxO { ttl: 7084747, current_slot: 7084748 });
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "input_set_empty_utxo") =>
+        matches Err(UTxOValidationError::InputSetEmptyUTxO);
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let alonzo_tx = pallas_codec::minicbor::decode::<AlonzoMintedTx>(&raw_tx).unwrap();
-        let mtx = MultiEraTx::from_alonzo_compatible(&alonzo_tx, PallasEra::Shelley);
+        let tx = MultiEraTx::decode_for_era(traverse::Era::Shelley, &raw_tx).unwrap();
 
         let lookup_by_hash = |tx_ref: TxOutRef| -> Result<TxIdentifier> {
             ctx.utxos.get(&tx_ref).copied().ok_or_else(|| {
@@ -309,7 +316,7 @@ mod tests {
                 )
             })
         };
-        validate_shelley_tx(&mtx, &ctx.shelley_params, ctx.current_slot, lookup_by_hash)
+        validate_shelley_tx(&tx, &ctx.shelley_params, ctx.current_slot, lookup_by_hash)
             .map_err(|e| *e)
     }
 }
