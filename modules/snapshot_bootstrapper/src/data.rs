@@ -78,13 +78,14 @@ impl BootstrapData {
         let hash = BlockHash::try_from(header.hash.to_vec())
             .map_err(|e| BootstrapDataError::InvalidBlockHash(format!("{:?}", e)))?;
 
+        let (_, epoch_slot) = genesis.slot_to_epoch(header.slot);
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             slot: header.slot,
             number: header.block_number()?,
             hash,
             epoch: target_epoch,
-            epoch_slot: genesis.epoch_to_first_slot(target_epoch),
+            epoch_slot,
             new_epoch: true,
             timestamp: genesis.slot_to_timestamp(header.slot),
             era: Era::Conway,
