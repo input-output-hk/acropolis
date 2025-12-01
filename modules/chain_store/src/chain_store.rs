@@ -113,7 +113,6 @@ impl ChainStore {
         let query_store = store.clone();
         context.handle(&txs_queries_topic, move |req| {
             let query_store = query_store.clone();
-            let network_id = network_id.clone();
             async move {
                 let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(
@@ -893,14 +892,14 @@ impl ChainStore {
                     alonzo::Certificate::StakeRegistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: true,
                         });
                     }
                     alonzo::Certificate::StakeDeregistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: false,
                         });
                     }
@@ -910,28 +909,28 @@ impl ChainStore {
                     conway::Certificate::StakeRegistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: true,
                         });
                     }
                     conway::Certificate::StakeDeregistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: false,
                         });
                     }
                     conway::Certificate::StakeRegDeleg(cred, _, _) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: true,
                         });
                     }
                     conway::Certificate::StakeVoteRegDeleg(cred, _, _, _) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             registration: true,
                         });
                     }
@@ -961,7 +960,7 @@ impl ChainStore {
                     {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
@@ -971,7 +970,7 @@ impl ChainStore {
                     conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
@@ -979,7 +978,7 @@ impl ChainStore {
                     conway::Certificate::StakeRegDeleg(cred, pool_key_hash, _) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
@@ -987,7 +986,7 @@ impl ChainStore {
                     conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, _, _) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: map_stake_address(cred, network_id),
                             pool_id: to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
@@ -1041,7 +1040,7 @@ impl ChainStore {
                                             InstantaneousRewardSource::Treasury
                                         }
                                     },
-                                    address: map_stake_address(&cred, network_id.clone()),
+                                    address: map_stake_address(&cred, network_id),
                                     amount: amount as u64,
                                 });
                             }
@@ -1093,7 +1092,7 @@ impl ChainStore {
                                 pool_owners,
                                 relays,
                                 pool_metadata,
-                                network_id.clone(),
+                                network_id,
                                 false,
                             )?,
                             // Pool registration/updates become active after 2 epochs
@@ -1126,7 +1125,7 @@ impl ChainStore {
                                 pool_owners,
                                 relays,
                                 pool_metadata,
-                                network_id.clone(),
+                                network_id,
                                 false,
                             )?,
                             // Pool registration/updates become active after 2 epochs

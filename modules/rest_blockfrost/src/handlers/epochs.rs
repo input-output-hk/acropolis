@@ -117,9 +117,9 @@ pub async fn handle_epoch_info_blockfrost(
                 Message::StateQueryResponse(StateQueryResponse::Accounts(
                     AccountsStateQueryResponse::ActiveStakes(total_active_stake),
                 )) => Ok(Some(total_active_stake)),
-                Message::StateQueryResponse(StateQueryResponse::Accounts(
-                    AccountsStateQueryResponse::Error(_),
-                )) => Ok(None),
+                Message::StateQueryResponse(StateQueryResponse::Accounts(AccountsStateQueryResponse::Error(_))) => {
+                    Ok(None)
+                }
                 _ => Err(QueryError::internal_error(
                     "Unexpected message type while retrieving the latest total active stakes",
                 )),
@@ -129,9 +129,7 @@ pub async fn handle_epoch_info_blockfrost(
     } else {
         // Historical epoch: use SPDD if available
         let total_active_stakes_msg = Arc::new(Message::StateQuery(StateQuery::SPDD(
-            SPDDStateQuery::GetEpochTotalActiveStakes {
-                epoch: epoch_number,
-            },
+            SPDDStateQuery::GetEpochTotalActiveStakes { epoch: epoch_number },
         )));
         query_state(
             &context,
@@ -139,18 +137,17 @@ pub async fn handle_epoch_info_blockfrost(
             total_active_stakes_msg,
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::SPDD(
-                                                SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
-                                            )) => Ok(Some(total_active_stakes)),
-                Message::StateQueryResponse(StateQueryResponse::SPDD(
-                                                SPDDStateQueryResponse::Error(_),
-                                            )) => Ok(None),
-                _ => Err(QueryError::internal_error(
-                    format!("Unexpected message type while retrieving total active stakes for epoch: {epoch_number}"),
-                )),
+                    SPDDStateQueryResponse::EpochTotalActiveStakes(total_active_stakes),
+                )) => Ok(Some(total_active_stakes)),
+                Message::StateQueryResponse(StateQueryResponse::SPDD(SPDDStateQueryResponse::Error(_))) => Ok(None),
+                _ => Err(QueryError::internal_error(format!(
+                    "Unexpected message type while retrieving total active stakes for epoch: {epoch_number}"
+                ))),
             },
         )
-            .await?
-    }.unwrap_or(0);
+        .await?
+    }
+    .unwrap_or(0);
 
     if total_active_stakes == 0 {
         response.active_stake = None;

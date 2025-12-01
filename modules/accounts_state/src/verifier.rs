@@ -238,13 +238,15 @@ impl Verifier {
                                 }
                                 Both(expected, actual) => {
                                     if expected.amount != actual.amount {
-                                        error!("Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
-                                               expected_spo.0,
-                                               expected.account,
-                                               expected.rtype,
-                                               expected.amount,
-                                               actual.amount,
-                                               actual.amount as i64-expected.amount as i64);
+                                        error!(
+                                            "Different reward: SPO {} account {} {:?} expected {}, actual {} ({})",
+                                            expected_spo.0,
+                                            expected.account,
+                                            expected.rtype,
+                                            expected.amount,
+                                            actual.amount,
+                                            actual.amount as i64 - expected.amount as i64
+                                        );
                                         errors += 1;
                                     } else {
                                         debug!(

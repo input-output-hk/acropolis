@@ -68,7 +68,10 @@ impl Signature {
 impl From<&[u8; Self::SIZE]> for Signature {
     fn from(bytes: &[u8; Self::SIZE]) -> Self {
         Signature(Sum6KesSig::from_bytes(bytes).unwrap_or_else(|e| {
-            unreachable!("Impossible! Failed to create a KES signature from a slice ({}) of known size: {e:?}", hex::encode(bytes))
+            unreachable!(
+                "Impossible! Failed to create a KES signature from a slice ({}) of known size: {e:?}",
+                hex::encode(bytes)
+            )
         }))
     }
 }

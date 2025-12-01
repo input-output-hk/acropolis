@@ -13,12 +13,14 @@ use pallas::ledger::{
 };
 
 use acropolis_common::hash::Hash;
+use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     protocol_params::{Nonce, NonceVariant, ProtocolVersion},
     rational_number::RationalNumber,
     *,
 };
 use pallas_primitives::conway::PseudoScript;
+use pallas_traverse::{MultiEraInput, MultiEraTx};
 use std::{
     collections::{HashMap, HashSet},
     net::{Ipv4Addr, Ipv6Addr},
@@ -265,16 +267,14 @@ pub fn to_pool_reg(
         reward_account: if force_reward_network_id {
             StakeAddress::new(
                 StakeAddress::from_binary(reward_account)?.credential,
-                network_id.clone(),
+                network_id,
             )
         } else {
             StakeAddress::from_binary(reward_account)?
         },
         pool_owners: pool_owners
             .iter()
-            .map(|v| {
-                StakeAddress::new(StakeCredential::AddrKeyHash(to_hash(v)), network_id.clone())
-            })
+            .map(|v| StakeAddress::new(StakeCredential::AddrKeyHash(to_hash(v)), network_id))
             .collect(),
         relays: relays.iter().map(map_relay).collect(),
         pool_metadata: match pool_metadata {
@@ -379,7 +379,7 @@ pub fn map_certificate(
                             InstantaneousRewardTarget::StakeAddresses(
                                 creds
                                     .iter()
-                                    .map(|(sc, v)| (map_stake_address(sc, network_id.clone()), *v))
+                                    .map(|(sc, v)| (map_stake_address(sc, network_id), *v))
                                     .collect(),
                             )
                         }
@@ -988,6 +988,111 @@ pub fn map_all_governance_voting_procedures(
     }
 
     Ok(procs)
+}
+
+// pub struct TransactionRefInfo {}
+
+// pub fn map_transaction_refs(
+//     inputs: &Vec<MultiEraInput>,
+//     outputs: &Vec<(usize, MultiEraOutput)>,
+// ) -> (Vec<TxOutRef>, Vec<TxOutRef>) {
+//     let mut ref_inps = Vec::new();
+//     for input in inputs {
+//         // MultiEraInput
+//         let oref = input.output_ref();
+//         let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
+//         ref_inps.push(tx_ref);
+//     }
+
+//     let mut ref_outs = Vec::new();
+//     for (index, output) in outputs {}
+
+//     (ref_inps, ref_outs)
+// }
+
+pub fn map_transaction_inputs(inputs: &Vec<MultiEraInput>) -> Vec<TxOutRef> {
+    let mut parsed_inputs = Vec::new();
+    for input in inputs {
+        // MultiEraInput
+        let oref = input.output_ref();
+        let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
+
+        parsed_inputs.push(tx_ref);
+    }
+
+    parsed_inputs
+}
+
+pub fn map_transaction_inputs_outputs(
+    block_number: u32,
+    tx_index: u16,
+    tx: &MultiEraTx,
+) -> (
+    Vec<TxOutRef>,
+    Vec<(TxOutRef, TxOutput)>,
+    Vec<ValidationError>,
+) {
+    let mut parsed_inputs = Vec::new();
+    let mut parsed_outputs = Vec::new();
+    let mut errors = Vec::new();
+
+    let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
+        errors.push(ValidationError::MalformedTransaction(
+            tx_index,
+            format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
+        ));
+        return (parsed_inputs, parsed_outputs, errors);
+    };
+
+    let inputs = tx.consumes();
+    let outputs = tx.produces();
+
+    for input in inputs {
+        let tx_ref = TxOutRef::new(
+            TxHash::from(**input.output_ref().hash()),
+            input.output_ref().index() as u16,
+        );
+        parsed_inputs.push(tx_ref);
+    }
+
+    for (index, output) in outputs {
+        let tx_out_ref = TxOutRef {
+            tx_hash,
+            output_index: index as u16,
+        };
+
+        let utxo_id = UTxOIdentifier::new(block_number, tx_index, tx_out_ref.output_index);
+
+        match output.address() {
+            Ok(pallas_address) => match map_address(&pallas_address) {
+                Ok(address) => {
+                    // Add TxOutput to utxo_deltas
+                    parsed_outputs.push((
+                        tx_out_ref,
+                        TxOutput {
+                            utxo_identifier: utxo_id,
+                            address,
+                            value: map_value(&output.value()),
+                            datum: map_datum(&output.datum()),
+                            reference_script: map_reference_script(&output.script_ref()),
+                        },
+                    ));
+                }
+                Err(e) => {
+                    errors.push(ValidationError::MalformedTransaction(
+                        tx_index,
+                        format!("Output {index} has been ignored: {e}"),
+                    ));
+                }
+            },
+            Err(e) => errors.push(ValidationError::MalformedTransaction(
+                tx_index,
+                format!("Can't parse output {index} in tx: {e}"),
+            )),
+        }
+    }
+
+    (parsed_inputs, parsed_outputs, errors)
 }
 
 pub fn map_value(pallas_value: &MultiEraValue) -> Value {

@@ -237,7 +237,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn dummy_address() -> Address {
-        Address::from_string("DdzFFzCqrht7fNAHwdou7iXPJ5NZrssAH53yoRMUtF9t6momHH52EAxM5KmqDwhrjT7QsHjbMPJUBywmzAgmF4hj2h9eKj4U6Ahandyy").unwrap()
+        Address::from_string(
+            "DdzFFzCqrht7fNAHwdou7iXPJ5NZrssAH53yoRMUtF9t6momHH52EAxM5KmqDwhrjT7QsHjbMPJUBywmzAgmF4hj2h9eKj4U6Ahandyy",
+        )
+        .unwrap()
     }
 
     fn test_config() -> AddressStorageConfig {

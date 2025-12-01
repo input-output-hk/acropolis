@@ -21,6 +21,17 @@ pub struct ProtocolParams {
     pub conway: Option<ConwayParams>,
 }
 
+impl ProtocolParams {
+    /// Calculate Transaction's Mininum required fee for shelley Era
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Tx.hs#L254
+    pub fn shelley_min_fee(&self, tx_bytes: u32) -> Result<u64> {
+        self.shelley
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Shelley params are not set"))
+            .map(|shelley_params| shelley_params.min_fee(tx_bytes))
+    }
+}
+
 //
 // Byron protocol parameters
 //
@@ -134,6 +145,13 @@ pub struct ShelleyParams {
     pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
 }
 
+impl ShelleyParams {
+    pub fn min_fee(&self, tx_bytes: u32) -> u64 {
+        (tx_bytes as u64 * self.protocol_params.minfee_a as u64)
+            + (self.protocol_params.minfee_b as u64)
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,7 +208,7 @@ impl From<&ShelleyParams> for PraosParams {
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
-            network_id: params.network_id.clone(),
+            network_id: params.network_id,
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
 

@@ -160,9 +160,7 @@ impl MithrilSnapshotFetcher {
                         true
                     }
                 } else {
-                    info!(
-                        "SKIP DOWNLOAD: Snapshot is not expired by download max age: {download_max_age} hours"
-                    );
+                    info!("SKIP DOWNLOAD: Snapshot is not expired by download max age: {download_max_age} hours");
                     true
                 }
             }
@@ -439,9 +437,7 @@ impl MithrilSnapshotFetcher {
 
 /// Async helper to prompt user for pause behavior
 async fn prompt_pause(description: String) -> bool {
-    info!(
-        "Paused at {description}. Press [Enter] to step to to the next, or [c + Enter] to continue without pauses."
-    );
+    info!("Paused at {description}. Press [Enter] to step to to the next, or [c + Enter] to continue without pauses.");
     tokio::task::spawn_blocking(|| {
         use std::io::{self, BufRead};
         let stdin = io::stdin();

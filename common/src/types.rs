@@ -30,6 +30,7 @@ use std::{
 /// Network identifier
 #[derive(
     Debug,
+    Copy,
     Clone,
     Default,
     PartialEq,
@@ -58,6 +59,19 @@ impl From<String> for NetworkId {
             "mainnet" => NetworkId::Mainnet,
             _ => NetworkId::Mainnet,
         }
+    }
+}
+
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NetworkId::Mainnet => "mainnet",
+                NetworkId::Testnet => "testnet",
+            }
+        )
     }
 }
 
@@ -323,7 +337,14 @@ impl AssetName {
 }
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+    PartialEq,
+    Eq,
 )]
 pub struct NativeAsset {
     #[n(0)]
@@ -343,7 +364,7 @@ pub struct NativeAssetDelta {
 }
 
 /// Datum (inline or hash)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum Datum {
     Hash(Vec<u8>),
     Inline(Vec<u8>),
@@ -359,7 +380,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq, Eq)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -562,7 +583,7 @@ pub struct UTXOValue {
 }
 
 /// Transaction output (UTXO)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TxOutput {
     /// Identifier for this UTxO
     pub utxo_identifier: UTxOIdentifier,
@@ -718,6 +739,12 @@ impl TxOutRef {
             tx_hash,
             output_index,
         }
+    }
+}
+
+impl Display for TxOutRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
 }
 

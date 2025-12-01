@@ -154,8 +154,13 @@ impl ConwayVoting {
                 // Re-voting is allowed; new vote must be treated as the proper one,
                 // older is to be discarded.
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("Governance vote by {} for {} already registered! New: {:?}, old: {:?} from {}",
-                        voter, action_id, procedure, prev_vote, prev_trans.encode_hex::<String>()
+                    debug!(
+                        "Governance vote by {} for {} already registered! New: {:?}, old: {:?} from {}",
+                        voter,
+                        action_id,
+                        procedure,
+                        prev_vote,
+                        prev_trans.encode_hex::<String>()
                     );
                 }
             }

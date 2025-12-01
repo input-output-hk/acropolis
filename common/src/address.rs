@@ -776,7 +776,10 @@ mod tests {
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x");
+        assert_eq!(
+            text,
+            "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -791,7 +794,10 @@ mod tests {
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh");
+        assert_eq!(
+            text,
+            "addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -806,7 +812,10 @@ mod tests {
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve");
+        assert_eq!(
+            text,
+            "addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -821,7 +830,10 @@ mod tests {
         });
 
         let text = address.to_string().unwrap();
-        assert_eq!(text, "addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g");
+        assert_eq!(
+            text,
+            "addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g"
+        );
 
         let unpacked = Address::from_string(&text).unwrap();
         assert_eq!(address, unpacked);
@@ -935,8 +947,14 @@ mod tests {
 
     #[test]
     fn shelley_to_stake_address_string_mainnet() {
-        let normal_address = ShelleyAddress::from_string("addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5").expect("valid normal address");
-        let script_address = ShelleyAddress::from_string("addr1zx0whlxaw4ksygvuljw8jxqlw906tlql06ern0gtvvzhh0c6409492020k6xml8uvwn34wrexagjh5fsk5xk96jyxk2qhlj6gf").expect("valid script address");
+        let normal_address = ShelleyAddress::from_string(
+            "addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5",
+        )
+        .expect("valid normal address");
+        let script_address = ShelleyAddress::from_string(
+            "addr1zx0whlxaw4ksygvuljw8jxqlw906tlql06ern0gtvvzhh0c6409492020k6xml8uvwn34wrexagjh5fsk5xk96jyxk2qhlj6gf",
+        )
+        .expect("valid script address");
 
         let normal_stake_address = normal_address
             .stake_address_string()
