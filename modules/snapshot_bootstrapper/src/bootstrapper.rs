@@ -50,7 +50,6 @@ pub struct SnapshotBootstrapper;
 impl SnapshotBootstrapper {
     /// Initializes the snapshot bootstrapper.
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        info!("Config {}", format!("{:?}", config));
         // Check if this module is the selected startup method
         let startup_method = config
             .get::<StartupMethod>(CONFIG_KEY_START_UP_METHOD)
