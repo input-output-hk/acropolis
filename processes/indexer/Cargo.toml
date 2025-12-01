@@ -19,8 +19,10 @@ caryatid_process = { workspace = true }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+bincode = "1"
 clap = { workspace = true }
 config = { workspace = true }
+fjall = "2.7.0"
 pallas = { workspace = true}
 plutus-parser = { version = "0.1", default-features = false, features = ["derive", "pallas-v0_33"] }
 tracing = { workspace = true }

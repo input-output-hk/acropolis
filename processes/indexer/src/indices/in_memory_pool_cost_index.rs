@@ -1,3 +1,4 @@
+#![allow(unused)]
 use acropolis_codec::map_parameters::to_pool_id;
 use acropolis_common::{BlockInfo, Lovelace, PoolId};
 use acropolis_module_custom_indexer::managed_index::ManagedIndex;
@@ -9,19 +10,19 @@ use std::collections::BTreeMap;
 use tokio::sync::watch;
 
 #[derive(Clone)]
-pub struct PoolCostState {
+pub struct InMemoryPoolCostState {
     pub pools: BTreeMap<PoolId, Lovelace>,
 }
 
-pub struct PoolCostIndex {
-    state: PoolCostState,
-    sender: watch::Sender<PoolCostState>,
+pub struct InMemoryPoolCostIndex {
+    state: InMemoryPoolCostState,
+    sender: watch::Sender<InMemoryPoolCostState>,
 }
 
-impl PoolCostIndex {
-    pub fn new(sender: watch::Sender<PoolCostState>) -> Self {
+impl InMemoryPoolCostIndex {
+    pub fn new(sender: watch::Sender<InMemoryPoolCostState>) -> Self {
         Self {
-            state: PoolCostState {
+            state: InMemoryPoolCostState {
                 pools: BTreeMap::new(),
             },
             sender,
@@ -30,7 +31,7 @@ impl PoolCostIndex {
 }
 
 #[async_trait]
-impl ManagedIndex for PoolCostIndex {
+impl ManagedIndex for InMemoryPoolCostIndex {
     fn name(&self) -> String {
         "pool-cost-index".into()
     }

@@ -14,12 +14,14 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+bincode = "1"
 config = { workspace = true }
+fjall = "2.7.0"
+futures = "0.3.31"
+pallas = { workspace = true}
 serde = { workspace = true, features = ["rc"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
-pallas = { workspace = true}
-futures = "0.3.31"
 
 [lib]
 path = "src/indexer.rs"

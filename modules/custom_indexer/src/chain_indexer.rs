@@ -8,6 +8,7 @@ use caryatid_sdk::{async_trait, Context, Module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::info;
 
 use pallas::ledger::traverse::MultiEraTx;
 
@@ -76,6 +77,10 @@ where
                 start_point,
             )));
             run_context.publish(&cfg.sync_command_publisher_topic, Arc::new(msg)).await?;
+            info!(
+                "Publishing initial sync command on {}",
+                cfg.sync_command_publisher_topic
+            );
 
             // Forward received txs to index handlers
             while let Ok((_, message)) = subscription.read().await {

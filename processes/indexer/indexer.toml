@@ -1,5 +1,9 @@
 # Top-level configuration for Acropolis indexer process
 
+[global.startup]
+method = "snapshot"  # Options: "mithril" | "snapshot"
+topic = "cardano.sequence.start"
+
 [module.genesis-bootstrapper]
 
 [module.peer-network-interface]
