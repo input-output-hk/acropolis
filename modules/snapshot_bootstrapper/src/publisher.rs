@@ -40,7 +40,6 @@ pub struct BootstrapContext {
 impl BootstrapContext {
     /// Build context from nonces, header data, and genesis values.
     ///
-    /// # Arguments
     /// * `nonces` - Nonces loaded from nonces.json
     /// * `header_slot` - Slot number from the target block header
     /// * `header_block_height` - Block height from the target block header
@@ -117,7 +116,10 @@ impl SnapshotPublisher {
     /// Publish a startup message to signal bootstrap is beginning.
     pub async fn publish_start(&self) -> Result<()> {
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Startup));
-        self.context.publish(&self.snapshot_topic, message).await
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish bootstrap startup message: {}", e);
+        });
+        Ok(())
     }
 
     /// Publish a completion message with final block info.
@@ -126,7 +128,10 @@ impl SnapshotPublisher {
             block_info,
             CardanoMessage::SnapshotComplete,
         )));
-        self.context.publish(&self.completion_topic, message).await
+        self.context.publish(&self.completion_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish bootstrap completion message: {}", e);
+        });
+        Ok(())
     }
 
     /// Convert hex pool ID string to PoolId.
@@ -173,7 +178,6 @@ impl SnapshotPublisher {
             nonces,
         ) = match &self.bootstrap_context {
             Some(ctx) => {
-                // Estimate first block height: last height minus blocks in current epoch
                 let first_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
                 (
                     ctx.epoch_start_time,
@@ -276,15 +280,13 @@ impl EpochCallback for SnapshotPublisher {
             SnapshotStateMessage::EpochState(epoch_bootstrap_data),
         )));
 
-        // Clone what we need for the async task
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // Spawn async publish task since this callback is synchronous
         tokio::spawn(async move {
-            if let Err(e) = context.publish(&snapshot_topic, message).await {
-                tracing::error!("Failed to publish epoch bootstrap: {}", e);
-            }
+            context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                tracing::error!("Failed to publish epoch bootstrap message: {}", e)
+            });
         });
 
         Ok(())

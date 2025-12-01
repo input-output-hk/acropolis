@@ -13,6 +13,9 @@ pub enum HeaderError {
 
     #[error("Invalid point format: {0}")]
     InvalidPoint(String),
+
+    #[error("Invalid hex hash: {0}")]
+    InvalidHex(String, #[source] hex::FromHexError),
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +37,7 @@ impl Header {
         Ok(Self { cbor, slot, hash })
     }
 
-    /// Decode CBOR and extract block number.
+    /// Decode CBOR and extract the block number.
     pub fn block_number(&self) -> Result<u64, HeaderError> {
         let header = self.decode()?;
         Ok(header.header_body.block_number)
@@ -54,7 +57,8 @@ fn parse_point(s: &str) -> Result<(u64, &str), HeaderError> {
 }
 
 fn decode_hash32(hex_str: &str) -> Result<[u8; 32], HeaderError> {
-    let bytes = hex::decode(hex_str).map_err(|_| HeaderError::InvalidPoint(hex_str.to_string()))?;
+    let bytes =
+        hex::decode(hex_str).map_err(|e| HeaderError::InvalidHex(hex_str.to_string(), e))?;
     bytes.try_into().map_err(|_| HeaderError::InvalidPoint(hex_str.to_string()))
 }
 
