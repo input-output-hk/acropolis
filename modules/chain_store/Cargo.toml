@@ -14,10 +14,11 @@ anyhow = "1.0"
 config = "0.15.11"
 fjall = "2.7.0"
 hex = "0.4"
-minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
+minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas-traverse = { workspace = true }
 tracing = "0.1.40"
 tokio.workspace = true
+pallas.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

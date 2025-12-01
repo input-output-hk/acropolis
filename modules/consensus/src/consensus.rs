@@ -2,7 +2,7 @@
 //! Maintains a favoured chain based on offered options from multiple sources
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
+    messages::{CardanoMessage, Message, StateTransitionMessage},
     validation::ValidationStatus,
 };
 use anyhow::Result;
@@ -132,6 +132,18 @@ impl Consensus {
                         }
                         .instrument(span)
                         .await;
+                    }
+
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
+                        // Send rollback to all validators and state modules
+                        context
+                            .message_bus
+                            .publish(&publish_blocks_topic, message.clone())
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),

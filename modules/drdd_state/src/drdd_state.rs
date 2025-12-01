@@ -1,6 +1,7 @@
 //! Acropolis DRDD state module for Caryatid
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message},
     rest_helper::handle_rest_with_query_parameters,
 };
@@ -50,7 +51,8 @@ impl DRDDState {
             let mut message_subscription = context.subscribe(&subscribe_topic).await?;
             context.run(async move {
                 loop {
-                    let Ok((_, message)) = message_subscription.read().await else {
+                    let Ok((_, message)) = message_subscription.read_ignoring_rollbacks().await
+                    else {
                         return;
                     };
                     match message.as_ref() {

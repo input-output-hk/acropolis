@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "acropolis_cardano"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+]
+
+[[package]]
 name = "acropolis_codec"
 version = "0.1.0"
 dependencies = [
@@ -37,7 +45,7 @@ dependencies = [
  "futures",
  "hex",
  "memmap2",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "num-rational",
  "num-traits",
  "rayon",
@@ -82,7 +90,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -165,7 +173,8 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
+ "pallas 0.33.0",
  "pallas-traverse 0.33.0",
  "tempfile",
  "tokio",
@@ -274,7 +283,7 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "rayon",
  "tokio",
  "tracing",
@@ -289,7 +298,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -362,6 +371,7 @@ dependencies = [
 name = "acropolis_module_rest_blockfrost"
 version = "0.1.0"
 dependencies = [
+ "acropolis_cardano",
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
@@ -3633,27 +3643,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0452a60c1863c1f50b5f77cd295e8d2786849f35883f0b9e18e7e6e1b5691b0"
 dependencies = [
  "half 2.7.1",
- "minicbor-derive 0.15.3",
+ "minicbor-derive",
 ]
 
 [[package]]
 name = "minicbor"
-version = "0.26.5"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a309f581ade7597820083bc275075c4c6986e57e53f8d26f88507cfefc8c987"
-dependencies = [
- "half 2.7.1",
- "minicbor-derive 0.16.2",
-]
-
-[[package]]
-name = "minicbor"
-version = "2.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcdf88f4e6c97939dc99797448e722d618ab7e34f96d2c030d60fb8023793fa0"
-dependencies = [
- "minicbor-derive 0.18.2",
-]
+checksum = "f9a1119e42fbacc2bb65d860de6eb7c930562bc71d42dca026d06b0228231f77"
 
 [[package]]
 name = "minicbor-derive"
@@ -3667,34 +3664,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "minicbor-derive"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9882ef5c56df184b8ffc107fc6c61e33ee3a654b021961d790a78571bb9d67a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
-name = "minicbor-derive"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17290c95158a760027059fe3f511970d6857e47ff5008f9e09bffe3d3e1c6af"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
 name = "minicbor-serde"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546cc904f35809921fa57016a84c97e68d9d27c012e87b9dadc28c233705f783"
 dependencies = [
- "minicbor 2.1.2",
+ "minicbor 2.1.3",
  "serde",
 ]
 

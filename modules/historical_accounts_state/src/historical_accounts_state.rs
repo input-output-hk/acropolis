@@ -1,6 +1,7 @@
 //! Acropolis historical accounts state module for Caryatid
 //! Manages optional state data needed for Blockfrost alignment
 
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
@@ -85,15 +86,10 @@ impl HistoricalAccountsState {
         });
         // Main loop of synchronised messages
         loop {
-            // Create all per-block message futures upfront before processing messages sequentially
-            let certs_message_f = certs_subscription.read();
-            let stake_address_deltas_message_f = stake_address_deltas_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.read();
-
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read_ignoring_rollbacks().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
@@ -111,7 +107,7 @@ impl HistoricalAccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let (_, params_msg) = params_subscription.read().await?;
+                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     params_msg.as_ref()
                 {
@@ -123,7 +119,7 @@ impl HistoricalAccountsState {
                     }
                 }
 
-                let (_, rewards_msg) = rewards_subscription.read().await?;
+                let (_, rewards_msg) = rewards_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((
                     block_info,
                     CardanoMessage::StakeRewardDeltas(rewards_msg),
@@ -153,7 +149,7 @@ impl HistoricalAccountsState {
             }
 
             // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
+            let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(
@@ -171,7 +167,7 @@ impl HistoricalAccountsState {
             }
 
             // Handle address deltas
-            let (_, message) = stake_address_deltas_message_f.await?;
+            let (_, message) = stake_address_deltas_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
                     let span = info_span!(

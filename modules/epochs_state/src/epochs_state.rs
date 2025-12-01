@@ -2,14 +2,14 @@
 //! Unpacks block bodies to get transaction fees
 
 use acropolis_common::{
-    messages::{
-        CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse,
+    caryatid::SubscriptionExt,
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    queries::{
+        epochs::{
+            EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
+        },
+        errors::QueryError,
     },
-    queries::epochs::{
-        EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
-    },
-    queries::errors::QueryError,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -151,12 +151,8 @@ impl EpochsState {
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis));
             let mut current_block: Option<BlockInfo> = None;
 
-            // Read both topics in parallel
-            let block_message_f = block_subscription.read();
-            let block_txs_message_f = block_txs_subscription.read();
-
             // Handle blocks first
-            let (_, message) = block_message_f.await?;
+            let (_, message) = block_subscription.read().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     // handle rollback here
@@ -169,7 +165,7 @@ impl EpochsState {
                     // read protocol parameters if new epoch
                     if is_new_epoch {
                         let (_, protocol_parameters_msg) =
-                            protocol_parameters_subscription.read().await?;
+                            protocol_parameters_subscription.read_ignoring_rollbacks().await?;
                         if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
                             protocol_parameters_msg.as_ref()
                         {
@@ -216,11 +212,21 @@ impl EpochsState {
                     });
                 }
 
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // publish epoch activity rollback message
+                    epoch_activity_publisher.publish_rollback(message).await.unwrap_or_else(|e| {
+                        error!("Failed to publish epoch activity rollback: {e}")
+                    });
+                }
+
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            let (_, message) = block_txs_message_f.await?;
+            let (_, message) = block_txs_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockInfoMessage(txs_msg))) => {
                     let span =
