@@ -2179,22 +2179,6 @@ pub struct AddressTotals {
     pub tx_count: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StartupMethod {
-    Mithril,
-    Snapshot,
-}
-
-impl Display for StartupMethod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StartupMethod::Mithril => write!(f, "mithril"),
-            StartupMethod::Snapshot => write!(f, "snapshot"),
-        }
-    }
-}
-
 impl AddAssign for AddressTotals {
     fn add_assign(&mut self, other: Self) {
         self.sent += other.sent;

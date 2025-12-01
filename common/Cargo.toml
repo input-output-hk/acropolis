@@ -14,6 +14,7 @@ caryatid_module_clock = { workspace = true }
 caryatid_module_rest_server = { workspace = true }
 
 anyhow = { workspace = true }
+config = { workspace = true }
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
