@@ -28,7 +28,7 @@ dependencies = [
  "caryatid_module_clock",
  "caryatid_module_rest_server",
  "caryatid_process",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "chrono",
  "config",
  "crc",
@@ -59,7 +59,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "bigdecimal",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "chrono",
  "config",
  "csv",
@@ -79,7 +79,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "fjall",
  "minicbor 0.26.5",
@@ -95,7 +95,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "imbl",
@@ -110,7 +110,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "imbl",
@@ -127,7 +127,7 @@ version = "0.2.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "pallas 0.33.0",
  "tracing",
@@ -140,7 +140,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "dashu-int",
  "hex",
@@ -161,7 +161,7 @@ dependencies = [
  "acropolis_codec",
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "fjall",
  "hex",
@@ -178,7 +178,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "futures",
  "tokio",
@@ -191,7 +191,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "imbl",
@@ -207,7 +207,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "serde",
  "serde_with 3.15.1",
@@ -221,7 +221,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "imbl",
@@ -237,7 +237,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "pallas 0.33.0",
  "reqwest 0.12.24",
@@ -252,7 +252,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "csv",
  "hex",
@@ -270,7 +270,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "fjall",
  "hex",
@@ -286,7 +286,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "fjall",
  "minicbor 0.26.5",
@@ -301,7 +301,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "serde",
  "tracing",
@@ -314,7 +314,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "async-trait",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "chrono",
  "config",
  "mithril-client",
@@ -333,7 +333,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "blake2 0.10.6",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "pallas 0.33.0",
@@ -350,7 +350,7 @@ version = "0.2.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "pallas 0.33.0",
  "serde",
@@ -365,7 +365,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "num-traits",
@@ -386,7 +386,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "async-compression",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "flate2",
  "futures-util",
@@ -408,7 +408,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "imbl",
@@ -423,7 +423,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "dashmap",
  "imbl",
@@ -441,7 +441,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "bech32 0.11.0",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "pallas 0.33.0",
  "serde",
@@ -457,7 +457,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "futures",
  "hex",
@@ -473,7 +473,7 @@ dependencies = [
  "acropolis_codec",
  "acropolis_common",
  "anyhow",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "futures",
  "hex",
@@ -488,7 +488,7 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "async-trait",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "dashmap",
  "fjall",
@@ -589,7 +589,7 @@ dependencies = [
  "caryatid_module_rest_server",
  "caryatid_module_spy",
  "caryatid_process",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "clap 4.5.51",
  "config",
  "opentelemetry",
@@ -615,7 +615,7 @@ dependencies = [
  "acropolis_module_tx_unpacker",
  "anyhow",
  "caryatid_process",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "hex",
  "tokio",
@@ -629,7 +629,7 @@ dependencies = [
  "acropolis_module_tx_submitter",
  "anyhow",
  "caryatid_process",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "clap 4.5.51",
  "config",
  "tokio",
@@ -1509,16 +1509,15 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951c0ab316e5557315c10b75011b30faeeb032f96c88507946ec154c7f9d4ddd"
+checksum = "5509d9f63ad2d973599703617120dbfeff58078b37895f433cc784b5d3890d6e"
 dependencies = [
  "anyhow",
- "caryatid_sdk 0.13.1",
+ "caryatid_sdk",
  "chrono",
  "config",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1526,18 +1525,17 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c82ea79ce5ede49ce0dde01d204f21d39165d0abd8213281a7ce163a01519df"
+checksum = "a42373dd9604700e51dd07565303522f7b1d2a0002a8db7489c77d846f08c08b"
 dependencies = [
  "anyhow",
  "axum",
- "caryatid_sdk 0.13.1",
+ "caryatid_sdk",
  "config",
  "futures",
  "hyper 0.14.32",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1545,16 +1543,13 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53b7ce84ba23710e42d1fc497b2bb36463cbcb0af8aab39b7f14942b4682763"
+checksum = "0432b56f66f5b3d527a704c9c4b090c03567aaefc48350e7bf41fce286431b5d"
 dependencies = [
  "anyhow",
- "caryatid_sdk 0.13.1",
+ "caryatid_sdk",
  "config",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
@@ -1566,7 +1561,7 @@ checksum = "a5964024f9c302253bdf84b3f35dc068853ed0c643961072b59f6e69b8f83552"
 dependencies = [
  "anyhow",
  "async-trait",
- "caryatid_sdk 0.14.0",
+ "caryatid_sdk",
  "config",
  "dashmap",
  "futures",
@@ -1578,26 +1573,6 @@ dependencies = [
  "tokio-executor-trait 3.1.0",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "caryatid_sdk"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b81e3dc1a35c175c7fc27f564b9ba9840fa25d24f08785a9cdfe2c2182965c77"
-dependencies = [
- "anyhow",
- "async-trait",
- "caryatid_macros",
- "chrono",
- "config",
- "futures",
- "hex",
- "rand 0.9.2",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
