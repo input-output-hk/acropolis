@@ -173,7 +173,9 @@ impl SnapshotPublisher {
             nonces,
         ) = match &self.bootstrap_context {
             Some(ctx) => {
-                // Estimate first block height: last height minus blocks in current epoch
+                // Estimate first block height: last height minus blocks in current epoch.
+                // Assumes all blocks in the epoch are accounted for in total_blocks_current.
+                // If the snapshot does not capture the complete epoch, this estimation may be inaccurate.
                 let first_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
                 (
                     ctx.epoch_start_time,
