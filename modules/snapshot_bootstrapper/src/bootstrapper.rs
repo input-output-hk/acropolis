@@ -102,7 +102,7 @@ impl SnapshotBootstrapper {
 
         info!("Parsing snapshot: {}", data.snapshot_path());
         let start = Instant::now();
-        let parser = StreamingSnapshotParser::new(&data.snapshot_path());
+        let parser = StreamingSnapshotParser::new(data.snapshot_path());
         parser.parse(&mut publisher).map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 

@@ -121,10 +121,9 @@ impl BootstrapData {
     }
 }
 
-fn genesis_for_network(network: &str) -> GenesisValues {
-    match network {
-        _ => GenesisValues::mainnet(),
-    }
+fn genesis_for_network(_network: &str) -> GenesisValues {
+    // TODO: Add preprod/preview support
+    GenesisValues::mainnet()
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T, BootstrapDataError> {
