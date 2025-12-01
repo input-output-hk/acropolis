@@ -60,9 +60,6 @@ pub struct State {
 
     // protocol parameter for Praos and TPraos
     praos_params: Option<PraosParams>,
-
-    // Flag to indicate if state was bootstrapped from snapshot
-    bootstrapped: bool,
 }
 
 impl State {
@@ -87,7 +84,6 @@ impl State {
             epoch_fees: 0,
             nonces: None,
             praos_params: None,
-            bootstrapped: false,
         }
     }
 
@@ -115,8 +111,6 @@ impl State {
             epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
 
         self.nonces = Some(epoch_data.nonces.clone());
-
-        self.bootstrapped = true;
 
         info!(
             "Bootstrapped epoch state: epoch={}, blocks={}, unique_spos={}",
@@ -367,7 +361,6 @@ mod tests {
         assert_eq!(state.epoch_outputs, 0);
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
-        assert!(!state.bootstrapped);
     }
 
     #[test]
