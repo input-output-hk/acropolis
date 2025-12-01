@@ -289,20 +289,60 @@ pub fn validate_max_tx_size_utxo(
 mod tests {
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
+    use acropolis_common::{ShelleyAddress, StakeAddress, TxHash};
     use pallas::ledger::traverse;
+    use std::str::FromStr;
     use test_case::test_case;
 
     #[test_case(validation_fixture!("cd9037018278826d8ee2a80fe233862d0ff20bf61fc9f74543d682828c7cdb9f") =>
         matches Ok(());
+        "valid transaction 1"
     )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
         matches Ok(());
+        "valid transaction 2"
     )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "expired_utxo") =>
         matches Err(UTxOValidationError::ExpiredUTxO { ttl: 7084747, current_slot: 7084748 });
+        "expired_utxo"
     )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "input_set_empty_utxo") =>
         matches Err(UTxOValidationError::InputSetEmptyUTxO);
+        "input_set_empty_utxo"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "fee_too_small_utxo") =>
+        matches Err(UTxOValidationError::FeeTooSmallUTxO { supplied: 22541, required: 172277 });
+        "fee_too_small_utxo"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "bad_inputs_utxo") =>
+        matches Err(UTxOValidationError::BadInputsUTxO { bad_input, bad_input_index })
+        if bad_input == TxOutRef::new(TxHash::from_str("d93625fb30376a1eaf90e6232296b0a31b7e63fac2af01381ffe58a574aae537").unwrap(), 1) && bad_input_index == 0;
+        "bad_inputs_utxo"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "wrong_network") =>
+        matches Err(UTxOValidationError::WrongNetwork { expected: NetworkId::Mainnet, wrong_address, output_index })
+        if wrong_address == Address::Shelley(ShelleyAddress::from_string("addr_test1qzvsy7ftzmrqj3hfs6ppczx263rups3fy3q0z0msnfw2e7s663nkrm3jz3sre0aupn4mdmdz8tdakdhgppaz58qkwe0q680lcj").unwrap()) 
+            && output_index == 1;
+        "wrong_network"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "output_too_small_utxo") =>
+        matches Err(UTxOValidationError::OutputTooSmallUTxO { output_index: 1, lovelace: 1, required_lovelace: 1000000 });
+        "output_too_small_utxo"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "max_tx_size_utxo") =>
+        matches Err(UTxOValidationError::MaxTxSizeUTxO { supplied: 17983, max: 16384 });
+        "max_tx_size_utxo"
+    )]
+    /// This tx contains withdrawal
+    #[test_case(validation_fixture!("a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a") =>
+        matches Ok(());
+        "valid transaction 3 with withdrawal"
+    )]
+    #[test_case(validation_fixture!("a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a", "wrong_network_withdrawal") =>
+        matches Err(UTxOValidationError::WrongNetworkWithdrawal { expected: NetworkId::Mainnet, wrong_account, withdrawal_index })
+        if wrong_account == StakeAddress::from_string("stake_test1upfe3tuzexk65edjy8t4dsfjcs2scyhwwucwkf7qmmg3mmqx3st08").unwrap() 
+            && withdrawal_index == 0;
+        "wrong_network_withdrawal"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {

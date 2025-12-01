@@ -1,6 +1,5 @@
-use std::{collections::HashMap, str::FromStr};
-
 use acropolis_common::{protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, TxOutRef};
+use std::{collections::HashMap, str::FromStr};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct TestContextJson {
@@ -10,6 +9,7 @@ pub struct TestContextJson {
     pub utxos: Vec<((String, u16), (u32, u16))>,
 }
 
+#[derive(Debug)]
 pub struct TestContext {
     pub shelley_params: ShelleyParams,
     pub current_slot: Slot,

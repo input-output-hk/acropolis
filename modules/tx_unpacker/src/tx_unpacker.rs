@@ -24,6 +24,8 @@ mod state;
 mod utxo_registry;
 mod validations;
 use crate::{state::State, utxo_registry::UTxORegistry};
+
+#[cfg(test)]
 mod test_utils;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
