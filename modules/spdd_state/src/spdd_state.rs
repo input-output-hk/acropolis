@@ -1,5 +1,6 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -66,7 +67,8 @@ impl SPDDState {
             let mut message_subscription = context.subscribe(&subscribe_topic).await?;
             context.run(async move {
                 loop {
-                    let Ok((_, message)) = message_subscription.read().await else {
+                    let Ok((_, message)) = message_subscription.read_ignoring_rollbacks().await
+                    else {
                         return;
                     };
                     match message.as_ref() {

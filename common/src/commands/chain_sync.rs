@@ -1,6 +1,6 @@
-use crate::{BlockHash, Slot};
+use crate::Point;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ChainSyncCommand {
-    FindIntersect { slot: Slot, hash: BlockHash },
+    FindIntersect(Point),
 }

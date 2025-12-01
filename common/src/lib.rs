@@ -2,6 +2,7 @@
 
 pub mod address;
 pub mod calculations;
+pub mod caryatid;
 pub mod cbor;
 pub mod cip19;
 pub mod commands;

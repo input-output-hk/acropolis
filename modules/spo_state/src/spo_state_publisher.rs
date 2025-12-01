@@ -1,24 +1,23 @@
-use acropolis_common::messages::Message;
+use acropolis_common::{caryatid::RollbackAwarePublisher, messages::Message};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
 /// Message publisher for SPO State
-pub struct SPOStatePublisher {
-    /// Module context
-    context: Arc<Context<Message>>,
-
-    /// Topic to publish on
-    topic: String,
-}
+pub struct SPOStatePublisher(RollbackAwarePublisher<Message>);
 
 impl SPOStatePublisher {
     /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
-        Self { context, topic }
+        Self(RollbackAwarePublisher::new(context, topic))
     }
 
     /// Publish the DRep Delegation Distribution
     pub async fn publish(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
-        self.context.message_bus.publish(&self.topic, message).await
+        self.0.publish(message).await
+    }
+
+    /// Publish a rollback message, if we have anything to roll back
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+        self.0.publish(message).await
     }
 }
