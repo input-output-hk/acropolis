@@ -1,4 +1,4 @@
-use crate::configuration::{DownloadConfig, SnapshotFileMetadata};
+use crate::configuration::{DownloadConfig, Snapshot};
 use crate::progress_reader::ProgressReader;
 use async_compression::tokio::bufread::GzipDecoder;
 use futures_util::TryStreamExt;
@@ -29,7 +29,7 @@ pub enum DownloadError {
     Io(#[from] io::Error),
 }
 
-/// Handles downloading and decompressing snapshot files
+/// Handles downloading and decompressing snapshot files.
 pub struct SnapshotDownloader {
     client: Client,
     network_dir: String,
@@ -37,7 +37,7 @@ pub struct SnapshotDownloader {
 }
 
 impl SnapshotDownloader {
-    pub fn new(network_dir: String, config: &DownloadConfig) -> Result<Self, DownloadError> {
+    pub fn new(network_dir: &str, config: &DownloadConfig) -> Result<Self, DownloadError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
             .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
@@ -45,14 +45,14 @@ impl SnapshotDownloader {
 
         Ok(Self {
             client,
-            network_dir,
+            network_dir: network_dir.to_string(),
             cfg: config.clone(),
         })
     }
 
     /// Downloads the snapshot file specified by the metadata.
     /// Returns the path to the downloaded file.
-    pub async fn download(&self, snapshot: &SnapshotFileMetadata) -> Result<String, DownloadError> {
+    pub async fn download(&self, snapshot: &Snapshot) -> Result<String, DownloadError> {
         let file_path = snapshot.file_path(&self.network_dir);
         self.download_from_url(&snapshot.url, &file_path).await?;
         Ok(file_path)
@@ -133,6 +133,9 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    const TEST_POINT: &str =
+        "134956789.6558deef007ba372a414466e49214368c17c1f8428093193fc187d1c4587053c";
+
     fn gzip_compress(data: &[u8]) -> Vec<u8> {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
@@ -143,28 +146,29 @@ mod tests {
         DownloadConfig::default()
     }
 
+    fn test_snapshot(url: String) -> Snapshot {
+        Snapshot {
+            epoch: 509,
+            point: TEST_POINT.to_string(),
+            url,
+        }
+    }
+
     #[tokio::test]
     async fn test_downloader_skips_existing_file() {
         let temp_dir = TempDir::new().unwrap();
-        let file_path = temp_dir.path().join("point_500.cbor");
-        std::fs::write(&file_path, b"existing data").unwrap();
+        let network_dir = temp_dir.path().to_str().unwrap();
+        let snapshot = test_snapshot("https://example.com/snapshot.cbor.gz".to_string());
 
-        let downloader = SnapshotDownloader::new(
-            temp_dir.path().to_str().unwrap().to_string(),
-            &default_config(),
-        )
-        .unwrap();
+        // Create file at the exact path the downloader will check
+        let expected_path = snapshot.file_path(network_dir);
+        std::fs::write(&expected_path, b"existing data").unwrap();
 
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: "https://example.com/snapshot.cbor.gz".to_string(),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
-        assert_eq!(std::fs::read(&file_path).unwrap(), b"existing data");
+        assert_eq!(std::fs::read(&expected_path).unwrap(), b"existing data");
     }
 
     #[tokio::test]
@@ -179,23 +183,19 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let downloader = SnapshotDownloader::new(
-            temp_dir.path().to_str().unwrap().to_string(),
-            &default_config(),
-        )
-        .unwrap();
+        let network_dir = temp_dir.path().to_str().unwrap();
+        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
 
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
-        let file_path = result.unwrap();
-        assert_eq!(std::fs::read(&file_path).unwrap(), b"snapshot content");
+        let downloaded_path = result.unwrap();
+        assert_eq!(downloaded_path, snapshot.file_path(network_dir));
+        assert_eq!(
+            std::fs::read(&downloaded_path).unwrap(),
+            b"snapshot content"
+        );
     }
 
     #[tokio::test]
@@ -209,27 +209,17 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let downloader = SnapshotDownloader::new(
-            temp_dir.path().to_str().unwrap().to_string(),
-            &default_config(),
-        )
-        .unwrap();
+        let network_dir = temp_dir.path().to_str().unwrap();
+        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
 
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(matches!(
             result,
             Err(DownloadError::InvalidStatusCode(_, _))
         ));
-
-        let file_path = temp_dir.path().join("point_500.cbor");
-        assert!(!file_path.exists());
+        assert!(!Path::new(&snapshot.file_path(network_dir)).exists());
     }
 
     #[tokio::test]
@@ -245,21 +235,14 @@ mod tests {
 
         let temp_dir = TempDir::new().unwrap();
         let network_dir = temp_dir.path().join("nested").join("dir");
-        let downloader =
-            SnapshotDownloader::new(network_dir.to_str().unwrap().to_string(), &default_config())
-                .unwrap();
+        let network_dir_str = network_dir.to_str().unwrap();
+        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
 
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir_str, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
-        let file_path = network_dir.join("point_500.cbor");
-        assert!(file_path.exists());
+        assert!(Path::new(&snapshot.file_path(network_dir_str)).exists());
     }
 
     #[tokio::test]
@@ -273,24 +256,17 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
-        let downloader = SnapshotDownloader::new(
-            temp_dir.path().to_str().unwrap().to_string(),
-            &default_config(),
-        )
-        .unwrap();
+        let network_dir = temp_dir.path().to_str().unwrap();
+        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
 
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_err());
-        let file_path = temp_dir.path().join("point_500.cbor");
-        let partial_path = temp_dir.path().join("point_500.partial");
-        assert!(!file_path.exists());
+
+        let file_path = snapshot.file_path(network_dir);
+        let partial_path = Path::new(&file_path).with_extension("partial");
+        assert!(!Path::new(&file_path).exists());
         assert!(!partial_path.exists());
     }
 
@@ -306,23 +282,17 @@ mod tests {
             .await;
 
         let temp_dir = TempDir::new().unwrap();
+        let network_dir = temp_dir.path().to_str().unwrap();
         let config = DownloadConfig {
             timeout_secs: 600,
             connect_timeout_secs: 60,
             progress_log_interval: 100,
         };
 
-        let downloader =
-            SnapshotDownloader::new(temp_dir.path().to_str().unwrap().to_string(), &config)
-                .unwrap();
-
-        let snapshot = SnapshotFileMetadata {
-            epoch: 500,
-            point: "point_500".to_string(),
-            url: format!("{}/snapshot.cbor.gz", mock_server.uri()),
-        };
-
+        let downloader = SnapshotDownloader::new(network_dir, &config).unwrap();
+        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
         let result = downloader.download(&snapshot).await;
+
         assert!(result.is_ok());
     }
 }

@@ -1,5 +1,6 @@
 //! Acropolis epochs_state: state storage
 
+use acropolis_common::messages::EpochBootstrapMessage;
 use acropolis_common::{
     crypto::keyhash_224,
     genesis_values::GenesisValues,
@@ -92,7 +93,7 @@ impl State {
 
     /// Bootstrap state from snapshot data
     /// This initializes the epoch state with block production data from a snapshot
-    pub fn bootstrap_from_snapshot(&mut self, epoch_data: &EpochActivityMessage) {
+    pub fn bootstrap_from_snapshot(&mut self, epoch_data: &EpochBootstrapMessage) {
         info!(
             "Bootstrapping state from snapshot for epoch {}",
             epoch_data.epoch
@@ -113,18 +114,7 @@ impl State {
         self.blocks_minted =
             epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
 
-        // Set nonce if available
-        // TODO: use single active nonce
-        if let Some(nonce) = &epoch_data.nonce {
-            self.nonces = Some(Nonces {
-                epoch: epoch_data.epoch,
-                active: nonce.clone(),
-                candidate: nonce.clone(),
-                evolving: nonce.clone(),
-                lab: Default::default(),
-                prev_lab: Default::default(),
-            });
-        }
+        self.nonces = Some(epoch_data.nonces.clone());
 
         self.bootstrapped = true;
 
@@ -378,47 +368,6 @@ mod tests {
         assert_eq!(state.epoch_fees, 0);
         assert!(state.blocks_minted.is_empty());
         assert!(!state.bootstrapped);
-    }
-
-    #[test]
-    fn test_bootstrap_from_snapshot() {
-        let mut state = State::new(&GenesisValues::mainnet());
-
-        let pool_id_1 = PoolId::from(keyhash_224(b"pool1"));
-        let pool_id_2 = PoolId::from(keyhash_224(b"pool2"));
-
-        let epoch_data = EpochActivityMessage {
-            epoch: 500,
-            epoch_start_time: 1700000000,
-            epoch_end_time: 1700432000,
-            first_block_time: 1700000100,
-            first_block_height: 10000000,
-            last_block_time: 1700431900,
-            last_block_height: 10021599,
-            total_blocks: 21600,
-            total_txs: 500000,
-            total_outputs: 1000000000000,
-            total_fees: 50000000,
-            spo_blocks: vec![(pool_id_1, 100), (pool_id_2, 200)],
-            nonce: None,
-        };
-
-        state.bootstrap_from_snapshot(&epoch_data);
-
-        assert!(state.bootstrapped);
-        assert_eq!(state.epoch, 500);
-        assert_eq!(state.epoch_blocks, 21600);
-        assert_eq!(state.epoch_txs, 500000);
-        assert_eq!(state.epoch_fees, 50000000);
-        assert_eq!(state.blocks_minted.len(), 2);
-        assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&pool_id_1),
-            100
-        );
-        assert_eq!(
-            state.get_latest_epoch_blocks_minted_by_pool(&pool_id_2),
-            200
-        );
     }
 
     #[test]

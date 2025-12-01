@@ -1,11 +1,10 @@
-use crate::configuration::NoncesData;
+use acropolis_common::protocol_params::Nonces;
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, EpochActivityMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage, SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
-    protocol_params::{Nonce, NonceHash},
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochBootstrapData, EpochCallback, GovernanceProposal,
         PoolCallback, PoolInfo, ProposalCallback, SnapshotCallbacks, SnapshotMetadata,
@@ -23,11 +22,11 @@ use tracing::{info, warn};
 ///
 /// This data comes from bootstrap configuration files (nonces.json, headers/{slot}.{block_header_hash}.cbor, etc)
 /// and is not available to the CBOR parser. It's injected into the publisher
-/// so that `EpochActivityMessage` can include complete information, among other things.
+/// so that `EpochBootstrapMessage` can include complete information, among other things.
 #[derive(Debug, Clone)]
 pub struct BootstrapContext {
     /// Nonces for the target epoch
-    pub nonces: NoncesData,
+    pub nonces: Nonces,
     /// Epoch start time (UNIX timestamp)
     pub epoch_start_time: u64,
     /// Epoch end time (UNIX timestamp)
@@ -48,7 +47,7 @@ impl BootstrapContext {
     /// * `epoch` - Target epoch number
     /// * `genesis` - Genesis values for timestamp calculations
     pub fn new(
-        nonces: NoncesData,
+        nonces: Nonces,
         header_slot: u64,
         header_block_height: u64,
         epoch: u64,
@@ -66,11 +65,6 @@ impl BootstrapContext {
             last_block_time,
             last_block_height: header_block_height,
         }
-    }
-
-    /// Convert the active nonce to the protocol Nonce type.
-    fn active_nonce(&self) -> Option<Nonce> {
-        NonceHash::try_from(self.nonces.active.as_slice()).ok().map(Nonce::from)
     }
 }
 
@@ -158,8 +152,8 @@ impl SnapshotPublisher {
         }
     }
 
-    /// Build EpochActivityMessage from parsed data and external context.
-    fn build_epoch_activity_message(&self, data: &EpochBootstrapData) -> EpochActivityMessage {
+    /// Build EpochBootstrapMessage from parsed data and external context.
+    fn build_epoch_bootstrap_message(&self, data: &EpochBootstrapData) -> EpochBootstrapMessage {
         let spo_blocks: Vec<(PoolId, usize)> = data
             .blocks_current_epoch
             .iter()
@@ -176,7 +170,7 @@ impl SnapshotPublisher {
             first_block_height,
             last_block_time,
             last_block_height,
-            nonce,
+            nonces,
         ) = match &self.bootstrap_context {
             Some(ctx) => {
                 // Estimate first block height: last height minus blocks in current epoch
@@ -188,13 +182,13 @@ impl SnapshotPublisher {
                     first_height,
                     ctx.last_block_time,
                     ctx.last_block_height,
-                    ctx.active_nonce(),
+                    ctx.nonces.clone(),
                 )
             }
-            None => (0, 0, 0, 0, 0, 0, None),
+            None => (0, 0, 0, 0, 0, 0, Nonces::default()),
         };
 
-        EpochActivityMessage {
+        EpochBootstrapMessage {
             epoch: data.epoch,
             epoch_start_time,
             epoch_end_time,
@@ -203,11 +197,11 @@ impl SnapshotPublisher {
             last_block_time,
             last_block_height,
             total_blocks: data.total_blocks_current as usize,
-            total_txs: 0,     // Not available from snapshot
-            total_outputs: 0, // Not available from snapshot
-            total_fees: 0,    // Not available from snapshot
+            total_txs: 0,     // TODO: get from NewEpochState
+            total_outputs: 0, // TODO: get from NewEpochState
+            total_fees: 0,    // TODO: get from NewEpochState
             spo_blocks,
-            nonce,
+            nonces,
         }
     }
 }
@@ -269,18 +263,17 @@ impl EpochCallback for SnapshotPublisher {
             data.total_blocks_previous
         );
 
-        let epoch_activity = self.build_epoch_activity_message(&data);
+        let epoch_bootstrap_data = self.build_epoch_bootstrap_message(&data);
 
-        let has_nonce = epoch_activity.nonce.is_some();
+        let spo_blocks = epoch_bootstrap_data.spo_blocks.clone();
         info!(
-            "Publishing epoch bootstrap for epoch {} with {} SPO entries, nonce: {}",
+            "Publishing epoch bootstrap for epoch {} with {} SPO entries",
             data.epoch,
-            epoch_activity.spo_blocks.len(),
-            if has_nonce { "present" } else { "none" }
+            spo_blocks.len(),
         );
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::EpochState(epoch_activity),
+            SnapshotStateMessage::EpochState(epoch_bootstrap_data),
         )));
 
         // Clone what we need for the async task
@@ -340,15 +333,16 @@ impl SnapshotCallbacks for SnapshotPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::hash::Hash;
+    use acropolis_common::protocol_params::Nonce;
 
-    fn make_test_nonces() -> NoncesData {
-        NoncesData {
+    fn make_test_nonces() -> Nonces {
+        Nonces {
             epoch: 509,
-            active: Hash::from([0u8; 32]),
-            evolving: Hash::from([1u8; 32]),
-            candidate: Hash::from([2u8; 32]),
-            tail: Hash::from([3u8; 32]),
+            active: Nonce::from([0u8; 32]),
+            evolving: Nonce::from([1u8; 32]),
+            candidate: Nonce::from([2u8; 32]),
+            lab: Nonce::from([3u8; 32]),      // was: tail
+            prev_lab: Nonce::from([4u8; 32]), // was: missing
         }
     }
 
@@ -377,10 +371,10 @@ mod tests {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
 
-        let ctx = BootstrapContext::new(nonces, 134956789, 11000000, 509, &genesis);
+        let ctx = BootstrapContext::new(nonces.clone(), 134956789, 11000000, 509, &genesis);
 
         // Verify nonce conversion works
-        assert!(ctx.active_nonce().is_some());
+        assert_eq!(ctx.nonces, nonces);
     }
 
     #[test]

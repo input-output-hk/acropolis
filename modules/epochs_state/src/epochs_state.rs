@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     messages::{
-        CardanoMessage, EpochActivityMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse,
     },
     queries::epochs::{
@@ -53,8 +53,7 @@ pub struct EpochsState;
 
 impl EpochsState {
     /// Handle bootstrap message from snapshot
-    fn handle_bootstrap(state: &mut State, epoch_data: &EpochActivityMessage) {
-        // Print entire epoch activity message
+    fn handle_bootstrap(state: &mut State, epoch_data: &EpochBootstrapMessage) {
         info!(
             "Bootstrapping epoch state from snapshot epoch={}, epoch_start_time={}, epoch_end_time={}, first_block_time={}, first_block_height={}, last_block_time={}, last_block_height={}, total_blocks={}, total_txs={}, total_outputs={}, total_fees={}",
             epoch_data.epoch,
@@ -70,8 +69,7 @@ impl EpochsState {
             epoch_data.total_fees,
         );
 
-        info!("Nonces: {:?}", epoch_data.nonce);
-        info!("SPO blocks {:?}", epoch_data.spo_blocks);
+        info!("Nonces: {:?}", epoch_data.nonces);
 
         // Initialize epoch state from snapshot data
         state.bootstrap_from_snapshot(epoch_data);
