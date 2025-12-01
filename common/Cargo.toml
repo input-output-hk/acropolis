@@ -32,7 +32,7 @@ serde_with = { workspace = true, features = ["base64"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
 futures = "0.3.31"
-minicbor = { version = "0.26.0", features = ["std", "half", "derive"] }
+minicbor = { workspace = true, features = ["std", "half", "derive"] }
 num-traits = "0.2"
 dashmap = { workspace = true }
 rayon = "1.11.0"
@@ -41,9 +41,10 @@ thiserror = "2.0.17"
 sha2 = "0.10.8"
 
 [dev-dependencies]
-caryatid_process = { workspace = true }
+tempfile = "3.23"
 config = { workspace = true }
-tempfile = "3"
+caryatid_process = { workspace = true }
+
 
 [lib]
 crate-type = ["rlib"]
