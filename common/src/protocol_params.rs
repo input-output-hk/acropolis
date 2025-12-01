@@ -362,16 +362,32 @@ impl From<BlockHash> for Nonce {
 }
 
 #[derive(
-    Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, serde::Serialize, serde::Deserialize,
+    Default,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct Nonces {
+    #[n(0)]
     pub epoch: u64,
+    #[n(1)]
     pub active: Nonce,
+    #[n(2)]
     pub evolving: Nonce,
+    #[n(3)]
     pub candidate: Nonce,
     // Nonce constructed from the hash of the Last Applied Block
+    #[n(4)]
     pub lab: Nonce,
     // Nonce corresponding to the LAB nonce of the last block of the previous epoch
+    #[n(5)]
     pub prev_lab: Nonce,
 }
 
