@@ -411,6 +411,7 @@ pub struct EpochBootstrapMessage {
     pub nonces: Nonces,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
