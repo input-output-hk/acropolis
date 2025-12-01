@@ -9,7 +9,7 @@ use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 struct PeerData {
     conn: PeerConnection,
@@ -100,6 +100,12 @@ impl NetworkManager {
                 if let Point::Specific(slot, _) = point {
                     let (epoch, _) = self.block_sink.genesis_values.slot_to_epoch(slot);
                     self.block_sink.last_epoch = Some(epoch);
+                }
+
+                if let Some((&peer_id, _)) = self.peers.iter().next() {
+                    self.set_preferred_upstream(peer_id);
+                } else {
+                    warn!("Sync requested but no upstream peers available");
                 }
 
                 self.sync_to_point(point);
@@ -246,7 +252,7 @@ impl NetworkManager {
             self.block_sink.announce(header, body, rolled_back).await?;
             self.published_blocks += 1;
             if self.published_blocks.is_multiple_of(100) {
-                info!("Published block {}", header.number);
+                debug!("Published block {}", header.number);
             }
             self.chain.handle_block_published();
         }

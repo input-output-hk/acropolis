@@ -3,6 +3,7 @@
 [module.genesis-bootstrapper]
 
 [module.peer-network-interface]
+block-topic = "cardano.block.proposed" # Skip validation for indexer
 sync-point = "dynamic"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
@@ -13,7 +14,7 @@ magic-number = 764824073
 
 [module.block-unpacker]
 
-[module.indexer]
+[module.custom-indexer]
 
 [startup]
 topic = "cardano.sequence.start"
