@@ -2,7 +2,8 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
+    caryatid::SubscriptionExt,
+    messages::{CardanoMessage, Message, StateTransitionMessage},
     NetworkId,
 };
 use anyhow::{anyhow, Result};
@@ -162,7 +163,7 @@ impl StakeDeltaFilter {
         let mut subscription =
             params.context.subscribe(&params.clone().address_delta_topic).await?;
         params.context.clone().run(async move {
-            let publisher = DeltaPublisher::new(params.clone());
+            let mut publisher = DeltaPublisher::new(params.clone());
 
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -183,6 +184,16 @@ impl StakeDeltaFilter {
                         }
                         .instrument(span)
                         .await;
+                    }
+
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
+                        publisher
+                            .publish_rollback(message)
+                            .await
+                            .unwrap_or_else(|e| error!("Publish error: {e}"));
                     }
 
                     msg => error!(
@@ -208,7 +219,7 @@ impl StakeDeltaFilter {
         let mut subscription = params.context.subscribe(&params.tx_certificates_topic).await?;
         params.clone().context.run(async move {
             loop {
-                let Ok((_, message)) = subscription.read().await else {
+                let Ok((_, message)) = subscription.read_ignoring_rollbacks().await else {
                     return;
                 };
                 match message.as_ref() {
@@ -259,6 +270,18 @@ impl StakeDeltaFilter {
                         }
                         .instrument(span)
                         .await;
+                    }
+
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
+                        let mut state = state_deltas.lock().await;
+                        state
+                            .handle_rollback(message)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type for {}: {message:?}", &topic),

@@ -724,6 +724,17 @@ impl TxOutRef {
 /// Slot
 pub type Slot = u64;
 
+/// Point on the chain
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+pub enum Point {
+    #[default]
+    Origin,
+    Specific {
+        hash: BlockHash,
+        slot: Slot,
+    },
+}
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;

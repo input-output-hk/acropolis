@@ -6,10 +6,11 @@ mod publisher;
 use crate::configuration::{ConfigError, NetworkConfig, SnapshotConfig, SnapshotFileMetadata};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
-use acropolis_common::genesis_values::GenesisValues;
-use acropolis_common::snapshot::streaming_snapshot::StreamingSnapshotParser;
 use acropolis_common::{
+    configuration::StartupMethod,
+    genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
+    snapshot::streaming_snapshot::StreamingSnapshotParser,
     BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{bail, Result};
@@ -48,6 +49,16 @@ pub struct SnapshotBootstrapper;
 impl SnapshotBootstrapper {
     /// Initializes the snapshot bootstrapper.
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Check if this module is the selected startup method
+        let startup_method = StartupMethod::from_config(&config);
+        if !startup_method.is_snapshot() {
+            info!(
+                "Snapshot bootstrapper not enabled (startup.method = '{}')",
+                startup_method
+            );
+            return Ok(());
+        }
+
         let cfg = SnapshotConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");

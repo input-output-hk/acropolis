@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use acropolis_common::commands::chain_sync::Point;
+use acropolis_common::Point;
 use anyhow::Result;
 
 pub trait CursorStore: Send + Sync + 'static {

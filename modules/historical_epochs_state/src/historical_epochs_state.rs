@@ -3,6 +3,7 @@
 
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
+use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
@@ -70,9 +71,9 @@ impl HistoricalEpochsState {
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser
-            let (_, blocks_message) = blocks_subscription.read().await?;
+            let (_, blocks_message) = blocks_subscription.read_ignoring_rollbacks().await?;
             let new_epoch = match blocks_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
+                Message::Cardano((block_info, CardanoMessage::BlockAvailable(_))) => {
                     // Handle rollbacks on this topic only
                     let mut state = state_mutex.lock().await;
                     if block_info.status == BlockStatus::RolledBack {
@@ -87,10 +88,7 @@ impl HistoricalEpochsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let params_message_f = params_subscription.read();
-                let epoch_activity_message_f = epoch_activity_subscription.read();
-
-                let (_, params_msg) = params_message_f.await?;
+                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
                 match params_msg.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
                         let span = info_span!(
@@ -110,7 +108,8 @@ impl HistoricalEpochsState {
                     _ => error!("Unexpected message type: {params_msg:?}"),
                 }
 
-                let (_, epoch_activity_msg) = epoch_activity_message_f.await?;
+                let (_, epoch_activity_msg) =
+                    epoch_activity_subscription.read_ignoring_rollbacks().await?;
                 match epoch_activity_msg.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea))) => {
                         let span = info_span!(

@@ -1527,16 +1527,15 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951c0ab316e5557315c10b75011b30faeeb032f96c88507946ec154c7f9d4ddd"
+checksum = "5509d9f63ad2d973599703617120dbfeff58078b37895f433cc784b5d3890d6e"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
  "chrono",
  "config",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1544,9 +1543,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c82ea79ce5ede49ce0dde01d204f21d39165d0abd8213281a7ce163a01519df"
+checksum = "a42373dd9604700e51dd07565303522f7b1d2a0002a8db7489c77d846f08c08b"
 dependencies = [
  "anyhow",
  "axum",
@@ -1555,7 +1554,6 @@ dependencies = [
  "futures",
  "hyper 0.14.32",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1563,24 +1561,21 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53b7ce84ba23710e42d1fc497b2bb36463cbcb0af8aab39b7f14942b4682763"
+checksum = "0432b56f66f5b3d527a704c9c4b090c03567aaefc48350e7bf41fce286431b5d"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "caryatid_process"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7b38bc5f68d7f2400987524d50300597b607f5f2d76773fdc40a0216d296b01"
+checksum = "a5964024f9c302253bdf84b3f35dc068853ed0c643961072b59f6e69b8f83552"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1600,20 +1595,18 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b81e3dc1a35c175c7fc27f564b9ba9840fa25d24f08785a9cdfe2c2182965c77"
+checksum = "fceb8e403d1123e3a69fe108ea36d3e24c81f98605d2f15ca58f500774e956b0"
 dependencies = [
  "anyhow",
  "async-trait",
  "caryatid_macros",
- "chrono",
  "config",
  "futures",
  "hex",
  "rand 0.9.2",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]

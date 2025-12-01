@@ -9,6 +9,7 @@ use acropolis_codec::{
 use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::transactions::{
@@ -137,10 +138,6 @@ impl ChainStore {
         let mut new_blocks_subscription = context.subscribe(&new_blocks_topic).await?;
         let mut params_subscription = context.subscribe(&params_topic).await?;
         context.run(async move {
-            // Get promise of params message so the params queue is cleared and
-            // the message is ready as soon as possible when we need it
-            let mut params_message = params_subscription.read();
-
             // Validate the first stored block matches what is already persisted when clear-on-start is false
             let Ok((_, first_block_message)) = new_blocks_subscription.read().await else {
                 return;
@@ -160,7 +157,8 @@ impl ChainStore {
 
                 if let Message::Cardano((block_info, _)) = message.as_ref() {
                     if block_info.new_epoch {
-                        let Ok((_, message)) = params_message.await else {
+                        let Ok((_, message)) = params_subscription.read_ignoring_rollbacks().await
+                        else {
                             return;
                         };
                         let mut history = history.lock().await;
@@ -169,8 +167,6 @@ impl ChainStore {
                             return;
                         };
                         history.commit(block_info.number, state);
-                        // Have the next params message ready for the next epoch
-                        params_message = params_subscription.read();
                     }
                 }
             }

@@ -1,4 +1,4 @@
-use acropolis_common::{commands::chain_sync::Point, hash::Hash, messages::Message};
+use acropolis_common::{hash::Hash, messages::Message, Point};
 use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::module_registry::ModuleRegistry;
@@ -44,12 +44,12 @@ async fn main() -> Result<()> {
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
 
-    // watch channel to send latest state to downstream process on index change
+    // watch channel to send latest state to consumer on index change
     let (sender, receiver) = watch::channel(PoolCostState {
         pools: BTreeMap::new(),
     });
 
-    // Example receiver (This would likely be provided in initialization of a new module)
+    // Example receiver
     {
         let mut rx = receiver.clone();
         tokio::spawn(async move {
@@ -61,10 +61,10 @@ async fn main() -> Result<()> {
     }
 
     // Initialize and register indexer
-    let shelley_start = Point::Specific(
-        16588737,
-        Hash::from_str("4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a")?,
-    );
+    let shelley_start = Point::Specific {
+        hash: Hash::from_str("4e9bbbb67e3ae262133d94c3da5bffce7b1127fc436e7433b87668dba34c354a")?,
+        slot: 16588737,
+    };
     let indexer = CustomIndexer::new(
         PoolCostIndex::new(sender),
         InMemoryCursorStore::new(shelley_start.clone()),

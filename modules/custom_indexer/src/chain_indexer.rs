@@ -1,6 +1,7 @@
 use acropolis_common::{
-    commands::chain_sync::{ChainSyncCommand, Point},
+    commands::chain_sync::ChainSyncCommand,
     messages::{CardanoMessage, Command, Message},
+    Point,
 };
 use anyhow::Result;
 use caryatid_sdk::{async_trait, Context, Module};
@@ -71,9 +72,9 @@ where
 
         context.run(async move {
             // Publish initial sync point
-            let msg = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect {
-                point: start_point.clone(),
-            }));
+            let msg = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(
+                start_point,
+            )));
             run_context.publish(&cfg.sync_command_publisher_topic, Arc::new(msg)).await?;
 
             // Forward received txs to index handlers
@@ -91,7 +92,10 @@ where
                     }
 
                     // Update and save tip
-                    let new_tip = Point::Specific(block.slot, block.hash);
+                    let new_tip = Point::Specific {
+                        hash: block.hash,
+                        slot: block.slot,
+                    };
                     {
                         *tip.lock().await = new_tip.clone();
                         cursor_store.lock().await.save(&new_tip).await?;

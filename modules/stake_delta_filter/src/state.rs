@@ -2,6 +2,7 @@
 
 use crate::StakeDeltaFilterParams;
 use crate::{process_message, PointerCache, Tracker};
+use acropolis_common::caryatid::RollbackAwarePublisher;
 use acropolis_common::{
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StakeAddressDeltasMessage,
@@ -24,17 +25,18 @@ pub struct PointerOccurrence {
     pub occurrence: HashMap<ShelleyAddressPointer, Vec<(Option<Address>, BlockInfo, Address)>>,
 }
 
-pub struct DeltaPublisher {
-    pub params: Arc<StakeDeltaFilterParams>,
-}
+pub struct DeltaPublisher(RollbackAwarePublisher<Message>);
 
 impl DeltaPublisher {
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
-        Self { params }
+        Self(RollbackAwarePublisher::new(
+            params.context.clone(),
+            params.stake_address_delta_topic.clone(),
+        ))
     }
 
     pub async fn publish(
-        &self,
+        &mut self,
         block: &BlockInfo,
         message: StakeAddressDeltasMessage,
     ) -> Result<()> {
@@ -42,16 +44,11 @@ impl DeltaPublisher {
             block.clone(),
             CardanoMessage::StakeAddressDeltas(message),
         )));
-        let params = self.params.clone();
+        self.0.publish(packed_message).await
+    }
 
-        params
-            .context
-            .message_bus
-            .publish(&params.stake_address_delta_topic, packed_message)
-            .await
-            .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
-
-        Ok(())
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        self.0.publish(message).await
     }
 }
 
@@ -96,6 +93,10 @@ impl State {
             }
         }
         Ok(())
+    }
+
+    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        self.delta_publisher.publish_rollback(message).await
     }
 
     pub fn new(params: Arc<StakeDeltaFilterParams>) -> Self {
