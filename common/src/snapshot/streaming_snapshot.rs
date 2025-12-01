@@ -773,15 +773,15 @@ pub struct SnapshotMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EpochBootstrapData {
-    ///  Current epoch number
+    /// Current epoch number
     pub epoch: u64,
-    ///  Pool ID (hex) → block count
+    /// Pool ID (hex) → block count
     pub blocks_previous_epoch: Vec<(String, u64)>,
-    ///  Pool ID (hex) → block count
+    /// Pool ID (hex) → block count
     pub blocks_current_epoch: Vec<(String, u64)>,
-    ///  Sum of current epoch blocks
+    /// Sum of current epoch blocks
     pub total_blocks_current: u64,
-    ///  Sum of previous epoch blocks
+    /// Sum of previous epoch blocks
     pub total_blocks_previous: u64,
 }
 
