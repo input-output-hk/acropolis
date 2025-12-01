@@ -7,7 +7,7 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
     commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Command, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -80,6 +80,7 @@ impl PeerNetworkInterface {
                 genesis_values,
                 upstream_cache,
                 last_epoch,
+                rolled_back: false,
             };
 
             let manager = match cfg.sync_point {
@@ -226,15 +227,11 @@ struct BlockSink {
     genesis_values: GenesisValues,
     upstream_cache: Option<UpstreamCache>,
     last_epoch: Option<u64>,
+    rolled_back: bool,
 }
 impl BlockSink {
-    pub async fn announce(
-        &mut self,
-        header: &Header,
-        body: &[u8],
-        rolled_back: bool,
-    ) -> Result<()> {
-        let info = self.make_block_info(header, rolled_back);
+    pub async fn announce_roll_forward(&mut self, header: &Header, body: &[u8]) -> Result<()> {
+        let info = self.make_block_info(header);
         let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
             body: body.to_vec(),
@@ -250,17 +247,33 @@ impl BlockSink {
             info,
             CardanoMessage::BlockAvailable(raw_block),
         )));
+        self.context.publish(&self.topic, message).await?;
+        self.rolled_back = false;
+        Ok(())
+    }
+
+    pub async fn announce_roll_backward(&mut self, header: &Header) -> Result<()> {
+        self.rolled_back = true;
+        let info = self.make_block_info(header);
+        let point = acropolis_common::Point::Specific {
+            hash: info.hash,
+            slot: info.slot,
+        };
+        let message = Arc::new(Message::Cardano((
+            info,
+            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
+        )));
         self.context.publish(&self.topic, message).await
     }
 
-    fn make_block_info(&mut self, header: &Header, rolled_back: bool) -> BlockInfo {
+    fn make_block_info(&mut self, header: &Header) -> BlockInfo {
         let slot = header.slot;
         let (epoch, epoch_slot) = self.genesis_values.slot_to_epoch(slot);
         let new_epoch = self.last_epoch != Some(epoch);
         self.last_epoch = Some(epoch);
         let timestamp = self.genesis_values.slot_to_timestamp(slot);
         BlockInfo {
-            status: if rolled_back {
+            status: if self.rolled_back {
                 BlockStatus::RolledBack
             } else {
                 BlockStatus::Volatile

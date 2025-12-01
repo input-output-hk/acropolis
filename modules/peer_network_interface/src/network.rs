@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
     BlockSink,
-    chain_state::ChainState,
+    chain_state::{ChainEvent, ChainState},
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
 use acropolis_common::BlockHash;
@@ -88,7 +88,7 @@ impl NetworkManager {
         match event {
             NetworkEvent::PeerUpdate { peer, event } => {
                 self.handle_peer_update(peer, event);
-                self.publish_blocks().await?;
+                self.publish_events().await?;
             }
             NetworkEvent::SyncPointUpdate { point } => {
                 self.chain = ChainState::new();
@@ -241,14 +241,21 @@ impl NetworkManager {
         self.chain.clear_preferred_upstream();
     }
 
-    async fn publish_blocks(&mut self) -> Result<()> {
-        while let Some((header, body, rolled_back)) = self.chain.next_unpublished_block() {
-            self.block_sink.announce(header, body, rolled_back).await?;
-            self.published_blocks += 1;
-            if self.published_blocks.is_multiple_of(100) {
-                info!("Published block {}", header.number);
+    async fn publish_events(&mut self) -> Result<()> {
+        while let Some(event) = self.chain.next_unpublished_event() {
+            match event {
+                ChainEvent::RollForward { header, body } => {
+                    self.block_sink.announce_roll_forward(header, body).await?;
+                    self.published_blocks += 1;
+                    if self.published_blocks.is_multiple_of(100) {
+                        info!("Published block {}", header.number);
+                    }
+                }
+                ChainEvent::RollBackward { header } => {
+                    self.block_sink.announce_roll_backward(header).await?;
+                }
             }
-            self.chain.handle_block_published();
+            self.chain.handle_event_published();
         }
         Ok(())
     }
