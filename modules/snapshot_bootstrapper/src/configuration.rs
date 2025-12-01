@@ -76,7 +76,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     pub fn file_path(&self, network_dir: &str) -> String {
-        format!("{}/snapshots.json", network_dir)
+        format!("{}/{}.cbor", network_dir, self.point)
     }
 }
 
