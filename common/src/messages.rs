@@ -23,6 +23,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
 use crate::types::*;
@@ -389,7 +390,7 @@ pub struct EpochBootstrapMessage {
     pub total_fees: u64,
 
     /// Map of SPO IDs to blocks produced
-    pub spo_blocks: Vec<(PoolId, usize)>,
+    pub spo_blocks: HashMap<PoolId, u64>,
 
     /// Nonces
     pub nonces: Nonces,

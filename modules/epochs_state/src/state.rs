@@ -105,8 +105,7 @@ impl State {
         self.epoch_txs = epoch_data.total_txs;
         self.epoch_outputs = epoch_data.total_outputs;
         self.epoch_fees = epoch_data.total_fees;
-        self.blocks_minted =
-            epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
+        self.blocks_minted = epoch_data.spo_blocks.iter().map(|(k, v)| (*k, *v as usize)).collect();
 
         self.nonces = Some(epoch_data.nonces.clone());
         self.praos_params = epoch_data.praos_params.clone();

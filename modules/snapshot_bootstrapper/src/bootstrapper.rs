@@ -108,8 +108,8 @@ impl SnapshotBootstrapper {
             context,
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
-        )
-        .with_epoch_context(data.context());
+            data.context(),
+        );
 
         publisher.publish_start().await?;
 

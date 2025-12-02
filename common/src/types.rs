@@ -125,7 +125,7 @@ impl Display for Era {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PoolBlockProduction {
     /// Pool ID that produced the blocks
-    pub pool_id: String,
+    pub pool_id: PoolId,
 
     /// Number of blocks produced by this pool in the epoch
     pub block_count: u8,

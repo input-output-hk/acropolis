@@ -59,11 +59,14 @@ impl BootstrapContext {
 
         // Load header
         let header = HeaderContext::load(&network_dir, &snapshot.point)?;
-        let hash = header.block_hash;
+        let hash = header
+            .point
+            .hash()
+            .unwrap_or_else(|| panic!("Origin point has no hash: {:?}", header.point));
         let slot = header.point.slot();
 
         // Build nonce
-        let nonces = nonces_file.into_nonces(target_epoch, hash);
+        let nonces = nonces_file.into_nonces(target_epoch, *hash);
 
         // Build block info
         let (_, epoch_slot) = genesis.slot_to_epoch(slot);
@@ -71,7 +74,7 @@ impl BootstrapContext {
             status: BlockStatus::Immutable,
             slot,
             number: header.block_number,
-            hash,
+            hash: *hash,
             epoch: target_epoch,
             epoch_slot,
             new_epoch: true,

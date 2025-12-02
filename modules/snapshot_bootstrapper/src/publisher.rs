@@ -11,7 +11,7 @@ use acropolis_common::{
         StakeCallback, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
-    BlockInfo, PoolId,
+    BlockInfo,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -81,17 +81,15 @@ pub struct SnapshotPublisher {
     accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
-
-    /// Optional external context with nonces and timing
-    epoch_context: Option<EpochContext>,
+    epoch_context: EpochContext,
 }
 
 impl SnapshotPublisher {
-    /// Create a new publisher without external context.
     pub fn new(
         context: Arc<Context<Message>>,
         completion_topic: String,
         snapshot_topic: String,
+        epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
@@ -103,17 +101,10 @@ impl SnapshotPublisher {
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
-            epoch_context: None,
+            epoch_context,
         }
     }
 
-    /// Add external bootstrap context (nonces, timing info).
-    pub fn with_epoch_context(mut self, ctx: EpochContext) -> Self {
-        self.epoch_context = Some(ctx);
-        self
-    }
-
-    /// Publish a startup message to signal bootstrap is beginning.
     pub async fn publish_start(&self) -> Result<()> {
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Startup));
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
@@ -122,7 +113,6 @@ impl SnapshotPublisher {
         Ok(())
     }
 
-    /// Publish a completion message with final block info.
     pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
         let message = Arc::new(Message::Cardano((
             block_info,
@@ -134,54 +124,25 @@ impl SnapshotPublisher {
         Ok(())
     }
 
-    /// Build EpochBootstrapMessage from parsed data and external context.
     fn build_epoch_bootstrap_message(&self, data: &EpochBootstrapData) -> EpochBootstrapMessage {
-        let spo_blocks: Vec<(PoolId, usize)> = data
-            .blocks_current_epoch
-            .iter()
-            .map(|(pool_id, count)| (*pool_id, *count as usize))
-            .collect();
-
-        // Extract timing and nonces from external context if available
-        let (
-            epoch_start_time,
-            epoch_end_time,
-            first_block_time,
-            first_block_height,
-            last_block_time,
-            last_block_height,
-            nonces,
-        ) = match &self.epoch_context {
-            Some(ctx) => {
-                let first_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
-                (
-                    ctx.epoch_start_time,
-                    ctx.epoch_end_time,
-                    ctx.epoch_start_time, // Approximate: first block near epoch start
-                    first_height,
-                    ctx.last_block_time,
-                    ctx.last_block_height,
-                    ctx.nonces.clone(),
-                )
-            }
-            None => (0, 0, 0, 0, 0, 0, Nonces::default()),
-        };
+        let ctx = &self.epoch_context;
+        let first_block_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
 
         EpochBootstrapMessage {
             epoch: data.epoch,
-            epoch_start_time,
-            epoch_end_time,
-            first_block_time,
+            epoch_start_time: ctx.epoch_start_time,
+            epoch_end_time: ctx.epoch_end_time,
+            first_block_time: ctx.epoch_start_time,
             first_block_height,
-            last_block_time,
-            last_block_height,
+            last_block_time: ctx.last_block_time,
+            last_block_height: ctx.last_block_height,
             total_blocks: data.total_blocks_current as usize,
-            total_txs: 0,     // TODO: get from NewEpochState
-            total_outputs: 0, // TODO: get from NewEpochState
-            total_fees: 0,    // TODO: get from NewEpochState
-            spo_blocks,
-            nonces,
-            praos_params: Some(PraosParams::mainnet()), // TODO: Make this configurable?
+            total_txs: 0,
+            total_outputs: 0,
+            total_fees: 0,
+            spo_blocks: data.spo_blocks_current.clone(),
+            nonces: ctx.nonces.clone(),
+            praos_params: Some(PraosParams::mainnet()),
         }
     }
 }

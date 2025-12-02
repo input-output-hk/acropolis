@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tracing::info;
@@ -776,9 +776,9 @@ pub struct EpochBootstrapData {
     /// Current epoch number
     pub epoch: u64,
     /// Pool ID (hex) → block count
-    pub blocks_previous_epoch: Vec<(PoolId, u64)>,
+    pub spo_blocks_previous: HashMap<PoolId, u64>,
     /// Pool ID (hex) → block count
-    pub blocks_current_epoch: Vec<(PoolId, u64)>,
+    pub spo_blocks_current: HashMap<PoolId, u64>,
     /// Sum of current epoch blocks
     pub total_blocks_current: u64,
     /// Sum of previous epoch blocks
@@ -786,43 +786,26 @@ pub struct EpochBootstrapData {
 }
 
 impl EpochBootstrapData {
-    /// Create from SnapshotMetadata
     pub fn from_metadata(metadata: &SnapshotMetadata) -> Self {
-        let blocks_previous: Vec<(PoolId, u64)> = metadata
+        let blocks_previous: HashMap<PoolId, u64> = metadata
             .blocks_previous_epoch
             .iter()
-            .map(|p| {
-                (
-                    p.pool_id
-                        .parse::<PoolId>()
-                        .map_err(|e| anyhow!("Failed to parse pool_id {e}"))
-                        .unwrap(),
-                    p.block_count as u64,
-                )
-            })
+            .map(|p| (p.pool_id, p.block_count as u64))
             .collect();
 
-        let blocks_current: Vec<(PoolId, u64)> = metadata
+        let blocks_current: HashMap<PoolId, u64> = metadata
             .blocks_current_epoch
             .iter()
-            .map(|p| {
-                (
-                    p.pool_id
-                        .parse::<PoolId>()
-                        .map_err(|e| anyhow!("Failed to parse pool_id {e}"))
-                        .unwrap(),
-                    p.block_count as u64,
-                )
-            })
+            .map(|p| (p.pool_id, p.block_count as u64))
             .collect();
 
-        let total_previous: u64 = blocks_previous.iter().map(|(_, c)| c).sum();
-        let total_current: u64 = blocks_current.iter().map(|(_, c)| c).sum();
+        let total_previous = blocks_previous.values().sum();
+        let total_current = blocks_current.values().sum();
 
         Self {
             epoch: metadata.epoch,
-            blocks_previous_epoch: blocks_previous,
-            blocks_current_epoch: blocks_current,
+            spo_blocks_previous: blocks_previous,
+            spo_blocks_current: blocks_current,
             total_blocks_current: total_current,
             total_blocks_previous: total_previous,
         }
@@ -1730,7 +1713,8 @@ impl StreamingSnapshotParser {
         let block_count = decoder.u8().context("Failed to parse block count")?;
 
         // Convert pool ID bytes to hex string
-        let pool_id = hex::encode(pool_id_bytes);
+        let pool_id =
+            hex::encode(pool_id_bytes).parse::<PoolId>().context("Failed to parse pool ID")?;
 
         Ok(PoolBlockProduction {
             pool_id,

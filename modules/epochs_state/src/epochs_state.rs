@@ -89,19 +89,12 @@ impl EpochsState {
                     info!("Epoch state bootstrap complete");
                     return Ok(());
                 }
-                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
-                    _,
-                ))) => {
-                    // Ignore SPO state messages - not relevant for epochs state
-                }
                 Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                    // Snapshot complete without epoch bootstrap data
+                    // Snapshot completes without epoch bootstrap data
                     warn!("Snapshot complete without epoch bootstrap data, using default state");
                     return Ok(());
                 }
-                _ => {
-                    // Ignore other messages during bootstrap
-                }
+                _ => {}
             }
         }
     }
