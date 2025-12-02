@@ -57,7 +57,7 @@ impl EpochsState {
     /// Handle bootstrap message from snapshot
     fn handle_bootstrap(state: &mut State, epoch_data: &EpochBootstrapMessage) {
         // Initialize epoch state from snapshot data
-        state.bootstrap_from_snapshot(epoch_data);
+        state.bootstrap(epoch_data);
 
         info!(
             "Epoch state bootstrapped successfully for epoch {}",
@@ -124,7 +124,7 @@ impl EpochsState {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Wait for snapshot bootstrap (if available)
+        // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
 
         // Consume initial protocol parameters

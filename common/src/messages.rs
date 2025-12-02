@@ -395,7 +395,7 @@ pub struct EpochBootstrapMessage {
     pub nonces: Nonces,
 
     /// Praos Params
-    pub praos_params: PraosParams,
+    pub praos_params: Option<PraosParams>,
 }
 
 #[allow(clippy::large_enum_variant)]

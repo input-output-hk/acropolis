@@ -184,7 +184,7 @@ impl SnapshotPublisher {
             total_fees: 0,    // TODO: get from NewEpochState
             spo_blocks,
             nonces,
-            praos_params: PraosParams::mainnet(), // TODO: Make this configurable?
+            praos_params: Some(PraosParams::mainnet()), // TODO: Make this configurable?
         }
     }
 }
