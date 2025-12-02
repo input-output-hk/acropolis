@@ -55,6 +55,7 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
+    sync_point: Option<Point>,
 }
 
 impl NetworkManager {
@@ -73,6 +74,7 @@ impl NetworkManager {
             events_sender,
             block_sink,
             published_blocks: 0,
+            sync_point: None,
         }
     }
 
@@ -121,6 +123,8 @@ impl NetworkManager {
         let points = self.chain.choose_points_for_find_intersect();
         if !points.is_empty() {
             peer.find_intersect(points);
+        } else if let Some(sync_point) = self.sync_point.as_ref() {
+            peer.find_intersect(vec![sync_point.clone()]);
         }
         self.peers.insert(id, peer);
         if self.chain.preferred_upstream.is_none() {
@@ -153,6 +157,7 @@ impl NetworkManager {
         for peer in self.peers.values() {
             peer.find_intersect(vec![point.clone()]);
         }
+        self.sync_point = Some(point);
     }
 
     // Implementation note: this method is deliberately synchronous/non-blocking.
