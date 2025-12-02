@@ -12,10 +12,8 @@ use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
 use acropolis_common::{
     configuration::StartupMethod,
-    genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
-    BlockHash, BlockInfo, BlockStatus, Era,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -59,7 +57,6 @@ impl SnapshotBootstrapper {
             return Ok(());
         }
 
-        let cfg = SnapshotConfig::try_load(&config)?;
         let cfg = BootstrapConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");
