@@ -88,13 +88,25 @@ impl SlotBlockData {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SpecificPoint {
+    slot: u64,
+    hash: BlockHash,
+}
+impl SpecificPoint {
+    fn as_pallas_point(&self) -> Point {
+        Point::Specific(self.slot, self.hash.to_vec())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ChainState {
     pub preferred_upstream: Option<PeerId>,
     blocks: BTreeMap<u64, SlotBlockData>,
-    published_blocks: VecDeque<(u64, BlockHash)>,
-    unpublished_blocks: VecDeque<(u64, BlockHash)>,
+    published_blocks: VecDeque<SpecificPoint>,
+    unpublished_blocks: VecDeque<SpecificPoint>,
     rolled_back_to: Option<Header>,
+    waiting_for_first_message: bool,
 }
 
 impl ChainState {
@@ -109,7 +121,12 @@ impl ChainState {
         let slot_blocks = self.blocks.entry(header.slot).or_default();
         slot_blocks.track_announcement(id, header);
         if is_preferred {
-            self.unpublished_blocks.push_back((slot, hash));
+            if self.waiting_for_first_message {
+                self.switch_head_to_peer(id);
+            } else {
+                let point = SpecificPoint { slot, hash };
+                self.unpublished_blocks.push_back(point);
+            }
         }
         self.block_announcers(slot, hash)
     }
@@ -131,15 +148,15 @@ impl ChainState {
             Point::Specific(slot, _) => {
                 self.blocks.retain(|s, b| *s <= slot || b.track_rollback(id));
                 if is_preferred {
-                    while let Some((s, _)) = self.unpublished_blocks.back() {
-                        if *s > slot {
+                    while let Some(block) = self.unpublished_blocks.back() {
+                        if block.slot > slot {
                             self.unpublished_blocks.pop_back();
                         } else {
                             break;
                         }
                     }
-                    while let Some((s, _)) = self.published_blocks.back() {
-                        if *s > slot {
+                    while let Some(block) = self.published_blocks.back() {
+                        if block.slot > slot {
                             rolled_back = true;
                             self.published_blocks.pop_back();
                         } else {
@@ -151,6 +168,9 @@ impl ChainState {
         }
         if rolled_back {
             self.rolled_back_to = Some(self.build_header_for_rollback(point));
+        }
+        if is_preferred {
+            self.waiting_for_first_message = false;
         }
     }
 
@@ -195,55 +215,64 @@ impl ChainState {
             return;
         }
         self.preferred_upstream = Some(id);
+        self.switch_head_to_peer(id);
+    }
+
+    fn switch_head_to_peer(&mut self, id: PeerId) {
+        self.waiting_for_first_message = false;
 
         // If there are any blocks queued to be published which our preferred upstream never announced,
         // unqueue them now.
-        while let Some((slot, hash)) = self.unpublished_blocks.back() {
-            let Some(slot_blocks) = self.blocks.get(slot) else {
+        while let Some(block) = self.unpublished_blocks.back() {
+            if let Some(slot_blocks) = self.blocks.get(&block.slot)
+                && slot_blocks.was_hash_announced(id, block.hash)
+            {
                 break;
-            };
-            if !slot_blocks.was_hash_announced(id, *hash) {
+            } else {
                 self.unpublished_blocks.pop_back();
-            } else {
+            }
+        }
+
+        let mut peer_start = None;
+        for (slot, slot_blocks) in self.blocks.iter() {
+            if let Some(hash) = slot_blocks.find_announced_hash(id) {
+                peer_start = Some(SpecificPoint { slot: *slot, hash });
                 break;
             }
         }
 
-        // If we published any blocks which our preferred upstream never announced,
-        // we'll have to publish that we rolled them back
+        let Some(peer_start) = peer_start else {
+            // We haven't seen any blocks from this peer yet, we don't know where to roll back to.
+            self.waiting_for_first_message = true;
+            return;
+        };
+
         let mut rolled_back = false;
-        while let Some((slot, hash)) = self.published_blocks.back() {
-            let Some(slot_blocks) = self.blocks.get(slot) else {
-                break;
-            };
-            if !slot_blocks.was_hash_announced(id, *hash) {
-                rolled_back = true;
+        while let Some(published) = self.published_blocks.back() {
+            if self
+                .blocks
+                .get(&published.slot)
+                .is_none_or(|b| !b.was_hash_announced(id, published.hash))
+            {
                 self.published_blocks.pop_back();
-            } else {
-                break;
+                rolled_back = true;
+                continue;
             }
-        }
 
-        if rolled_back {
-            // we're rolling back, we must report where we've rolled back to
-            if let Some((slot, hash)) = self.published_blocks.back() {
-                // We've rolled back to a point which we announced downstream in this session
+            // we've found a point that's still on the chain
+            if rolled_back {
                 self.rolled_back_to =
-                    Some(self.build_header_for_rollback(Point::Specific(*slot, hash.to_vec())));
-            } else {
-                // We can't roll back, it might be farther than K blocks and break everything
-                todo!("rolled back to a point we haven't seen in-memory yet");
+                    Some(self.build_header_for_rollback(published.as_pallas_point()));
             }
+            break;
         }
 
         // If this other chain has announced blocks which we haven't published yet,
-        // queue them to be published as soon as we have their bodies
-        let head_slot = self.published_blocks.back().map(|(s, _)| *s);
-        if let Some(slot) = head_slot {
-            for (slot, blocks) in self.blocks.range(slot + 1..) {
-                if let Some(hash) = blocks.find_announced_hash(id) {
-                    self.unpublished_blocks.push_back((*slot, hash));
-                }
+        // queue them to be published
+        let next_slot = self.published_blocks.back().map(|b| b.slot + 1).unwrap_or(peer_start.slot);
+        for (slot, blocks) in self.blocks.range(next_slot..) {
+            if let Some(hash) = blocks.find_announced_hash(id) {
+                self.unpublished_blocks.push_back(SpecificPoint { slot: *slot, hash });
             }
         }
     }
@@ -256,9 +285,9 @@ impl ChainState {
         if let Some(header) = &self.rolled_back_to {
             return Some(ChainEvent::RollBackward { header });
         }
-        let (slot, hash) = self.unpublished_blocks.front()?;
-        let slot_blocks = self.blocks.get(slot)?;
-        let (header, body) = slot_blocks.body(*hash)?;
+        let block = self.unpublished_blocks.front()?;
+        let slot_blocks = self.blocks.get(&block.slot)?;
+        let (header, body) = slot_blocks.body(block.hash)?;
         Some(ChainEvent::RollForward { header, body })
     }
 
@@ -269,10 +298,10 @@ impl ChainState {
         if let Some(published) = self.unpublished_blocks.pop_front() {
             self.published_blocks.push_back(published);
             while self.published_blocks.len() > SECURITY_PARAMETER_K as usize {
-                let Some((slot, _)) = self.published_blocks.pop_front() else {
+                let Some(block) = self.published_blocks.pop_front() else {
                     break;
                 };
-                self.blocks.remove(&slot);
+                self.blocks.remove(&block.slot);
             }
         }
     }
@@ -283,16 +312,16 @@ impl ChainState {
 
         // send the 5 most recent points
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
         }
 
         // then 5 more points, spaced out by 10 block heights each
         let mut iterator = iterator.step_by(10);
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
         }
 
@@ -300,8 +329,8 @@ impl ChainState {
         // (in case of an implausibly long rollback)
         let mut iterator = iterator.step_by(10);
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
         }
 
@@ -351,24 +380,31 @@ mod tests {
         let peer = PeerId(0);
         state.handle_new_preferred_upstream(peer);
 
-        let (header, body) = make_block(0, "first block");
+        let (h0, _) = make_block(0, "initial block");
+        let (h1, b1) = make_block(1, "new block");
+
+        // our peer will start with a rollback.
+        state.handle_roll_backward(peer, Point::Specific(h0.slot, h0.hash.to_vec()));
+
+        // we don't have any new events to report yet
+        assert_eq!(state.next_unpublished_event(), None);
 
         // simulate a roll forward from our peer
-        let announced = state.handle_roll_forward(peer, header.clone());
+        let announced = state.handle_roll_forward(peer, h1.clone());
         assert_eq!(announced, vec![peer]);
 
         // we don't have any new events to report yet
         assert_eq!(state.next_unpublished_event(), None);
 
         // report that our peer returned the body
-        state.handle_body_fetched(header.slot, header.hash, body.clone());
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
 
         // NOW we have a new block to report
         assert_eq!(
             state.next_unpublished_event(),
             Some(ChainEvent::RollForward {
-                header: &header,
-                body: body.as_slice(),
+                header: &h1,
+                body: b1.as_slice(),
             }),
         );
         state.handle_event_published();
@@ -618,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn should_gracefully_handle_switching_chains() {
+    fn should_gracefully_switch_to_chain_on_fork() {
         let mut state = ChainState::new();
         let p1 = PeerId(0);
         let p2 = PeerId(1);
@@ -694,6 +730,137 @@ mod tests {
             Some(ChainEvent::RollForward {
                 header: &p2h3,
                 body: p2b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    #[test]
+    fn should_gracefully_switch_to_new_chain_at_older_head() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(10, "first block");
+        let (h2, b2) = make_block(11, "second block");
+        let (h3, b3) = make_block(12, "third block");
+
+        // publish three blocks on our current chain
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
+        state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
+        state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // now a new peer joins, and we switch to them
+        let p2 = PeerId(1);
+        state.handle_new_preferred_upstream(p2);
+
+        // We don't know enough about them to decide whether to roll back yet
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // When they roll back to an earlier block, we roll back to that block.
+        state.handle_roll_backward(p2, Point::Specific(h1.slot, h1.hash.to_vec()));
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollBackward { header: &h1 }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // and when they roll forward to the next block, we follow
+        assert_eq!(state.handle_roll_forward(p2, h2.clone()), vec![p1, p2]);
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    #[test]
+    fn should_gracefully_switch_to_new_chain_at_current_head() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(10, "first block");
+        let (h2, b2) = make_block(11, "second block");
+        let (h3, b3) = make_block(12, "third block");
+
+        // publish two blocks on our current chain
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
+        state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // now a new peer joins, and we switch to them
+        let p2 = PeerId(1);
+        state.handle_new_preferred_upstream(p2);
+
+        // We don't know enough about them to decide whether to roll back yet
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // They "roll back" to the point we're on, we don't react
+        state.handle_roll_backward(p2, Point::Specific(h2.slot, h2.hash.to_vec()));
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // They roll forward to the next point
+        assert_eq!(state.handle_roll_forward(p2, h3.clone()), vec![p2]);
+        state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
             }),
         );
         state.handle_event_published();
