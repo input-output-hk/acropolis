@@ -11,6 +11,7 @@
 
 // Submodules
 mod error;
+pub mod mark_set_go;
 mod parser;
 pub mod pool_params;
 pub mod streaming_snapshot;
@@ -28,3 +29,6 @@ pub use streaming_snapshot::{
     ProposalCallback, Relay, SnapshotCallbacks, SnapshotMetadata, StakeAddressState, StakeCallback,
     StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
+
+// Re-export snapshot types
+pub use mark_set_go::{RawSnapshotsContainer, SnapshotsCallback, VMap};

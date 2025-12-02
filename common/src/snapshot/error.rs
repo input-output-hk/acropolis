@@ -30,21 +30,17 @@ pub enum SnapshotError {
 impl fmt::Display for SnapshotError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SnapshotError::FileNotFound(msg) => write!(f, "File not found: {}", msg),
-            SnapshotError::StructuralDecode(msg) => write!(f, "Structural decode error: {}", msg),
-            SnapshotError::Cbor(e) => write!(f, "CBOR error: {}", e),
-            SnapshotError::IoError(msg) => write!(f, "I/O error: {}", msg),
+            SnapshotError::FileNotFound(msg) => write!(f, "File not found: {msg}"),
+            SnapshotError::StructuralDecode(msg) => write!(f, "Structural decode error: {msg}"),
+            SnapshotError::Cbor(e) => write!(f, "CBOR error: {e}"),
+            SnapshotError::IoError(msg) => write!(f, "I/O error: {msg}"),
             SnapshotError::EraMismatch { expected, actual } => {
-                write!(f, "Era mismatch: expected {}, got {}", expected, actual)
+                write!(f, "Era mismatch: expected {expected}, got {actual}")
             }
             SnapshotError::IntegrityMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "Integrity mismatch: expected {}, got {}",
-                    expected, actual
-                )
+                write!(f, "Integrity mismatch: expected {expected}, got {actual}")
             }
-            SnapshotError::Json(e) => write!(f, "JSON error: {}", e),
+            SnapshotError::Json(e) => write!(f, "JSON error: {e}"),
         }
     }
 }

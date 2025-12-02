@@ -23,8 +23,11 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, warn};
 
 mod epoch_activity_publisher;
+mod epoch_nonce_publisher;
 mod state;
-use crate::epoch_activity_publisher::EpochActivityPublisher;
+use crate::{
+    epoch_activity_publisher::EpochActivityPublisher, epoch_nonce_publisher::EpochNoncePublisher,
+};
 use state::State;
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -44,6 +47,8 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
+const DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC: (&str, &str) =
+    ("epoch-nonce-publish-topic", "cardano.epoch.nonce");
 
 /// Epochs State module
 #[module(
@@ -108,6 +113,7 @@ impl EpochsState {
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
+        mut epoch_nonce_publisher: EpochNoncePublisher,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -180,6 +186,18 @@ impl EpochsState {
                             }
                         }
                     });
+
+                    // At the beginning of epoch, publish the newly evolved active nonce
+                    // for that epoch
+                    if is_new_epoch {
+                        let active_nonce = state.get_active_nonce();
+                        epoch_nonce_publisher
+                            .publish(block_info, active_nonce)
+                            .await
+                            .unwrap_or_else(|e| {
+                                error!("Failed to publish epoch nonce messages: {e}")
+                            });
+                    }
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
@@ -258,6 +276,11 @@ impl EpochsState {
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
         info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
 
+        let epoch_nonce_publish_topic = config
+            .get_string(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing EpochNonceMessage on '{epoch_nonce_publish_topic}'");
+
         // query topic
         let epochs_query_topic = config
             .get_string(DEFAULT_EPOCHS_QUERY_TOPIC.0)
@@ -282,6 +305,8 @@ impl EpochsState {
         // Publisher
         let epoch_activity_publisher =
             EpochActivityPublisher::new(context.clone(), epoch_activity_publish_topic);
+        let epoch_nonce_publisher =
+            EpochNoncePublisher::new(context.clone(), epoch_nonce_publish_topic);
 
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
@@ -330,6 +355,7 @@ impl EpochsState {
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
+                epoch_nonce_publisher,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
