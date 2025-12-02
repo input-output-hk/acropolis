@@ -24,4 +24,4 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lib]
-path = "src/indexer.rs"
+path = "src/custom_indexer.rs"

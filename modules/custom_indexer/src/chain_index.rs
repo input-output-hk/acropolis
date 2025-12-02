@@ -1,10 +1,10 @@
-use acropolis_common::BlockInfo;
+use acropolis_common::{BlockInfo, Point};
 use anyhow::Result;
 use caryatid_sdk::async_trait;
 use pallas::ledger::traverse::MultiEraTx;
 
 #[async_trait]
-pub trait ManagedIndex: Send + Sync + 'static {
+pub trait ChainIndex: Send + Sync + 'static {
     fn name(&self) -> String;
 
     async fn handle_onchain_tx(&mut self, info: &BlockInfo, tx: &MultiEraTx<'_>) -> Result<()> {
@@ -12,8 +12,8 @@ pub trait ManagedIndex: Send + Sync + 'static {
         Ok(())
     }
 
-    async fn handle_rollback(&mut self, info: &BlockInfo) -> Result<()> {
-        let _ = info;
+    async fn handle_rollback(&mut self, point: &Point) -> Result<()> {
+        let _ = point;
         Ok(())
     }
 }

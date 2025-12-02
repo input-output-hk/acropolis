@@ -46,10 +46,7 @@ impl FjallCursorStore {
 
         // Use stored point if exists or initialize with provided point
         match partition.get("cursor")? {
-            Some(bytes) => {
-                bincode::deserialize::<Point>(&bytes)?;
-                Ok(Self { cursor: partition })
-            }
+            Some(_) => Ok(Self { cursor: partition }),
             None => {
                 let raw = bincode::serialize(&point)?;
                 partition.insert("cursor", raw)?;

@@ -1,6 +1,7 @@
+#![allow(unused)]
 use acropolis_codec::map_parameters::to_pool_id;
 use acropolis_common::{BlockInfo, Lovelace, PoolId};
-use acropolis_module_custom_indexer::managed_index::ManagedIndex;
+use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
 use caryatid_sdk::async_trait;
 use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
@@ -9,6 +10,7 @@ use pallas::ledger::traverse::{MultiEraCert, MultiEraTx};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tokio::sync::watch;
+use tracing::warn;
 
 #[derive(Clone)]
 pub struct FjallPoolCostState {
@@ -46,7 +48,7 @@ impl FjallPoolCostIndex {
 }
 
 #[async_trait]
-impl ManagedIndex for FjallPoolCostIndex {
+impl ChainIndex for FjallPoolCostIndex {
     fn name(&self) -> String {
         "pool-cost-index".into()
     }
@@ -63,7 +65,9 @@ impl ManagedIndex for FjallPoolCostIndex {
                         self.state.pools.insert(pool_id, *cost);
                         self.partition.insert(key, value)?;
 
-                        let _ = self.sender.send(self.state.clone());
+                        if self.sender.send(self.state.clone()).is_err() {
+                            warn!("Pool cost state receiver dropped");
+                        }
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
                         let pool_id = to_pool_id(operator);
@@ -72,7 +76,9 @@ impl ManagedIndex for FjallPoolCostIndex {
                         self.state.pools.remove(&pool_id);
                         self.partition.remove(key)?;
 
-                        let _ = self.sender.send(self.state.clone());
+                        if self.sender.send(self.state.clone()).is_err() {
+                            warn!("Pool cost state receiver dropped");
+                        }
                     }
 
                     _ => {}
@@ -86,7 +92,9 @@ impl ManagedIndex for FjallPoolCostIndex {
                         self.state.pools.insert(pool_id, *cost);
                         self.partition.insert(key, value)?;
 
-                        let _ = self.sender.send(self.state.clone());
+                        if self.sender.send(self.state.clone()).is_err() {
+                            warn!("Pool cost state receiver dropped");
+                        }
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
                         let pool_id = to_pool_id(operator);
@@ -95,7 +103,9 @@ impl ManagedIndex for FjallPoolCostIndex {
                         self.state.pools.remove(&to_pool_id(operator));
                         self.partition.remove(key)?;
 
-                        let _ = self.sender.send(self.state.clone());
+                        if self.sender.send(self.state.clone()).is_err() {
+                            warn!("Pool cost state receiver dropped");
+                        }
                     }
                     _ => {}
                 },

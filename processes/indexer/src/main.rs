@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::watch;
 
 use acropolis_module_block_unpacker::BlockUnpacker;
-use acropolis_module_custom_indexer::chain_indexer::CustomIndexer;
+use acropolis_module_custom_indexer::CustomIndexer;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 
@@ -51,6 +51,12 @@ async fn main() -> Result<()> {
     let (sender, receiver) = watch::channel(FjallPoolCostState {
         pools: BTreeMap::new(),
     });
+
+    /* Uncomment to test in memory indexer
+    let (sender, receiver) = watch::channel(InMemoryPoolCostState {
+        pools: BTreeMap::new(),
+    });
+    */
 
     // Example receiver
     {
