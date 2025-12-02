@@ -1,5 +1,5 @@
 mod configuration;
-mod data;
+mod context;
 mod downloader;
 mod header;
 mod nonces;
@@ -7,7 +7,7 @@ mod progress_reader;
 mod publisher;
 
 use crate::configuration::BootstrapConfig;
-use crate::data::{BootstrapData, BootstrapDataError};
+use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
 use acropolis_common::{
@@ -26,7 +26,7 @@ use tracing::{error, info, info_span, Instrument};
 #[derive(Debug, Error)]
 pub enum BootstrapError {
     #[error("Configuration error: {0}")]
-    Data(#[from] BootstrapDataError),
+    Data(#[from] BootstrapContextError),
 
     #[error("Download error: {0}")]
     Download(#[from] DownloadError),
@@ -91,7 +91,7 @@ impl SnapshotBootstrapper {
     ) -> Result<(), BootstrapError> {
         Self::wait_for_genesis(bootstrapped_sub).await?;
 
-        let data = BootstrapData::load(&cfg)?;
+        let data = BootstrapContext::load(&cfg)?;
         info!("Loaded bootstrap data for epoch {}", data.block_info.epoch);
         info!("  Snapshot: {}", data.snapshot.url);
         info!(
@@ -109,7 +109,7 @@ impl SnapshotBootstrapper {
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
         )
-        .with_bootstrap_context(data.context());
+        .with_epoch_context(data.context());
 
         publisher.publish_start().await?;
 

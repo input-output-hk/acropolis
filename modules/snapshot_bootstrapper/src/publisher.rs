@@ -18,13 +18,13 @@ use caryatid_sdk::Context;
 use std::sync::Arc;
 use tracing::info;
 
-/// External bootstrap context providing nonces and timing information.
+/// External epoch context containing nonces and timing information.
 ///
 /// This data comes from bootstrap configuration files (nonces.json, headers/{slot}.{block_header_hash}.cbor, etc)
 /// and is not available to the CBOR parser. It's injected into the publisher
 /// so that `EpochBootstrapMessage` can include complete information, among other things.
 #[derive(Debug, Clone)]
-pub struct BootstrapContext {
+pub struct EpochContext {
     /// Nonces for the target epoch
     pub nonces: Nonces,
     /// Epoch start time (UNIX timestamp)
@@ -37,7 +37,7 @@ pub struct BootstrapContext {
     pub last_block_height: u64,
 }
 
-impl BootstrapContext {
+impl EpochContext {
     /// Build context from nonces, header data, and genesis values.
     ///
     /// * `nonces` - Nonces loaded from nonces.json
@@ -83,7 +83,7 @@ pub struct SnapshotPublisher {
     proposals: Vec<GovernanceProposal>,
 
     /// Optional external context with nonces and timing
-    bootstrap_context: Option<BootstrapContext>,
+    epoch_context: Option<EpochContext>,
 }
 
 impl SnapshotPublisher {
@@ -103,13 +103,13 @@ impl SnapshotPublisher {
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
-            bootstrap_context: None,
+            epoch_context: None,
         }
     }
 
     /// Add external bootstrap context (nonces, timing info).
-    pub fn with_bootstrap_context(mut self, ctx: BootstrapContext) -> Self {
-        self.bootstrap_context = Some(ctx);
+    pub fn with_epoch_context(mut self, ctx: EpochContext) -> Self {
+        self.epoch_context = Some(ctx);
         self
     }
 
@@ -154,7 +154,7 @@ impl SnapshotPublisher {
             last_block_time,
             last_block_height,
             nonces,
-        ) = match &self.bootstrap_context {
+        ) = match &self.epoch_context {
             Some(ctx) => {
                 let first_height = ctx.last_block_height.saturating_sub(data.total_blocks_current);
                 (
@@ -332,7 +332,7 @@ mod tests {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
 
-        let ctx = BootstrapContext::new(
+        let ctx = EpochContext::new(
             nonces.clone(),
             134956789, // slot
             11000000,  // block height
@@ -352,7 +352,7 @@ mod tests {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
 
-        let ctx = BootstrapContext::new(nonces.clone(), 134956789, 11000000, 509, &genesis);
+        let ctx = EpochContext::new(nonces.clone(), 134956789, 11000000, 509, &genesis);
 
         // Verify nonce conversion works
         assert_eq!(ctx.nonces, nonces);

@@ -1,7 +1,7 @@
 use crate::configuration::{BootstrapConfig, ConfigError, Snapshot, TargetConfig};
-use crate::header::{Header, HeaderError};
-use crate::nonces::{NoncesError, NoncesFile};
-use crate::publisher::BootstrapContext;
+use crate::header::{HeaderContext, HeaderContextError};
+use crate::nonces::{NonceContext, NonceContextError};
+use crate::publisher::EpochContext;
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::protocol_params::Nonces;
 use acropolis_common::{BlockInfo, BlockStatus, Era, Point};
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum BootstrapDataError {
+pub enum BootstrapContextError {
     #[error("Origin point has no hash")]
     OriginPoint,
 
@@ -20,10 +20,10 @@ pub enum BootstrapDataError {
     },
 
     #[error(transparent)]
-    Header(#[from] HeaderError),
+    Header(#[from] HeaderContextError),
 
     #[error(transparent)]
-    Nonces(#[from] NoncesError),
+    Nonces(#[from] NonceContextError),
 
     #[error(transparent)]
     Config(#[from] ConfigError),
@@ -31,7 +31,7 @@ pub enum BootstrapDataError {
 
 /// Everything needed to bootstrap from a snapshot.
 #[derive(Debug)]
-pub struct BootstrapData {
+pub struct BootstrapContext {
     pub genesis: GenesisValues,
     pub snapshot: Snapshot,
     pub nonces: Nonces,
@@ -39,26 +39,26 @@ pub struct BootstrapData {
     network_dir: PathBuf,
 }
 
-impl BootstrapData {
+impl BootstrapContext {
     /// Load all bootstrap data from the network directory.
-    pub fn load(config: &BootstrapConfig) -> Result<Self, BootstrapDataError> {
+    pub fn load(config: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
         let network_dir = config.network_dir();
         let genesis = genesis_for_network(&config.network);
 
         let target_epoch = TargetConfig::load(&network_dir)?.snapshot;
         let snapshot = Snapshot::load_for_epoch(&network_dir, target_epoch)?;
-        let nonces_file = NoncesFile::load(&network_dir)?;
+        let nonces_file = NonceContext::load(&network_dir)?;
 
         // Validate nonces match snapshot point
         if nonces_file.at != snapshot.point {
-            return Err(BootstrapDataError::NoncesPointMismatch {
+            return Err(BootstrapContextError::NoncesPointMismatch {
                 nonces_point: nonces_file.at.clone(),
                 snapshot_point: snapshot.point.clone(),
             });
         }
 
         // Load header
-        let header = Header::load(&network_dir, &snapshot.point)?;
+        let header = HeaderContext::load(&network_dir, &snapshot.point)?;
         let hash = header.block_hash;
         let slot = header.point.slot();
 
@@ -99,8 +99,8 @@ impl BootstrapData {
     }
 
     /// Create the bootstrap context for the publisher.
-    pub fn context(&self) -> BootstrapContext {
-        BootstrapContext::new(
+    pub fn context(&self) -> EpochContext {
+        EpochContext::new(
             self.nonces.clone(),
             self.block_info.slot,
             self.block_info.number,

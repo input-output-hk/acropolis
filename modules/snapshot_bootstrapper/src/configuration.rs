@@ -19,7 +19,7 @@ pub enum ConfigError {
     SnapshotNotFound(u64),
 }
 
-/// Bootstrap module configuration (from TOML).
+/// Bootstrap module configuration (from either omnibus.toml or config.default.toml).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BootstrapConfig {
