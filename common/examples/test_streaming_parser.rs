@@ -216,7 +216,7 @@ impl SnapshotCallbacks for CountingCallbacks {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id[..16],
+                    &production.pool_id,
                     production.block_count,
                     production.epoch
                 );
@@ -237,7 +237,7 @@ impl SnapshotCallbacks for CountingCallbacks {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id[..16],
+                    &production.pool_id,
                     production.block_count,
                     production.epoch
                 );
