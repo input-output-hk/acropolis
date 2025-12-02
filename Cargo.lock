@@ -204,7 +204,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "futures",
  "pallas 0.33.0",
  "serde",
  "tokio",
@@ -531,7 +530,6 @@ dependencies = [
  "config",
  "fjall",
  "pallas 0.33.0",
- "plutus-parser",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4868,29 +4866,6 @@ name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
-
-[[package]]
-name = "plutus-parser"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c91c35ed696191fddf770ed73605614336cfa1458c21efae905aed0783c806e"
-dependencies = [
- "indexmap 2.12.0",
- "pallas-primitives 0.33.0",
- "plutus-parser-derive",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "plutus-parser-derive"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb90dc0af619a3872f56e62da683792c43ccb940f55f76ed0f84b7e666bf813a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
 
 [[package]]
 name = "polling"
