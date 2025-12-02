@@ -26,7 +26,6 @@ pub enum HeaderContextError {
 pub struct HeaderContext {
     pub point: Point,
     pub block_number: u64,
-    pub block_hash: Hash<32>,
 }
 
 impl HeaderContext {
@@ -53,13 +52,9 @@ impl HeaderContext {
         let minted: MintedHeader<'_> = minicbor::decode(&cbor)
             .map_err(|e| HeaderContextError::Decode(point.slot(), e.to_string()))?;
         let header = ConwayHeader::from(minted);
-        let block_body_hash = header.header_body.block_body_hash;
-        let hash = Self::convert_hash(block_body_hash.as_ref())?;
-
         Ok(Self {
             point: point.clone(),
             block_number: header.header_body.block_number,
-            block_hash: hash,
         })
     }
 }
