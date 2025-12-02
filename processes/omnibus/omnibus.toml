@@ -21,6 +21,7 @@ download-max-age = "never"
 pause = "none"
 
 [module.snapshot-bootstrapper]
+epoch = 509
 network = "mainnet"
 data-dir = "../../modules/snapshot_bootstrapper/data"
 

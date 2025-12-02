@@ -25,6 +25,9 @@ The snapshot bootstrapper:
 ```toml
 [module.snapshot-bootstrapper]
 
+# Target epoch to download and process.
+epoch = 500
+
 # Network and data
 network = "mainnet"
 data-dir = "./data"
@@ -45,7 +48,6 @@ progress-log-interval = 200
 
 The module expects the following files in `{data-dir}/{network}/`:
 
-- **`config.json`** - Network configuration specifying which snapshot epoch to load
 - **`snapshots.json`** - Snapshot metadata including download URLs
 
 The snapshot file is downloaded to `{data-dir}/{network}/{point}.cbor`.

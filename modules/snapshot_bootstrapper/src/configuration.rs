@@ -19,12 +19,12 @@ pub enum ConfigError {
     SnapshotNotFound(u64),
 }
 
-/// Bootstrap module configuration (from either omnibus.toml or config.default.toml).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BootstrapConfig {
     pub network: String,
     pub data_dir: PathBuf,
+    pub epoch: u64, // The target epoch, straight from TOML
     pub snapshot_topic: String,
     pub bootstrapped_subscribe_topic: String,
     pub completion_topic: String,
@@ -47,8 +47,11 @@ impl BootstrapConfig {
     pub fn network_dir(&self) -> PathBuf {
         self.data_dir.join(&self.network)
     }
-}
 
+    pub fn snapshot(&self) -> Result<Snapshot, ConfigError> {
+        Snapshot::load_for_epoch(&self.network_dir(), self.epoch)
+    }
+}
 /// Download settings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -80,25 +83,6 @@ mod defaults {
     }
     pub fn progress_interval() -> u64 {
         200
-    }
-}
-
-/// Target epoch configuration from config.json.
-#[derive(Debug, Deserialize)]
-pub struct TargetConfig {
-    pub snapshot: u64,
-}
-
-impl TargetConfig {
-    pub fn path(network_dir: &Path) -> PathBuf {
-        network_dir.join("config.json")
-    }
-
-    pub fn load(network_dir: &Path) -> Result<Self, ConfigError> {
-        let path = Self::path(network_dir);
-        let content =
-            fs::read_to_string(&path).map_err(|e| ConfigError::ReadFile(path.clone(), e))?;
-        serde_json::from_str(&content).map_err(|e| ConfigError::ParseJson(path, e))
     }
 }
 

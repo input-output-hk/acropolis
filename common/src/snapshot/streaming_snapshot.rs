@@ -776,9 +776,9 @@ pub struct EpochBootstrapData {
     /// Current epoch number
     pub epoch: u64,
     /// Pool ID (hex) → block count
-    pub blocks_previous_epoch: Vec<(String, u64)>,
+    pub blocks_previous_epoch: Vec<(PoolId, u64)>,
     /// Pool ID (hex) → block count
-    pub blocks_current_epoch: Vec<(String, u64)>,
+    pub blocks_current_epoch: Vec<(PoolId, u64)>,
     /// Sum of current epoch blocks
     pub total_blocks_current: u64,
     /// Sum of previous epoch blocks
@@ -788,16 +788,32 @@ pub struct EpochBootstrapData {
 impl EpochBootstrapData {
     /// Create from SnapshotMetadata
     pub fn from_metadata(metadata: &SnapshotMetadata) -> Self {
-        let blocks_previous: Vec<(String, u64)> = metadata
+        let blocks_previous: Vec<(PoolId, u64)> = metadata
             .blocks_previous_epoch
             .iter()
-            .map(|p| (p.pool_id.clone(), p.block_count as u64))
+            .map(|p| {
+                (
+                    p.pool_id
+                        .parse::<PoolId>()
+                        .map_err(|e| anyhow!("Failed to parse pool_id {e}"))
+                        .unwrap(),
+                    p.block_count as u64,
+                )
+            })
             .collect();
 
-        let blocks_current: Vec<(String, u64)> = metadata
+        let blocks_current: Vec<(PoolId, u64)> = metadata
             .blocks_current_epoch
             .iter()
-            .map(|p| (p.pool_id.clone(), p.block_count as u64))
+            .map(|p| {
+                (
+                    p.pool_id
+                        .parse::<PoolId>()
+                        .map_err(|e| anyhow!("Failed to parse pool_id {e}"))
+                        .unwrap(),
+                    p.block_count as u64,
+                )
+            })
             .collect();
 
         let total_previous: u64 = blocks_previous.iter().map(|(_, c)| c).sum();

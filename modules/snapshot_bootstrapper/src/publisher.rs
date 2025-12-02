@@ -139,10 +139,7 @@ impl SnapshotPublisher {
         let spo_blocks: Vec<(PoolId, usize)> = data
             .blocks_current_epoch
             .iter()
-            .filter_map(|(pool_id_hex, count)| {
-                let pool_id: PoolId = pool_id_hex.parse().ok()?;
-                Some((pool_id, *count as usize))
-            })
+            .map(|(pool_id, count)| (*pool_id, *count as usize))
             .collect();
 
         // Extract timing and nonces from external context if available

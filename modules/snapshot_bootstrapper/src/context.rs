@@ -1,4 +1,4 @@
-use crate::configuration::{BootstrapConfig, ConfigError, Snapshot, TargetConfig};
+use crate::configuration::{BootstrapConfig, ConfigError, Snapshot};
 use crate::header::{HeaderContext, HeaderContextError};
 use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
@@ -41,12 +41,12 @@ pub struct BootstrapContext {
 
 impl BootstrapContext {
     /// Load all bootstrap data from the network directory.
-    pub fn load(config: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
-        let network_dir = config.network_dir();
-        let genesis = genesis_for_network(&config.network);
+    pub fn load(cfg: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
+        let target_epoch = cfg.epoch;
+        let snapshot = cfg.snapshot()?;
+        let network_dir = cfg.network_dir();
+        let genesis = genesis_for_network(&cfg.network);
 
-        let target_epoch = TargetConfig::load(&network_dir)?.snapshot;
-        let snapshot = Snapshot::load_for_epoch(&network_dir, target_epoch)?;
         let nonces_file = NonceContext::load(&network_dir)?;
 
         // Validate nonces match snapshot point
