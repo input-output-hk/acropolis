@@ -85,7 +85,7 @@ impl EpochsState {
                 )) => {
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
-                    history.lock().await.commit(epoch_data.last_block_height, state);
+                    history.lock().await.commit(epoch_data.epoch, state);
                     info!("Epoch state bootstrap complete");
                     return Ok(());
                 }
