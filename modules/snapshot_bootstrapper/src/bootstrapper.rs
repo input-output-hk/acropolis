@@ -1,5 +1,7 @@
 mod configuration;
 mod downloader;
+mod header;
+mod nonces;
 mod progress_reader;
 mod publisher;
 
