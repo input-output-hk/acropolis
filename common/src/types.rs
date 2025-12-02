@@ -735,6 +735,31 @@ pub enum Point {
     },
 }
 
+impl Point {
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Origin => 0,
+            Self::Specific { slot, .. } => *slot,
+        }
+    }
+
+    pub fn hash(&self) -> Option<&BlockHash> {
+        match self {
+            Self::Origin => None,
+            Self::Specific { hash, .. } => Some(hash),
+        }
+    }
+}
+
+impl Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Origin => write!(f, "origin"),
+            Self::Specific { hash, slot } => write!(f, "{}@{}", hash, slot),
+        }
+    }
+}
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
