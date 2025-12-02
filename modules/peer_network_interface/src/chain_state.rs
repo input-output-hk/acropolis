@@ -334,6 +334,14 @@ impl ChainState {
             }
         }
 
+        // finally, in case of a rollback of nearly unprecedented size, fall back to the oldest point we know of
+        let oldest_point = self.published_blocks.front().map(|p| p.as_pallas_point());
+        if oldest_point.as_ref() != result.last()
+            && let Some(point) = oldest_point
+        {
+            result.push(point);
+        }
+
         result
     }
 
