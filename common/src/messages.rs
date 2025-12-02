@@ -1,8 +1,5 @@
 //! Definition of Acropolis messages
 
-// We don't use these messages in the acropolis_common crate itself
-#![allow(dead_code)]
-
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -43,6 +40,13 @@ pub struct RawBlockMessage {
 
     /// Body raw data
     pub body: Vec<u8>,
+}
+
+/// Rollback message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateTransitionMessage {
+    /// The chain has been rolled back to a specific point
+    Rollback(Point),
 }
 
 /// Snapshot completion message
@@ -303,6 +307,7 @@ pub struct SPOStateMessage {
 #[allow(clippy::large_enum_variant)]
 pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
+    StateTransition(StateTransitionMessage), // Our position on the chain has changed
     BlockValidation(ValidationStatus),       // Result of a block validation
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available

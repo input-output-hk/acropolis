@@ -2,7 +2,8 @@
 //! Manages stake and reward accounts state
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    caryatid::SubscriptionExt,
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -120,17 +121,13 @@ impl AccountsState {
             // Get a mutable state
             let mut state = history.lock().await.get_current_state();
 
-            // Read per-block topics in parallel
-            let certs_message_f = certs_subscription.read();
-            let stake_message_f = stake_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.read();
             let mut current_block: Option<BlockInfo> = None;
 
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -138,6 +135,16 @@ impl AccountsState {
 
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    drep_publisher.publish_rollback(certs_message.clone()).await?;
+                    spo_publisher.publish_rollback(certs_message.clone()).await?;
+                    spo_rewards_publisher.publish_rollback(certs_message.clone()).await?;
+                    stake_reward_deltas_publisher.publish_rollback(certs_message.clone()).await?;
+                    false
                 }
                 _ => false,
             };
@@ -149,11 +156,6 @@ impl AccountsState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let dreps_message_f = drep_state_subscription.read();
-                let spos_message_f = spos_subscription.read();
-                let ea_message_f = ea_subscription.read();
-                let params_message_f = parameters_subscription.read();
-
                 let spdd_store_guard = match spdd_store.as_ref() {
                     Some(s) => Some(s.lock().await),
                     None => None,
@@ -177,7 +179,7 @@ impl AccountsState {
                 }
 
                 // Handle DRep
-                let (_, message) = dreps_message_f.await?;
+                let (_, message) = drep_state_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
                         let span = info_span!(
@@ -201,7 +203,7 @@ impl AccountsState {
                 }
 
                 // Handle SPOs
-                let (_, message) = spos_message_f.await?;
+                let (_, message) = spos_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::SPOState(spo_msg))) => {
                         let span =
@@ -220,7 +222,7 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                let (_, message) = params_message_f.await?;
+                let (_, message) = parameters_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
                         let span = info_span!(
@@ -242,7 +244,7 @@ impl AccountsState {
                 }
 
                 // Handle epoch activity
-                let (_, message) = ea_message_f.await?;
+                let (_, message) = ea_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
                         let span = info_span!(
@@ -298,11 +300,18 @@ impl AccountsState {
                     .await;
                 }
 
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // Ignore this, we already handled rollbacks
+                }
+
                 _ => error!("Unexpected message type: {certs_message:?}"),
             }
 
             // Handle withdrawals
-            let (_, message) = withdrawals_message_f.await?;
+            let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::Withdrawals(withdrawals_msg))) => {
                     let span = info_span!(
@@ -324,7 +333,7 @@ impl AccountsState {
             }
 
             // Handle stake address deltas
-            let (_, message) = stake_message_f.await?;
+            let (_, message) = stake_subscription.read_ignoring_rollbacks().await?;
             match message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::StakeAddressDeltas(deltas_msg))) => {
                     let span = info_span!(

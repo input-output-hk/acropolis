@@ -22,6 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     fmt::{Display, Formatter},
+    net::{Ipv4Addr, Ipv6Addr},
     ops::{AddAssign, Neg},
     str::FromStr,
 };
@@ -723,6 +724,17 @@ impl TxOutRef {
 /// Slot
 pub type Slot = u64;
 
+/// Point on the chain
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+pub enum Point {
+    #[default]
+    Origin,
+    Specific {
+        hash: BlockHash,
+        slot: Slot,
+    },
+}
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
@@ -773,6 +785,16 @@ pub enum Pot {
     Reserves,
     Treasury,
     Deposits,
+}
+
+impl fmt::Display for Pot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Pot::Reserves => write!(f, "reserves"),
+            Pot::Treasury => write!(f, "treasury"),
+            Pot::Deposits => write!(f, "deposits"),
+        }
+    }
 }
 
 /// Pot Delta - internal change of pot values at genesis / era boundaries
@@ -910,10 +932,10 @@ pub struct SingleHostAddr {
     pub port: Option<u16>,
 
     /// Optional IPv4 address
-    pub ipv4: Option<[u8; 4]>,
+    pub ipv4: Option<Ipv4Addr>,
 
     /// Optional IPv6 address
-    pub ipv6: Option<[u8; 16]>,
+    pub ipv6: Option<Ipv6Addr>,
 }
 
 /// Relay hostname
@@ -1131,6 +1153,15 @@ pub struct GenesisKeyDelegation {
 pub enum InstantaneousRewardSource {
     Reserves,
     Treasury,
+}
+
+impl fmt::Display for InstantaneousRewardSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InstantaneousRewardSource::Reserves => write!(f, "reserves"),
+            InstantaneousRewardSource::Treasury => write!(f, "treasury"),
+        }
+    }
 }
 
 /// Target of a MIR

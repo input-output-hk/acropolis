@@ -64,6 +64,7 @@ use handlers::{
         handle_pool_votes_blockfrost, handle_pools_extended_retired_retiring_single_blockfrost,
         handle_pools_list_blockfrost,
     },
+    transactions::handle_transactions_blockfrost,
 };
 
 use crate::handlers_config::HandlersConfig;
@@ -225,6 +226,15 @@ const DEFAULT_HANDLE_EPOCH_TOTAL_BLOCKS_TOPIC: (&str, &str) = (
 const DEFAULT_HANDLE_EPOCH_POOL_BLOCKS_TOPIC: (&str, &str) = (
     "handle-topic-epoch-pool-blocks",
     "rest.get.epochs.*.blocks.*",
+);
+
+// Transactions topics
+const DEFAULT_HANDLE_TRANSACTIONS_TOPIC: (&str, &str) = ("handle-transactions", "rest.get.txs.*");
+const DEFAULT_HANDLE_TRANSACTIONS_SUB_TOPIC: (&str, &str) =
+    ("handle-transactions-sub", "rest.get.txs.*.*");
+const DEFAULT_HANDLE_TRANSACTIONS_METADATA_SUB_TOPIC: (&str, &str) = (
+    "handle-transactions-metadata-sub",
+    "rest.get.txs.metadata.*",
 );
 
 // Assets topics
@@ -751,6 +761,30 @@ impl BlockfrostREST {
             DEFAULT_HANDLE_ADDRESS_TRANSACTIONS_TOPIC,
             handlers_config.clone(),
             handle_address_transactions_blockfrost,
+        );
+
+        // Handler for /txs/{hash}
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_TRANSACTIONS_TOPIC,
+            handlers_config.clone(),
+            handle_transactions_blockfrost,
+        );
+
+        // Handler for /txs/{hash}/*
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_TRANSACTIONS_SUB_TOPIC,
+            handlers_config.clone(),
+            handle_transactions_blockfrost,
+        );
+
+        // Handler for /txs/{hash}/*/*
+        register_handler(
+            context.clone(),
+            DEFAULT_HANDLE_TRANSACTIONS_METADATA_SUB_TOPIC,
+            handlers_config.clone(),
+            handle_transactions_blockfrost,
         );
 
         Ok(())

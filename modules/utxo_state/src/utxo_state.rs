@@ -2,7 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
 use caryatid_sdk::{module, Context};
@@ -99,6 +99,18 @@ impl UTXOState {
                         }
                         .instrument(span)
                         .await;
+                    }
+
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
+                        let mut state = state1.lock().await;
+                        state
+                            .handle_rollback(message)
+                            .await
+                            .inspect_err(|e| error!("Rollback handling error: {e}"))
+                            .ok();
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),

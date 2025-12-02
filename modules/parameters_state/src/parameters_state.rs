@@ -1,6 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -102,7 +103,8 @@ impl ParametersState {
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         loop {
-            match enact_s.read().await?.1.as_ref() {
+            let (_, message) = enact_s.read().await?;
+            match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
                     let span = info_span!("parameters_state.handle", epoch = block.epoch);
                     async {
@@ -143,6 +145,13 @@ impl ParametersState {
                     }
                     .instrument(span)
                     .await?;
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // forward the rollback downstream
+                    config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }
                 msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
