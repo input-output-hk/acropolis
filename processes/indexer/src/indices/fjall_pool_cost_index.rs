@@ -100,7 +100,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         let pool_id = to_pool_id(operator);
                         let key = pool_id.as_ref();
 
-                        self.state.pools.remove(&to_pool_id(operator));
+                        self.state.pools.remove(&pool_id);
                         self.partition.remove(key)?;
 
                         if self.sender.send(self.state.clone()).is_err() {
