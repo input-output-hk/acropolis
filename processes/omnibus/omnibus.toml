@@ -82,7 +82,6 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-# Enables /epochs/{number}/{next | previous}
 store-spdd = false
 
 [module.historical-accounts-state]
@@ -139,6 +138,7 @@ write-full-cache = "false"
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
+spdd-clear-on-start = true
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"

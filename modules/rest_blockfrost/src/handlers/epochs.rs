@@ -630,7 +630,7 @@ pub async fn handle_epoch_total_blocks_blockfrost(
         )));
         let epoch_info = query_state(
             &context,
-            &handlers_config.epochs_query_topic,
+            &handlers_config.historical_epochs_query_topic,
             epoch_info_msg,
             |message| match message {
                 Message::StateQueryResponse(StateQueryResponse::Epochs(

@@ -7,7 +7,10 @@ use std::array::TryFromSliceError;
 
 use thiserror::Error;
 
-use crate::{protocol_params::Nonce, GenesisKeyhash, PoolId, Slot, VrfKeyHash};
+use crate::{
+    protocol_params::Nonce, rational_number::RationalNumber, GenesisKeyhash, PoolId, Slot,
+    VrfKeyHash,
+};
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -61,7 +64,7 @@ pub enum VrfValidationError {
     PraosBadVrfProof(#[from] PraosBadVrfProofError),
     /// **Cause:** The VRF output is too large for this pool's stake.
     /// The pool lost the slot lottery
-    #[error("VRF Leader Value Too Big")]
+    #[error("{0}")]
     VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
     /// **Cause:** This slot is in the overlay schedule but marked as non-active.
     /// It's an intentional gap slot where no blocks should be produced.
@@ -166,8 +169,12 @@ impl PartialEq for PraosBadVrfProofError {
 // ------------------------------------------------------------ VrfLeaderValueTooBigError
 #[derive(Error, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum VrfLeaderValueTooBigError {
-    #[error("VRF Leader Value Too Big")]
-    VrfLeaderValueTooBig,
+    #[error("VRF Leader Value Too Big: pool_id={pool_id}, active_stake={active_stake}, relative_stake={relative_stake}")]
+    VrfLeaderValueTooBig {
+        pool_id: PoolId,
+        active_stake: u64,
+        relative_stake: RationalNumber,
+    },
 }
 
 // ------------------------------------------------------------ BadVrfProofError
