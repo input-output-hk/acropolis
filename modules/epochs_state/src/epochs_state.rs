@@ -105,6 +105,7 @@ impl EpochsState {
     }
 
     /// Run loop
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,

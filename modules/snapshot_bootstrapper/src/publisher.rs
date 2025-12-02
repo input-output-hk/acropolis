@@ -1,4 +1,5 @@
 use acropolis_common::protocol_params::{Nonces, PraosParams};
+use acropolis_common::snapshot::{RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
@@ -8,7 +9,7 @@ use acropolis_common::{
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochBootstrapData, EpochCallback, GovernanceProposal,
         PoolCallback, PoolInfo, ProposalCallback, SnapshotCallbacks, SnapshotMetadata,
-        StakeCallback, UtxoCallback, UtxoEntry
+        StakeCallback, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
     BlockInfo,

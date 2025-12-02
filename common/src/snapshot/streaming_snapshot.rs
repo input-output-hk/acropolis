@@ -859,7 +859,13 @@ pub trait ProposalCallback {
 
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
-    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback + SnapshotsCallback + EpochCallback
+    UtxoCallback
+    + PoolCallback
+    + StakeCallback
+    + DRepCallback
+    + ProposalCallback
+    + SnapshotsCallback
+    + EpochCallback
 {
     /// Called before streaming begins with metadata
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()>;
@@ -1385,8 +1391,10 @@ impl StreamingSnapshotParser {
             }
             Err(_) => None,
         };
-        callbacks.on_metadata(SnapshotMetadata {
+
+        let snapshot_metadata = SnapshotMetadata {
             epoch,
+            snapshots: snapshots_info,
             pot_balances: PotBalances {
                 reserves,
                 treasury,
@@ -1396,22 +1404,12 @@ impl StreamingSnapshotParser {
             utxo_count: Some(utxo_count),
             blocks_previous_epoch: blocks_previous_epoch.clone(),
             blocks_current_epoch: blocks_current_epoch.clone(),
-        })?;
+        };
 
-        let epoch_bootstrap = EpochBootstrapData::from_metadata(&SnapshotMetadata {
-            epoch,
-            pot_balances: PotBalances {
-                reserves,
-                treasury,
-                deposits,
-            },
-            utxo_count: Some(utxo_count),
-            blocks_previous_epoch,
-            blocks_current_epoch,
-        });
+        callbacks.on_metadata(snapshot_metadata.clone())?;
+        let epoch_bootstrap = EpochBootstrapData::from_metadata(&snapshot_metadata);
+
         callbacks.on_epoch(epoch_bootstrap)?;
-            snapshots: snapshots_info,
-        })?;
 
         // Emit completion callback
         callbacks.on_complete()?;
