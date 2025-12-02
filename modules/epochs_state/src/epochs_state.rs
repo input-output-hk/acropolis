@@ -1,6 +1,7 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::messages::{EpochBootstrapMessage, SnapshotMessage, SnapshotStateMessage};
 use acropolis_common::{
     caryatid::SubscriptionExt,
@@ -73,9 +74,18 @@ impl EpochsState {
     /// Wait for and process snapshot bootstrap messages
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         genesis: &acropolis_common::genesis_values::GenesisValues,
     ) -> Result<()> {
+        // Check we're subscribed to snapshot messages first
+        let snapshot_subscription = match snapshot_subscription.as_mut() {
+            Some(sub) => sub,
+            None => {
+                warn!("No snapshot subscription available, using default state");
+                return Ok(());
+            }
+        };
+
         info!("Waiting for snapshot bootstrap messages...");
 
         loop {
@@ -95,7 +105,6 @@ impl EpochsState {
                     return Ok(());
                 }
                 Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                    // Snapshot completes without epoch bootstrap data
                     warn!("Snapshot complete without epoch bootstrap data, using default state");
                     return Ok(());
                 }
@@ -109,7 +118,7 @@ impl EpochsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        snapshot_subscription: Box<dyn Subscription<Message>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
@@ -301,7 +310,13 @@ impl EpochsState {
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
-        let snapshot_subscription = context.subscribe(&snapshot_subscribe_topic).await?;
+
+        // Only subscribe to Snapshot if we're using Snapshot to start-up
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
 
         // Publisher
         let epoch_activity_publisher =
