@@ -1,36 +1,32 @@
-use crate::configuration::{BootstrapConfig, Snapshot};
+use crate::configuration::{BootstrapConfig, ConfigError, Snapshot, TargetConfig};
 use crate::header::{Header, HeaderError};
 use crate::nonces::{NoncesError, NoncesFile};
 use crate::publisher::BootstrapContext;
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::protocol_params::Nonces;
-use acropolis_common::{BlockHash, BlockInfo, BlockStatus, Era};
-use serde::Deserialize;
-use std::fs;
+use acropolis_common::{BlockInfo, BlockStatus, Era, Point};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum BootstrapDataError {
-    #[error("Failed to read {0}: {1}")]
-    ReadFile(String, std::io::Error),
+    #[error("Origin point has no hash")]
+    OriginPoint,
 
-    #[error("Failed to parse {0}: {1}")]
-    ParseJson(String, serde_json::Error),
-
-    #[error("Snapshot not found for epoch {0}")]
-    SnapshotNotFound(u64),
-
-    #[error("Header not found for hash: {0}")]
-    HeaderNotFound(String),
-
-    #[error("Invalid block hash: {0}")]
-    InvalidBlockHash(String),
+    #[error("Nonces point mismatch: nonces at {nonces_point}, snapshot at {snapshot_point}")]
+    NoncesPointMismatch {
+        nonces_point: Point,
+        snapshot_point: Point,
+    },
 
     #[error(transparent)]
     Header(#[from] HeaderError),
 
     #[error(transparent)]
     Nonces(#[from] NoncesError),
+
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 }
 
 /// Everything needed to bootstrap from a snapshot.
@@ -40,55 +36,47 @@ pub struct BootstrapData {
     pub snapshot: Snapshot,
     pub nonces: Nonces,
     pub block_info: BlockInfo,
-    network_dir: String,
+    network_dir: PathBuf,
 }
 
 impl BootstrapData {
     /// Load all bootstrap data from the network directory.
     pub fn load(config: &BootstrapConfig) -> Result<Self, BootstrapDataError> {
-        let dir = config.network_dir();
+        let network_dir = config.network_dir();
         let genesis = genesis_for_network(&config.network);
 
-        // config.json -> target epoch
-        let target_epoch = read_json::<ConfigFile>(&format!("{dir}/config.json"))?.snapshot;
+        let target_epoch = TargetConfig::load(&network_dir)?.snapshot;
+        let snapshot = Snapshot::load_for_epoch(&network_dir, target_epoch)?;
+        let nonces_file = NoncesFile::load(&network_dir)?;
 
-        // snapshots.json -> find snapshot for target epoch
-        let snapshot = read_json::<Vec<Snapshot>>(&format!("{dir}/snapshots.json"))?
-            .into_iter()
-            .find(|s| s.epoch == target_epoch)
-            .ok_or(BootstrapDataError::SnapshotNotFound(target_epoch))?;
-
-        // nonces.json -> get at_hash to find header
-        let nonces_file = NoncesFile::load(&dir)?;
-        let nonces_hash = nonces_file.at_hash()?;
-
-        // headers.json -> find header point matching nonces
-        let header_point = read_json::<Vec<String>>(&format!("{dir}/headers.json"))?
-            .into_iter()
-            .find(|p| p.ends_with(nonces_hash))
-            .ok_or_else(|| BootstrapDataError::HeaderNotFound(nonces_hash.to_string()))?;
+        // Validate nonces match snapshot point
+        if nonces_file.at != snapshot.point {
+            return Err(BootstrapDataError::NoncesPointMismatch {
+                nonces_point: nonces_file.at.clone(),
+                snapshot_point: snapshot.point.clone(),
+            });
+        }
 
         // Load header
-        let header = Header::load(&dir, &header_point)?;
+        let header = Header::load(&network_dir, &snapshot.point)?;
+        let hash = header.block_hash;
+        let slot = header.point.slot();
 
-        // Build nonces with header hash as lab
-        let nonces = nonces_file.into_nonces(target_epoch, header.hash)?;
+        // Build nonce
+        let nonces = nonces_file.into_nonces(target_epoch, hash);
 
         // Build block info
-        let hash = BlockHash::try_from(header.hash.to_vec())
-            .map_err(|e| BootstrapDataError::InvalidBlockHash(format!("{:?}", e)))?;
-
-        let (_, epoch_slot) = genesis.slot_to_epoch(header.slot);
+        let (_, epoch_slot) = genesis.slot_to_epoch(slot);
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
-            slot: header.slot,
-            number: header.block_number()?,
+            slot,
+            number: header.block_number,
             hash,
             epoch: target_epoch,
             epoch_slot,
             new_epoch: true,
-            timestamp: genesis.slot_to_timestamp(header.slot),
-            era: Era::Conway,
+            timestamp: genesis.slot_to_timestamp(slot),
+            era: Era::Conway, // TODO: Make dynamic with era history
         };
 
         Ok(Self {
@@ -96,17 +84,17 @@ impl BootstrapData {
             snapshot,
             nonces,
             block_info,
-            network_dir: dir,
+            network_dir,
         })
     }
 
-    /// Path to the snapshot file.
-    pub fn snapshot_path(&self) -> String {
-        format!("{}/{}.cbor", self.network_dir, self.snapshot.point)
+    /// Path to the snapshot cbor file.
+    pub fn snapshot_path(&self) -> PathBuf {
+        self.snapshot.cbor_path(&self.network_dir)
     }
 
     /// Network directory path.
-    pub fn network_dir(&self) -> &str {
+    pub fn network_dir(&self) -> &Path {
         &self.network_dir
     }
 
@@ -125,16 +113,4 @@ impl BootstrapData {
 fn genesis_for_network(_network: &str) -> GenesisValues {
     // TODO: Add preprod/preview support
     GenesisValues::mainnet()
-}
-
-fn read_json<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T, BootstrapDataError> {
-    let content =
-        fs::read_to_string(path).map_err(|e| BootstrapDataError::ReadFile(path.to_string(), e))?;
-    serde_json::from_str(&content).map_err(|e| BootstrapDataError::ParseJson(path.to_string(), e))
-}
-
-/// Internal: config.json structure
-#[derive(Deserialize)]
-struct ConfigFile {
-    snapshot: u64,
 }

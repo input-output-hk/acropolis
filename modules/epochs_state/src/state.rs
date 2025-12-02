@@ -105,18 +105,14 @@ impl State {
         self.epoch_txs = epoch_data.total_txs;
         self.epoch_outputs = epoch_data.total_outputs;
         self.epoch_fees = epoch_data.total_fees;
-
-        // Initialize blocks_minted from spo_blocks
         self.blocks_minted =
             epoch_data.spo_blocks.iter().map(|(pool_id, count)| (*pool_id, *count)).collect();
 
         self.nonces = Some(epoch_data.nonces.clone());
 
         info!(
-            "Bootstrapped epoch state: epoch={}, blocks={}, unique_spos={}",
-            self.epoch,
-            self.epoch_blocks,
-            self.blocks_minted.len()
+            "Bootstrapped epoch state: epoch={}, blocks={}",
+            self.epoch, self.epoch_blocks,
         );
     }
 

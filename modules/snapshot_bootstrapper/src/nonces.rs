@@ -1,83 +1,76 @@
 use acropolis_common::protocol_params::{Nonce, Nonces};
-use serde::Deserialize;
+use acropolis_common::{BlockHash, Point};
+use serde::{Deserialize, Deserializer};
 use std::fs;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NoncesError {
-    #[error("Failed to read nonces file: {0}")]
-    ReadFile(std::io::Error),
+    #[error("Failed to read {0}: {1}")]
+    ReadFile(PathBuf, std::io::Error),
 
-    #[error("Failed to parse nonces file: {0}")]
-    Parse(serde_json::Error),
-
-    #[error("Invalid point format: {0}")]
-    InvalidPoint(String),
-
-    #[error("Invalid hex: {0}")]
-    InvalidHex(String),
+    #[error("Failed to parse {0}: {1}")]
+    Parse(PathBuf, serde_json::Error),
 }
 
-/// Parsed nonces.json file.
-#[derive(Debug, Deserialize)]
-pub struct NoncesFile {
-    at: String,
-    active: String,
-    candidate: String,
-    evolving: String,
-    tail: String,
-}
-
-impl NoncesFile {
-    /// Load from `{dir}/nonces.json`
-    pub fn load(dir: &str) -> Result<Self, NoncesError> {
-        let path = format!("{dir}/nonces.json");
-        let content = fs::read_to_string(&path).map_err(NoncesError::ReadFile)?;
-        serde_json::from_str(&content).map_err(NoncesError::Parse)
-    }
-
-    /// Extract the hash from the `at` field (format: "slot.hash")
-    pub fn at_hash(&self) -> Result<&str, NoncesError> {
-        self.at
-            .split_once('.')
-            .map(|(_, hash)| hash)
-            .ok_or_else(|| NoncesError::InvalidPoint(self.at.clone()))
-    }
-
-    /// Convert to Nonces domain type.
-    ///
-    /// - `epoch`: target epoch
-    /// - `lab_hash`: hash of last applied block (from header)
-    pub fn into_nonces(self, epoch: u64, lab_hash: [u8; 32]) -> Result<Nonces, NoncesError> {
-        Ok(Nonces {
-            epoch,
-            active: parse_nonce(&self.active)?,
-            evolving: parse_nonce(&self.evolving)?,
-            candidate: parse_nonce(&self.candidate)?,
-            lab: Nonce::from(lab_hash),
-            prev_lab: parse_nonce(&self.tail)?,
-        })
-    }
-}
-
-fn parse_nonce(hex_str: &str) -> Result<Nonce, NoncesError> {
-    let bytes = hex::decode(hex_str).map_err(|_| NoncesError::InvalidHex(hex_str.to_string()))?;
-    let hash: [u8; 32] =
-        bytes.try_into().map_err(|_| NoncesError::InvalidHex(hex_str.to_string()))?;
+fn deserialize_nonce<'de, D>(deserializer: D) -> Result<Nonce, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let hash: BlockHash = Deserialize::deserialize(deserializer)?;
     Ok(Nonce::from(hash))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn deserialize_point<'de, D>(deserializer: D) -> Result<Point, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    s.split_once('.')
+        .and_then(|(slot_str, hash_str)| {
+            Some(Point::Specific {
+                slot: slot_str.parse().ok()?,
+                hash: hash_str.parse().ok()?,
+            })
+        })
+        .ok_or_else(|| serde::de::Error::custom("invalid point format"))
+}
 
-    #[test]
-    fn test_parse_nonce() {
-        let nonce = parse_nonce("0b9e320e63bf995b81287ce7a624b6735d98b083cc1a0e2ae8b08b680c79c983")
-            .unwrap();
-        assert!(nonce.hash.is_some());
+#[derive(Debug, Deserialize)]
+pub struct NoncesFile {
+    #[serde(deserialize_with = "deserialize_point")]
+    pub at: Point,
+    #[serde(deserialize_with = "deserialize_nonce")]
+    pub active: Nonce,
+    #[serde(deserialize_with = "deserialize_nonce")]
+    pub candidate: Nonce,
+    #[serde(deserialize_with = "deserialize_nonce")]
+    pub evolving: Nonce,
+    #[serde(deserialize_with = "deserialize_nonce")]
+    pub tail: Nonce,
+}
 
-        assert!(parse_nonce("invalid").is_err());
-        assert!(parse_nonce("abcd").is_err()); // too short
+impl NoncesFile {
+    pub fn path(network_dir: &Path) -> PathBuf {
+        network_dir.join("nonces.json")
+    }
+
+    pub fn load(network_dir: &Path) -> Result<Self, NoncesError> {
+        let path = Self::path(network_dir);
+        let content =
+            fs::read_to_string(&path).map_err(|e| NoncesError::ReadFile(path.clone(), e))?;
+        serde_json::from_str(&content).map_err(|e| NoncesError::Parse(path, e))
+    }
+
+    pub fn into_nonces(self, epoch: u64, lab_hash: BlockHash) -> Nonces {
+        Nonces {
+            epoch,
+            active: self.active,
+            evolving: self.evolving,
+            candidate: self.candidate,
+            lab: Nonce::from(lab_hash),
+            prev_lab: self.tail,
+        }
     }
 }

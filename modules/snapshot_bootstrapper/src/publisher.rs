@@ -1,4 +1,4 @@
-use acropolis_common::protocol_params::Nonces;
+use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
@@ -16,7 +16,7 @@ use acropolis_common::{
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 /// External bootstrap context providing nonces and timing information.
 ///
@@ -134,36 +134,14 @@ impl SnapshotPublisher {
         Ok(())
     }
 
-    /// Convert hex pool ID string to PoolId.
-    fn parse_pool_id(pool_id_hex: &str) -> Option<PoolId> {
-        match hex::decode(pool_id_hex) {
-            Ok(bytes) if bytes.len() == 28 => {
-                let mut arr = [0u8; 28];
-                arr.copy_from_slice(&bytes);
-                Some(PoolId::from(arr))
-            }
-            Ok(bytes) => {
-                warn!(
-                    "Invalid pool ID length: expected 28 bytes, got {} for {}",
-                    bytes.len(),
-                    pool_id_hex
-                );
-                None
-            }
-            Err(e) => {
-                warn!("Failed to decode pool ID {}: {}", pool_id_hex, e);
-                None
-            }
-        }
-    }
-
     /// Build EpochBootstrapMessage from parsed data and external context.
     fn build_epoch_bootstrap_message(&self, data: &EpochBootstrapData) -> EpochBootstrapMessage {
         let spo_blocks: Vec<(PoolId, usize)> = data
             .blocks_current_epoch
             .iter()
             .filter_map(|(pool_id_hex, count)| {
-                Self::parse_pool_id(pool_id_hex).map(|pool_id| (pool_id, *count as usize))
+                let pool_id: PoolId = pool_id_hex.parse().ok()?;
+                Some((pool_id, *count as usize))
             })
             .collect();
 
@@ -206,6 +184,7 @@ impl SnapshotPublisher {
             total_fees: 0,    // TODO: get from NewEpochState
             spo_blocks,
             nonces,
+            praos_params: PraosParams::mainnet(), // TODO: Make this configurable?
         }
     }
 }
@@ -377,26 +356,5 @@ mod tests {
 
         // Verify nonce conversion works
         assert_eq!(ctx.nonces, nonces);
-    }
-
-    #[test]
-    fn test_parse_pool_id_valid() {
-        let valid_hex = "0".repeat(56); // 28 bytes = 56 hex chars
-        let result = SnapshotPublisher::parse_pool_id(&valid_hex);
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn test_parse_pool_id_invalid_length() {
-        let invalid_hex = "0".repeat(40); // Wrong length
-        let result = SnapshotPublisher::parse_pool_id(&invalid_hex);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_parse_pool_id_invalid_hex() {
-        let invalid_hex = "not_valid_hex";
-        let result = SnapshotPublisher::parse_pool_id(invalid_hex);
-        assert!(result.is_none());
     }
 }

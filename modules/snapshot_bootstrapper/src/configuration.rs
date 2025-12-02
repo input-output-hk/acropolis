@@ -1,13 +1,30 @@
+use acropolis_common::Point;
 use anyhow::Result;
 use config::Config;
-use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fs;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("Failed to read {0}: {1}")]
+    ReadFile(PathBuf, std::io::Error),
+
+    #[error("Failed to parse {0}: {1}")]
+    ParseJson(PathBuf, serde_json::Error),
+
+    #[error("Snapshot not found for epoch {0}")]
+    SnapshotNotFound(u64),
+}
 
 /// Bootstrap module configuration (from TOML).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct BootstrapConfig {
     pub network: String,
-    pub data_dir: String,
+    pub data_dir: PathBuf,
     pub snapshot_topic: String,
     pub bootstrapped_subscribe_topic: String,
     pub completion_topic: String,
@@ -27,8 +44,8 @@ impl BootstrapConfig {
         Ok(full.try_deserialize()?)
     }
 
-    pub fn network_dir(&self) -> String {
-        format!("{}/{}", self.data_dir, self.network)
+    pub fn network_dir(&self) -> PathBuf {
+        self.data_dir.join(&self.network)
     }
 }
 
@@ -66,43 +83,87 @@ mod defaults {
     }
 }
 
+/// Target epoch configuration from config.json.
+#[derive(Debug, Deserialize)]
+pub struct TargetConfig {
+    pub snapshot: u64,
+}
+
+impl TargetConfig {
+    pub fn path(network_dir: &Path) -> PathBuf {
+        network_dir.join("config.json")
+    }
+
+    pub fn load(network_dir: &Path) -> Result<Self, ConfigError> {
+        let path = Self::path(network_dir);
+        let content =
+            fs::read_to_string(&path).map_err(|e| ConfigError::ReadFile(path.clone(), e))?;
+        serde_json::from_str(&content).map_err(|e| ConfigError::ParseJson(path, e))
+    }
+}
+
 /// Snapshot entry from snapshots.json.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Snapshot {
     pub epoch: u64,
-    pub point: String,
+    #[serde(
+        deserialize_with = "deserialize_point",
+        serialize_with = "serialize_point"
+    )]
+    pub point: Point,
     pub url: String,
 }
 
 impl Snapshot {
-    pub fn file_path(&self, network_dir: &str) -> String {
-        format!("{}/{}.cbor", network_dir, self.point)
+    pub fn path(network_dir: &Path) -> PathBuf {
+        network_dir.join("snapshots.json")
+    }
+
+    pub fn load_all(network_dir: &Path) -> Result<Vec<Self>, ConfigError> {
+        let path = Self::path(network_dir);
+        let content =
+            fs::read_to_string(&path).map_err(|e| ConfigError::ReadFile(path.clone(), e))?;
+        serde_json::from_str(&content).map_err(|e| ConfigError::ParseJson(path, e))
+    }
+
+    pub fn load_for_epoch(network_dir: &Path, epoch: u64) -> Result<Self, ConfigError> {
+        Self::load_all(network_dir)?
+            .into_iter()
+            .find(|s| s.epoch == epoch)
+            .ok_or(ConfigError::SnapshotNotFound(epoch))
+    }
+
+    pub fn cbor_path(&self, network_dir: &Path) -> PathBuf {
+        let filename = format!(
+            "{}.{}.cbor",
+            self.point.slot(),
+            self.point.hash().expect("snapshot point must have hash")
+        );
+        network_dir.join(filename)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn deserialize_point<'de, D>(deserializer: D) -> Result<Point, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let (slot_str, hash_str) = s
+        .split_once('.')
+        .ok_or_else(|| D::Error::custom("invalid point format, expected 'slot.hash'"))?;
 
-    #[test]
-    fn test_bootstrap_config_paths() {
-        let config = BootstrapConfig {
-            network: "mainnet".to_string(),
-            data_dir: "./data".to_string(),
-            snapshot_topic: "snapshot".to_string(),
-            bootstrapped_subscribe_topic: "bootstrapped".to_string(),
-            completion_topic: "completion".to_string(),
-            download: DownloadConfig::default(),
-        };
+    Ok(Point::Specific {
+        slot: slot_str.parse().map_err(|e| D::Error::custom(format!("invalid slot: {e}")))?,
+        hash: hash_str.parse().map_err(|e| D::Error::custom(format!("invalid hash: {e}")))?,
+    })
+}
 
-        assert_eq!(config.network_dir(), "./data/mainnet");
-    }
-
-    #[test]
-    fn test_download_config_defaults() {
-        let config = DownloadConfig::default();
-        assert_eq!(config.timeout_secs, 300);
-        assert_eq!(config.connect_timeout_secs, 30);
-        assert_eq!(config.progress_log_interval, 200);
+fn serialize_point<S>(point: &Point, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match point {
+        Point::Origin => serializer.serialize_str("origin"),
+        Point::Specific { slot, hash } => serializer.serialize_str(&format!("{slot}.{hash}")),
     }
 }

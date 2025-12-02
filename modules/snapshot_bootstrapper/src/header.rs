@@ -1,78 +1,60 @@
+use acropolis_common::hash::Hash;
+use acropolis_common::Point;
 use pallas_primitives::babbage::MintedHeader;
 use pallas_primitives::conway::Header as ConwayHeader;
 use std::fs;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum HeaderError {
     #[error("Failed to read header file {0}: {1}")]
-    ReadFile(String, std::io::Error),
+    ReadFile(PathBuf, std::io::Error),
 
     #[error("Failed to decode header at slot {0}: {1}")]
     Decode(u64, String),
 
-    #[error("Invalid point format: {0}")]
-    InvalidPoint(String),
+    #[error("Origin point has no hash")]
+    OriginPoint,
 
-    #[error("Invalid hex hash: {0}")]
-    InvalidHex(String, #[source] hex::FromHexError),
+    #[error("Failed to convert hash: {0}")]
+    HashConversion(String),
 }
 
-#[derive(Debug, Clone)]
 pub struct Header {
-    cbor: Vec<u8>,
-    pub slot: u64,
-    pub hash: [u8; 32],
+    pub point: Point,
+    pub block_number: u64,
+    pub block_hash: Hash<32>,
 }
 
 impl Header {
-    /// Load header from `headers/header.{point}.cbor`
-    pub fn load(dir: &str, point: &str) -> Result<Self, HeaderError> {
-        let (slot, hash_hex) = parse_point(point)?;
-        let hash = decode_hash32(hash_hex)?;
+    pub fn path(network_dir: &Path, point: &Point) -> PathBuf {
+        let filename = format!(
+            "header.{}.{}.cbor",
+            point.slot(),
+            point.hash().expect("header point must have hash")
+        );
+        network_dir.join("headers").join(filename)
+    }
 
-        let path = format!("{dir}/headers/header.{point}.cbor");
+    /// Load and decode header from `headers/header.{slot}.{hash}.cbor`
+    pub fn load(network_dir: &Path, point: &Point) -> Result<Self, HeaderError> {
+        let path = Self::path(network_dir, point);
         let cbor = fs::read(&path).map_err(|e| HeaderError::ReadFile(path, e))?;
 
-        Ok(Self { cbor, slot, hash })
-    }
+        let minted: MintedHeader<'_> = minicbor::decode(&cbor)
+            .map_err(|e| HeaderError::Decode(point.slot(), e.to_string()))?;
+        let header = ConwayHeader::from(minted);
+        let block_body_hash = header.header_body.block_body_hash;
+        let hash: Hash<32> = block_body_hash
+            .as_ref()
+            .try_into()
+            .map_err(|_| HeaderError::HashConversion(format!("{:?}", block_body_hash)))?;
 
-    /// Decode CBOR and extract the block number.
-    pub fn block_number(&self) -> Result<u64, HeaderError> {
-        let header = self.decode()?;
-        Ok(header.header_body.block_number)
-    }
-
-    fn decode(&self) -> Result<ConwayHeader, HeaderError> {
-        let minted: MintedHeader<'_> = minicbor::decode(&self.cbor)
-            .map_err(|e| HeaderError::Decode(self.slot, e.to_string()))?;
-        Ok(ConwayHeader::from(minted))
-    }
-}
-
-fn parse_point(s: &str) -> Result<(u64, &str), HeaderError> {
-    let (slot, hash) = s.split_once('.').ok_or_else(|| HeaderError::InvalidPoint(s.to_string()))?;
-    let slot = slot.parse().map_err(|_| HeaderError::InvalidPoint(s.to_string()))?;
-    Ok((slot, hash))
-}
-
-fn decode_hash32(hex_str: &str) -> Result<[u8; 32], HeaderError> {
-    let bytes =
-        hex::decode(hex_str).map_err(|e| HeaderError::InvalidHex(hex_str.to_string(), e))?;
-    bytes.try_into().map_err(|_| HeaderError::InvalidPoint(hex_str.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_point() {
-        let (slot, hash) = parse_point("134956789.abc123").unwrap();
-        assert_eq!(slot, 134956789);
-        assert_eq!(hash, "abc123");
-
-        assert!(parse_point("invalid").is_err());
-        assert!(parse_point("not_number.abc").is_err());
+        Ok(Self {
+            point: point.clone(),
+            block_number: header.header_body.block_number,
+            block_hash: hash,
+        })
     }
 }

@@ -56,23 +56,6 @@ pub struct EpochsState;
 impl EpochsState {
     /// Handle bootstrap message from snapshot
     fn handle_bootstrap(state: &mut State, epoch_data: &EpochBootstrapMessage) {
-        info!(
-            "Bootstrapping epoch state from snapshot epoch={}, epoch_start_time={}, epoch_end_time={}, first_block_time={}, first_block_height={}, last_block_time={}, last_block_height={}, total_blocks={}, total_txs={}, total_outputs={}, total_fees={}",
-            epoch_data.epoch,
-            epoch_data.epoch_start_time,
-            epoch_data.epoch_end_time,
-            epoch_data.first_block_time,
-            epoch_data.first_block_height,
-            epoch_data.last_block_time,
-            epoch_data.last_block_height,
-            epoch_data.total_blocks,
-            epoch_data.total_txs,
-            epoch_data.total_outputs,
-            epoch_data.total_fees,
-        );
-
-        info!("Nonces: {:?}", epoch_data.nonces);
-
         // Initialize epoch state from snapshot data
         state.bootstrap_from_snapshot(epoch_data);
 
@@ -102,8 +85,7 @@ impl EpochsState {
                 )) => {
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
-                    // Commit the bootstrapped state at block 0 (genesis equivalent for snapshot)
-                    history.lock().await.commit(0, state);
+                    history.lock().await.commit(epoch_data.last_block_height, state);
                     info!("Epoch state bootstrap complete");
                     return Ok(());
                 }

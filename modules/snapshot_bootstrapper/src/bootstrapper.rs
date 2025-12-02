@@ -48,7 +48,7 @@ impl SnapshotBootstrapper {
 
         info!("Snapshot bootstrapper initializing");
         info!("  Network: {}", cfg.network);
-        info!("  Data directory: {}", cfg.data_dir);
+        info!("  Data directory: {}", cfg.data_dir.display());
         info!("  Publishing on '{}'", cfg.snapshot_topic);
         info!(
             "  Download timeouts: {}s total, {}s connect",
@@ -100,9 +100,10 @@ impl SnapshotBootstrapper {
 
         publisher.publish_start().await?;
 
-        info!("Parsing snapshot: {}", data.snapshot_path());
+        info!("Parsing snapshot: {}", data.snapshot_path().display());
         let start = Instant::now();
-        let parser = StreamingSnapshotParser::new(data.snapshot_path());
+        let parser =
+            StreamingSnapshotParser::new(data.snapshot_path().to_string_lossy().into_owned());
         parser.parse(&mut publisher).map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
