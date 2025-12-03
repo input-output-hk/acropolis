@@ -2,17 +2,18 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
     ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
     SnapshotsCallback, StakeCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
-use acropolis_common::snapshot::{EpochBootstrapData, EpochCallback};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
 use tracing::info;
 
+use acropolis_common::EpochBootstrapData;
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
