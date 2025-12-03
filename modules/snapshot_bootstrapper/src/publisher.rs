@@ -318,8 +318,8 @@ mod tests {
             active: Nonce::from([0u8; 32]),
             evolving: Nonce::from([1u8; 32]),
             candidate: Nonce::from([2u8; 32]),
-            lab: Nonce::from([3u8; 32]),      // was: tail
-            prev_lab: Nonce::from([4u8; 32]), // was: missing
+            lab: Nonce::from([3u8; 32]),
+            prev_lab: Nonce::from([4u8; 32]),
         }
     }
 
