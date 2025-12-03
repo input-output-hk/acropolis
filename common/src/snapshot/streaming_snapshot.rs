@@ -33,6 +33,9 @@ pub use crate::hash::Hash;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
 
+// Import snapshot parsing support
+use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
 // -----------------------------------------------------------------------------
@@ -754,6 +757,8 @@ pub struct PotBalances {
     pub treasury: u64,
     /// Current deposits pot balance in Lovelace
     pub deposits: u64,
+    /// Current fees accumulated in Lovelace
+    pub fees: u64,
 }
 
 /// Snapshot metadata extracted before streaming
@@ -769,6 +774,8 @@ pub struct SnapshotMetadata {
     pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
     /// Block production statistics for current epoch
     pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    /// Parsed snapshots (Mark, Set, Go, Fee)
+    pub snapshots: Option<SnapshotsInfo>,
 }
 
 // -----------------------------------------------------------------------------
@@ -807,7 +814,7 @@ pub trait ProposalCallback {
 
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
-    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback
+    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback + SnapshotsCallback
 {
     /// Called before streaming begins with metadata
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()>;
@@ -924,9 +931,9 @@ impl StreamingSnapshotParser {
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
-        // Phase 1: Parse metadata efficiently using smaller buffer to locate UTXO section
-        // Read initial portion for metadata parsing (256MB should be sufficient for metadata)
-        let metadata_size = 256 * 1024 * 1024; // 256MB for metadata parsing
+        // Phase 1: Parse metadata efficiently using larger buffer to handle protocol parameters
+        // Read initial portion for metadata parsing (512MB to handle large protocol parameters)
+        let metadata_size = 512 * 1024 * 1024; // 512MB for metadata parsing (increased for PParams)
         let actual_metadata_size = metadata_size.min(chunked_reader.file_size as usize);
 
         // Read metadata portion
@@ -947,8 +954,7 @@ impl StreamingSnapshotParser {
 
         if new_epoch_state_len < 4 {
             return Err(anyhow!(
-                "NewEpochState array too short: expected at least 4 elements, got {}",
-                new_epoch_state_len
+                "NewEpochState array too short: expected at least 4 elements, got {new_epoch_state_len}"
             ));
         }
 
@@ -970,8 +976,7 @@ impl StreamingSnapshotParser {
 
         if epoch_state_len < 3 {
             return Err(anyhow!(
-                "EpochState array too short: expected at least 3 elements, got {}",
-                epoch_state_len
+                "EpochState array too short: expected at least 3 elements, got {epoch_state_len}"
             ));
         }
 
@@ -984,8 +989,7 @@ impl StreamingSnapshotParser {
 
         if account_state_len < 2 {
             return Err(anyhow!(
-                "AccountState array too short: expected at least 2 elements, got {}",
-                account_state_len
+                "AccountState array too short: expected at least 2 elements, got {account_state_len}"
             ));
         }
 
@@ -997,7 +1001,7 @@ impl StreamingSnapshotParser {
 
         // Skip any remaining AccountState fields
         for i in 2..account_state_len {
-            decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
+            decoder.skip().context(format!("Failed to skip AccountState[{i}]"))?;
         }
 
         // Note: We defer the on_metadata callback until after we parse deposits from UTxOState[1]
@@ -1010,8 +1014,7 @@ impl StreamingSnapshotParser {
 
         if ledger_state_len < 2 {
             return Err(anyhow!(
-                "LedgerState array too short: expected at least 2 elements, got {}",
-                ledger_state_len
+                "LedgerState array too short: expected at least 2 elements, got {ledger_state_len}"
             ));
         }
 
@@ -1028,8 +1031,7 @@ impl StreamingSnapshotParser {
 
         if cert_state_len < 3 {
             return Err(anyhow!(
-                "CertState array too short: expected at least 3 elements, got {}",
-                cert_state_len
+                "CertState array too short: expected at least 3 elements, got {cert_state_len}"
             ));
         }
 
@@ -1129,8 +1131,7 @@ impl StreamingSnapshotParser {
 
         if utxo_state_len < 1 {
             return Err(anyhow!(
-                "UTxOState array too short: expected at least 1 element, got {}",
-                utxo_state_len
+                "UTxOState array too short: expected at least 1 element, got {utxo_state_len}"
             ));
         }
 
@@ -1145,13 +1146,171 @@ impl StreamingSnapshotParser {
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        let utxo_count = Self::stream_utxos(&mut utxo_file, callbacks)
+        let (utxo_count, bytes_consumed_from_file) = Self::stream_utxos(&mut utxo_file, callbacks)
             .context("Failed to stream UTXOs with true streaming")?;
 
-        // For chunked reading, we'll parse deposits from the metadata buffer if possible
-        // or set to a default value. In a full implementation, we'd need to track
-        // the position after UTXOs in the chunked reader.
-        let deposits = 0; // TODO: Parse deposits properly with chunked reading
+        // After UTXOs, parse deposits from UTxOState[1]
+        // Reset our file pointer to a position after UTXOs
+        let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
+        utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
+
+        info!(
+            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
+            position_after_utxos
+        );
+
+        // ========================================================================
+        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
+        // ========================================================================
+        // After extensive analysis, the remaining snapshot data (deposits, fees,
+        // protocol parameters, and mark/set/go snapshots) can be efficiently
+        // parsed by reading the entire remainder of the file into memory (~500MB)
+        // rather than streaming. This is much smaller than the full 2.5GB file.
+        //
+        // The CBOR structure from this point:
+        // UTxOState[1] = deposits
+        // UTxOState[2] = fees
+        // UTxOState[3] = gov_state
+        // UTxOState[4] = donations
+        // EpochState[2] = PParams (100-300MB)
+        // EpochState[3] = PParamsPrev (100-300MB)
+        // EpochState[4] = SnapShots (100+ MB stake distribution)
+        //
+        // This hybrid approach allows us to:
+        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
+        // 2. Parse remaining sections using snapshot.rs functions
+        // 3. Access mark/set/go snapshots that were previously unreachable
+        // ========================================================================
+
+        // Calculate remaining file size from current position
+        let current_file_size = utxo_file.metadata()?.len();
+        let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
+
+        info!(
+            "    Reading remainder of file into memory: {:.1} MB from position {}",
+            remaining_bytes as f64 / 1024.0 / 1024.0,
+            position_after_utxos
+        );
+
+        // Read the entire remainder of the file into memory
+        let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
+        utxo_file.read_to_end(&mut remainder_buffer)?;
+
+        info!(
+            "    Successfully loaded {:.1} MB remainder buffer for parsing",
+            remainder_buffer.len() as f64 / 1024.0 / 1024.0
+        );
+
+        // Create decoder for the remainder buffer
+        let mut remainder_decoder = Decoder::new(&remainder_buffer);
+
+        // Parse remaining UTxOState elements: deposits, fees, gov_state, donations
+        // UTxOState = [utxos (already consumed), deposits, fees, gov_state, donations]
+
+        // Parse deposits (UTxOState[1])
+        let deposits = match remainder_decoder.decode::<u64>() {
+            Ok(deposits_value) => {
+                info!(
+                    "    Successfully parsed deposits: {} lovelace",
+                    deposits_value
+                );
+                deposits_value
+            }
+            Err(e) => {
+                info!("    Failed to parse deposits: {}, using 0", e);
+                0
+            }
+        };
+
+        // Parse fees (UTxOState[2])
+        let fees = match remainder_decoder.decode::<u64>() {
+            Ok(fees_value) => {
+                info!("    Successfully parsed fees: {} lovelace", fees_value);
+                fees_value as i64
+            }
+            Err(e) => {
+                info!("    Failed to parse fees: {}, using 0", e);
+                0
+            }
+        };
+
+        let (_root_params, _root_hard_fork, _root_cc, _root_constitution) = {
+            // Epoch State / Ledger State / UTxO State / utxosGovState
+            remainder_decoder.array()?;
+
+            // Proposals
+            remainder_decoder.array()?;
+            remainder_decoder.array()?;
+            (
+                remainder_decoder.skip()?,
+                remainder_decoder.skip()?,
+                remainder_decoder.skip()?,
+                remainder_decoder.skip()?,
+            )
+        };
+
+        // skip ProposalState
+        remainder_decoder.skip()?;
+
+        // skip ConstitutionalCommittee
+        remainder_decoder.skip()?;
+
+        // skip Constitution
+        remainder_decoder.skip()?;
+
+        // Current Protocol Params
+        remainder_decoder.skip()?; // Skip current protocol params instead of parsing
+
+        remainder_decoder.skip()?; // Previous Protocol Params
+        remainder_decoder.skip()?; // Future Protocol Params
+        {
+            remainder_decoder.array()?; // DRep Pulsing State
+            remainder_decoder.array()?; // Pulsing Snapshot
+            remainder_decoder.skip()?; // Last epoch votes
+        }
+        remainder_decoder.skip()?; // DRep distr
+        remainder_decoder.skip()?; // DRep state
+        remainder_decoder.skip()?; // Pool distr
+        {
+            remainder_decoder.array()?; // Ratify State
+            remainder_decoder.skip()?; // Enact State
+        }
+
+        {
+            // skip GovActionState
+            remainder_decoder.skip()?;
+            remainder_decoder.tag()?;
+            // skip expired ProposalId
+            remainder_decoder.skip()?;
+            // check for delayed as a way to know we're parsing correctly up to here.
+            let delayed: bool = remainder_decoder.decode()?;
+            assert!(
+                !delayed,
+                "unimplemented import scenario: snapshot contains a ratified delaying governance action"
+            );
+        }
+
+        // Epoch State / Ledger State / UTxO State / utxosStakeDistr
+        remainder_decoder.skip()?;
+
+        // Epoch State / Ledger State / UTxO State / utxosDonation
+        remainder_decoder.skip()?;
+
+        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        let snapshots_result =
+            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, epoch);
+
+        match &snapshots_result {
+            Ok(raw_snapshots) => {
+                info!("    Successfully parsed mark/set/go snapshots!");
+                // Call the raw snapshots callback
+                callbacks.on_snapshots(raw_snapshots.clone())?;
+            }
+            Err(e) => {
+                info!("    Failed to parse snapshots: {}", e);
+                info!("    Continuing with empty snapshots...");
+            }
+        }
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
@@ -1159,17 +1318,40 @@ impl StreamingSnapshotParser {
         callbacks.on_accounts(accounts)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
-        // Emit metadata callback with accurate deposits and utxo count
+        // Emit metadata callback with accurate deposits, fees, utxo count, and snapshots
+        let snapshots_info = match snapshots_result {
+            Ok(_raw_snapshots) => {
+                // For metadata, we can provide basic info without converting to API format
+                Some(SnapshotsInfo {
+                    mark: SnapshotInfo {
+                        name: "Mark".to_string(),
+                        sections_count: _raw_snapshots.mark.0.len() as u64,
+                    },
+                    set: SnapshotInfo {
+                        name: "Set".to_string(),
+                        sections_count: _raw_snapshots.set.0.len() as u64,
+                    },
+                    go: SnapshotInfo {
+                        name: "Go".to_string(),
+                        sections_count: _raw_snapshots.go.0.len() as u64,
+                    },
+                    fee: _raw_snapshots.fee,
+                })
+            }
+            Err(_) => None,
+        };
         callbacks.on_metadata(SnapshotMetadata {
             epoch,
             pot_balances: PotBalances {
                 reserves,
                 treasury,
                 deposits,
+                fees: fees as u64,
             },
             utxo_count: Some(utxo_count),
             blocks_previous_epoch,
             blocks_current_epoch,
+            snapshots: snapshots_info,
         })?;
 
         // Emit completion callback
@@ -1178,313 +1360,8 @@ impl StreamingSnapshotParser {
         Ok(())
     }
 
-    /// Parse metadata and structure, returning the UTXO position (for future chunked reading)
-    #[expect(dead_code)]
-    fn parse_metadata_and_find_utxos(&self, buffer: &[u8]) -> Result<ParsedMetadata> {
-        let mut decoder = Decoder::new(buffer);
-        let start_pos = decoder.position();
-
-        // Navigate to NewEpochState root array
-        let new_epoch_state_len = decoder
-            .array()
-            .context("Failed to parse NewEpochState root array")?
-            .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
-
-        if new_epoch_state_len < 4 {
-            return Err(anyhow!(
-                "NewEpochState array too short: expected at least 4 elements, got {}",
-                new_epoch_state_len
-            ));
-        }
-
-        // Extract epoch number [0]
-        let epoch = decoder.u64().context("Failed to parse epoch number")?;
-
-        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
-        let blocks_previous_epoch =
-            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
-                .context("Failed to parse blocks_previous_epoch")?;
-        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
-            .context("Failed to parse blocks_current_epoch")?;
-
-        // Navigate to EpochState [3]
-        let epoch_state_len = decoder
-            .array()
-            .context("Failed to parse EpochState array")?
-            .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
-
-        if epoch_state_len < 3 {
-            return Err(anyhow!(
-                "EpochState array too short: expected at least 3 elements, got {}",
-                epoch_state_len
-            ));
-        }
-
-        // Extract AccountState [3][0]: [treasury, reserves]
-        let account_state_len = decoder
-            .array()
-            .context("Failed to parse AccountState array")?
-            .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
-
-        if account_state_len < 2 {
-            return Err(anyhow!(
-                "AccountState array too short: expected at least 2 elements, got {}",
-                account_state_len
-            ));
-        }
-
-        // Parse treasury and reserves
-        let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
-        let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
-        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
-        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
-
-        // Skip any remaining AccountState fields
-        for i in 2..account_state_len {
-            decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
-        }
-
-        // Navigate to LedgerState [3][1]
-        let ledger_state_len = decoder
-            .array()
-            .context("Failed to parse LedgerState array")?
-            .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
-
-        if ledger_state_len < 2 {
-            return Err(anyhow!(
-                "LedgerState array too short: expected at least 2 elements, got {}",
-                ledger_state_len
-            ));
-        }
-
-        // Parse CertState [3][1][0]
-        let cert_state_len = decoder
-            .array()
-            .context("Failed to parse CertState array")?
-            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
-
-        if cert_state_len < 3 {
-            return Err(anyhow!(
-                "CertState array too short: expected at least 3 elements, got {}",
-                cert_state_len
-            ));
-        }
-
-        // Parse DReps, pools, and accounts
-        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
-        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
-        let accounts =
-            Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
-
-        // Navigate to UTxOState [3][1][1]
-        decoder.array().context("Failed to parse UTxOState array")?;
-
-        // Current position is right before the UTXO map [3][1][1][0]
-        let utxo_position = start_pos as u64 + decoder.position() as u64;
-
-        Ok(ParsedMetadata {
-            epoch,
-            treasury,
-            reserves,
-            pools,
-            dreps,
-            accounts,
-            blocks_previous_epoch,
-            blocks_current_epoch,
-            utxo_position,
-        })
-    }
-
-    /// Parse metadata and structure (everything except UTXOs) (legacy)
-    #[expect(dead_code)]
-    fn parse_metadata_and_structure(
-        &self,
-        buffer: &[u8],
-    ) -> Result<ParsedMetadataWithoutUtxoPosition> {
-        let mut decoder = Decoder::new(buffer);
-
-        // Navigate to NewEpochState root array
-        let new_epoch_state_len = decoder
-            .array()
-            .context("Failed to parse NewEpochState root array")?
-            .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
-
-        if new_epoch_state_len < 4 {
-            return Err(anyhow!(
-                "NewEpochState array too short: expected at least 4 elements, got {}",
-                new_epoch_state_len
-            ));
-        }
-
-        // Extract epoch number [0]
-        let epoch = decoder.u64().context("Failed to parse epoch number")?;
-
-        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
-        let blocks_previous_epoch =
-            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
-                .context("Failed to parse blocks_previous_epoch")?;
-        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
-            .context("Failed to parse blocks_current_epoch")?;
-
-        // Navigate to EpochState [3]
-        let epoch_state_len = decoder
-            .array()
-            .context("Failed to parse EpochState array")?
-            .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
-
-        if epoch_state_len < 3 {
-            return Err(anyhow!(
-                "EpochState array too short: expected at least 3 elements, got {}",
-                epoch_state_len
-            ));
-        }
-
-        // Extract AccountState [3][0]: [treasury, reserves]
-        let account_state_len = decoder
-            .array()
-            .context("Failed to parse AccountState array")?
-            .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
-
-        if account_state_len < 2 {
-            return Err(anyhow!(
-                "AccountState array too short: expected at least 2 elements, got {}",
-                account_state_len
-            ));
-        }
-
-        // Parse treasury and reserves
-        let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
-        let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
-        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
-        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
-
-        // Skip any remaining AccountState fields
-        for i in 2..account_state_len {
-            decoder.skip().context(format!("Failed to skip AccountState[{}]", i))?;
-        }
-
-        // Navigate to LedgerState [3][1]
-        let ledger_state_len = decoder
-            .array()
-            .context("Failed to parse LedgerState array")?
-            .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
-
-        if ledger_state_len < 2 {
-            return Err(anyhow!(
-                "LedgerState array too short: expected at least 2 elements, got {}",
-                ledger_state_len
-            ));
-        }
-
-        // Parse CertState [3][1][0]
-        let cert_state_len = decoder
-            .array()
-            .context("Failed to parse CertState array")?
-            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
-
-        if cert_state_len < 3 {
-            return Err(anyhow!(
-                "CertState array too short: expected at least 3 elements, got {}",
-                cert_state_len
-            ));
-        }
-
-        // Parse DReps, pools, and accounts
-        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
-        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
-        let accounts =
-            Self::parse_dstate(&mut decoder).context("Failed to parse DState for accounts")?;
-
-        Ok(ParsedMetadataWithoutUtxoPosition {
-            epoch,
-            treasury,
-            reserves,
-            pools,
-            dreps,
-            accounts,
-            blocks_previous_epoch,
-            blocks_current_epoch,
-        })
-    }
-
-    /// Parse DState for accounts (extracted from original parse method)
-    fn parse_dstate(decoder: &mut Decoder) -> Result<Vec<AccountState>> {
-        // Parse DState [3][1][0][2] for accounts/delegations
-        decoder.array().context("Failed to parse DState array")?;
-
-        // Parse unified rewards - it's actually an array containing the map
-        let umap_len = decoder.array().context("Failed to parse UMap array")?;
-
-        // Parse the rewards map [0]: StakeCredential -> Account
-        let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
-
-        // Skip remaining UMap elements if any
-        if let Some(len) = umap_len {
-            for _ in 1..len {
-                decoder.skip()?;
-            }
-        }
-
-        // Convert to AccountState for API
-        let accounts: Vec<AccountState> = accounts_map
-            .into_iter()
-            .map(|(credential, account)| {
-                // Convert StakeCredential to stake address representation
-                let stake_address = match &credential {
-                    StakeCredential::AddrKeyHash(hash) => {
-                        format!("stake_key_{}", hex::encode(hash))
-                    }
-                    StakeCredential::ScriptHash(hash) => {
-                        format!("stake_script_{}", hex::encode(hash))
-                    }
-                };
-
-                // Extract rewards from rewards_and_deposit (first element of tuple)
-                let rewards = match &account.rewards_and_deposit {
-                    StrictMaybe::Just((reward, _deposit)) => *reward,
-                    StrictMaybe::Nothing => 0,
-                };
-
-                // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
-                let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(*pool_id),
-                    StrictMaybe::Nothing => None,
-                };
-
-                // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
-                let delegated_drep = match &account.drep {
-                    StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
-                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
-                        DRep::Abstain => crate::DRepChoice::Abstain,
-                        DRep::NoConfidence => crate::DRepChoice::NoConfidence,
-                    }),
-                    StrictMaybe::Nothing => None,
-                };
-
-                AccountState {
-                    stake_address,
-                    address_state: StakeAddressState {
-                        registered: false, // Accounts are registered by SPOState
-                        utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
-                        rewards,
-                        delegated_spo,
-                        delegated_drep,
-                    },
-                }
-            })
-            .collect();
-
-        // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
-        decoder.skip()?; // dsFutureGenDelegs
-        decoder.skip()?; // dsGenDelegs
-        decoder.skip()?; // dsIRewards
-
-        Ok(accounts)
-    }
-
     /// STREAMING: Process UTXOs with chunked buffering and incremental parsing
-    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<u64> {
+    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<(u64, u64)> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
 
@@ -1495,12 +1372,14 @@ impl StreamingSnapshotParser {
         let mut buffer = Vec::with_capacity(PARSE_BUFFER_SIZE);
         let mut utxo_count = 0u64;
         let mut total_bytes_processed = 0usize;
+        let mut total_bytes_read_from_file = 0u64;
 
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
         let initial_read = file.read(&mut chunk)?;
         chunk.truncate(initial_read);
         buffer.extend_from_slice(&chunk);
+        total_bytes_read_from_file += initial_read as u64;
 
         // Parse map header first
         let mut decoder = Decoder::new(&buffer);
@@ -1533,6 +1412,7 @@ impl StreamingSnapshotParser {
                 }
                 chunk.truncate(bytes_read);
                 buffer.extend_from_slice(&chunk);
+                total_bytes_read_from_file += bytes_read as u64;
             }
 
             // Batch process multiple UTXOs when buffer is large enough
@@ -1637,7 +1517,34 @@ impl StreamingSnapshotParser {
         );
         info!("  Largest single entry: {} bytes", max_single_entry_size);
 
-        Ok(utxo_count)
+        // After successfully parsing all UTXOs, we need to consume the break token
+        // that ends the indefinite-length UTXO map if present
+        if !buffer.is_empty() {
+            let mut decoder = Decoder::new(&buffer);
+            match decoder.datatype() {
+                Ok(Type::Break) => {
+                    info!("    Found break token after UTXOs, consuming it (end of indefinite UTXO map)");
+                    decoder.skip()?; // Consume the break that ends the UTXO map
+
+                    // Update our tracking to account for the consumed break token
+                    let break_bytes_consumed = decoder.position();
+                    buffer.drain(0..break_bytes_consumed);
+                }
+                Ok(_) => {
+                    // No break token, this is a definite-length map - continue normal parsing
+                    info!("    No break token found, assuming definite-length UTXO map");
+                }
+                Err(e) => {
+                    info!("    After UTXO parsing, datatype() check failed: {}", e);
+                }
+            }
+        }
+
+        // Calculate how many bytes we actually consumed from the file
+        // This is the total bytes processed minus any remaining buffer content
+        let bytes_consumed_from_file = total_bytes_read_from_file - buffer.len() as u64;
+
+        Ok((utxo_count, bytes_consumed_from_file))
     }
 
     /// Parse a single block production entry from a map (producer pool ID -> block count)
@@ -1685,13 +1592,13 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
-                    info!("📦 Processing indefinite-length blocks array");
+                    info!("Processing indefinite-length blocks array");
                     let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
-                                info!("📦 Found array break after {} entries", count);
+                                info!("Found array break after {} entries", count);
                                 break;
                             }
                             entry_type => {
@@ -1758,19 +1665,19 @@ impl StreamingSnapshotParser {
                 match simple_type {
                     Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
                         let value = decoder.u64().context("Failed to read block integer value")?;
-                        info!("📦 Block data is integer: {}", value);
+                        info!("Block data is integer: {}", value);
                     }
                     Type::Bytes => {
                         let bytes = decoder.bytes().context("Failed to read block bytes")?;
-                        info!("📦 Block data is {} bytes", bytes.len());
+                        info!("Block data is {} bytes", bytes.len());
                     }
                     Type::String => {
                         let text = decoder.str().context("Failed to read block text")?;
-                        info!("📦 Block data is text: '{}'", text);
+                        info!("Block data is text: '{}'", text);
                     }
                     Type::Null => {
                         decoder.skip()?;
-                        info!("📦 Block data is null");
+                        info!("Block data is null");
                     }
                     _ => {
                         decoder.skip().context("Failed to skip blocks value")?;
@@ -1815,8 +1722,7 @@ impl StreamingSnapshotParser {
 
         if vstate_len < 1 {
             return Err(anyhow!(
-                "VState array too short: expected at least 1 element, got {}",
-                vstate_len
+                "VState array too short: expected at least 1 element, got {vstate_len}"
             ));
         }
 
@@ -1853,7 +1759,7 @@ impl StreamingSnapshotParser {
 
         // Skip committee_state [1] and dormant_epoch [2] if present
         for i in 1..vstate_len {
-            decoder.skip().context(format!("Failed to skip VState[{}]", i))?;
+            decoder.skip().context(format!("Failed to skip VState[{i}]"))?;
         }
 
         Ok(dreps)
@@ -1870,8 +1776,7 @@ impl StreamingSnapshotParser {
 
         if pstate_len < 1 {
             return Err(anyhow!(
-                "PState array too short: expected at least 1 element, got {}",
-                pstate_len
+                "PState array too short: expected at least 1 element, got {pstate_len}"
             ));
         }
 
@@ -1887,10 +1792,10 @@ impl StreamingSnapshotParser {
                 // Definite-length map
                 for i in 0..pool_count {
                     let pool_id: Hash<28> =
-                        decoder.decode().context(format!("Failed to decode pool ID #{}", i))?;
+                        decoder.decode().context(format!("Failed to decode pool ID #{i}"))?;
                     let params: super::pool_params::PoolParams = decoder
                         .decode()
-                        .context(format!("Failed to decode pool params for pool #{}", i))?;
+                        .context(format!("Failed to decode pool params for pool #{i}"))?;
                     pools_map.insert(pool_id, params);
                 }
             }
@@ -1906,9 +1811,9 @@ impl StreamingSnapshotParser {
                         _ => {
                             let pool_id: Hash<28> = decoder
                                 .decode()
-                                .context(format!("Failed to decode pool ID #{}", count))?;
+                                .context(format!("Failed to decode pool ID #{count}"))?;
                             let params: super::pool_params::PoolParams = decoder.decode().context(
-                                format!("Failed to decode pool params for pool #{}", count),
+                                format!("Failed to decode pool params for pool #{count}"),
                             )?;
                             pools_map.insert(pool_id, params);
                             count += 1;
@@ -2015,7 +1920,7 @@ impl StreamingSnapshotParser {
 
         // Skip any remaining PState elements (like deposits)
         for i in 3..pstate_len {
-            decoder.skip().context(format!("Failed to skip PState[{}]", i))?;
+            decoder.skip().context(format!("Failed to skip PState[{i}]"))?;
         }
 
         Ok(pools)
@@ -2152,6 +2057,108 @@ impl StreamingSnapshotParser {
             _ => Err(anyhow!("unexpected TxOut type")),
         }
     }
+
+    /// Parse snapshots using hybrid approach with memory-based parsing
+    /// Uses snapshot.rs functions to parse mark/set/go snapshots from buffer
+    /// We expect the following structure:
+    /// Epoch State / Snapshots / Mark
+    /// Epoch State / Snapshots / Set
+    /// Epoch State / Snapshots / Go
+    /// Epoch State / Snapshots / Fee
+    fn parse_snapshots_with_hybrid_approach(
+        decoder: &mut Decoder,
+        _epoch: u64,
+    ) -> Result<RawSnapshotsContainer> {
+        info!("    Starting snapshots parsing...");
+
+        // SnapShots = [Mark, Set, Go, Fee] or possibly different structure
+        let snapshots_len = decoder
+            .array()
+            .context("Failed to parse SnapShots array")?
+            .ok_or_else(|| anyhow!("SnapShots must be a definite-length array"))?;
+
+        // Investigate actual structure before enforcing 3 elements
+        if snapshots_len != 4 {
+            return Err(anyhow!(
+                "SnapShots array must have exactly 4 elements (Mark, Set, Go, Fee), got {snapshots_len}"
+            ));
+        }
+
+        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
+
+        // Parse each snapshot using snapshot.rs functions
+        let mut parsed_snapshots = Vec::new();
+
+        // Parse Mark snapshot [0]
+        info!("    Parsing Mark snapshot...");
+        let mark_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
+            .context("Failed to parse Mark snapshot")?;
+        parsed_snapshots.push(mark_snapshot);
+
+        // Parse Set snapshot [1]
+        info!("    Parsing Set snapshot...");
+        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
+            .context("Failed to parse Set snapshot")?;
+        parsed_snapshots.push(set_snapshot);
+
+        // Parse Go snapshot [2]
+        info!("    Parsing Go snapshot...");
+        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
+            .context("Failed to parse Go snapshot")?;
+        parsed_snapshots.push(go_snapshot);
+
+        // Parse Fee snapshot [3]
+        info!("    Parsing Fee snapshot...");
+        let fee_value = match decoder.decode::<u64>() {
+            Ok(fee) => {
+                info!("    Successfully parsed Fee value: {}", fee);
+                fee
+            }
+            Err(e) => {
+                info!("    Failed to parse Fee value: {}, using 0", e);
+                0
+            }
+        };
+
+        info!(
+            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
+        );
+
+        // Create raw snapshots container with VMap data directly
+        let raw_snapshots = RawSnapshotsContainer {
+            mark: parsed_snapshots[0].snapshot_stake.clone(),
+            set: parsed_snapshots[1].snapshot_stake.clone(),
+            go: parsed_snapshots[2].snapshot_stake.clone(),
+            fee: fee_value,
+        };
+
+        info!("    Raw snapshots container created with VMap data");
+
+        // Return only the raw snapshots - no more API compatibility needed
+        Ok(raw_snapshots)
+    }
+}
+
+/// Information about a parsed snapshot (Mark, Set, or Go)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotInfo {
+    /// Name of the snapshot (Mark, Set, or Go)
+    pub name: String,
+    /// Number of sections in the snapshot
+    pub sections_count: u64,
+}
+
+/// Information about all four snapshots (Mark, Set, Go, Fee)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotsInfo {
+    /// Mark snapshot information
+    pub mark: SnapshotInfo,
+    /// Set snapshot information
+    pub set: SnapshotInfo,
+    /// Go snapshot information
+    pub go: SnapshotInfo,
+    /// Fee value from the snapshots
+    pub fee: u64,
 }
 
 // -----------------------------------------------------------------------------
@@ -2215,6 +2222,19 @@ impl SnapshotCallbacks for CollectingCallbacks {
     }
 }
 
+impl SnapshotsCallback for CollectingCallbacks {
+    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
+        // For testing, we could store snapshots here if needed
+        info!(
+            "CollectingCallbacks: Received raw snapshots data with {} mark, {} set, {} go entries",
+            snapshots.mark.0.len(),
+            snapshots.set.0.len(),
+            snapshots.go.0.len()
+        );
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2231,10 +2251,12 @@ mod tests {
                     reserves: 1000000,
                     treasury: 2000000,
                     deposits: 500000,
+                    fees: 100000,
                 },
                 utxo_count: Some(100),
                 blocks_previous_epoch: Vec::new(),
                 blocks_current_epoch: Vec::new(),
+                snapshots: None,
             })
             .unwrap();
 

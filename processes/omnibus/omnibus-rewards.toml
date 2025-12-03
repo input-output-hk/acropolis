@@ -1,4 +1,5 @@
 # Top-level configuration for Acropolis omnibus process
+# Cut down version for rewards testing only
 
 # ============================================================================
 # Startup Configuration
@@ -18,23 +19,11 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
-pause = "none"
-
-[module.snapshot-bootstrapper]
-network = "mainnet"
-data-dir = "../../modules/snapshot_bootstrapper/data"
+pause = "epoch:216"
 
 # ============================================================================
 # Core Module Configurations
 # ============================================================================
-[module.peer-network-interface]
-sync-point = "snapshot"
-node-addresses = [
-    "backbone.cardano.iog.io:3001",
-    "backbone.mainnet.cardanofoundation.org:3001",
-    "backbone.mainnet.emurgornd.com:3001",
-]
-magic-number = 764824073
 
 [module.consensus]
 # List of validation result topics to listen on
@@ -46,8 +35,6 @@ validators = [
 ]
 
 [module.block-unpacker]
-
-[module.rest-blockfrost]
 
 [module.tx-unpacker]
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
@@ -82,31 +69,8 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
+# Enables /epochs/{number}/{next | previous}
 store-spdd = false
-
-[module.historical-accounts-state]
-# Clear state on start up (default true)
-clear-on-start = true
-# Enables /accounts/{stake_address}/rewards endpoint
-store-rewards-history = false
-# Enables /accounts/{stake_address}/history endpoint
-store-active-stake-history = false
-# Enables /accounts/{stake_address}/registrations endpoint
-store-registration-history = false
-# Enables /accounts/{stake_address}/delegations endpoint
-store-delegation-history = false
-# Enables /accounts/{stake_address}/mirs endpoint
-store-mir-history = false
-# Enables /accounts/{stake_address}/withdrawals endpoint
-store-withdrawal-history = false
-# Enables /accounts/{stake_address}/addresses endpoint
-store-addresses = false
-# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
-store-tx-count = false
-
-[module.historical-epochs-state]
-# Clear state on start up (default true)
-clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -138,63 +102,15 @@ write-full-cache = "false"
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
-spdd-clear-on-start = true
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
-[module.assets-state]
-# Enables /assets endpoint
-store-assets = false
-# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
-store-info = false
-# Enables /assets/{asset}/history endpoint
-store-history = false
-# Enables /assets/{asset}/transactions endpoint
-#   Usage: "none", "all", or most recent: "1", "20", etc.
-store-transactions = "none"
-# Enables /assets/{asset}/addresses endpoint
-store-addresses = false
-# Enables /assets/{asset} endpoint (requires store-assets to be enabled)
-index-by-policy = false
-
-[module.chain-store]
-# Clear state on start up (default true)
-clear-on-start = true
-
-[module.address-state]
-# Clear state on start up (default true)
-clear-on-start = true
-# Enables /addresses/{address}, /addresses/{address}/extended,
-# /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
-store-info = false
-# Enables /addresses/{address}/totals endpoint
-store-totals = false
-# Enables /addresses/{address}/transactions endpoint
-store-transactions = false
-
-[module.block-vrf-validator]
-
-[module.block-kes-validator]
-
 [module.clock]
-
-[module.rest-server]
-address = "127.0.0.1"
-port = 4340
-
-[module.spy]
-# Enable for message spying
-#topic = "cardano.#"
 
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
-
 [message-bus.internal]
 class = "in-memory"
 workers = 50
