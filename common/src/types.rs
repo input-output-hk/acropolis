@@ -220,6 +220,10 @@ pub struct BlockInfo {
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
+    /// Which slot was the tip at when we received this block?
+    #[serde(default)]
+    pub tip_slot: Option<u64>,
+
     /// UNIX timestamp
     #[serde(default)]
     pub timestamp: u64,
@@ -237,6 +241,12 @@ impl Ord for BlockInfo {
 impl PartialOrd for BlockInfo {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl BlockInfo {
+    pub fn is_at_tip(&self) -> bool {
+        self.tip_slot.is_some_and(|s| s == self.slot)
     }
 }
 

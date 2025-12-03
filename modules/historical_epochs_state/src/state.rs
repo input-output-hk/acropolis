@@ -138,6 +138,7 @@ mod tests {
             era: Era::Shelley,
             number: epoch * 10 + 100,
             epoch,
+            tip_slot: None,
             timestamp: epoch * 10,
         }
     }

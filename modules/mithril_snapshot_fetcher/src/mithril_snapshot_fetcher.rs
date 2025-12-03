@@ -337,6 +337,7 @@ impl MithrilSnapshotFetcher {
                             epoch_slot,
                             new_epoch,
                             timestamp,
+                            tip_slot: None,
                             era,
                         };
 

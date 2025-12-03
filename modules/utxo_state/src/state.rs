@@ -430,6 +430,7 @@ mod tests {
             epoch_slot: slot,
             new_epoch: false,
             timestamp: slot,
+            tip_slot: None,
             era: Era::Byron,
         }
     }

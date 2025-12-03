@@ -323,6 +323,7 @@ mod tests {
             new_epoch: false,
             timestamp: 99999,
             era: Era::Shelley,
+            tip_slot: None,
         }
     }
 
@@ -337,6 +338,7 @@ mod tests {
             new_epoch: true,
             timestamp: 99999,
             era: Era::Shelley,
+            tip_slot: None,
         }
     }
 
@@ -351,6 +353,7 @@ mod tests {
             new_epoch: false,
             timestamp: 99999,
             era: Era::Conway,
+            tip_slot: None,
         }
     }
 

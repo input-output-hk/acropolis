@@ -75,6 +75,7 @@ mod tests {
             epoch_slot: 1,
             new_epoch: false,
             timestamp: 1,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let ea = EpochActivityMessage {

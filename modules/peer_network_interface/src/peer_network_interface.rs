@@ -284,6 +284,7 @@ impl BlockSink {
             epoch,
             epoch_slot,
             new_epoch,
+            tip_slot: None, // TODO
             timestamp,
             era: header.era,
         }

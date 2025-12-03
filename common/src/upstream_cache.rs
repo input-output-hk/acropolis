@@ -182,6 +182,7 @@ mod test {
             new_epoch: false,
             timestamp: n,
             era: Era::default(),
+            tip_slot: None,
         }
     }
 

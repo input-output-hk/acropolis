@@ -141,6 +141,7 @@ impl GenesisBootstrapper {
                     new_epoch: false,
                     timestamp: byron_genesis.start_time,
                     era: Era::Byron,
+                    tip_slot: None,
                 };
 
                 let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
