@@ -793,24 +793,22 @@ pub struct EpochBootstrapData {
 }
 
 impl EpochBootstrapData {
-    pub fn from_metadata(metadata: &SnapshotMetadata) -> Self {
-        let blocks_previous: HashMap<PoolId, u64> = metadata
-            .blocks_previous_epoch
-            .iter()
-            .map(|p| (p.pool_id, p.block_count as u64))
-            .collect();
+    pub fn new(
+        epoch: u64,
+        blocks_previous_epoch: &[crate::types::PoolBlockProduction],
+        blocks_current_epoch: &[crate::types::PoolBlockProduction],
+    ) -> Self {
+        let blocks_previous: HashMap<PoolId, u64> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
 
-        let blocks_current: HashMap<PoolId, u64> = metadata
-            .blocks_current_epoch
-            .iter()
-            .map(|p| (p.pool_id, p.block_count as u64))
-            .collect();
+        let blocks_current: HashMap<PoolId, u64> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
 
         let total_previous = blocks_previous.values().sum();
         let total_current = blocks_current.values().sum();
 
         Self {
-            epoch: metadata.epoch,
+            epoch,
             spo_blocks_previous: blocks_previous,
             spo_blocks_current: blocks_current,
             total_blocks_current: total_current,
@@ -1392,6 +1390,10 @@ impl StreamingSnapshotParser {
             Err(_) => None,
         };
 
+        let epoch_bootstrap =
+            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
+        callbacks.on_epoch(epoch_bootstrap)?;
+
         let snapshot_metadata = SnapshotMetadata {
             epoch,
             snapshots: snapshots_info,
@@ -1402,14 +1404,10 @@ impl StreamingSnapshotParser {
                 fees: fees as u64,
             },
             utxo_count: Some(utxo_count),
-            blocks_previous_epoch: blocks_previous_epoch.clone(),
-            blocks_current_epoch: blocks_current_epoch.clone(),
+            blocks_previous_epoch,
+            blocks_current_epoch,
         };
-
-        callbacks.on_metadata(snapshot_metadata.clone())?;
-        let epoch_bootstrap = EpochBootstrapData::from_metadata(&snapshot_metadata);
-
-        callbacks.on_epoch(epoch_bootstrap)?;
+        callbacks.on_metadata(snapshot_metadata)?;
 
         // Emit completion callback
         callbacks.on_complete()?;
