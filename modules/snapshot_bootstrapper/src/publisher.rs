@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_epoch_activity_with_context() {
+    fn test_epoch_context_stores_nonces() {
         // This would require mocking Context, so just test the data flow concept
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
