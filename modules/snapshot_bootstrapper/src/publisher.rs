@@ -1,8 +1,9 @@
 use acropolis_common::{
-    messages::{CardanoMessage, Message},
+    ledger_state::SPOState,
+    messages::{CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage},
     snapshot::{
         streaming_snapshot::{
-            DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo, ProposalCallback,
+            DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, ProposalCallback,
             SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
         },
         RawSnapshotsContainer, SnapshotsCallback,
@@ -22,7 +23,7 @@ pub struct SnapshotPublisher {
     snapshot_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
@@ -40,7 +41,7 @@ impl SnapshotPublisher {
             snapshot_topic,
             metadata: None,
             utxo_count: 0,
-            pools: Vec::new(),
+            pools: SPOState::new(),
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
@@ -77,10 +78,30 @@ impl UtxoCallback for SnapshotPublisher {
 }
 
 impl PoolCallback for SnapshotPublisher {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
-        info!("Received {} pools", pools.len());
-        self.pools.extend(pools);
-        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
+        info!(
+            "Received pools (registers: {}, future: {}, retiring: {}",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
+        self.pools.extend(&pools);
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::SPOState(pools),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // Spawn async publish task since this callback is synchronous
+        tokio::spawn(async move {
+            if let Err(e) = context.publish(&snapshot_topic, message).await {
+                tracing::error!("Failed to publish SPO bootstrap: {}", e);
+            }
+        });
+
         Ok(())
     }
 }
@@ -176,7 +197,12 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("Snapshot parsing completed");
         info!("Final statistics:");
         info!("  - UTXOs processed: {}", self.utxo_count);
-        info!("  - Pools: {}", self.pools.len());
+        info!(
+            "  - Pools: {} (future: {}, retiring: {})",
+            self.pools.pools.len(),
+            self.pools.updates.len(),
+            self.pools.retiring.len()
+        );
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());

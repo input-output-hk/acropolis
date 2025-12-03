@@ -990,77 +990,47 @@ pub enum Relay {
 
 /// Pool metadata
 #[serde_as]
-#[derive(
-    Debug,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Encode,
-    minicbor::Decode,
-    Eq,
-    PartialEq,
-)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct PoolMetadata {
     /// Metadata URL
-    #[n(0)]
     pub url: String,
 
     /// Metadata hash
     #[serde_as(as = "Hex")]
-    #[n(1)]
     pub hash: DataHash,
 }
 
 /// Pool registration data
 #[serde_as]
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Decode,
-    minicbor::Encode,
-    PartialEq,
-    Eq,
-)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PoolRegistration {
     /// Operator pool key hash - used as ID
     #[serde_as(as = "Hex")]
-    #[n(0)]
     pub operator: PoolId,
 
     /// VRF key hash
     #[serde_as(as = "Hex")]
-    #[n(1)]
     pub vrf_key_hash: VrfKeyHash,
 
     /// Pledged Ada
-    #[n(2)]
     pub pledge: Lovelace,
 
     /// Fixed cost
-    #[n(3)]
     pub cost: Lovelace,
 
     /// Marginal cost (fraction)
-    #[n(4)]
     pub margin: Ratio,
 
     /// Reward account
-    #[n(5)]
     pub reward_account: StakeAddress,
 
     /// Pool owners by their key hash
-    #[n(6)]
     pub pool_owners: Vec<StakeAddress>,
 
     // Relays
-    #[n(7)]
     pub relays: Vec<Relay>,
 
     // Metadata
-    #[n(8)]
     pub pool_metadata: Option<PoolMetadata>,
 }
 
