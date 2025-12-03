@@ -7,12 +7,12 @@ use acropolis_common::{
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, EpochBootstrapData, EpochCallback, GovernanceProposal,
-        PoolCallback, PoolInfo, ProposalCallback, SnapshotCallbacks, SnapshotMetadata,
-        StakeCallback, UtxoCallback, UtxoEntry,
+        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, PoolInfo,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback,
+        UtxoEntry,
     },
     stake_addresses::AccountState,
-    BlockInfo,
+    BlockInfo, EpochBootstrapData,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
