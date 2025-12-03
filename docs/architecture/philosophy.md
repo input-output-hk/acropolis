@@ -81,8 +81,8 @@ Mitigating these costs is why we have the [Caryatid](https://github.com/input-ou
 framework that Acropolis is built on.
 
 The cost of message passing only happens if you need to serialise and deserialise messages
-to pass them between processes over an external bus.  Although this mode is possible in Caryatid
-- to add third-party extensions, for example - its default mode is combining all the modules into
+to pass them between processes over an external bus.  Although this mode is possible in Caryatid -
+to add third-party extensions, for example - its default mode is combining all the modules into
 a single process and using in-memory message passing of native data (Rust structs), avoiding all
 that overhead.
 
@@ -92,5 +92,65 @@ complexity of the message bus, and making it almost as simple as a function defi
 Finally, Caryatid provides a request-response layer over the raw message bus, which makes it as
 easy to send or handle a request as it would be in any RPC system.
 
+```mermaid
+flowchart TB
+subgraph P1[Process 1]
+    direction TB
+    subgraph AC[Acropolis]
+      A[Module A]
+      B[Module B]
+    end
+    subgraph CA[Caryatid]
+      direction TB
+      RR[Request-Response]
+      ROUTE[Message Routing]
+      IMB[In-memory bus]
+      XMB[External bus]
 
+      RR <--> ROUTE
+      ROUTE <--> IMB
+      ROUTE <--> XMB
+    end
 
+    A <--> RR
+    B <--> RR
+end
+
+subgraph P2[Optional Process 2]
+    direction TB
+    subgraph AC2[Acropolis]
+      C[Module C]
+    end
+    subgraph CA2[Caryatid]
+      direction TB
+      RR2[Request-Response]
+      ROUTE2[Message Routing]
+      XMB2[External bus]
+      IMB2[In-memory bus]
+
+      RR2 <--> ROUTE2
+      ROUTE2 <--> XMB2
+      ROUTE2 <--> IMB2
+    end
+
+    C <--> RR2
+end
+
+RMQ[Rabbit MQ]
+XMB <--> RMQ
+XMB2 <--> RMQ
+
+classDef optional fill:#fffff8,stroke:#ccc
+class AC2 optional
+class P2 optional
+class CA2 optional
+
+classDef optmod fill:#f8f8ff,stroke:#ccc
+class RMQ optmod
+class C optmod
+class RR2 optmod
+class ROUTE2 optmod
+class IMB2 optmod
+class XMB2 optmod
+class XMB optmod
+```
