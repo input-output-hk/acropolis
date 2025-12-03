@@ -5,5 +5,5 @@ to become a full Cardano node.
 
 ## Contents
 
-- [Philosophy](philosophy.md) - How and why Acropolis differs from other node implementations, and the guiding principles for development
+- [Modularity](modularity.md) - Why and how Acropolis is split into loosely-coupled modules
 - [Modules](modules.md) - The current set of modules in Acropolis, and how they interact

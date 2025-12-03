@@ -1,4 +1,4 @@
-# The Philosophy of Acropolis
+# The Modularity of Acropolis
 
 Acropolis is a modular architecture for building nodes, indexers and
 other clients for the Cardano blockchain, and maybe other blockchains
@@ -154,3 +154,31 @@ class IMB2 optmod
 class XMB2 optmod
 class XMB optmod
 ```
+
+## Simplification for design
+
+When we talk about the design of Acropolis and how all the modules interact, we gloss over
+the publish-subscribe message flow and message bus, and draw and describe the system as if
+the modules talked directly to each other.  For many message flows in a realistic system they
+are actually one publisher and one subscriber anyway.  In some cases - the transaction certificates
+output by TxUnpacker is a good example - it is one publisher and many subscribers.  There can be
+multiple publishers on the same topic, too - for example a number of different sources publish
+blocks to be proceesed.
+
+A simple graph diagram covers all these cases:
+
+```mermaid
+flowchart LR
+  A[Module A]
+  B[Module B]
+  C[Module C]
+  D[Module D]
+
+  A -- Message 1 --> B
+  B -- Message 2 --> D
+  C -- Message 2 --> D
+  A -- Message 1 --> C
+  B -- Message 3 --> C
+```
+
+and this is how we describe the system in these pages.
