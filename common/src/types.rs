@@ -134,6 +134,45 @@ pub struct PoolBlockProduction {
     pub epoch: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EpochBootstrapData {
+    /// Current epoch number
+    pub epoch: u64,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_previous: HashMap<PoolId, u64>,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_current: HashMap<PoolId, u64>,
+    /// Sum of current epoch blocks
+    pub total_blocks_current: u64,
+    /// Sum of previous epoch blocks
+    pub total_blocks_previous: u64,
+}
+
+impl EpochBootstrapData {
+    pub fn new(
+        epoch: u64,
+        blocks_previous_epoch: &[crate::types::PoolBlockProduction],
+        blocks_current_epoch: &[crate::types::PoolBlockProduction],
+    ) -> Self {
+        let blocks_previous: HashMap<PoolId, u64> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let blocks_current: HashMap<PoolId, u64> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let total_previous = blocks_previous.values().sum();
+        let total_current = blocks_current.values().sum();
+
+        Self {
+            epoch,
+            spo_blocks_previous: blocks_previous,
+            spo_blocks_current: blocks_current,
+            total_blocks_current: total_current,
+            total_blocks_previous: total_previous,
+        }
+    }
+}
+
 /// Block status
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum BlockStatus {
