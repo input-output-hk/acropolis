@@ -1,7 +1,9 @@
-use acropolis_common::{AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash, GovActionId, ProtocolParamUpdate};
+use acropolis_common::{
+    AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash,
+    ProtocolParamUpdate
+};
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};
-use acropolis_common::validation::{GovernanceValidationError, ValidationError, ValidationStatus};
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
@@ -33,9 +35,9 @@ impl AlonzoBabbageVoting {
         &mut self,
         block_info: &BlockInfo,
         updates: &[AlonzoBabbageUpdateProposal],
-    ) -> Result<ValidationStatus> {
+    ) -> Result<()> {
         if updates.is_empty() {
-            return Ok(ValidationStatus::Go);
+            return Ok(());
         }
 
         if block_info.era < Era::Shelley {
@@ -54,7 +56,7 @@ impl AlonzoBabbageVoting {
             }
         }
 
-        Ok(ValidationStatus::Go)
+        Ok(())
     }
 
     pub fn finalize_voting(

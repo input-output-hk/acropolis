@@ -26,6 +26,7 @@ pub mod state_history;
 pub mod types;
 pub mod upstream_cache;
 pub mod validation;
+pub mod utils;
 
 // Flattened re-exports
 pub use self::address::*;

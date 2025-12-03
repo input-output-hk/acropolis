@@ -5,6 +5,8 @@ use acropolis_common::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
+    protocol_params::ProtocolVersion,
+    validation::{GovernanceValidationError, ValidationError},
     BlockInfo, DRepCredential, DelegatedStake, Era, GovActionId, Lovelace, PoolId,
     ProposalProcedure, TxHash, Voter, VotingProcedure,
 };
@@ -12,12 +14,10 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
-use tracing::{error, info};
-use acropolis_common::protocol_params::ProtocolVersion;
-use acropolis_common::validation::{GovernanceValidationError, ValidationError, ValidationStatus};
+use tracing::info;
 use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
-    VotingRegistrationState,
+    ValidationOutcomes, VotingRegistrationState
 };
 
 pub struct State {
@@ -34,10 +34,6 @@ pub struct State {
 
     alonzo_babbage_voting: AlonzoBabbageVoting,
     conway_voting: ConwayVoting,
-}
-
-fn gov_error(e: GovernanceValidationError) -> ValidationStatus {
-    ValidationStatus::NoGo(ValidationError::BadGovernance(e))
 }
 
 impl State {
@@ -112,51 +108,59 @@ impl State {
         &mut self,
         block: &BlockInfo,
         governance_message: &GovernanceProceduresMessage,
-    ) -> Result<ValidationStatus> {
+    ) -> Result<ValidationOutcomes> {
         if block.era < Era::Conway {
             // Alonzo-Babbage governance
             if !(governance_message.proposal_procedures.is_empty()
                 && governance_message.voting_procedures.is_empty())
             {
-                return Ok(gov_error(GovernanceValidationError::WrongProtocolForGovernance(
-                    ProtocolVersion::conway()
-                )));
+                let mut outcomes = ValidationOutcomes::new();
+                outcomes.push(ValidationError::BadGovernance(
+                    GovernanceValidationError::WrongProtocolForGovernance(
+                        ProtocolVersion::conway()
+                    )
+                ));
+                return Ok(outcomes);
             }
 
             if !governance_message.alonzo_babbage_updates.is_empty() {
-                return self
-                    .alonzo_babbage_voting
+                self.alonzo_babbage_voting
                     .process_update_proposals(block, &governance_message.alonzo_babbage_updates)
-                    .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"));
+                    .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"))?;
             }
+
+            return Ok(ValidationOutcomes::new())
         } else {
             // Conway governance
+            let mut outcomes = ValidationOutcomes::new();
             for pproc in &governance_message.proposal_procedures {
-                if let Err(e) = self.conway_voting.insert_proposal_procedure(block.epoch, pproc) {
-                    error!("Error handling governance_message: '{}'", e);
-                }
+                 outcomes.merge(&mut self
+                     .conway_voting
+                     .insert_proposal_procedure(block.epoch, pproc)
+                     .map_err(|e| anyhow!("Error handling Conway governance_message: '{e}'"))?
+                 );
             }
 
             for (trans, vproc) in &governance_message.voting_procedures {
                 for (voter, voter_votes) in vproc.votes.iter() {
-                    if let Err(e) = self.conway_voting.insert_voting_procedure(
-                        block.epoch,
-                        voter,
-                        trans,
-                        voter_votes,
-                    ) {
-                        error!(
-                            "Error handling governance voting block {}, trans {}: '{}'",
+                    outcomes.merge(&mut self
+                        .conway_voting
+                        .insert_voting_procedure(
+                            block.epoch,
+                            voter,
+                            trans,
+                            voter_votes,
+                        )
+                        .map_err(|e| anyhow!(
+                            "Error handling Conway voting block {}, trans {} '{e}'",
                             block.number,
                             trans.encode_hex::<String>(),
-                            e
-                        );
-                    }
+                        ))?
+                    );
                 }
             }
+            Ok(outcomes)
         }
-
-        Ok(ValidationStatus::Go)
     }
 
     fn recalculate_voting_state(&self) -> Result<VotingRegistrationState> {

@@ -1,17 +1,18 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
         ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
     },
+    queries::errors::QueryError,
     queries::governance::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
-    BlockInfo,
+    utils::ValidationOutcomes,
+    declare_cardano_reader, BlockInfo,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -19,8 +20,6 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-use acropolis_common::messages::CardanoMessage::BlockValidation;
-use acropolis_common::validation::{ValidationError, ValidationStatus};
 
 mod alonzo_babbage_voting;
 mod conway_voting;
@@ -63,38 +62,6 @@ pub struct GovernanceStateConfig {
     verification_output_file: Option<String>,
 }
 
-macro_rules! declare_cardano_reader {
-    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
-        async fn $name(s: &mut Box<dyn Subscription<Message>>) -> Result<(BlockInfo, $msg_type)> {
-            match s.read().await?.1.as_ref() {
-                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                    Ok((blk.clone(), body.clone()))
-                }
-                msg => Err(anyhow!(
-                    "Unexpected message {msg:?} for {} topic", stringify!($msg_constructor)
-                )),
-            }
-        }
-    };
-}
-async fn publish_validation_outcome(
-    context: &Arc<Context<Message>>,
-    topic_field: &str,
-    block: &BlockInfo,
-    outcome: ValidationStatus,
-) -> Result<()> {
-    if block.intent.do_validation() {
-        let outcome_msg = Arc::new(
-            Message::Cardano((block.clone(), BlockValidation(outcome)))
-        );
-        context.message_bus.publish(topic_field, outcome_msg).await?;
-    }
-    else if let ValidationStatus::NoGo(e) = outcome {
-        error!("Error in validation, block {block:?}: {e}");
-    }
-    Ok(())
-}
-
 impl GovernanceStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
@@ -125,72 +92,6 @@ impl GovernanceState {
     declare_cardano_reader!(read_drep, DRepStakeDistribution, DRepStakeDistributionMessage);
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
-/*
-    async fn read_governance(
-        governance_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, GovernanceProceduresMessage)> {
-        match governance_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
-                Ok((blk.clone(), msg.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for governance procedures topic"
-            )),
-        }
-    }
-
-    async fn read_parameters(
-        parameters_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
-        match parameters_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => {
-                Ok((blk.clone(), params.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for protocol parameters topic"
-            )),
-        }
-    }
-
-    async fn read_drep(
-        drep_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, DRepStakeDistributionMessage)> {
-        match drep_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) => {
-                Ok((blk.clone(), distr.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for DRep distribution topic"
-            )),
-        }
-    }
-
-    async fn read_spo(
-        spo_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, SPOStakeDistributionMessage)> {
-        match spo_s.read().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::SPOStakeDistribution(distr))) => {
-                Ok((blk.clone(), distr.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for SPO distribution topic"
-            )),
-        }
-    }
- */
-/*
-    async fn publish_validation_outcome(
-        context: &Arc<Context<Message>>,
-        config: &GovernanceStateConfig,
-        block: BlockInfo,
-        outcome: ValidationStatus
-    ) -> Result<()> {
-        let outcome_msg = Arc::new(
-            Message::Cardano((block, BlockValidation(outcome)))
-        );
-        context.message_bus.publish(&config.validation_outcome_topic, outcome_msg).await
-    }
-*/
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
@@ -288,7 +189,7 @@ impl GovernanceState {
         loop {
             let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
 
-            let mut response = ValidationStatus::Go;
+            let mut outcomes = ValidationOutcomes::new();
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
                 if blk_g.new_epoch {
@@ -301,7 +202,7 @@ impl GovernanceState {
 
                 // Governance may present in any block -- not only in 'new epoch' blocks.
                 {
-                    response.compose(state.lock().await.handle_governance(&blk_g, &gov_procs).await?);
+                    outcomes.merge(&mut state.lock().await.handle_governance(&blk_g, &gov_procs).await?);
                 }
 
                 if blk_g.new_epoch {
@@ -347,9 +248,7 @@ impl GovernanceState {
                 Ok::<(), anyhow::Error>(())
             }.instrument(span).await?;
 
-            publish_validation_outcome(
-                &context, &config.validation_outcome_topic, &blk_g, response
-            ).await?;
+            outcomes.publish(&context, &config.validation_outcome_topic, &blk_g).await?;
         }
     }
 

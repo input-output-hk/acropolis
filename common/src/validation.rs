@@ -4,15 +4,18 @@
 #![allow(dead_code)]
 
 use std::array::TryFromSliceError;
-
+use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
-use crate::{protocol_params::Nonce, GenesisKeyhash, GovActionId, NetworkId, PoolId, ProposalProcedure, Slot, StakeAddress, VrfKeyHash};
+use crate::{protocol_params::Nonce, CommitteeCredential, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, ProposalProcedure, Slot, StakeAddress, Voter, VrfKeyHash};
 use crate::protocol_params::ProtocolVersion;
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
 pub enum ValidationError {
+    #[error("Uncategorized validation error: {0}")]
+    Unclassified(String),
+
     #[error("VRF failure: {0}")]
     BadVRF(#[from] VrfValidationError),
 
@@ -344,6 +347,49 @@ pub enum OperationalCertificateError {
     NoCounterForKeyHashOcert { pool_id: PoolId },
 }
 
+/// Partial formalization of validation outcome errors, relation between entities
+/// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum MismatchRelation {
+    RelEq,
+    RelLt,
+    RelGt,
+    RelLtEq,
+    RelGtEq,
+    RelSubset
+}
+
+impl Display for MismatchRelation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            MismatchRelation::RelEq => "=",
+            MismatchRelation::RelLt => "<",
+            MismatchRelation::RelGt => ">",
+            MismatchRelation::RelLtEq => "<=",
+            MismatchRelation::RelGtEq => ">=",
+            MismatchRelation::RelSubset => " in "
+        };
+        write!(f, "{}", str)
+    }
+}
+
+/// Partial formalization of validation outcome errors, what's wrong with relation of two entities
+/// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum Mismatch<T: Debug + Display> {
+    Supplied(T, MismatchRelation),
+    Expected(T, MismatchRelation),
+}
+
+impl <T: Debug + Display> Display for Mismatch<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Supplied(val, relation) => write!(f, "{relation} {val}"),
+            Self::Expected(val, relation) => write!(f, "not {relation} {val}"),
+        }
+    }
+}
+
 /// See Haskell node, "GOV" rule in Conway epoch, data ConwayGovPredFailure era
 /// also, "PPUP" rule in Shelley epoch, data ShelleyPpupPredFailure era
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -384,20 +430,30 @@ pub enum GovernanceValidationError {
 
     #[error("Treasury withdrawals network id mismatch: {reward_accounts:?} and {network:?}")]
     TreasuryWithdrawalsNetworkIdMismatch { reward_accounts: Vec<StakeAddress>, network: NetworkId },
+
+    #[error("Proposal deposit mismatch: {0}")]
+    ProposalDepositIncorrect(Mismatch<Lovelace>),
+
+    // Some governance actions are not allowed to be voted on by certain types of
+    // Voters. This failure lists all governance action ids with their respective voters
+    // that are not allowed to vote on those governance actions.
+    #[error("Voters are not allowed for the actions: {0:?}")]
+    DisallowedVoters(Vec<(Voter, GovActionId)>),
+
+    // Credentials that are mentioned as members to be both removed and added
+    #[error("Committee members both removed and added: {0:?}")]
+    ConflictingCommitteeUpdate(Vec<CommitteeCredential>),
+
+    // Members for which the expiration epoch has already been reached
+    #[error("Committee members already expired: {0:?}")]
+    ExpirationEpochTooSmall(Vec<(CommitteeCredential, u64)>),
+
+    #[error("InvalidPrevGovActionId: {0}")]
+    InvalidPrevGovActionId (GovActionId),
+
+    #[error("Voting on expired governance action {0:?}")]
+    VotingOnExpiredGovAction (Vec<(Voter, GovActionId)>)
 /*
-  | ProposalDepositIncorrect (Mismatch 'RelEQ Coin)
-  | -- | Some governance actions are not allowed to be voted on by certain types of
-    -- Voters. This failure lists all governance action ids with their respective voters
-    -- that are not allowed to vote on those governance actions.
-    DisallowedVoters (NonEmpty (Voter, GovActionId))
-  | ConflictingCommitteeUpdate
-      -- | Credentials that are mentioned as members to be both removed and added
-      (Set.Set (Credential 'ColdCommitteeRole))
-  | ExpirationEpochTooSmall
-      -- | Members for which the expiration epoch has already been reached
-      (Map.Map (Credential 'ColdCommitteeRole) EpochNo)
-  | InvalidPrevGovActionId (ProposalProcedure era)
-  | VotingOnExpiredGovAction (NonEmpty (Voter, GovActionId))
   | ProposalCantFollow
       -- | The PrevGovActionId of the HardForkInitiation that fails
       (StrictMaybe (GovPurposeId 'HardForkPurpose era))
