@@ -46,7 +46,7 @@ be used as a prefix to resolve per-network configuration files
 needed for bootstrapping. Given a source directory `data`, and a
 a network name of `preview`, the expected layout for configuration files would be:
 
-* `data/preview/snapshots.json`: a list of `SnapshotFileMetadata` values (epoch, point, url)
+* `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url)
 
 This file along with the TOML config is loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
