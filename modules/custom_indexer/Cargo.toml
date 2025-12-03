@@ -17,6 +17,7 @@ anyhow = { workspace = true }
 bincode = "1"
 config = { workspace = true }
 fjall = "2.7.0"
+futures = "0.3"
 pallas = { workspace = true}
 serde = { workspace = true, features = ["rc"] }
 tokio = { workspace = true }

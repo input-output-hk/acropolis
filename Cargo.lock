@@ -204,6 +204,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
+ "futures",
  "pallas 0.33.0",
  "serde",
  "tokio",

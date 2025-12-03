@@ -48,15 +48,15 @@ async fn main() -> Result<()> {
     PeerNetworkInterface::register(&mut process);
 
     // watch channel to send latest state to consumer on index change
+    /*
     let (sender, receiver) = watch::channel(FjallPoolCostState {
         pools: BTreeMap::new(),
     });
+    */
 
-    /* Uncomment to test in memory indexer
     let (sender, receiver) = watch::channel(InMemoryPoolCostState {
         pools: BTreeMap::new(),
     });
-    */
 
     // Example receiver
     {
@@ -76,20 +76,21 @@ async fn main() -> Result<()> {
     };
 
     // Fjall backed example indexer
-    let indexer = CustomIndexer::new(
-        FjallPoolCostIndex::new("fjall-pool-cost-index", sender)?,
-        FjallCursorStore::new("fjall-cursor-store", shelley_start.clone())?,
-        shelley_start,
-    );
+    /*
+    let indexer = CustomIndexer::new(FjallCursorStore::new("fjall-cursor-store")?);
+    indexer
+        .add_index(
+            FjallPoolCostIndex::new("fjall-pool-cost-index", sender)?,
+            shelley_start,
+            false,
+        )
+        .await;
+    */
 
     // In memory example indexer
-    /*
-    let indexer = CustomIndexer::new(
-        InMemoryPoolCostIndex::new(sender),
-        InMemoryCursorStore::new(shelley_start.clone()),
-        shelley_start,
-    );
-    */
+
+    let indexer = CustomIndexer::new(InMemoryCursorStore::new());
+    indexer.add_index(InMemoryPoolCostIndex::new(sender), shelley_start, false).await;
 
     process.register(Arc::new(indexer));
     process.run().await?;

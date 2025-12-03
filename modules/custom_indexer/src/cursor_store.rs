@@ -1,79 +1,148 @@
-use std::{future::Future, path::Path, sync::Mutex};
+use std::{collections::HashMap, future::Future, path::Path};
 
 use acropolis_common::Point;
 use anyhow::Result;
 use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
+use tokio::sync::Mutex;
+use tracing::warn;
 
 pub trait CursorStore: Send + Sync + 'static {
-    fn load(&self) -> impl Future<Output = Result<Option<Point>>> + Send;
-    fn save(&self, point: &Point) -> impl Future<Output = Result<()>> + Send;
+    fn load(&self) -> impl Future<Output = Result<HashMap<String, Point>>> + Send;
+    fn save(
+        &self,
+        tips: &HashMap<String, Point>,
+    ) -> impl Future<Output = Result<(), CursorSaveError>> + Send;
 }
 
 // In memory cursor store (Not persisted across runs)
 pub struct InMemoryCursorStore {
-    cursor: Mutex<Option<Point>>,
+    cursors: Mutex<HashMap<String, Point>>,
 }
 impl InMemoryCursorStore {
-    pub fn new(point: Point) -> Self {
+    pub fn new() -> Self {
         Self {
-            cursor: Mutex::new(Some(point)),
+            cursors: Mutex::new(HashMap::new()),
         }
     }
 }
+impl Default for InMemoryCursorStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CursorStore for InMemoryCursorStore {
-    async fn load(&self) -> Result<Option<Point>> {
-        let guard = self.cursor.lock().map_err(|_| anyhow::anyhow!("cursor mutex poisoned"))?;
-        Ok(guard.as_ref().cloned())
+    async fn load(&self) -> Result<HashMap<String, Point>> {
+        let guard = self.cursors.lock().await;
+        Ok(guard.clone())
     }
 
-    async fn save(&self, point: &Point) -> Result<()> {
-        let mut guard = self.cursor.lock().map_err(|_| anyhow::anyhow!("cursor mutex poisoned"))?;
-        *guard = Some(point.clone());
+    async fn save(&self, tips: &HashMap<String, Point>) -> Result<(), CursorSaveError> {
+        let mut guard = self.cursors.lock().await;
+        *guard = tips.clone();
         Ok(())
     }
 }
 
 // Fjall backed cursor store (Retains last stored point)
 pub struct FjallCursorStore {
-    cursor: Partition,
+    partition: Partition,
 }
 
 impl FjallCursorStore {
-    pub fn new(path: impl AsRef<Path>, point: Point) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let cfg = Config::new(path);
         let keyspace = Keyspace::open(cfg)?;
         let partition = keyspace.open_partition("cursor", PartitionCreateOptions::default())?;
 
-        // Use stored point if exists or initialize with provided point
-        match partition.get("cursor")? {
-            Some(_) => Ok(Self { cursor: partition }),
-            None => {
-                let raw = bincode::serialize(&point)?;
-                partition.insert("cursor", raw)?;
-                Ok(Self { cursor: partition })
-            }
-        }
+        Ok(Self { partition })
     }
 }
 
 impl CursorStore for FjallCursorStore {
-    async fn load(&self) -> Result<Option<Point>> {
-        let raw = self.cursor.get("cursor")?;
+    async fn load(&self) -> Result<HashMap<String, Point>> {
+        let mut out = HashMap::new();
+        let iter = self.partition.prefix("cursor/");
+        for next in iter {
+            let (key_bytes, val_bytes) = match next {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("CursorStore: failed to read row: {:#}", e);
+                    continue;
+                }
+            };
 
-        let Some(bytes) = raw else {
-            return Ok(None);
-        };
+            let key = match String::from_utf8(key_bytes.to_vec()) {
+                Ok(k) => k,
+                Err(e) => {
+                    warn!("CursorStore: invalid UTF-8 in key: {:#}", e);
+                    continue;
+                }
+            };
 
-        let point: Point = bincode::deserialize(&bytes)?;
+            if let Some(name) = key.strip_prefix("cursor/") {
+                let point = match bincode::deserialize::<Point>(&val_bytes) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!(
+                            "CursorStore: failed to deserialize cursor for '{}': {:#}",
+                            name, e
+                        );
+                        continue;
+                    }
+                };
+                out.insert(name.to_string(), point);
+            }
+        }
 
-        Ok(Some(point))
+        Ok(out)
     }
 
-    async fn save(&self, point: &Point) -> Result<()> {
-        let raw = bincode::serialize(point)?;
+    async fn save(&self, tips: &HashMap<String, Point>) -> Result<(), CursorSaveError> {
+        let mut failed = Vec::new();
 
-        self.cursor.insert("cursor", raw)?;
+        for (name, point) in tips {
+            let key = format!("cursor/{name}");
 
-        Ok(())
+            let val = match bincode::serialize(point) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(
+                        "CursorStore: failed to serialize cursor for '{}': {:#}",
+                        name, e
+                    );
+                    failed.push(name.clone());
+                    continue;
+                }
+            };
+
+            if let Err(e) = self.partition.insert(&key, val) {
+                warn!(
+                    "CursorStore: failed to write cursor for '{}': {:#}",
+                    name, e
+                );
+                failed.push(name.clone());
+                continue;
+            }
+        }
+
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(CursorSaveError { failed })
+        }
     }
 }
+
+#[derive(Debug)]
+pub struct CursorSaveError {
+    pub failed: Vec<String>,
+}
+
+impl std::fmt::Display for CursorSaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to save cursor tips for: {:?}", self.failed)
+    }
+}
+
+impl std::error::Error for CursorSaveError {}

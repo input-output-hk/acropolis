@@ -735,6 +735,15 @@ pub enum Point {
     },
 }
 
+impl Point {
+    pub fn slot_or_default(&self) -> u64 {
+        match self {
+            Self::Origin => 0,
+            Self::Specific { slot, .. } => *slot,
+        }
+    }
+}
+
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
