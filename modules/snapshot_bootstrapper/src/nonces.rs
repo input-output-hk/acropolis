@@ -63,13 +63,13 @@ impl NonceContext {
         serde_json::from_str(&content).map_err(|e| NonceContextError::Parse(path, e))
     }
 
-    pub fn into_nonces(self, epoch: u64, lab_hash: BlockHash) -> Nonces {
+    pub fn into_nonces(self, epoch: u64, lab: Nonce) -> Nonces {
         Nonces {
             epoch,
             active: self.active,
             evolving: self.evolving,
             candidate: self.candidate,
-            lab: Nonce::from(lab_hash),
+            lab,
             prev_lab: self.tail,
         }
     }

@@ -66,7 +66,7 @@ impl BootstrapContext {
         let slot = header.point.slot();
 
         // Build nonce
-        let nonces = nonces_file.into_nonces(target_epoch, *hash);
+        let nonces = nonces_file.into_nonces(target_epoch, header.nonce_vrf_output);
 
         // Build block info
         let (_, epoch_slot) = genesis.slot_to_epoch(slot);
@@ -77,7 +77,7 @@ impl BootstrapContext {
             hash: *hash,
             epoch: target_epoch,
             epoch_slot,
-            new_epoch: true,
+            new_epoch: false,
             timestamp: genesis.slot_to_timestamp(slot),
             era: Era::Conway, // TODO: Make dynamic with era history
         };
