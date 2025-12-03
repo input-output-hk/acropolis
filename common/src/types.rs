@@ -61,6 +61,19 @@ impl From<String> for NetworkId {
     }
 }
 
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NetworkId::Mainnet => "mainnet",
+                NetworkId::Testnet => "testnet",
+            }
+        )
+    }
+}
+
 /// Protocol era
 #[derive(
     Debug,
@@ -362,7 +375,14 @@ impl AssetName {
 }
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct NativeAsset {
     #[n(0)]
@@ -398,7 +418,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -757,6 +777,12 @@ impl TxOutRef {
             tx_hash,
             output_index,
         }
+    }
+}
+
+impl Display for TxOutRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
 }
 
