@@ -1,4 +1,6 @@
 # Snapshot bootstrapper default configuration
+# Epoch to bootstrap to
+epoch = 509
 
 # The Cardano network to connect to (e.g., "mainnet", "preprod", "preview")
 network = "mainnet"
