@@ -8,6 +8,8 @@ start of the Cardano chain) and using a Mithril block data dump to save fetching
 network.  Once we've processed all the Mithril data, we hand over to a block fetcher which then
 synchronises with a friendly local relay node.
 
+Here is the [configuration](../../processes/omnibus/configs/omnibus-basic-utxo.toml) for this setup.
+
 ## Module graph
 
 ```mermaid
@@ -27,5 +29,11 @@ flowchart LR
   TXU -- UTXO Deltas --> UTXO
   GEN -- Genesis UTXO Deltas --> UTXO
 
-  click GEN "../../modules/genesis_bootstrapper/"
+  click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
+  click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
+  click PNI "https://github.com/input-output-hk/acropolis/tree/main/modules/peer_network_interface/"
+  click BU "https://github.com/input-output-hk/acropolis/tree/main/modules/block_unpacker/"
+  click TXU "https://github.com/input-output-hk/acropolis/tree/main/modules/tx_unpacker/"
+  click UTXO "https://github.com/input-output-hk/acropolis/tree/main/modules/utxo_state/"
 ```
+
