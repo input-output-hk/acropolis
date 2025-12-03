@@ -41,15 +41,14 @@ be one of 'mainnet', 'preprod', 'preview' or 'testnet_<magic>' where
 Data structure, e.g. as [Amaru mainnet](https://github.com/pragma-org/amaru/tree/main/data/mainnet)
 
 The bootstrapper will be given a path to a directory that is expected to contain
-the following files: snapshots.json and config.json. The path will
+the following a snapshots.json. The path will
 be used as a prefix to resolve per-network configuration files
 needed for bootstrapping. Given a source directory `data`, and a
 a network name of `preview`, the expected layout for configuration files would be:
 
-* `data/preview/config.json`: the epoch to load and points
-* `data/preview/snapshots.json`: a list of `SnapshotFileMetadata` values (epoch, point, url)
+* `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url)
 
-These files are loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
+This file along with the TOML config is loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
 
 ## Bootstrapping sequence
@@ -62,9 +61,10 @@ corresponding URL and metadata in snapshots.json for the snapshot file.
 Loading occurs in this order:
 
 1. Wait for `bootstrapped-topic` message with genesis values (typically `cardano.sequence.bootstrapped`)
-2. Load network configuration from `config.json`
+2. Load network configuration from [Omninbus config](../../processes/omnibus/omnibus.toml)
+   or [default toml](config.default.toml)
 3. Load snapshot metadata from `snapshots.json`
-4. Find snapshot matching the epoch specified in config.json
+4. Find snapshot matching the epoch specified in TOML config (step 2)
 5. Download snapshot file (skips if already present)
 6. Publish `SnapshotMessage::Startup` to the snapshot topic
 7. Parse the snapshot file using the [streaming_snapshot](../../common/src/snapshot/streaming_snapshot.rs)
@@ -104,17 +104,3 @@ The bootstrapper supports the following configuration options:
 - `bootstrapped-subscribe-topic`: Topic to receive genesis completion (default: "cardano.sequence.bootstrapped")
 - `completion-topic`: Topic to publish completion signal (default: "cardano.snapshot.complete")
 
-## Example config.json
-
-```json
-{
-  "snapshot": 500,
-  "points": [
-    {
-      "epoch": 500,
-      "id": "abc123...",
-      "slot": 12345678
-    }
-  ]
-}
-```

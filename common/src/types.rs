@@ -61,6 +61,19 @@ impl From<String> for NetworkId {
     }
 }
 
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NetworkId::Mainnet => "mainnet",
+                NetworkId::Testnet => "testnet",
+            }
+        )
+    }
+}
+
 /// Protocol era
 #[derive(
     Debug,
@@ -125,13 +138,52 @@ impl Display for Era {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PoolBlockProduction {
     /// Pool ID that produced the blocks
-    pub pool_id: String,
+    pub pool_id: PoolId,
 
     /// Number of blocks produced by this pool in the epoch
     pub block_count: u8,
 
     /// Epoch number
     pub epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EpochBootstrapData {
+    /// Current epoch number
+    pub epoch: u64,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_previous: HashMap<PoolId, u64>,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_current: HashMap<PoolId, u64>,
+    /// Sum of current epoch blocks
+    pub total_blocks_current: u64,
+    /// Sum of previous epoch blocks
+    pub total_blocks_previous: u64,
+}
+
+impl EpochBootstrapData {
+    pub fn new(
+        epoch: u64,
+        blocks_previous_epoch: &[crate::types::PoolBlockProduction],
+        blocks_current_epoch: &[crate::types::PoolBlockProduction],
+    ) -> Self {
+        let blocks_previous: HashMap<PoolId, u64> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let blocks_current: HashMap<PoolId, u64> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let total_previous = blocks_previous.values().sum();
+        let total_current = blocks_current.values().sum();
+
+        Self {
+            epoch,
+            spo_blocks_previous: blocks_previous,
+            spo_blocks_current: blocks_current,
+            total_blocks_current: total_current,
+            total_blocks_previous: total_previous,
+        }
+    }
 }
 
 /// Block status
@@ -323,7 +375,14 @@ impl AssetName {
 }
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct NativeAsset {
     #[n(0)]
@@ -359,7 +418,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -718,6 +777,12 @@ impl TxOutRef {
             tx_hash,
             output_index,
         }
+    }
+}
+
+impl Display for TxOutRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
 }
 

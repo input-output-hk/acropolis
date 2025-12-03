@@ -23,9 +23,10 @@ pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrit
 
 // Re-export streaming snapshot APIs
 pub use streaming_snapshot::{
-    AccountState, Anchor, CollectingCallbacks, DRepCallback, DRepInfo, GovernanceProposal,
-    PoolCallback, PotBalances, ProposalCallback, Relay, SnapshotCallbacks, SnapshotMetadata,
-    StakeAddressState, StakeCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    AccountState, Anchor, CollectingCallbacks, DRepCallback, DRepInfo, EpochCallback,
+    GovernanceProposal, PoolCallback, PotBalances, ProposalCallback, Relay, SnapshotCallbacks,
+    SnapshotMetadata, StakeAddressState, StakeCallback, StreamingSnapshotParser, UtxoCallback,
+    UtxoEntry,
 };
 
 // Re-export snapshot types

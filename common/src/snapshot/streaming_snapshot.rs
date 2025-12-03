@@ -34,8 +34,8 @@ pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::{
-    Lovelace, MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay,
-    SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
+    EpochBootstrapData, Lovelace, MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration,
+    Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
 };
 
 // Import snapshot parsing support
@@ -626,6 +626,10 @@ pub trait UtxoCallback {
     fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()>;
 }
 
+pub trait EpochCallback {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()>;
+}
+
 /// Callback invoked with bulk stake pool data
 pub trait PoolCallback {
     /// Called once with all pool data
@@ -652,7 +656,13 @@ pub trait ProposalCallback {
 
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
-    UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback + SnapshotsCallback
+    UtxoCallback
+    + PoolCallback
+    + StakeCallback
+    + DRepCallback
+    + ProposalCallback
+    + SnapshotsCallback
+    + EpochCallback
 {
     /// Called before streaming begins with metadata
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()>;
@@ -1178,8 +1188,14 @@ impl StreamingSnapshotParser {
             }
             Err(_) => None,
         };
-        callbacks.on_metadata(SnapshotMetadata {
+
+        let epoch_bootstrap =
+            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
+        callbacks.on_epoch(epoch_bootstrap)?;
+
+        let snapshot_metadata = SnapshotMetadata {
             epoch,
+            snapshots: snapshots_info,
             pot_balances: PotBalances {
                 reserves,
                 treasury,
@@ -1189,8 +1205,8 @@ impl StreamingSnapshotParser {
             utxo_count: Some(utxo_count),
             blocks_previous_epoch,
             blocks_current_epoch,
-            snapshots: snapshots_info,
-        })?;
+        };
+        callbacks.on_metadata(snapshot_metadata)?;
 
         // Emit completion callback
         callbacks.on_complete()?;
@@ -1400,7 +1416,8 @@ impl StreamingSnapshotParser {
         let block_count = decoder.u8().context("Failed to parse block count")?;
 
         // Convert pool ID bytes to hex string
-        let pool_id = hex::encode(pool_id_bytes);
+        let pool_id =
+            hex::encode(pool_id_bytes).parse::<PoolId>().context("Failed to parse pool ID")?;
 
         Ok(PoolBlockProduction {
             pool_id,
@@ -1938,11 +1955,19 @@ pub struct CollectingCallbacks {
     pub accounts: Vec<AccountState>,
     pub dreps: Vec<DRepInfo>,
     pub proposals: Vec<GovernanceProposal>,
+    epoch: EpochBootstrapData,
 }
 
 impl UtxoCallback for CollectingCallbacks {
     fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()> {
         self.utxos.push(utxo);
+        Ok(())
+    }
+}
+
+impl EpochCallback for CollectingCallbacks {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
+        self.epoch = data;
         Ok(())
     }
 }
