@@ -43,9 +43,9 @@ only for the topics that they are interested in.
 
 ```mermaid
 flowchart LR
-    A[Module A]
-    B[Module B]
-    C[Module C]
+    A(Module A)
+    B(Module B)
+    C(Module C)
     MB(Message Bus)
 
     A  -- Publish   --> MB
@@ -97,8 +97,8 @@ flowchart TB
 subgraph P1[Process 1]
     direction TB
     subgraph AC[Acropolis]
-      A[Module A]
-      B[Module B]
+      A(Module A)
+      B(Module B)
     end
     subgraph CA[Caryatid]
       direction TB
@@ -119,7 +119,7 @@ end
 subgraph P2[Optional Process 2]
     direction TB
     subgraph AC2[Acropolis]
-      C[Module C]
+      C(Module C)
     end
     subgraph CA2[Caryatid]
       direction TB
@@ -169,10 +169,10 @@ A simple graph diagram covers all these cases:
 
 ```mermaid
 flowchart LR
-  A[Module A]
-  B[Module B]
-  C[Module C]
-  D[Module D]
+  A(Module A)
+  B(Module B)
+  C(Module C)
+  D(Module D)
 
   A -- Message 1 --> B
   B -- Message 2 --> D

@@ -6,4 +6,4 @@ to become a full Cardano node.
 ## Contents
 
 - [Modularity](modularity.md) - Why and how Acropolis is split into loosely-coupled modules
-- [Modules](modules.md) - The current set of modules in Acropolis, and how they interact
+- [Basic system description](system-basic.md) - Building a system description up from basics
