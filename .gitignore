@@ -1,5 +1,9 @@
 target
 README.html
+restore.sh
+startup.sh
+configuration/
+docker-compose.yaml
 
 # Nix
 result

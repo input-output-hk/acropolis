@@ -45,10 +45,6 @@ use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
-const STARTUP_METHOD_MITHRIL: &str = "mithril";
-const STARTUP_METHOD_SNAPSHOT: &str = "snapshot";
-const CONFIG_KEY_STARTUP_METHOD: &str = "startup.method";
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 #[cfg(not(target_env = "msvc"))]
@@ -102,35 +98,12 @@ pub async fn main() -> Result<()> {
     );
 
     // Create the process
-    let mut process = Process::<Message>::create(config.clone()).await;
-
-    // Get startup method from config
-    let startup_method = config
-        .get_string(CONFIG_KEY_STARTUP_METHOD)
-        .unwrap_or_else(|_| STARTUP_METHOD_MITHRIL.to_string());
-
-    info!("Using startup method: {}", startup_method);
-
-    // Register bootstrap modules based on the startup method
-    match startup_method.as_str() {
-        STARTUP_METHOD_MITHRIL => {
-            info!("Registering MithrilSnapshotFetcher");
-            MithrilSnapshotFetcher::register(&mut process);
-        }
-        STARTUP_METHOD_SNAPSHOT => {
-            info!("Registering SnapshotBootstrapper");
-            SnapshotBootstrapper::register(&mut process);
-        }
-        _ => {
-            panic!(
-                "Invalid startup method: {}. Must be one of: mithril, snapshot",
-                startup_method
-            );
-        }
-    }
+    let mut process = Process::<Message>::create(config).await;
 
     // Register modules
     GenesisBootstrapper::register(&mut process);
+    SnapshotBootstrapper::register(&mut process);
+    MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
     TxUnpacker::register(&mut process);

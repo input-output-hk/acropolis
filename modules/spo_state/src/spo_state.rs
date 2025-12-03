@@ -1,6 +1,8 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
+use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
@@ -111,17 +113,10 @@ impl SPOState {
             let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
             let mut current_block: Option<BlockInfo> = None;
 
-            // read per-block topics in parallel
-            let certs_message_f = certificates_subscription.read();
-            let block_message_f = block_subscription.read();
-            let withdrawals_message_f = withdrawals_subscription.as_mut().map(|s| s.read());
-            let governance_message_f = governance_subscription.as_mut().map(|s| s.read());
-            let stake_deltas_message_f = stake_deltas_subscription.as_mut().map(|s| s.read());
-
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certificates_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, _)) => {
+                Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -132,6 +127,14 @@ impl SPOState {
                     block_info.new_epoch && block_info.epoch > 0
                 }
 
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    spo_state_publisher.publish_rollback(certs_message.clone()).await?;
+                    false
+                }
+
                 _ => {
                     error!("Unexpected message type: {certs_message:?}");
                     false
@@ -140,7 +143,7 @@ impl SPOState {
 
             // handle blocks (handle_mint) before handle_tx_certs
             // in case of epoch boundary
-            let (_, block_message) = block_message_f.await?;
+            let (_, block_message) = block_subscription.read_ignoring_rollbacks().await?;
             match block_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
                     let span =
@@ -206,19 +209,20 @@ impl SPOState {
                     .await;
                 }
 
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // Do nothing, we handled rollback earlier
+                }
+
                 _ => error!("Unexpected message type: {certs_message:?}"),
             };
 
             // read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let spdd_message_f = spdd_subscription.read();
-                let spo_rewards_message_f = spo_rewards_subscription.as_mut().map(|s| s.read());
-                let ea_message_f = epoch_activity_subscription.read();
-                let stake_reward_deltas_message_f =
-                    stake_reward_deltas_subscription.as_mut().map(|s| s.read());
-
                 // Handle SPDD
-                let (_, spdd_message) = spdd_message_f.await?;
+                let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((
                     block_info,
                     CardanoMessage::SPOStakeDistribution(spdd_message),
@@ -233,8 +237,9 @@ impl SPOState {
                 }
 
                 // Handle SPO rewards
-                if let Some(spo_rewards_message_f) = spo_rewards_message_f {
-                    let (_, spo_rewards_message) = spo_rewards_message_f.await?;
+                if let Some(spo_rewards_subscription) = spo_rewards_subscription.as_mut() {
+                    let (_, spo_rewards_message) =
+                        spo_rewards_subscription.read_ignoring_rollbacks().await?;
                     if let Message::Cardano((
                         block_info,
                         CardanoMessage::SPORewards(spo_rewards_message),
@@ -251,8 +256,11 @@ impl SPOState {
                 }
 
                 // Handle Stake Reward Deltas
-                if let Some(stake_reward_deltas_message_f) = stake_reward_deltas_message_f {
-                    let (_, stake_reward_deltas_message) = stake_reward_deltas_message_f.await?;
+                if let Some(stake_reward_deltas_subscription) =
+                    stake_reward_deltas_subscription.as_mut()
+                {
+                    let (_, stake_reward_deltas_message) =
+                        stake_reward_deltas_subscription.read_ignoring_rollbacks().await?;
                     if let Message::Cardano((
                         block_info,
                         CardanoMessage::StakeRewardDeltas(stake_reward_deltas_message),
@@ -274,7 +282,7 @@ impl SPOState {
                 }
 
                 // Handle EpochActivityMessage
-                let (_, ea_message) = ea_message_f.await?;
+                let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((
                     block_info,
                     CardanoMessage::EpochActivity(epoch_activity_message),
@@ -300,8 +308,8 @@ impl SPOState {
             }
 
             // Handle withdrawals
-            if let Some(withdrawals_message_f) = withdrawals_message_f {
-                let (_, message) = withdrawals_message_f.await?;
+            if let Some(withdrawals_subscription) = withdrawals_subscription.as_mut() {
+                let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
@@ -325,8 +333,8 @@ impl SPOState {
             }
 
             // Handle stake deltas
-            if let Some(stake_deltas_message_f) = stake_deltas_message_f {
-                let (_, message) = stake_deltas_message_f.await?;
+            if let Some(stake_deltas_subscription) = stake_deltas_subscription.as_mut() {
+                let (_, message) = stake_deltas_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,
@@ -350,8 +358,8 @@ impl SPOState {
             }
 
             // Handle governance
-            if let Some(governance_message_f) = governance_message_f {
-                let (_, message) = governance_message_f.await?;
+            if let Some(governance_subscription) = governance_subscription.as_mut() {
+                let (_, message) = governance_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,

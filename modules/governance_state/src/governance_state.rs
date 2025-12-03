@@ -2,9 +2,11 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage,
+        Message, ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -14,7 +16,7 @@ use acropolis_common::{
     utils::ValidationOutcomes,
     declare_cardano_reader, BlockInfo,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -91,7 +93,7 @@ impl GovernanceState {
     declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
     declare_cardano_reader!(read_drep, DRepStakeDistribution, DRepStakeDistributionMessage);
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
-
+    
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
@@ -187,7 +189,21 @@ impl GovernanceState {
         });
 
         loop {
-            let (blk_g, gov_procs) = Self::read_governance(&mut governance_s).await?;
+            let (_, message) = governance_s.read().await?;
+            let (blk_g, gov_procs) = match message.as_ref() {
+                Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
+                    (blk.clone(), msg.clone())
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    let mut state = state.lock().await;
+                    state.publish_rollback(message).await?;
+                    continue;
+                }
+                _ => bail!("Unexpected message {message:?} for governance procedures topic"),
+            };
 
             let mut outcomes = ValidationOutcomes::new();
             let span = info_span!("governance_state.handle", block = blk_g.number);
@@ -214,7 +230,9 @@ impl GovernanceState {
                     }
 
                     {
+                        info!("Handling protocol parameters");
                         state.lock().await.handle_protocol_parameters(&params).await?;
+                        info!("Handling protocol parameters -- done!");
                     }
 
                     if blk_g.epoch > 0 {

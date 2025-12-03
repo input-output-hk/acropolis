@@ -1,5 +1,6 @@
 //! Acropolis UTXOState: State storage
 use crate::volatile_index::VolatileIndex;
+use acropolis_common::messages::Message;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
@@ -23,6 +24,9 @@ pub trait AddressDeltaObserver: Send + Sync {
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
+
+    /// handle rollback
+    async fn rollback(&self, message: Arc<Message>);
 }
 
 /// Immutable UTXO store
@@ -377,6 +381,13 @@ impl State {
             observer.finalise_block(block).await;
         }
 
+        Ok(())
+    }
+
+    pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
+        if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer.rollback(message).await;
+        }
         Ok(())
     }
 }
@@ -806,6 +817,8 @@ mod tests {
         }
 
         async fn finalise_block(&self, _block: &BlockInfo) {}
+
+        async fn rollback(&self, _msg: Arc<Message>) {}
     }
 
     #[tokio::test]

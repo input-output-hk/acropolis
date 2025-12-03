@@ -5,7 +5,7 @@ use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
+        StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     *,
 };
@@ -464,6 +464,39 @@ impl TxUnpacker {
                                 .filter_map(Result::err)
                                 .for_each(|e| error!("Failed to publish: {e}"));
                         }.instrument(span).await;
+                    }
+
+                    Message::Cardano((_, CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)))) => {
+                        let mut futures = Vec::new();
+                        if let Some(ref topic) = publish_utxo_deltas_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_asset_deltas_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_withdrawals_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_certificates_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_governance_procedures_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        if let Some(ref topic) = publish_block_txs_topic {
+                            futures.push(context.message_bus.publish(topic, message.clone()));
+                        }
+
+                        join_all(futures)
+                            .await
+                            .into_iter()
+                            .filter_map(Result::err)
+                            .for_each(|e| error!("Failed to publish: {e}"));
                     }
 
                     _ => error!("Unexpected message type: {message:?}")

@@ -5,7 +5,7 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
-    protocol_params::{Nonces, PraosParams},
+    protocol_params::{Nonce, Nonces, PraosParams},
     BlockHash, BlockInfo, PoolId,
 };
 use anyhow::Result;
@@ -236,6 +236,11 @@ impl State {
         self.epoch_fees = 0;
 
         epoch_activity
+    }
+
+    /// This function returns active nonce of current epoch's state
+    pub fn get_active_nonce(&self) -> Option<Nonce> {
+        self.nonces.as_ref().map(|n| n.active.clone())
     }
 
     pub fn get_epoch_info(&self) -> EpochActivityMessage {

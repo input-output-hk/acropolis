@@ -153,12 +153,15 @@ impl PeerNetworkInterface {
         events_sender: mpsc::Sender<NetworkEvent>,
     ) -> Result<()> {
         while let Ok((_, msg)) = subscription.read().await {
-            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect {
-                slot,
-                hash,
-            })) = msg.as_ref()
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(p))) =
+                msg.as_ref()
             {
-                let point = Point::new(*slot, hash.to_vec());
+                let point = match p {
+                    acropolis_common::Point::Origin => Point::Origin,
+                    acropolis_common::Point::Specific { hash, slot } => {
+                        Point::Specific(*slot, hash.to_vec())
+                    }
+                };
 
                 if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
                     bail!("event channel closed");

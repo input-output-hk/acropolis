@@ -1,29 +1,29 @@
-# Rewards and pools timing: epochs 
+# Rewards and pools timing.
 
-The following is the result of discussions with ledger team
-and of analysis of Haskell code.
+The following notes is the result of discussions with ledger team
+and of Haskell code analysis.
 
 ## Anikett Deshpande's comment on the epoch boundary transition:
 
 In summary, at the epoch boundary:
 
-    TICK is called, calls
-    NEWEPOCH which forces the existing rewards pulser to complete and distributes the rewards and then calls
-    EPOCH, which calls
-    SNAP to rotate the snapshots: now new -> mark, mark -> set , and set -> go
-    SNAP returns to
-    EPOCH, which returns to
-    NEWEPOCH, which returns to
-    TICK, which calls
-    RUPD, which in turn sets off the new rewards pulser using the newly rotated go snapshot (after stability window ~1.5 days), and returns to
-    TICK
+* `TICK` is called, calls
+* `NEWEPOCH` which forces the existing rewards pulser to complete and distributes the rewards and then calls
+* `EPOCH`, which calls
+* `SNAP` to rotate the snapshots: now new -> mark, mark -> set , and set -> go
+* `SNAP` returns to
+* `EPOCH`, which returns to
+* `NEWEPOCH`, which returns to
+* `TICK`, which calls
+* `RUPD`, which in turn sets off the new rewards pulser using the newly rotated go snapshot (after stability window ~1.5 days), and returns to
+* `TICK`
 
 In short:
 
-    TICK calls NEWEPOCH
-    NEWEPOCH forces pulser and distributes rewards from the go snapshot (we are about to deallocate) which was rotated and marked as go at the previous boundary and was originally snapshotted as mark 2 epoch boundaries before that.
-    SNAP rotates the snapshots and takes a new one for mark
-    RUPD sets of the new pulser with the newly rotated go snapshot, which was marked as set in the previous epoch and was used for leader schedule processing.
+* `TICK` calls `NEWEPOCH`
+* `NEWEPOCH` forces pulser and distributes rewards from the go snapshot (we are about to deallocate) which was rotated and marked as go at the previous boundary and was originally snapshotted as mark 2 epoch boundaries before that.
+* `SNAP` rotates the snapshots and takes a new one for mark
+* `RUPD` sets of the new pulser with the newly rotated go snapshot, which was marked as set in the previous epoch and was used for leader schedule processing.
 
 I hope this answers the question much better than before. :blush: (edited) 
 

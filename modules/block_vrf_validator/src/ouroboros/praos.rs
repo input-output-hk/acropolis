@@ -70,6 +70,7 @@ pub fn validate_vrf_praos<'a>(
         }),
         Box::new(move || {
             validate_vrf_leader_value(
+                &pool_id,
                 &header.leader_vrf_output().map_err(|_| {
                     VrfValidationError::Other("Leader VRF Output is not set".to_string())
                 })?[..],

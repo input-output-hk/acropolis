@@ -1,8 +1,11 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo, ProposalCallback,
-        SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
+    snapshot::{
+        streaming_snapshot::{
+            DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo, ProposalCallback,
+            SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
+        },
+        RawSnapshotsContainer, SnapshotsCallback,
     },
     stake_addresses::AccountState,
     BlockInfo,
@@ -105,6 +108,43 @@ impl ProposalCallback for SnapshotPublisher {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
         // TODO: Accumulate proposal data if needed or send in chunks to ProposalState processor
+        Ok(())
+    }
+}
+
+impl SnapshotsCallback for SnapshotPublisher {
+    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
+        info!("📸 Raw Snapshots Data:");
+
+        // Calculate total stakes and delegator counts from VMap data
+        let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
+        let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
+        let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
+
+        info!(
+            "  • Mark snapshot: {} delegators, {} total stake (ADA)",
+            snapshots.mark.0.len(),
+            mark_total as f64 / 1_000_000.0
+        );
+        info!(
+            "  • Set snapshot: {} delegators, {} total stake (ADA)",
+            snapshots.set.0.len(),
+            set_total as f64 / 1_000_000.0
+        );
+        info!(
+            "  • Go snapshot: {} delegators, {} total stake (ADA)",
+            snapshots.go.0.len(),
+            go_total as f64 / 1_000_000.0
+        );
+        info!("  • Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
+
+        // TODO: Send snapshot data to appropriate message bus topics
+        // This could involve publishing messages for:
+        // - Mark snapshot → MarkSnapshotState processor
+        // - Set snapshot → SetSnapshotState processor
+        // - Go snapshot → GoSnapshotState processor
+        // - Fee data → FeesState processor
+
         Ok(())
     }
 }

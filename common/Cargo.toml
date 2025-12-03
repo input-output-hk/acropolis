@@ -14,6 +14,7 @@ caryatid_module_clock = { workspace = true }
 caryatid_module_rest_server = { workspace = true }
 
 anyhow = { workspace = true }
+config = { workspace = true }
 bech32 = "0.11"
 bigdecimal = "0.4.8"
 bitmask-enum = "2.2"
@@ -23,6 +24,7 @@ bs58 = "0.5"
 chrono = { workspace = true }
 crc = "3"
 hex = { workspace = true }
+log = "0.4"
 memmap2 = "0.9"
 num-rational = { version = "0.4.2", features = ["serde"] }
 regex = "1"
@@ -44,7 +46,7 @@ sha2 = "0.10.8"
 tempfile = "3.23"
 config = { workspace = true }
 caryatid_process = { workspace = true }
-
+env_logger = "0.10"
 
 [lib]
 crate-type = ["rlib"]

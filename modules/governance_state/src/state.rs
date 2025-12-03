@@ -1,6 +1,7 @@
 //! Acropolis Governance State: State storage
 
 use acropolis_common::{
+    caryatid::RollbackAwarePublisher,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
@@ -21,8 +22,7 @@ use crate::{
 };
 
 pub struct State {
-    pub enact_state_topic: String,
-    pub context: Arc<Context<Message>>,
+    publisher: RollbackAwarePublisher<Message>,
 
     pub drep_stake_messages_count: usize,
 
@@ -43,8 +43,7 @@ impl State {
         verification_output_file: Option<String>,
     ) -> Self {
         Self {
-            context,
-            enact_state_topic,
+            publisher: RollbackAwarePublisher::new(context, enact_state_topic),
 
             drep_stake_messages_count: 0,
 
@@ -235,22 +234,21 @@ impl State {
         );
     }
 
-    pub async fn send(&self, block: &BlockInfo, message: GovernanceOutcomesMessage) -> Result<()> {
+    pub async fn send(
+        &mut self,
+        block: &BlockInfo,
+        message: GovernanceOutcomesMessage,
+    ) -> Result<()> {
         let packed_message = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::GovernanceOutcomes(message),
         )));
-        let context = self.context.clone();
-        let enact_state_topic = self.enact_state_topic.clone();
+        self.publisher.publish(packed_message).await
+    }
 
-        tokio::spawn(async move {
-            context
-                .message_bus
-                .publish(&enact_state_topic, packed_message)
-                .await
-                .unwrap_or_else(|e| tracing::error!("Failed to publish: {e}"));
-        });
-        Ok(())
+    /// Publish a rollback message, if we have anything to roll back
+    pub async fn publish_rollback(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
+        self.publisher.publish(message).await
     }
 
     /// Get list of actual voting proposals
