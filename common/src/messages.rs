@@ -355,7 +355,7 @@ pub struct SnapshotDumpMessage {
 /// Epoch bootstrap message, sent by snapshot bootstrapper to Epoch State
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct EpochBootstrapMessage {
-    /// Epoch which has ended
+    /// Epoch number from the snapshot
     pub epoch: u64,
 
     /// Epoch start time
