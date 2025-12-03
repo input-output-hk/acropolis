@@ -41,6 +41,18 @@ distribution is usually mediated with a "publish-subscribe" (pub-sub) bus,
 where messages are sent on certain 'topics' (subjects) and modules subscribe
 only for the topics that they are interested in.
 
+```mermaid
+flowchart LR
+    A[Module A]
+    B[Module B]
+    C[Module C]
+    MB(Message Bus)
+
+    A  -- Publish   --> MB
+    MB -- Subscribe --> B
+    MB -- Subscribe --> C
+```
+
 ## The benefits
 
 This philosophy has a number of benefits:
