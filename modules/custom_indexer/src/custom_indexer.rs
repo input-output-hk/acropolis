@@ -31,6 +31,10 @@ use crate::{
     chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::CursorStore,
 };
 
+type SharedIndex = Arc<Mutex<IndexWrapper>>;
+type IndexMap = HashMap<String, SharedIndex>;
+type SharedIndexes = Arc<Mutex<IndexMap>>;
+
 struct IndexWrapper {
     name: String,
     index: Box<dyn ChainIndex>,
@@ -40,8 +44,8 @@ struct IndexWrapper {
 }
 
 pub struct CustomIndexer<CS: CursorStore> {
-    indexes: Arc<Mutex<HashMap<String, Arc<Mutex<IndexWrapper>>>>>,
-    cursor_store: Arc<Mutex<CS>>,
+    indexes: SharedIndexes,
+    cursor_store: Arc<CS>,
     halted: Arc<AtomicBool>,
 }
 
@@ -49,7 +53,7 @@ impl<CS: CursorStore> CustomIndexer<CS> {
     pub fn new(cursor_store: CS) -> Self {
         Self {
             indexes: Arc::new(Mutex::new(HashMap::new())),
-            cursor_store: Arc::new(Mutex::new(cursor_store)),
+            cursor_store: Arc::new(cursor_store),
             halted: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -104,7 +108,7 @@ where
         let halted = Arc::clone(&self.halted);
 
         // Retrieve saved index tips from cursor store
-        let saved = cursor_store.lock().await.load().await?;
+        let saved = cursor_store.load().await?;
 
         // Compute start_point by collecting wrapper arcs, then locking each wrapper
         let start_point = {
@@ -218,7 +222,7 @@ where
                                         out
                                     };
 
-                                    cursor_store.lock().await.save(&tips).await?;
+                                    cursor_store.save(&tips).await?;
                                 }
                             }
 
@@ -228,12 +232,13 @@ where
                                     point,
                                 )),
                             )) => {
-                                // Collect wrapper arcs then process each without holding map lock
+                                // Collect wrapper arcs first to avoid holding lock on map
                                 let wrappers = {
                                     let map = indexes.lock().await;
                                     map.values().cloned().collect::<Vec<_>>()
                                 };
 
+                                let mut tips = HashMap::with_capacity(wrappers.len());
                                 for wrapper_arc in wrappers.iter() {
                                     let mut wrapper = wrapper_arc.lock().await;
                                     if let Err(e) = wrapper.index.handle_rollback(point).await {
@@ -241,29 +246,18 @@ where
                                             "Rollback error in index '{}': {e:#}",
                                             wrapper.name
                                         );
+                                        wrapper.halted = true;
                                     } else {
                                         wrapper.tip = point.clone();
                                     }
+
+                                    tips.insert(wrapper.name.clone(), wrapper.tip.clone());
                                 }
 
-                                // Rollback tips and save
-                                let tips = {
-                                    let map = indexes.lock().await;
-                                    let entries = map.iter()
-                                        .map(|(k, v)| (k.clone(), v.clone()))
-                                        .collect::<Vec<_>>();
+                                // Save rolled back tips to cursor store
+                                cursor_store.save(&tips).await?;
 
-                                    let mut out = HashMap::new();
-                                    for (k, w_arc) in entries {
-                                        let w = w_arc.lock().await;
-                                        out.insert(k, w.tip.clone());
-                                    }
-                                    out
-                                };
-
-                                cursor_store.lock().await.save(&tips).await?;
-
-                                // Remove halt
+                                // Remove global halt
                                 halted.store(false, Ordering::SeqCst);
                             }
                             _ => (),
@@ -293,21 +287,18 @@ async fn process_onchain_for_all(
 
     for wrapper_arc in wrappers {
         let at = at.clone();
-        let block = block.clone();
 
         futs.push(async move {
             let mut wrapper = wrapper_arc.lock().await;
 
-            if wrapper.halted {
+            // Skip indexes which are halted or have a higher tip than the received block
+            if at.slot_or_default() <= wrapper.tip.slot_or_default() || wrapper.halted {
                 return;
             }
 
-            if wrapper.tip.slot_or_default() > at.slot_or_default() {
-                return;
-            }
-
+            // Call handle_onchain_tx for the index and halt if any fail
             for tx in decoded {
-                if let Err(e) = wrapper.index.handle_onchain_tx(&block, tx).await {
+                if let Err(e) = wrapper.index.handle_onchain_tx(block, tx).await {
                     error!(
                         "index '{}' failed on block {}: {e:#}",
                         wrapper.name, block.number
