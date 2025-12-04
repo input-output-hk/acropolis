@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
@@ -106,6 +106,7 @@ pub struct ChainState {
     published_blocks: VecDeque<SpecificPoint>,
     unpublished_blocks: VecDeque<SpecificPoint>,
     rolled_back_to: Option<Header>,
+    tips: HashMap<PeerId, Point>,
     waiting_for_first_message: bool,
 }
 
@@ -218,6 +219,21 @@ impl ChainState {
         self.switch_head_to_peer(id);
     }
 
+    pub fn handle_tip(&mut self, id: PeerId, tip: Point) {
+        self.tips.insert(id, tip);
+    }
+
+    pub fn preferred_upstream_tip(&self) -> Option<&Point> {
+        self.tips.get(&self.preferred_upstream?)
+    }
+
+    pub fn handle_disconnect(&mut self, id: PeerId) {
+        self.tips.remove(&id);
+        if self.preferred_upstream == Some(id) {
+            self.preferred_upstream = None;
+        }
+    }
+
     fn switch_head_to_peer(&mut self, id: PeerId) {
         self.waiting_for_first_message = false;
 
@@ -275,10 +291,6 @@ impl ChainState {
                 self.unpublished_blocks.push_back(SpecificPoint { slot: *slot, hash });
             }
         }
-    }
-
-    pub fn clear_preferred_upstream(&mut self) {
-        self.preferred_upstream = None;
     }
 
     pub fn next_unpublished_event(&self) -> Option<ChainEvent<'_>> {
