@@ -295,7 +295,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(TxHash::default(), 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         // Drain volatile to immutable
         state.volatile.epoch_start_block = 1;
@@ -305,7 +308,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(TxHash::default(), 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         // Perisist immutable to disk
         state.immutable.persist_epoch(0, &state.config).await?;
@@ -314,7 +320,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(TxHash::default(), 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         Ok(())
     }

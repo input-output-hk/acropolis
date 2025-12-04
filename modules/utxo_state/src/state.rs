@@ -239,10 +239,7 @@ impl State {
                 self.volatile_created.add_utxo(&key);
 
                 if self.volatile_utxos.insert(key, value).is_some() {
-                    error!(
-                        "Saw UTXO {} before",
-                        output.utxo_identifier
-                    );
+                    error!("Saw UTXO {} before", output.utxo_identifier);
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
@@ -399,7 +396,10 @@ struct AddressTxMap {
 mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
-    use acropolis_common::{Address, AssetName, BlockHash, ByronAddress, Datum, Era, NativeAsset, ReferenceScript, TxHash, TxUTxODeltas, Value};
+    use acropolis_common::{
+        Address, AssetName, BlockHash, ByronAddress, Datum, Era, NativeAsset, ReferenceScript,
+        TxHash, TxUTxODeltas, Value,
+    };
     use config::Config;
     use tokio::sync::Mutex;
 

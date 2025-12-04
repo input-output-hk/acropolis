@@ -97,8 +97,8 @@ impl VolatileIndex {
 // -- Tests --
 #[cfg(test)]
 mod tests {
-    use acropolis_common::TxHash;
     use super::*;
+    use acropolis_common::TxHash;
 
     #[test]
     fn new_index_is_empty() {

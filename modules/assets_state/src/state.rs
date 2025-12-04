@@ -688,7 +688,11 @@ mod tests {
         asset_registry::{AssetId, AssetRegistry},
         state::{AssetsStorageConfig, State, StoreTransactions, CIP67_LABEL_222, CIP68_LABEL_100},
     };
-    use acropolis_common::{Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName, Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier, Value};
+    use acropolis_common::{
+        Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName,
+        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxIdentifier,
+        TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
+    };
     use serde_cbor::Value as CborValue;
 
     fn dummy_policy(byte: u8) -> PolicyId {

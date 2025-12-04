@@ -328,7 +328,9 @@ pub async fn handle_address_utxos_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(hashes_and_indexes),
+                BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
+                    hashes_and_indexes,
+                ),
             )) => Ok(hashes_and_indexes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
@@ -468,7 +470,9 @@ pub async fn handle_address_asset_utxos_blockfrost(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(hashes_and_indexes),
+                BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
+                    hashes_and_indexes,
+                ),
             )) => Ok(hashes_and_indexes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),

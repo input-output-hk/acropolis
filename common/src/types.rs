@@ -2410,12 +2410,18 @@ mod tests {
 
     #[test]
     fn test_utxo_identifier_to_bytes() -> Result<()> {
-        let tx_hash = TxHash::try_from(hex::decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f").unwrap()).unwrap();
+        let tx_hash = TxHash::try_from(
+            hex::decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                .unwrap(),
+        )
+        .unwrap();
         let output_index = 42;
         let utxo = UTxOIdentifier::new(tx_hash, output_index);
         let bytes = utxo.to_bytes();
-        assert_eq!(hex::encode(bytes),
-                   "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f002a");
+        assert_eq!(
+            hex::encode(bytes),
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f002a"
+        );
 
         Ok(())
     }

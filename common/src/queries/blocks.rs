@@ -2,8 +2,7 @@ use crate::queries::errors::QueryError;
 use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
-    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier,
-    VrfKeyHash,
+    Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier, VrfKeyHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};

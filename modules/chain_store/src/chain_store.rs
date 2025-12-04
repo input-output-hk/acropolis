@@ -434,9 +434,11 @@ impl ChainStore {
                     // TODO!  Look up TxHash to get block hash, and index of Tx in block
                 }
 
-                Ok(BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
-                    block_hashes_and_indexes,
-                ))
+                Ok(
+                    BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
+                        block_hashes_and_indexes,
+                    ),
+                )
             }
             BlocksStateQuery::GetTransactionHashesAndTimestamps { tx_ids } => {
                 let mut tx_hashes = Vec::with_capacity(tx_ids.len());
