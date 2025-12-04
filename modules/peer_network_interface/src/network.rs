@@ -104,6 +104,12 @@ impl NetworkManager {
                     self.block_sink.last_epoch = Some(epoch);
                 }
 
+                if let Some((&peer_id, _)) = self.peers.iter().next() {
+                    self.set_preferred_upstream(peer_id);
+                } else {
+                    warn!("Sync requested but no upstream peers available");
+                }
+
                 self.sync_to_point(point);
             }
         }
