@@ -1,6 +1,8 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{EpochBootstrapMessage, SnapshotMessage, SnapshotStateMessage};
 use acropolis_common::{
     caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
@@ -19,10 +21,14 @@ use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span};
+use tracing::{error, info, info_span, warn};
+
 mod epoch_activity_publisher;
+mod epoch_nonce_publisher;
 mod state;
-use crate::epoch_activity_publisher::EpochActivityPublisher;
+use crate::{
+    epoch_activity_publisher::EpochActivityPublisher, epoch_nonce_publisher::EpochNoncePublisher,
+};
 use state::State;
 
 const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -37,9 +43,13 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
 );
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
+const DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC: (&str, &str) =
+    ("epoch-nonce-publish-topic", "cardano.epoch.nonce");
 
 /// Epochs State module
 #[module(
@@ -50,14 +60,70 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
 pub struct EpochsState;
 
 impl EpochsState {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, epoch_data: &EpochBootstrapMessage) {
+        // Initialize epoch state from snapshot data
+        state.bootstrap(epoch_data);
+
+        info!(
+            "Epoch state bootstrapped successfully for epoch {}",
+            epoch_data.epoch
+        );
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        genesis: &acropolis_common::genesis_values::GenesisValues,
+    ) -> Result<()> {
+        // Check we're subscribed to snapshot messages first
+        let snapshot_subscription = match snapshot_subscription.as_mut() {
+            Some(sub) => sub,
+            None => {
+                warn!("No snapshot subscription available, using default state");
+                return Ok(());
+            }
+        };
+
+        info!("Waiting for snapshot bootstrap messages...");
+
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::EpochState(epoch_data),
+                )) => {
+                    let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
+                    Self::handle_bootstrap(&mut state, epoch_data);
+                    history.lock().await.commit(epoch_data.epoch, state);
+                    info!("Epoch state bootstrap complete");
+                    return Ok(());
+                }
+                Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
+                    warn!("Snapshot complete without epoch bootstrap data, using default state");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Run loop
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut block_txs_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
+        mut epoch_nonce_publisher: EpochNoncePublisher,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -66,6 +132,9 @@ impl EpochsState {
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
+
+        // Wait for the snapshot bootstrap (if available)
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
 
         // Consume initial protocol parameters
         let _ = protocol_parameters_subscription.read().await?;
@@ -127,6 +196,18 @@ impl EpochsState {
                             }
                         }
                     });
+
+                    // At the beginning of epoch, publish the newly evolved active nonce
+                    // for that epoch
+                    if is_new_epoch {
+                        let active_nonce = state.get_active_nonce();
+                        epoch_nonce_publisher
+                            .publish(block_info, active_nonce)
+                            .await
+                            .unwrap_or_else(|e| {
+                                error!("Failed to publish epoch nonce messages: {e}")
+                            });
+                    }
 
                     let span = info_span!("epochs_state.handle_mint", block = block_info.number);
                     span.in_scope(|| {
@@ -194,11 +275,21 @@ impl EpochsState {
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
 
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+
         // Publish topic
         let epoch_activity_publish_topic = config
             .get_string(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC.1.to_string());
         info!("Publishing EpochActivityMessage on '{epoch_activity_publish_topic}'");
+
+        let epoch_nonce_publish_topic = config
+            .get_string(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing EpochNonceMessage on '{epoch_nonce_publish_topic}'");
 
         // query topic
         let epochs_query_topic = config
@@ -220,9 +311,18 @@ impl EpochsState {
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
 
+        // Only subscribe to Snapshot if we're using Snapshot to start-up
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
         // Publisher
         let epoch_activity_publisher =
             EpochActivityPublisher::new(context.clone(), epoch_activity_publish_topic);
+        let epoch_nonce_publisher =
+            EpochNoncePublisher::new(context.clone(), epoch_nonce_publish_topic);
 
         // handle epochs query
         context.handle(&epochs_query_topic, move |message| {
@@ -266,10 +366,12 @@ impl EpochsState {
             Self::run(
                 history,
                 bootstrapped_subscription,
+                snapshot_subscription,
                 block_subscription,
                 block_txs_subscription,
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
+                epoch_nonce_publisher,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

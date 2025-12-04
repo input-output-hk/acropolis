@@ -5,9 +5,7 @@ use std::sync::Arc;
 use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{
-        EpochActivityMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
-    },
+    messages::{ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage},
     protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::VrfValidationError,
@@ -62,8 +60,8 @@ impl State {
         }
     }
 
-    pub fn handle_epoch_activity(&mut self, msg: &EpochActivityMessage) {
-        self.epoch_nonce = msg.nonce.clone();
+    pub fn handle_epoch_nonce(&mut self, active_nonce: &Option<Nonce>) {
+        self.epoch_nonce = active_nonce.clone();
     }
 
     pub fn handle_new_snapshot(
