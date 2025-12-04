@@ -246,6 +246,9 @@ impl PartialOrd for BlockInfo {
 
 impl BlockInfo {
     pub fn is_at_tip(&self) -> bool {
+        // The slot of a newly-reported block can be later than the slot of the tip.
+        // This is because the tip is the most recent slot with a _validated_ block,
+        // and we can receive and propagate blocks which have not yet been validated.
         self.tip_slot.is_some_and(|s| s <= self.slot)
     }
 }
