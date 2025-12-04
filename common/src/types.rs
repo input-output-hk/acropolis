@@ -705,13 +705,14 @@ impl TxIdentifier {
     }
 }
 
-impl From<UTxOIdentifier> for TxIdentifier {
-    fn from(id: UTxOIdentifier) -> Self {
+impl From<CompactUTxOIdentifier> for TxIdentifier {
+    fn from(id: CompactUTxOIdentifier) -> Self {
         Self::new(id.block_number(), id.tx_index())
     }
 }
 
-// Compact UTxO identifier (block_number, tx_index, output_index)
+// Compact UTxO identifier (block_number, tx_index, output_index) used for internal storage
+// TODO Not currently used - could be used as a part of optimisation of AddressState etc.
 #[derive(
     Debug,
     Clone,
@@ -724,9 +725,9 @@ impl From<UTxOIdentifier> for TxIdentifier {
     minicbor::Encode,
     minicbor::Decode,
 )]
-pub struct UTxOIdentifier(#[n(0)] [u8; 8]);
+pub struct CompactUTxOIdentifier(#[n(0)] [u8; 8]);
 
-impl UTxOIdentifier {
+impl CompactUTxOIdentifier {
     pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
         let mut buf = [0u8; 8];
         buf[..4].copy_from_slice(&block_number.to_be_bytes());
@@ -752,7 +753,7 @@ impl UTxOIdentifier {
     }
 }
 
-impl fmt::Display for UTxOIdentifier {
+impl fmt::Display for CompactUTxOIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -764,23 +765,44 @@ impl fmt::Display for UTxOIdentifier {
     }
 }
 
-// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TxOutRef {
+// Full UTXO identifier as used in the outside world, with TX hash and output index
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct UTxOIdentifier {
+    #[n(0)]
     pub tx_hash: TxHash,
+
+    #[n(1)]
     pub output_index: u16,
 }
 
-impl TxOutRef {
+impl UTxOIdentifier {
     pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
-        TxOutRef {
+        UTxOIdentifier {
             tx_hash,
             output_index,
         }
     }
+
+    pub fn to_bytes(&self) -> [u8; 34] {
+        let mut buf = [0u8; 34];
+        buf[..32].copy_from_slice(self.tx_hash.as_inner());
+        buf[32..34].copy_from_slice(&self.output_index.to_be_bytes());
+        buf
+    }
 }
 
-impl Display for TxOutRef {
+impl Display for UTxOIdentifier {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
@@ -2384,6 +2406,18 @@ mod tests {
         } else {
             Credential::ScriptHash(KeyHash::from(hash_bytes))
         }
+    }
+
+    #[test]
+    fn test_utxo_identifier_to_bytes() -> Result<()> {
+        let tx_hash = TxHash::try_from(hex::decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f").unwrap()).unwrap();
+        let output_index = 42;
+        let utxo = UTxOIdentifier::new(tx_hash, output_index);
+        let bytes = utxo.to_bytes();
+        assert_eq!(hex::encode(bytes),
+                   "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f002a");
+
+        Ok(())
     }
 
     #[test]

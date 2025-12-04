@@ -3,7 +3,7 @@ use crate::{
     queries::misc::Order,
     serialization::{Bech32Conversion, Bech32WithHrp},
     Address, BlockHash, GenesisDelegate, HeavyDelegate, KeyHash, TxHash, TxIdentifier,
-    UTxOIdentifier, VrfKeyHash,
+    VrfKeyHash,
 };
 use cryptoxide::hashing::blake2b::Blake2b;
 use serde::ser::{Serialize, SerializeStruct, Serializer};
@@ -70,11 +70,11 @@ pub enum BlocksStateQuery {
         min_number: u64,
         max_number: u64,
     },
+    GetBlockHashesAndIndexOfTransactionHashes {
+        tx_hashes: Vec<TxHash>,
+    },
     GetTransactionHashes {
         tx_ids: Vec<TxIdentifier>,
-    },
-    GetUTxOHashes {
-        utxo_ids: Vec<UTxOIdentifier>,
     },
     GetTransactionHashesAndTimestamps {
         tx_ids: Vec<TxIdentifier>,
@@ -102,8 +102,8 @@ pub enum BlocksStateQueryResponse {
     BlockInvolvedAddresses(BlockInvolvedAddresses),
     BlockHashes(BlockHashes),
     BlockHashesByNumberRange(Vec<BlockHash>),
+    BlockHashesAndIndexOfTransactionHashes(Vec<BlockHashAndTxIndex>),
     TransactionHashes(TransactionHashes),
-    UTxOHashes(UTxOHashes),
     TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),
     Error(QueryError),
 }
@@ -219,6 +219,12 @@ pub struct BlockInvolvedAddress {
     pub txs: Vec<TxHash>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockHashAndTxIndex {
+    pub block_hash: BlockHash,
+    pub tx_index: u16,
+}
+
 impl Serialize for BlockInvolvedAddress {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -242,12 +248,6 @@ pub struct BlockHashes {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionHashes {
     pub tx_hashes: HashMap<TxIdentifier, TxHash>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UTxOHashes {
-    pub block_hashes: Vec<BlockHash>,
-    pub tx_hashes: Vec<TxHash>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

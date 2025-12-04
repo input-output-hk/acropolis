@@ -25,7 +25,7 @@ use acropolis_common::{
         blocks::{
             BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
             BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes, UTxOHashes,
+            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
             DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         misc::Order,
@@ -427,70 +427,16 @@ impl ChainStore {
                     TransactionHashes { tx_hashes },
                 ))
             }
-            BlocksStateQuery::GetUTxOHashes { utxo_ids } => {
-                let mut tx_hashes = Vec::with_capacity(utxo_ids.len());
-                let mut block_hashes = Vec::with_capacity(utxo_ids.len());
+            BlocksStateQuery::GetBlockHashesAndIndexOfTransactionHashes { tx_hashes } => {
+                let mut block_hashes_and_indexes = Vec::with_capacity(tx_hashes.len());
 
-                for utxo in utxo_ids {
-                    let block = match store.get_block_by_number(utxo.block_number().into()) {
-                        Ok(Some(b)) => b,
-                        Ok(None) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("Block {} not found", utxo.block_number()),
-                            )))
-                        }
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!("Failed to fetch block {}: {e}", utxo.block_number()),
-                            )))
-                        }
-                    };
-
-                    let block_hash = match Self::get_block_hash(&block) {
-                        Ok(h) => h,
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "Failed to extract block hash for block {}: {e}",
-                                    utxo.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    let tx_hashes_in_block = match Self::to_block_transaction_hashes(&block) {
-                        Ok(h) => h,
-                        Err(e) => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "Failed to extract tx list for block {}: {e}",
-                                    utxo.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    let tx_hash = match tx_hashes_in_block.get(utxo.tx_index() as usize) {
-                        Some(h) => h,
-                        None => {
-                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
-                                format!(
-                                    "tx_index {} out of bounds for block {}",
-                                    utxo.tx_index(),
-                                    utxo.block_number()
-                                ),
-                            )))
-                        }
-                    };
-
-                    tx_hashes.push(*tx_hash);
-                    block_hashes.push(block_hash);
+                for tx_hash in tx_hashes {
+                    // TODO!  Look up TxHash to get block hash, and index of Tx in block
                 }
 
-                Ok(BlocksStateQueryResponse::UTxOHashes(UTxOHashes {
-                    block_hashes,
-                    tx_hashes,
-                }))
+                Ok(BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(
+                    block_hashes_and_indexes,
+                ))
             }
             BlocksStateQuery::GetTransactionHashesAndTimestamps { tx_ids } => {
                 let mut tx_hashes = Vec::with_capacity(tx_ids.len());

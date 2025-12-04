@@ -20,9 +20,6 @@ use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
 
-mod utxo_registry;
-use crate::utxo_registry::UTxORegistry;
-
 #[cfg(test)]
 mod test_utils;
 #[cfg(test)]
@@ -118,24 +115,10 @@ impl TxUnpacker {
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
-        // Initialize UTxORegistry
-        let mut utxo_registry = UTxORegistry::default();
-
-        // Subscribe to genesis and txs topics
-        let mut genesis_sub = context.subscribe(&genesis_utxos_subscribe_topic).await?;
+        // Subscribe to txs topics
         let mut txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
 
         context.clone().run(async move {
-            // Initialize TxRegistry with genesis utxos
-            let (_, message) = genesis_sub.read().await
-                .expect("failed to read genesis utxos");
-            match message.as_ref() {
-                Message::Cardano((_block, CardanoMessage::GenesisUTxOs(genesis_msg))) => {
-                    utxo_registry.bootstrap_from_genesis_utxos(&genesis_msg.utxos);
-                    info!("Seeded registry with {} genesis utxos", genesis_msg.utxos.len());
-                }
-                other => panic!("expected GenesisUTxOs, got {:?}", other),
-            }
             loop {
                 let Ok((_, message)) = txs_sub.read().await else { return; };
                 match message.as_ref() {
@@ -159,15 +142,7 @@ impl TxUnpacker {
                             let mut total_output: u128 = 0;
                             let mut total_fees: u64 = 0;
                             let total_txs = txs_msg.txs.len() as u64;
-
-                            // handle rollback or advance registry to the next block
                             let block_number = block.number as u32;
-                            if block.status == BlockStatus::RolledBack {
-                                if let Err(e) = utxo_registry.rollback_before(block_number) {
-                                    error!("rollback_before({}) failed: {}", block_number, e);
-                                }
-                                utxo_registry.next_block();
-                            }
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
@@ -197,59 +172,40 @@ impl TxUnpacker {
                                             // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
                                             for input in inputs {
                                                 let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
+                                                let utxo_id = UTxOIdentifier::new(
+                                                    TxHash::from(**oref.hash()),
+                                                    oref.index() as u16);
 
-                                                match utxo_registry.consume(&tx_ref) {
-                                                    Ok(tx_identifier) => {
-                                                        tx_utxo_deltas.inputs.push(
-                                                            UTxOIdentifier::new(
-                                                                tx_identifier.block_number(),
-                                                                tx_identifier.tx_index(),
-                                                                tx_ref.output_index,
-                                                            ),
-                                                      );
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to consume input {}: {e}", tx_ref.output_index);
-                                                    }
-                                                }
+                                                tx_utxo_deltas.inputs.push(utxo_id);
                                             }
 
                                             // Add outputs to UTxORegistry and push TxOutputs to delta
                                             for (index, output) in outputs {
-                                                match utxo_registry.add(
-                                                    block_number,
-                                                    tx_index,
-                                                    TxOutRef {
-                                                        tx_hash,
-                                                        output_index: index as u16,
-                                                    },
-                                                ) {
-                                                    Ok(utxo_id) => {
-                                                        match output.address() {
-                                                            Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
-                                                                Ok(address) => {
-                                                                    tx_utxo_deltas.outputs.push(TxOutput {
-                                                                        utxo_identifier: utxo_id,
-                                                                        address,
-                                                                        value: map_parameters::map_value(&output.value()),
-                                                                        datum: map_parameters::map_datum(&output.datum()),
-                                                                        reference_script: map_parameters::map_reference_script(&output.script_ref())
-                                                                    });
+                                                let utxo_id = UTxOIdentifier::new(
+                                                    tx_hash,
+                                                    index as u16
+                                                );
 
-                                                                    // catch all output lovelaces
-                                                                    total_output += output.value().coin() as u128;
-                                                                }
-                                                                Err(e) => error!("Output {index} in tx ignored: {e}"),
-                                                            },
-                                                            Err(e) => error!("Can't parse output {index} in tx: {e}"),
+                                                match output.address() {
+                                                    Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
+                                                        Ok(address) => {
+                                                            tx_utxo_deltas.outputs.push(TxOutput {
+                                                                utxo_identifier: utxo_id,
+                                                                address,
+                                                                value: map_parameters::map_value(&output.value()),
+                                                                datum: map_parameters::map_datum(&output.datum()),
+                                                                reference_script: map_parameters::map_reference_script(&output.script_ref())
+                                                            });
+
+                                                            // catch all output lovelaces
+                                                            total_output += output.value().coin() as u128;
                                                         }
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to insert output into registry: {e}");
-                                                    }
+                                                        Err(e) => error!("Output {index} in tx ignored: {e}"),
+                                                    },
+                                                    Err(e) => error!("Can't parse output {index} in tx: {e}"),
                                                 }
                                             }
+
                                             utxo_deltas.push(tx_utxo_deltas);
                                         }
 
@@ -385,8 +341,6 @@ impl TxUnpacker {
                                                      block.slot)
                                 }
                             }
-
-                            utxo_registry.next_block();
 
                             // Publish messages in parallel
                             let mut futures = Vec::new();

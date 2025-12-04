@@ -205,12 +205,7 @@ impl State {
                 }
             }
             _ => {
-                error!(
-                    "UTXO output {} unknown in transaction {} of block {}",
-                    &input.output_index(),
-                    input.tx_index(),
-                    input.block_number()
-                );
+                error!("UTXO output {} unknown", &input);
             }
         }
 
@@ -245,10 +240,8 @@ impl State {
 
                 if self.volatile_utxos.insert(key, value).is_some() {
                     error!(
-                        "Saw UTXO {}:{}:{} before",
-                        output.utxo_identifier.block_number(),
-                        output.utxo_identifier.tx_index(),
-                        output.utxo_identifier.output_index(),
+                        "Saw UTXO {} before",
+                        output.utxo_identifier
                     );
                 }
             }

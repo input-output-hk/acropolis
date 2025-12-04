@@ -770,21 +770,21 @@ pub async fn handle_account_utxos_blockfrost(
     )
     .await?;
 
-    // Get TxHashes and BlockHashes from UTxOIdentifiers
+    // Get BlockHashes and Tx indexes from UTXO Tx hashes
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetUTxOHashes {
-            utxo_ids: utxo_identifiers.clone(),
+        BlocksStateQuery::GetBlockHashesAndIndexOfTransactionHashes {
+            tx_hashes: utxo_identifiers.iter().map(|utxo| utxo.tx_hash).collect(),
         },
     )));
 
-    let hashes = query_state(
+    let hashes_and_indexes = query_state(
         &context,
         &handlers_config.blocks_query_topic,
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::UTxOHashes(hashes),
-            )) => Ok(hashes),
+                BlocksStateQueryResponse::BlockHashesAndIndexOfTransactionHashes(hashes_and_indexes),
+            )) => Ok(hashes_and_indexes),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
@@ -823,10 +823,11 @@ pub async fn handle_account_utxos_blockfrost(
     for (i, entry) in entries.into_iter().enumerate() {
         rest_response.push(UTxOREST::new(
             entry.address.to_string()?,
-            &utxo_identifiers[i],
             &entry,
-            hashes.tx_hashes[i].as_ref(),
-            hashes.block_hashes[i].as_ref(),
+            utxo_identifiers[i].tx_hash.as_ref(),
+            hashes_and_indexes[i].block_hash.as_ref(),
+            hashes_and_indexes[i].tx_index,
+            utxo_identifiers[i].output_index,
         ));
     }
 

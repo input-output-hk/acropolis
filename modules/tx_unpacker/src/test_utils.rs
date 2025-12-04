@@ -1,4 +1,4 @@
-use acropolis_common::{protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, TxOutRef};
+use acropolis_common::{protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, UTxOIdentifier};
 use std::{collections::HashMap, str::FromStr};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -13,7 +13,7 @@ pub struct TestContextJson {
 pub struct TestContext {
     pub shelley_params: ShelleyParams,
     pub current_slot: Slot,
-    pub utxos: HashMap<TxOutRef, TxIdentifier>,
+    pub utxos: HashMap<UTxOIdentifier, TxIdentifier>,
 }
 
 impl From<TestContextJson> for TestContext {
@@ -26,7 +26,7 @@ impl From<TestContextJson> for TestContext {
                 .into_iter()
                 .map(|((tx_hash, output_index), (block_number, tx_index))| {
                     (
-                        TxOutRef::new(TxHash::from_str(&tx_hash).unwrap(), output_index),
+                        UTxOIdentifier::new(TxHash::from_str(&tx_hash).unwrap(), output_index),
                         TxIdentifier::new(block_number, tx_index),
                     )
                 })
