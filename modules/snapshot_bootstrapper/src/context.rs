@@ -66,7 +66,7 @@ impl BootstrapContext {
         let slot = header.point.slot();
 
         // Build nonce
-        let nonces = nonces_file.into_nonces(target_epoch, header.nonce_vrf_output);
+        let nonces = nonces_file.into_nonces(target_epoch, *hash);
 
         // Build block info
         let (_, epoch_slot) = genesis.slot_to_epoch(slot);

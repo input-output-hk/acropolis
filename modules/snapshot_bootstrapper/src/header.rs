@@ -1,6 +1,5 @@
 #![allow(dead_code, unused)]
 use acropolis_common::hash::Hash;
-use acropolis_common::protocol_params::{Nonce, NonceHash};
 use acropolis_common::Point;
 use pallas_traverse::Era::Conway;
 use pallas_traverse::MultiEraHeader;
@@ -27,7 +26,6 @@ pub enum HeaderContextError {
 pub struct HeaderContext {
     pub point: Point,
     pub block_number: u64,
-    pub nonce_vrf_output: Nonce,
 }
 
 impl HeaderContext {
@@ -52,13 +50,9 @@ impl HeaderContext {
         let cbor = fs::read(&path).map_err(|e| HeaderContextError::ReadFile(path, e))?;
         let header = MultiEraHeader::decode(Conway as u8, None, &cbor)
             .map_err(|e| HeaderContextError::Decode(point.slot(), e.to_string()))?;
-        let nonce_vrf_output: Nonce = Nonce::from(
-            NonceHash::try_from(header.nonce_vrf_output().unwrap().as_slice()).unwrap(),
-        );
         Ok(Self {
             point: point.clone(),
             block_number: header.number(),
-            nonce_vrf_output,
         })
     }
 }
