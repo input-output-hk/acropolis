@@ -205,7 +205,6 @@ dependencies = [
  "config",
  "fjall",
  "futures",
- "minicbor 0.25.1",
  "pallas 0.33.0",
  "serde",
  "tokio",

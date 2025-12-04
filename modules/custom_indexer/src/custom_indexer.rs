@@ -13,7 +13,7 @@ mod utils;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc,  Mutex};
+use tokio::sync::{mpsc, Mutex};
 
 use anyhow::Result;
 use config::Config;
@@ -22,12 +22,16 @@ use tracing::{error, warn};
 use caryatid_sdk::{async_trait, Context, Module};
 
 use acropolis_common::{
-     Point,  messages::{CardanoMessage,  Message, StateTransitionMessage}
+    messages::{CardanoMessage, Message, StateTransitionMessage},
+    Point,
 };
 
 use crate::{
-    chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::{CursorEntry, CursorStore},
-    index_actor::{IndexCommand, IndexResult, index_actor}, utils::{change_sync_point, send_rollback_to_indexers, send_txs_to_indexers},
+    chain_index::ChainIndex,
+    configuration::CustomIndexerConfig,
+    cursor_store::{CursorEntry, CursorStore},
+    index_actor::{index_actor, IndexCommand, IndexResult},
+    utils::{change_sync_point, send_rollback_to_indexers, send_txs_to_indexers},
 };
 
 type IndexSenders = HashMap<String, mpsc::Sender<IndexCommand>>;
@@ -106,7 +110,13 @@ impl<CS: CursorStore> CustomIndexer<CS> {
 
         let mut min_point = None;
         for index in index_names {
-            let index_entry = saved_tips.get(&index).unwrap_or(&CursorEntry{tip: Point::Origin, halted: false}).clone();
+            let index_entry = saved_tips
+                .get(&index)
+                .unwrap_or(&CursorEntry {
+                    tip: Point::Origin,
+                    halted: false,
+                })
+                .clone();
             min_point = match min_point {
                 None => Some(index_entry.tip),
                 Some(current) => {
@@ -170,7 +180,7 @@ where
 
                                 // Save the new entries to the cursor store
                                 cursor_store.save(&new_entries).await?;
-                                
+
                             }
 
                             Message::Cardano((
@@ -181,7 +191,7 @@ where
                             )) => {
                                 // Inform indexes of a rollback
                                 let responses = send_rollback_to_indexers(&senders, point).await;
-                                
+
                                 // Get responses with new tips and any indexes which failed to rollback and could not be reset
                                 let (new_tips, to_remove) = process_rollback_responses(
                                     responses,
@@ -227,7 +237,12 @@ async fn process_tx_responses<F>(
     block_slot: u64,
 ) -> HashMap<String, CursorEntry>
 where
-    F: futures::Future<Output = (String, Result<IndexResult, tokio::sync::oneshot::error::RecvError>)>,
+    F: futures::Future<
+        Output = (
+            String,
+            Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
+        ),
+    >,
 {
     let mut new_tips = HashMap::new();
 
@@ -262,13 +277,17 @@ where
 }
 
 async fn process_rollback_responses(
-    mut results: FuturesUnordered<impl futures::Future<
-        Output = (String, Result<IndexResult, tokio::sync::oneshot::error::RecvError>)
-    >>,
+    mut results: FuturesUnordered<
+        impl futures::Future<
+            Output = (
+                String,
+                Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
+            ),
+        >,
+    >,
     run_context: Arc<Context<Message>>,
     sync_topic: &str,
-) -> Result<(HashMap<String, CursorEntry>, Vec<String>)>
-{
+) -> Result<(HashMap<String, CursorEntry>, Vec<String>)> {
     let mut new_tips = HashMap::new();
     let mut to_remove = Vec::new();
 
