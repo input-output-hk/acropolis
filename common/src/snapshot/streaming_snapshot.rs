@@ -18,7 +18,7 @@
 //! Parses CBOR dumps from Cardano Haskell node's GetCBOR ledger-state query.
 //! These snapshots represent the internal `NewEpochState` type and are not formally
 //! specified - see: https://github.com/IntersectMBO/cardano-ledger/blob/33e90ea03447b44a389985ca2b158568e5f4ad65/eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/Types.hs#L121-L131
-//!
+//! and https://github.com/rrruko/nes-cddl-hs/blob/main/nes.cddl
 
 use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
@@ -30,6 +30,7 @@ use std::io::{Read, Seek, SeekFrom};
 use tracing::info;
 
 pub use crate::hash::Hash;
+use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
 
@@ -312,7 +313,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::{EpochBootstrapData, PoolId};
+use crate::{Constitution, EpochBootstrapData, PoolId};
 /// Alias minicbor as cbor for pool_params module
 pub use minicbor as cbor;
 
@@ -816,12 +817,24 @@ pub trait ProposalCallback {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()>;
 }
 
+/// Callback invoked with Governance State ProtocolParameters (previous, current, future)
+pub trait GovernanceProtocolParametersCallback {
+    /// Called once with all proposals
+    fn on_gs_protocol_parameters(
+        &mut self,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
+    ) -> Result<()>;
+}
+
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
     UtxoCallback
     + PoolCallback
     + StakeCallback
     + DRepCallback
+    + GovernanceProtocolParametersCallback
     + ProposalCallback
     + SnapshotsCallback
     + EpochCallback
@@ -954,199 +967,229 @@ impl StreamingSnapshotParser {
             buffer
         };
 
-        let mut decoder = Decoder::new(&metadata_buffer);
+        // Parse metadata using decoder - scope it to prevent accidental reuse
+        let (
+            epoch,
+            blocks_previous_epoch,
+            blocks_current_epoch,
+            treasury,
+            reserves,
+            dreps,
+            pools,
+            accounts,
+            utxo_file_position,
+        ) = {
+            let mut decoder = Decoder::new(&metadata_buffer);
 
-        // Navigate to NewEpochState root array
-        let new_epoch_state_len = decoder
-            .array()
-            .context("Failed to parse NewEpochState root array")?
-            .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
+            // Navigate to NewEpochState root array
+            let new_epoch_state_len = decoder
+                .array()
+                .context("Failed to parse NewEpochState root array")?
+                .ok_or_else(|| anyhow!("NewEpochState must be a definite-length array"))?;
 
-        if new_epoch_state_len < 4 {
-            return Err(anyhow!(
+            if new_epoch_state_len < 4 {
+                return Err(anyhow!(
                 "NewEpochState array too short: expected at least 4 elements, got {new_epoch_state_len}"
             ));
-        }
+            }
 
-        // Extract epoch number [0]
-        let epoch = decoder.u64().context("Failed to parse epoch number")?;
+            // Extract epoch number [0]
+            let epoch = decoder.u64().context("Failed to parse epoch number")?;
 
-        // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
-        let blocks_previous_epoch =
-            Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
-                .context("Failed to parse blocks_previous_epoch")?;
-        let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
-            .context("Failed to parse blocks_current_epoch")?;
+            // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
+            let blocks_previous_epoch =
+                Self::parse_blocks_with_epoch(&mut decoder, epoch.saturating_sub(1))
+                    .context("Failed to parse blocks_previous_epoch")?;
+            let blocks_current_epoch = Self::parse_blocks_with_epoch(&mut decoder, epoch)
+                .context("Failed to parse blocks_current_epoch")?;
 
-        // Navigate to EpochState [3]
-        let epoch_state_len = decoder
-            .array()
-            .context("Failed to parse EpochState array")?
-            .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
+            // Navigate to EpochState [3]
+            let epoch_state_len = decoder
+                .array()
+                .context("Failed to parse EpochState array")?
+                .ok_or_else(|| anyhow!("EpochState must be a definite-length array"))?;
 
-        if epoch_state_len < 3 {
-            return Err(anyhow!(
+            if epoch_state_len < 3 {
+                return Err(anyhow!(
                 "EpochState array too short: expected at least 3 elements, got {epoch_state_len}"
             ));
-        }
+            }
 
-        // Extract AccountState [3][0]: [treasury, reserves]
-        // Note: In Conway era, AccountState is just [treasury, reserves], not a full map
-        let account_state_len = decoder
-            .array()
-            .context("Failed to parse AccountState array")?
-            .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
+            // Extract AccountState [3][0]: [treasury, reserves]
+            // Note: In Conway era, AccountState is just [treasury, reserves], not a full map
+            let account_state_len = decoder
+                .array()
+                .context("Failed to parse AccountState array")?
+                .ok_or_else(|| anyhow!("AccountState must be a definite-length array"))?;
 
-        if account_state_len < 2 {
-            return Err(anyhow!(
+            if account_state_len < 2 {
+                return Err(anyhow!(
                 "AccountState array too short: expected at least 2 elements, got {account_state_len}"
             ));
-        }
+            }
 
-        // Parse treasury and reserves (can be negative in CBOR, so decode as i64 first)
-        let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
-        let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
-        let treasury = u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
-        let reserves = u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
+            // Parse treasury and reserves (can be negative in CBOR, so decode as i64 first)
+            let treasury_i64: i64 = decoder.decode().context("Failed to parse treasury")?;
+            let reserves_i64: i64 = decoder.decode().context("Failed to parse reserves")?;
+            let treasury =
+                u64::try_from(treasury_i64).map_err(|_| anyhow!("treasury was negative"))?;
+            let reserves =
+                u64::try_from(reserves_i64).map_err(|_| anyhow!("reserves was negative"))?;
 
-        // Skip any remaining AccountState fields
-        for i in 2..account_state_len {
-            decoder.skip().context(format!("Failed to skip AccountState[{i}]"))?;
-        }
+            // Skip any remaining AccountState fields
+            for i in 2..account_state_len {
+                decoder.skip().context(format!("Failed to skip AccountState[{i}]"))?;
+            }
 
-        // Note: We defer the on_metadata callback until after we parse deposits from UTxOState[1]
+            // Note: We defer the on_metadata callback until after we parse deposits from UTxOState[1]
 
-        // Navigate to LedgerState [3][1]
-        let ledger_state_len = decoder
-            .array()
-            .context("Failed to parse LedgerState array")?
-            .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
+            // Navigate to LedgerState [3][1]
+            let ledger_state_len = decoder
+                .array()
+                .context("Failed to parse LedgerState array")?
+                .ok_or_else(|| anyhow!("LedgerState must be a definite-length array"))?;
 
-        if ledger_state_len < 2 {
-            return Err(anyhow!(
+            if ledger_state_len < 2 {
+                return Err(anyhow!(
                 "LedgerState array too short: expected at least 2 elements, got {ledger_state_len}"
             ));
-        }
-
-        // Parse CertState [3][1][0] to extract DReps and pools
-        // CertState (ARRAY) - DReps, pools, accounts
-        //       - [0] VotingState - DReps at [3][1][0][0][0]
-        //       - [1] PoolState - pools at [3][1][0][1][0]
-        //       - [2] DelegationState - accounts at [3][1][0][2][0][0]
-        // CertState = [VState, PState, DState]
-        let cert_state_len = decoder
-            .array()
-            .context("Failed to parse CertState array")?
-            .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
-
-        if cert_state_len < 3 {
-            return Err(anyhow!(
-                "CertState array too short: expected at least 3 elements, got {cert_state_len}"
-            ));
-        }
-
-        // Parse VState [3][1][0][0] for DReps, which also skips committee_state and dormant_epoch.
-        // TODO: We may need to return to these later if we implement committee tracking.
-        let dreps = Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
-
-        // Parse PState [3][1][0][1] for pools
-        let pools = Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
-
-        // Parse DState [3][1][0][2] for accounts/delegations
-        // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
-        decoder.array().context("Failed to parse DState array")?;
-
-        // Parse unified rewards - it's actually an array containing the map
-        // UMap structure: [rewards_map, ...]
-        let umap_len = decoder.array().context("Failed to parse UMap array")?;
-
-        // Parse the rewards map [0]: StakeCredential -> Account
-        let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
-
-        // Skip remaining UMap elements if any
-        if let Some(len) = umap_len {
-            for _ in 1..len {
-                decoder.skip()?;
             }
-        }
 
-        // Convert to AccountState for API
-        let accounts: Vec<AccountState> = accounts_map
-            .into_iter()
-            .map(|(credential, account)| {
-                // Convert StakeCredential to stake address representation
-                let stake_address = match &credential {
-                    StakeCredential::AddrKeyHash(hash) => {
-                        format!("stake_key_{}", hex::encode(hash))
-                    }
-                    StakeCredential::ScriptHash(hash) => {
-                        format!("stake_script_{}", hex::encode(hash))
-                    }
-                };
+            // Parse CertState [3][1][0] to extract DReps and pools
+            // CertState (ARRAY) - DReps, pools, accounts
+            //       - [0] VotingState - DReps at [3][1][0][0][0]
+            //       - [1] PoolState - pools at [3][1][0][1][0]
+            //       - [2] DelegationState - accounts at [3][1][0][2][0][0]
+            // CertState = [VState, PState, DState]
+            let cert_state_len = decoder
+                .array()
+                .context("Failed to parse CertState array")?
+                .ok_or_else(|| anyhow!("CertState must be a definite-length array"))?;
 
-                // Extract rewards from rewards_and_deposit (first element of tuple)
-                let rewards = match &account.rewards_and_deposit {
-                    StrictMaybe::Just((reward, _deposit)) => *reward,
-                    StrictMaybe::Nothing => 0,
-                };
+            if cert_state_len < 3 {
+                return Err(anyhow!(
+                    "CertState array too short: expected at least 3 elements, got {cert_state_len}"
+                ));
+            }
 
-                // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
-                // PoolId is Hash<28>, we need to convert to Vec<u8>
-                let delegated_spo = match &account.pool {
-                    StrictMaybe::Just(pool_id) => Some(*pool_id),
-                    StrictMaybe::Nothing => None,
-                };
+            // Parse VState [3][1][0][0] for DReps, which also skips committee_state and dormant_epoch.
+            // TODO: We may need to return to these later if we implement committee tracking.
+            let dreps =
+                Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
-                // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
-                let delegated_drep = match &account.drep {
-                    StrictMaybe::Just(drep) => Some(match drep {
-                        DRep::Key(hash) => crate::DRepChoice::Key(*hash),
-                        DRep::Script(hash) => crate::DRepChoice::Script(*hash),
-                        DRep::Abstain => crate::DRepChoice::Abstain,
-                        DRep::NoConfidence => crate::DRepChoice::NoConfidence,
-                    }),
-                    StrictMaybe::Nothing => None,
-                };
+            // Parse PState [3][1][0][1] for pools
+            let pools =
+                Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
 
-                AccountState {
-                    stake_address,
-                    address_state: StakeAddressState {
-                        registered: false, // Accounts are registered by SPOState
-                        utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
-                        rewards,
-                        delegated_spo,
-                        delegated_drep,
-                    },
+            // Parse DState [3][1][0][2] for accounts/delegations
+            // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
+            decoder.array().context("Failed to parse DState array")?;
+
+            // Parse unified rewards - it's actually an array containing the map
+            // UMap structure: [rewards_map, ...]
+            let umap_len = decoder.array().context("Failed to parse UMap array")?;
+
+            // Parse the rewards map [0]: StakeCredential -> Account
+            let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
+
+            // Skip remaining UMap elements if any
+            if let Some(len) = umap_len {
+                for _ in 1..len {
+                    decoder.skip()?;
                 }
-            })
-            .collect();
+            }
 
-        // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
-        // The UMap already handled all its internal elements including pointers
+            // Convert to AccountState for API
+            let accounts: Vec<AccountState> = accounts_map
+                .into_iter()
+                .map(|(credential, account)| {
+                    // Convert StakeCredential to stake address representation
+                    let stake_address = match &credential {
+                        StakeCredential::AddrKeyHash(hash) => {
+                            format!("stake_key_{}", hex::encode(hash))
+                        }
+                        StakeCredential::ScriptHash(hash) => {
+                            format!("stake_script_{}", hex::encode(hash))
+                        }
+                    };
 
-        // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-        decoder.skip()?;
+                    // Extract rewards from rewards_and_deposit (first element of tuple)
+                    let rewards = match &account.rewards_and_deposit {
+                        StrictMaybe::Just((reward, _deposit)) => *reward,
+                        StrictMaybe::Nothing => 0,
+                    };
 
-        // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-        decoder.skip()?;
+                    // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
+                    // PoolId is Hash<28>, we need to convert to Vec<u8>
+                    let delegated_spo = match &account.pool {
+                        StrictMaybe::Just(pool_id) => Some(*pool_id),
+                        StrictMaybe::Nothing => None,
+                    };
 
-        // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
-        decoder.skip()?;
+                    // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
+                    let delegated_drep = match &account.drep {
+                        StrictMaybe::Just(drep) => Some(match drep {
+                            DRep::Key(hash) => crate::DRepChoice::Key(*hash),
+                            DRep::Script(hash) => crate::DRepChoice::Script(*hash),
+                            DRep::Abstain => crate::DRepChoice::Abstain,
+                            DRep::NoConfidence => crate::DRepChoice::NoConfidence,
+                        }),
+                        StrictMaybe::Nothing => None,
+                    };
 
-        // Navigate to UTxOState [3][1][1]
-        let utxo_state_len = decoder
-            .array()
-            .context("Failed to parse UTxOState array")?
-            .ok_or_else(|| anyhow!("UTxOState must be a definite-length array"))?;
+                    AccountState {
+                        stake_address,
+                        address_state: StakeAddressState {
+                            registered: false, // Accounts are registered by SPOState
+                            utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                            rewards,
+                            delegated_spo,
+                            delegated_drep,
+                        },
+                    }
+                })
+                .collect();
 
-        if utxo_state_len < 1 {
-            return Err(anyhow!(
-                "UTxOState array too short: expected at least 1 element, got {utxo_state_len}"
-            ));
-        }
+            // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
+            // The UMap already handled all its internal elements including pointers
 
-        // Record the position before UTXO streaming - this is where UTXOs start in the file
-        let utxo_file_position = decoder.position() as u64;
+            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+            decoder.skip()?;
+
+            // Navigate to UTxOState [3][1][1]
+            let utxo_state_len = decoder
+                .array()
+                .context("Failed to parse UTxOState array")?
+                .ok_or_else(|| anyhow!("UTxOState must be a definite-length array"))?;
+
+            if utxo_state_len < 1 {
+                return Err(anyhow!(
+                    "UTxOState array too short: expected at least 1 element, got {utxo_state_len}"
+                ));
+            }
+
+            // Record the position before UTXO streaming - this is where UTXOs start in the file
+            let utxo_file_position = decoder.position() as u64;
+
+            // Return all the parsed metadata values
+            (
+                epoch,
+                blocks_previous_epoch,
+                blocks_current_epoch,
+                treasury,
+                reserves,
+                dreps,
+                pools,
+                accounts,
+                utxo_file_position,
+            )
+        }; // decoder goes out of scope here
 
         // Read only the UTXO section from the file (not the entire file!)
         let mut utxo_file = File::open(&self.file_path).context(format!(
@@ -1265,14 +1308,20 @@ impl StreamingSnapshotParser {
         // skip ConstitutionalCommittee
         remainder_decoder.skip()?;
 
-        // skip Constitution
-        remainder_decoder.skip()?;
+        // Decode Constitution (unused currently, but serves as a "correctness" checkpoint while parsing)
+        let _constitution: Constitution = remainder_decoder.decode()?;
 
-        // Current Protocol Params
-        remainder_decoder.skip()?; // Skip current protocol params instead of parsing
+        // Governance State from epoch_state/ledger_state/utxo_state/gov_state
+        let gs_current_pparams: ProtocolParameters = remainder_decoder.decode()?;
+        let gs_previous_pparams: ProtocolParameters = remainder_decoder.decode()?;
+        let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?; // may be empty
 
-        remainder_decoder.skip()?; // Previous Protocol Params
-        remainder_decoder.skip()?; // Future Protocol Params
+        callbacks.on_gs_protocol_parameters(
+            gs_previous_pparams,
+            gs_current_pparams,
+            gs_future_pparams,
+        )?;
+
         {
             remainder_decoder.array()?; // DRep Pulsing State
             remainder_decoder.array()?; // Pulsing Snapshot
@@ -2191,7 +2240,11 @@ pub struct CollectingCallbacks {
     pub accounts: Vec<AccountState>,
     pub dreps: Vec<DRepInfo>,
     pub proposals: Vec<GovernanceProposal>,
-    epoch: EpochBootstrapData,
+    pub epoch: EpochBootstrapData,
+    pub snapshots: Option<RawSnapshotsContainer>,
+    pub gs_protocol_previous_parameters: Option<ProtocolParameters>,
+    pub gs_protocol_current_parameters: Option<ProtocolParameters>,
+    pub gs_protocol_future_parameters: Option<ProtocolParameters>,
 }
 
 impl UtxoCallback for CollectingCallbacks {
@@ -2232,6 +2285,20 @@ impl DRepCallback for CollectingCallbacks {
 impl ProposalCallback for CollectingCallbacks {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         self.proposals = proposals;
+        Ok(())
+    }
+}
+
+impl GovernanceProtocolParametersCallback for CollectingCallbacks {
+    fn on_gs_protocol_parameters(
+        &mut self,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
+    ) -> Result<()> {
+        self.gs_protocol_previous_parameters = Some(gs_previous_params);
+        self.gs_protocol_current_parameters = Some(gs_current_params);
+        self.gs_protocol_future_parameters = Some(gs_future_params);
         Ok(())
     }
 }

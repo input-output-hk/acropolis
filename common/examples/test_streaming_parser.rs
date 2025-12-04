@@ -2,6 +2,8 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
@@ -30,6 +32,9 @@ struct CountingCallbacks {
     sample_accounts: Vec<AccountState>,
     sample_dreps: Vec<DRepInfo>,
     sample_proposals: Vec<GovernanceProposal>,
+    gs_previous_params: Option<ProtocolParameters>,
+    gs_current_params: Option<ProtocolParameters>,
+    gs_future_params: Option<ProtocolParameters>,
 }
 
 impl UtxoCallback for CountingCallbacks {
@@ -158,6 +163,115 @@ impl ProposalCallback for CountingCallbacks {
 
         // Keep first 10 for summary
         self.sample_proposals = proposals.into_iter().take(10).collect();
+        Ok(())
+    }
+}
+
+impl GovernanceProtocolParametersCallback for CountingCallbacks {
+    fn on_gs_protocol_parameters(
+        &mut self,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
+    ) -> Result<()> {
+        eprintln!("\n=== Governance Protocol Parameters ===\n");
+
+        eprintln!("Previous Protocol Parameters:");
+        eprintln!(
+            "  Protocol Version: {}.{}",
+            gs_previous_params.protocol_version.major, gs_previous_params.protocol_version.minor
+        );
+        eprintln!("  Min Fee A: {}", gs_previous_params.min_fee_a);
+        eprintln!("  Min Fee B: {}", gs_previous_params.min_fee_b);
+        eprintln!(
+            "  Max Block Body Size: {}",
+            gs_previous_params.max_block_body_size
+        );
+        eprintln!(
+            "  Max Transaction Size: {}",
+            gs_previous_params.max_transaction_size
+        );
+        eprintln!(
+            "  Max Block Header Size: {}",
+            gs_previous_params.max_block_header_size
+        );
+        eprintln!(
+            "  Stake Pool Deposit: {}",
+            gs_previous_params.stake_pool_deposit
+        );
+        eprintln!(
+            "  Stake Credential Deposit: {}",
+            gs_previous_params.stake_credential_deposit
+        );
+        eprintln!("  Min Pool Cost: {}", gs_previous_params.min_pool_cost);
+        eprintln!(
+            "  Monetary Expansion: {}/{}",
+            gs_previous_params.monetary_expansion_rate.numerator,
+            gs_previous_params.monetary_expansion_rate.denominator
+        );
+        eprintln!(
+            "  Treasury Expansion: {}/{}",
+            gs_previous_params.treasury_expansion_rate.numerator,
+            gs_previous_params.treasury_expansion_rate.denominator
+        );
+
+        eprintln!("\nCurrent Protocol Parameters:");
+        eprintln!(
+            "  Protocol Version: {}.{}",
+            gs_current_params.protocol_version.major, gs_current_params.protocol_version.minor
+        );
+        eprintln!("  Min Fee A: {}", gs_current_params.min_fee_a);
+        eprintln!("  Min Fee B: {}", gs_current_params.min_fee_b);
+        eprintln!(
+            "  Max Block Body Size: {}",
+            gs_current_params.max_block_body_size
+        );
+        eprintln!(
+            "  Max Transaction Size: {}",
+            gs_current_params.max_transaction_size
+        );
+        eprintln!(
+            "  Max Block Header Size: {}",
+            gs_current_params.max_block_header_size
+        );
+        eprintln!(
+            "  Stake Pool Deposit: {}",
+            gs_current_params.stake_pool_deposit
+        );
+        eprintln!(
+            "  Stake Credential Deposit: {}",
+            gs_current_params.stake_credential_deposit
+        );
+        eprintln!("  Min Pool Cost: {}", gs_current_params.min_pool_cost);
+        eprintln!(
+            "  Monetary Expansion: {}/{}",
+            gs_current_params.monetary_expansion_rate.numerator,
+            gs_current_params.monetary_expansion_rate.denominator
+        );
+        eprintln!(
+            "  Treasury Expansion: {}/{}",
+            gs_current_params.treasury_expansion_rate.numerator,
+            gs_current_params.treasury_expansion_rate.denominator
+        );
+
+        eprintln!("\nFuture Protocol Parameters:");
+        eprintln!(
+            "  Protocol Version: {}.{}",
+            gs_future_params.protocol_version.major, gs_future_params.protocol_version.minor
+        );
+        eprintln!("  Min Fee A: {}", gs_future_params.min_fee_a);
+        eprintln!("  Min Fee B: {}", gs_future_params.min_fee_b);
+        eprintln!(
+            "  Max Block Body Size: {}",
+            gs_future_params.max_block_body_size
+        );
+
+        // Store for later display
+        self.gs_previous_params = Some(gs_previous_params);
+        self.gs_current_params = Some(gs_current_params);
+        self.gs_future_params = Some(gs_future_params);
+
+        eprintln!("\n=== End Protocol Parameters ===\n");
         Ok(())
     }
 }

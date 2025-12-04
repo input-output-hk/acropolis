@@ -820,7 +820,7 @@ impl Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Origin => write!(f, "origin"),
-            Self::Specific { hash, slot } => write!(f, "{}@{}", hash, slot),
+            Self::Specific { hash, slot } => write!(f, "{hash}@{slot}"),
         }
     }
 }
@@ -1386,6 +1386,34 @@ pub struct Anchor {
     pub data_hash: DataHash,
 }
 
+impl<'b, C> minicbor::Decode<'b, C> for Anchor {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+
+        // URL can be either bytes or text string (snapshot format uses bytes)
+        let url = match d.datatype()? {
+            minicbor::data::Type::Bytes => {
+                let url_bytes = d.bytes()?;
+                String::from_utf8_lossy(url_bytes).to_string()
+            }
+            minicbor::data::Type::String => d.str()?.to_string(),
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "Expected bytes or string for Anchor URL",
+                ))
+            }
+        };
+
+        // data_hash is encoded as direct bytes, not an array
+        let data_hash = d.bytes()?.to_vec();
+
+        Ok(Self { url, data_hash })
+    }
+}
+
 pub type DRepCredential = Credential;
 
 /// DRep Registration = reg_drep_cert
@@ -1445,9 +1473,13 @@ pub struct ResignCommitteeCold {
 
 /// Governance actions data structures
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy, minicbor::Decode,
+)]
 pub struct ExUnits {
+    #[n(0)]
     pub mem: u64,
+    #[n(1)]
     pub steps: u64,
 }
 
@@ -1455,6 +1487,30 @@ pub struct ExUnits {
 pub struct ExUnitPrices {
     pub mem_price: RationalNumber,
     pub step_price: RationalNumber,
+}
+
+impl<'a, C> minicbor::Decode<'a, C> for ExUnitPrices {
+    fn decode(
+        d: &mut minicbor::Decoder<'a>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        // Decode mem_price as [numerator, denominator] array
+        d.array()?;
+        let mem_num: u64 = d.decode()?;
+        let mem_den: u64 = d.decode()?;
+        let mem_price = RationalNumber::from(mem_num, mem_den);
+
+        // Decode step_price as [numerator, denominator] array
+        d.array()?;
+        let step_num: u64 = d.decode()?;
+        let step_den: u64 = d.decode()?;
+        let step_price = RationalNumber::from(step_num, step_den);
+
+        Ok(ExUnitPrices {
+            mem_price,
+            step_price,
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -1519,8 +1575,8 @@ impl Display for GovActionId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct CostModel(Vec<i64>);
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+pub struct CostModel(#[n(0)] Vec<i64>);
 
 impl CostModel {
     pub fn new(m: Vec<i64>) -> Self {
@@ -1539,26 +1595,41 @@ pub struct CostModels {
     pub plutus_v3: Option<CostModel>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct PoolVotingThresholds {
+    #[n(0)]
     pub motion_no_confidence: RationalNumber,
+    #[n(1)]
     pub committee_normal: RationalNumber,
+    #[n(2)]
     pub committee_no_confidence: RationalNumber,
+    #[n(3)]
     pub hard_fork_initiation: RationalNumber,
+    #[n(4)]
     pub security_voting_threshold: RationalNumber,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct DRepVotingThresholds {
+    #[n(0)]
     pub motion_no_confidence: RationalNumber,
+    #[n(1)]
     pub committee_normal: RationalNumber,
+    #[n(2)]
     pub committee_no_confidence: RationalNumber,
+    #[n(3)]
     pub update_constitution: RationalNumber,
+    #[n(4)]
     pub hard_fork_initiation: RationalNumber,
+    #[n(5)]
     pub pp_network_group: RationalNumber,
+    #[n(6)]
     pub pp_economic_group: RationalNumber,
+    #[n(7)]
     pub pp_technical_group: RationalNumber,
+    #[n(8)]
     pub pp_governance_group: RationalNumber,
+    #[n(9)]
     pub treasury_withdrawal: RationalNumber,
 }
 
@@ -1845,6 +1916,47 @@ pub struct AlonzoBabbageUpdateProposal {
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Constitution {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?; // Constitution array
+
+        // In snapshot format, Anchor fields are flattened (not wrapped in array)
+        // Try to detect: if next element is bytes/string, it's flattened
+        // If next element is array, it's wrapped
+        let is_flattened = matches!(
+            d.datatype()?,
+            minicbor::data::Type::Bytes | minicbor::data::Type::String
+        );
+
+        let anchor = if is_flattened {
+            // Flattened format: [url, data_hash, guardrail_script]
+            let url = match d.datatype()? {
+                minicbor::data::Type::Bytes => {
+                    let url_bytes = d.bytes()?;
+                    String::from_utf8_lossy(url_bytes).to_string()
+                }
+                minicbor::data::Type::String => d.str()?.to_string(),
+                _ => {
+                    return Err(minicbor::decode::Error::message(
+                        "Expected bytes or string for Anchor URL",
+                    ))
+                }
+            };
+            let data_hash: Vec<u8> = d.bytes()?.to_vec();
+            Anchor { url, data_hash }
+        } else {
+            // Wrapped format: [[url, data_hash], guardrail_script]
+            d.decode_with(ctx)?
+        };
+
+        let guardrail_script: Option<ScriptHash> = d.decode_with(ctx)?;
+        Ok(Self {
+            anchor,
+            guardrail_script,
+        })
+    }
 }
 
 #[serde_as]
@@ -2425,7 +2537,7 @@ mod tests {
                     make_committee_credential(false, 87),
                     1234,
                 )]),
-                terms: RationalNumber::from(1),
+                terms: RationalNumber::ONE,
             },
         });
 
