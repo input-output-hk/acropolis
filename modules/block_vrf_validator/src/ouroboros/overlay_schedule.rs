@@ -135,7 +135,7 @@ mod tests {
     fn test_lookup_in_overlay_schedule_1() {
         let genesis_values = GenesisValues::mainnet();
         let genesis_delegs = genesis_values.genesis_delegs;
-        let decentralisation_param = RationalNumber::from(1);
+        let decentralisation_param = RationalNumber::ONE;
         let active_slots_coeff = RationalNumber::new(1, 20);
         let epoch_slot = 0;
         let obft_slot = lookup_in_overlay_schedule(

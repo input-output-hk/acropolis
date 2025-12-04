@@ -183,7 +183,7 @@ pub fn validate_vrf_leader_value(
             Err(VrfLeaderValueTooBigError::VrfLeaderValueTooBig {
                 pool_id: *pool_id,
                 active_stake: *leader_relative_stake.numer(),
-                relative_stake: *leader_relative_stake,
+                relative_stake: leader_relative_stake.clone(),
             })
         }
     }
