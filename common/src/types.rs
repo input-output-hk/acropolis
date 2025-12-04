@@ -246,7 +246,7 @@ impl PartialOrd for BlockInfo {
 
 impl BlockInfo {
     pub fn is_at_tip(&self) -> bool {
-        self.tip_slot.is_some_and(|s| s == self.slot)
+        self.tip_slot.is_some_and(|s| s <= self.slot)
     }
 }
 
