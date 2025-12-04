@@ -1,5 +1,5 @@
 # Top-level configuration for Acropolis omnibus process
-# Basic UTXO follower version
+# Basic UTXO follower version from Mithril and then live sync
 
 # ============================================================================
 # Startup Configuration

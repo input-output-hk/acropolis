@@ -5,10 +5,7 @@ stages, which more-or-less reflects how it was developed.
 
 To start with, let's create the simplest possible UTXO indexer, booting from genesis (the very
 start of the Cardano chain) and using a Mithril block data dump to save fetching from the live
-network.  Once we've processed all the Mithril data, we hand over to a block fetcher which then
-synchronises with a friendly local relay node.
-
-Here is the [configuration](../../processes/omnibus/configs/omnibus-basic-utxo.toml) for this setup.
+network.
 
 ## Module graph
 
@@ -16,22 +13,18 @@ Here is the [configuration](../../processes/omnibus/configs/omnibus-basic-utxo.t
 flowchart LR
   GEN(Genesis Bootstrapper)
   MSF(Mithril Snapshot Fetcher)
-  PNI(Peer Network Interface)
   BU(Block Unpacker)
   TXU(Tx Unpacker)
   UTXO(UTXO State)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
   MSF -- cardano.block.available --> BU
-  MSF -- cardano.snapshot.complete --> PNI
-  PNI -- cardano.block.available --> BU
   BU  -- cardano.txs --> TXU
   TXU -- cardano.utxo.deltas --> UTXO
   GEN -- cardano.utxo.deltas --> UTXO
 
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
-  click PNI "https://github.com/input-output-hk/acropolis/tree/main/modules/peer_network_interface/"
   click BU "https://github.com/input-output-hk/acropolis/tree/main/modules/block_unpacker/"
   click TXU "https://github.com/input-output-hk/acropolis/tree/main/modules/tx_unpacker/"
   click UTXO "https://github.com/input-output-hk/acropolis/tree/main/modules/utxo_state/"
@@ -56,8 +49,7 @@ recent' is in its section in the config file.
 
 When it has downloaded the snapshot (about 50GB at the time of writing), verified and unpacked it,
 it starts sending `cardano.block.available` messages with the raw data for every block in the
-history.  When it's finished it sends a `cardano.snapshot.complete` message, which hands over
-to the live synchronisation, as we'll see later.
+history.
 
 The [Block Unpacker](../../modules/block_unpacker) receives the
 `cardano.block.available` messages and, as its name suggests, decodes
@@ -86,11 +78,15 @@ and flag any errors (which we don't expect to see in mainnet, of
 course!).  Naturally any real system would have more modules doing useful things with
 this data, and/or providing APIs to read it, as we'll see as we expand our setup.
 
-As already mentioned, when the Mithril Snapshot Fetcher has come to the end of the block data
-in the snapshot, it sends a `cardano.sequence.bootstrapped` message indicating how far it got.
-This is then picked up by the [Peer Network Interface](../../modules/peer_network_interface) which
-is configured to be a block fetching client to one or more relays (the config has some standard
-ones by default), and continues where the snapshot left off, fetching blocks from the live
-network and publishing them as `cardano.block.available` in the same way.  Notice that the
-Block Unpacker doesn't care where the blocks come from, as long as they are in sequence, which
-the hand-off process ensures.
+## Configuration
+
+Here is the [configuration](../../processes/omnibus/configs/simple-mithril-utxo.toml) for this setup.  You can run it in the `processes/omnibus` directory with:
+
+```shell
+$ cargo run --release -- --config configs/simple-mithril-utxo.toml
+```
+
+## Next steps
+
+Next we'll add a [live network synchronisation](system-simple-mithril-and-sync-utxo.md) after
+the bootstrap.
