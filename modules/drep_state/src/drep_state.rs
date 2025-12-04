@@ -1,6 +1,8 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
+use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -79,19 +81,23 @@ impl DRepState {
             };
             let mut current_block: Option<BlockInfo> = None;
 
-            // Read per-block messages in parallel
-            let certs_message_f = certs_subscription.read();
-
             // Certificates are the synchroniser
-            let (_, certs_message) = certs_message_f.await?;
+            let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((ref block_info, _)) => {
+                Message::Cardano((ref block_info, CardanoMessage::TxCertificates(_))) => {
                     // rollback only on certs
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
                     current_block = Some(block_info.clone());
                     block_info.new_epoch && block_info.epoch > 0
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    drep_state_publisher.publish_rollback(certs_message.clone()).await?;
+                    false
                 }
                 _ => false,
             };
@@ -100,7 +106,7 @@ impl DRepState {
             if new_epoch {
                 // Read params subscription if store-info is enabled to obtain DRep expiration param. Update expirations on epoch transition
                 if let Some(sub) = params_subscription.as_mut() {
-                    let (_, message) = sub.read().await?;
+                    let (_, message) = sub.read_ignoring_rollbacks().await?;
                     match message.as_ref() {
                         Message::Cardano((
                             ref block_info,
@@ -151,12 +157,19 @@ impl DRepState {
                     .await;
                 }
 
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // Do nothing, we handled the rollback earlier
+                }
+
                 _ => error!("Unexpected message type: {certs_message:?}"),
             }
 
             // Handle governance message
             if let Some(sub) = gov_subscription.as_mut() {
-                let (_, message) = sub.read().await?;
+                let (_, message) = sub.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
                     Message::Cardano((
                         block_info,

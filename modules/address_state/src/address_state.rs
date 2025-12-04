@@ -8,7 +8,7 @@ use crate::{
     immutable_address_store::ImmutableAddressStore,
     state::{AddressStorageConfig, State},
 };
-use acropolis_common::queries::errors::QueryError;
+use acropolis_common::{caryatid::SubscriptionExt, queries::errors::QueryError};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -72,7 +72,7 @@ impl AddressState {
         // Main loop of synchronised messages
         loop {
             // Address deltas are the synchroniser
-            let (_, deltas_msg) = address_deltas_subscription.read().await?;
+            let (_, deltas_msg) = address_deltas_subscription.read_ignoring_rollbacks().await?;
             let (current_block, new_epoch) = match deltas_msg.as_ref() {
                 Message::Cardano((info, _)) => (info.clone(), info.new_epoch && info.epoch > 0),
                 _ => continue,
@@ -87,7 +87,7 @@ impl AddressState {
             // Read params message on epoch bounday to update rollback window
             // length if needed and set epoch start block for volatile pruning
             if new_epoch {
-                let (_, message) = params_subscription.read().await?;
+                let (_, message) = params_subscription.read_ignoring_rollbacks().await?;
                 if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
                     message.as_ref()
                 {
