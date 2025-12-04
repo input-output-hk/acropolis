@@ -6,4 +6,6 @@ to become a full Cardano node.
 ## Contents
 
 - [Modularity](modularity.md) - Why and how Acropolis is split into loosely-coupled modules
-- [Basic system description](system-basic.md) - Building a system description up from basics
+- Building a node from the ground up:
+  - [Simple Mithril UTXOs](system-simple-mithril-utxo.md) - The most basic UTXO follower from a Mithril snapshot
+  - [Mithril and Sync UTXOs](system-simple-mithril-and-sync-utxo.md) - Adding a live network sync

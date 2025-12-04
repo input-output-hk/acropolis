@@ -45,11 +45,9 @@ It then sends a `cardano.sequence.bootstrapped` which triggers the next stage.
 This is picked up by the [Mithril Snapshot Fetcher](../../modules/mithril_snapshot_fetcher),
 which downloads a 'snapshot' containing the entire block history of the chain (up to a few hours
 ago), if it doesn't already have a sufficiently recent one.  You can configure what 'sufficiently
-recent' is in its section in the config file.
-
-When it has downloaded the snapshot (about 50GB at the time of writing), verified and unpacked it,
-it starts sending `cardano.block.available` messages with the raw data for every block in the
-history.
+recent' is in its section in the config file.  When it has downloaded the snapshot (about 50GB at
+the time of writing), verified and unpacked it, it starts sending `cardano.block.available`
+messages with the raw data for every block in the history.
 
 The [Block Unpacker](../../modules/block_unpacker) receives the
 `cardano.block.available` messages and, as its name suggests, decodes

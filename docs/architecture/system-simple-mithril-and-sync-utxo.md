@@ -48,19 +48,23 @@ The process follows exactly the same sequence as [before](system-simple-mithril-
 * [Tx Unpacker](../../modules/tx_unpacker) decodes transactions and produces UTXO deltas
 * [UTXO State](../../modules/utxo_state) catches and checks the UTXO deltas and maintains a store of active ones.
 
-To this we have added a [Peer Network Interface](../../modules/peer_network_interface). 
+To this we have added a [Peer Network Interface](../../modules/peer_network_interface), which
+just slots into the existing graph.
+
 When the Mithril Snapshot Fetcher has come to the end of the block data
 in the snapshot, it sends a `cardano.sequence.bootstrapped` message indicating how far it got (it
 was already doing this but no-one was listening, so we didn't mention it before).
 
-This is then picked up by the Peer Network Interface which is
-configured to be a block fetching client to one or more relays (the
-config has some standard ones by default), and continues where the
+This is then picked up by the Peer Network Interface, which is
+configured to be a block fetching client to one or more relays - the
+config has some standard ones by default.  It continues where the
 snapshot left off, fetching blocks from the live network and
-publishing them as `cardano.block.available` in the same way.  Notice
-that we didn't have to reconfigure anything else - the Block Unpacker
+publishing them as `cardano.block.available` in the same way.
+
+Notice that we didn't have to reconfigure anything else - the Block Unpacker
 doesn't care where the blocks come from, as long as they are in
-sequence, which the hand-off process ensures.
+sequence, which the hand-off process ensures.  This is the benefit of the pub-sub
+architecture!
 
 ## Configuration
 
