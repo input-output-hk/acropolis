@@ -356,7 +356,7 @@ impl SnapshotsCallback for CountingCallbacks {
 
         eprintln!("Fee: {:.2} ADA", snapshots.fee as f64 / 1_000_000.0);
         eprintln!();
-        
+
         Ok(())
     }
 }
