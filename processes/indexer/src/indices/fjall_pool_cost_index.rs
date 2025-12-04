@@ -1,6 +1,6 @@
 #![allow(unused)]
 use acropolis_codec::map_parameters::to_pool_id;
-use acropolis_common::{BlockInfo, Lovelace, PoolId};
+use acropolis_common::{BlockInfo, Lovelace, Point, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
 use caryatid_sdk::async_trait;
@@ -113,5 +113,16 @@ impl ChainIndex for FjallPoolCostIndex {
             }
         }
         Ok(())
+    }
+
+    async fn reset(&mut self, start: &Point) -> Result<Point> {
+        self.state.pools = BTreeMap::new();
+
+        for item in self.partition.iter() {
+            let (key, _) = item?;
+            self.partition.remove(key.as_ref())?;
+        }
+
+        Ok(start.clone())
     }
 }

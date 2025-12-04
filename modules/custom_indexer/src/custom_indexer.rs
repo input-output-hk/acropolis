@@ -8,47 +8,27 @@ pub mod chain_index;
 mod configuration;
 pub mod cursor_store;
 mod index_actor;
+mod utils;
 
-use acropolis_common::BlockInfo;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc,  Mutex};
 
 use anyhow::Result;
 use config::Config;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 use caryatid_sdk::{async_trait, Context, Module};
 
 use acropolis_common::{
-    commands::chain_sync::ChainSyncCommand,
-    messages::{CardanoMessage, Command, Message, StateTransitionMessage},
-    Point,
+     Point,  messages::{CardanoMessage,  Message, StateTransitionMessage}
 };
 
 use crate::{
-    chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::CursorStore,
-    index_actor::index_actor,
+    chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::{CursorEntry, CursorStore},
+    index_actor::{IndexCommand, IndexResult, index_actor}, utils::{change_sync_point, send_rollback_to_indexers, send_txs_to_indexers},
 };
-
-enum IndexCommand {
-    ApplyTxs {
-        block: BlockInfo,
-        txs:  Vec<Arc<[u8]>>,
-        response_tx: oneshot::Sender<IndexResult>,
-    },
-    Rollback {
-        point: Point,
-        response_tx: oneshot::Sender<IndexResult>,
-    },
-}
-
-enum IndexResult {
-    Success { tip: Point },
-    Failed { reason: String },
-}
 
 type IndexSenders = HashMap<String, mpsc::Sender<IndexCommand>>;
 type SharedSenders = Arc<Mutex<IndexSenders>>;
@@ -56,13 +36,13 @@ type SharedSenders = Arc<Mutex<IndexSenders>>;
 struct IndexWrapper {
     index: Box<dyn ChainIndex>,
     tip: Point,
+    default_start: Point,
     halted: bool,
 }
 
 pub struct CustomIndexer<CS: CursorStore> {
     senders: SharedSenders,
     cursor_store: Arc<CS>,
-    halted: Arc<AtomicBool>,
 }
 
 impl<CS: CursorStore> CustomIndexer<CS> {
@@ -70,13 +50,12 @@ impl<CS: CursorStore> CustomIndexer<CS> {
         Self {
             senders: Arc::new(Mutex::new(HashMap::new())),
             cursor_store: Arc::new(cursor_store),
-            halted: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub async fn add_index<I: ChainIndex + 'static>(
         &self,
-        index: I,
+        mut index: I,
         default_start: Point,
         force_restart: bool,
     ) -> Result<()> {
@@ -88,25 +67,26 @@ impl<CS: CursorStore> CustomIndexer<CS> {
             return Ok(());
         }
 
-        let mut tips = self.cursor_store.load().await?;
+        let mut cursors = self.cursor_store.load().await?;
 
-        let tip = match (tips.get(&name).cloned(), force_restart) {
-            (_, true) => {
-                tips.insert(name.clone(), default_start.clone());
-                default_start.clone()
-            }
-            (Some(saved), false) => saved,
-            (None, false) => {
-                tips.insert(name.clone(), default_start.clone());
-                default_start.clone()
-            }
-        };
+        let mut entry = cursors.get(&name).cloned().unwrap_or(CursorEntry {
+            tip: default_start.clone(),
+            halted: false,
+        });
 
-        self.cursor_store.save(&tips).await?;
+        if force_restart || entry.halted {
+            index.reset(&default_start).await?;
+            entry.tip = default_start.clone();
+            entry.halted = false;
+        }
+
+        cursors.insert(name.clone(), entry.clone());
+        self.cursor_store.save(&cursors).await?;
 
         let wrapper = IndexWrapper {
             index: Box::new(index),
-            tip,
+            tip: entry.tip.clone(),
+            default_start,
             halted: false,
         };
 
@@ -115,6 +95,30 @@ impl<CS: CursorStore> CustomIndexer<CS> {
         indexes.insert(name.clone(), tx);
 
         Ok(())
+    }
+
+    async fn compute_start_point(&self) -> Result<Point> {
+        let saved_tips = self.cursor_store.load().await?;
+        let index_names: Vec<String> = {
+            let senders = self.senders.lock().await;
+            senders.keys().cloned().collect()
+        };
+
+        let mut min_point = None;
+        for index in index_names {
+            let index_entry = saved_tips.get(&index).unwrap_or(&CursorEntry{tip: Point::Origin, halted: false}).clone();
+            min_point = match min_point {
+                None => Some(index_entry.tip),
+                Some(current) => {
+                    if index_entry.tip.slot_or_default() < current.slot_or_default() {
+                        Some(index_entry.tip)
+                    } else {
+                        Some(current)
+                    }
+                }
+            };
+        }
+        Ok(min_point.unwrap_or(Point::Origin))
     }
 }
 
@@ -138,43 +142,13 @@ where
 
         let senders = Arc::clone(&self.senders);
         let cursor_store = Arc::clone(&self.cursor_store);
-        let halted = Arc::clone(&self.halted);
 
-        // Retrieve saved index tips from cursor store
-        let start_point = {
-            let saved_tips = cursor_store.load().await?;
-            let index_names: Vec<String> = {
-                let senders = self.senders.lock().await;
-                senders.keys().cloned().collect()
-            };
-
-            let mut min_point = None;
-            for index in index_names {
-                let index_tip = saved_tips.get(&index).unwrap_or(&Point::Origin).clone();
-                min_point = match min_point {
-                    None => Some(index_tip),
-                    Some(current) => {
-                        if index_tip.slot_or_default() < current.slot_or_default() {
-                            Some(index_tip)
-                        } else {
-                            Some(current)
-                        }
-                    }
-                };
-            }
-            min_point.unwrap_or(Point::Origin)
-        };
+        // Get the lowest tip from added indexes to determine where chain sync should begin
+        let start_point = self.compute_start_point().await?;
 
         context.run(async move {
             // Publish initial sync point
-            let msg = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(
-                start_point,
-            )));
-            run_context.publish(&cfg.sync_command_publisher_topic, Arc::new(msg)).await?;
-            info!(
-                "Publishing initial sync command on {}",
-                cfg.sync_command_publisher_topic
-            );
+            change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
 
             // Forward received txs and rollback notifications to index handlers
             loop {
@@ -182,50 +156,20 @@ where
                     Ok((_, message)) => {
                         match message.as_ref() {
                             Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
-                                // Do not continue processing if awaiting a rollback due to failed tx decode
-                                if halted.load(Ordering::SeqCst) {
-                                    continue;
-                                }
-
-                                let senders_snapshot: Vec<_> = {
-                                    let map = senders.lock().await;
-                                    map.iter().map(|(n, tx)| (n.clone(), tx.clone())).collect()
-                                };
-
                                 let txs: Vec<Arc<[u8]>> = txs_msg
                                     .txs
                                     .iter()
                                     .map(|tx| Arc::<[u8]>::from(tx.as_slice()))
                                     .collect();
 
-                                let mut results = FuturesUnordered::new();
-                                for (name, sender) in senders_snapshot {
-                                    let (response_tx, response_rx) = oneshot::channel();
+                                // Send txs to all index tasks
+                                let mut responses = send_txs_to_indexers(&senders, block, &txs).await;
 
-                                     let cmd = IndexCommand::ApplyTxs {
-                                        block: block.clone(),
-                                        txs: txs.clone(),
-                                        response_tx,
-                                    };
+                                // Get responses with new tips and any halts that occured
+                                let new_entries = process_tx_responses(&mut responses, block.slot).await;
 
-                                    let _ = sender.send(cmd).await;
-
-                                    results.push(async move { (name, response_rx.await) });
-                                }
-
-                                let mut new_tips = HashMap::new();
-                                while let Some((name, result)) = results.next().await {
-                                    match result {
-                                        Ok(IndexResult::Success {  tip }) => { 
-                                            new_tips.insert(name, tip); 
-                                        }
-                                        Ok(IndexResult::Failed { reason }) => { error!("Failed to handle tx at slot {} for {name} index: {reason}", block.slot) }
-                                        Err(_) => { /* actor dropped */ }
-                                    }
-                                }
-
-                                // Save tips
-                                cursor_store.save(&new_tips).await?;
+                                // Save the new entries to the cursor store
+                                cursor_store.save(&new_entries).await?;
                                 
                             }
 
@@ -235,44 +179,31 @@ where
                                     point,
                                 )),
                             )) => {
-                                // Collect wrapper arcs first to avoid holding lock on map
-                                let senders_snapshot: Vec<_> = {
-                                    let map = senders.lock().await;
-                                    map.iter().map(|(n, tx)| (n.clone(), tx.clone())).collect()
-                                };
+                                // Inform indexes of a rollback
+                                let responses = send_rollback_to_indexers(&senders, point).await;
+                                
+                                // Get responses with new tips and any indexes which failed to rollback and could not be reset
+                                let (new_tips, to_remove) = process_rollback_responses(
+                                    responses,
+                                    run_context.clone(),
+                                    &cfg.sync_command_publisher_topic,
+                                ).await?;
 
-                                let mut results = FuturesUnordered::new();
-                                for (name, sender) in senders_snapshot {
-                                    let (resp_tx, resp_rx) = oneshot::channel();
+                                // Save the new entries to the cursor store
+                                cursor_store.save(&new_tips).await?;
 
-                                    let cmd = IndexCommand::Rollback {
-                                        point: point.clone(),
-                                        response_tx: resp_tx,
-                                    };
+                                // Remove any indexes which were unable to rollback or reset successfully
+                                if !to_remove.is_empty() {
+                                    let mut guard = senders.lock().await;
 
-                                    let _ = sender.send(cmd).await;
-                                    results.push(async move { (name, resp_rx.await) });
-                                }
-
-                                let mut new_tips = HashMap::new();
-
-                                while let Some((name, result)) = results.next().await {
-                                    match result {
-                                        Ok(IndexResult::Success { tip }) => {
-                                            new_tips.insert(name, tip);
-                                        }
-                                        Ok(IndexResult::Failed { reason }) => {
-                                            error!("Rollback failed for index '{name}': {reason}");
-                                        }
-                                        Err(_) => {
-                                            error!("Rollback actor for index '{name}' dropped");
+                                    for name in &to_remove {
+                                        if guard.remove(name).is_some() {
+                                            warn!("Removed sender for '{name}' due to fatal reset error");
+                                        } else {
+                                            warn!("Tried to remove sender for '{name}' but it wasn't present");
                                         }
                                     }
                                 }
-                                cursor_store.save(&new_tips).await?;
-
-                                // Remove global halt
-                                halted.store(false, Ordering::SeqCst);
                             }
                             _ => (),
                         }
@@ -291,3 +222,78 @@ where
     }
 }
 
+async fn process_tx_responses<F>(
+    results: &mut FuturesUnordered<F>,
+    block_slot: u64,
+) -> HashMap<String, CursorEntry>
+where
+    F: futures::Future<Output = (String, Result<IndexResult, tokio::sync::oneshot::error::RecvError>)>,
+{
+    let mut new_tips = HashMap::new();
+
+    while let Some((name, result)) = results.next().await {
+        match result {
+            Ok(IndexResult::Success { entry }) => {
+                new_tips.insert(name, entry);
+            }
+            Ok(IndexResult::DecodeError { reason }) => {
+                error!(
+                    "Failed to decode tx at slot {} for index '{}': {}",
+                    block_slot, name, reason
+                );
+            }
+            Ok(IndexResult::HandleError { reason }) => {
+                error!(
+                    "Failed to handle tx at slot {} for index '{}': {}",
+                    block_slot, name, reason
+                );
+            }
+            Ok(IndexResult::Halted) => {
+                warn!("Index '{}' is halted", name);
+            }
+            Err(_) => {
+                error!("Actor for index '{}' dropped unexpectedly", name);
+            }
+            _ => {}
+        }
+    }
+
+    new_tips
+}
+
+async fn process_rollback_responses(
+    mut results: FuturesUnordered<impl futures::Future<
+        Output = (String, Result<IndexResult, tokio::sync::oneshot::error::RecvError>)
+    >>,
+    run_context: Arc<Context<Message>>,
+    sync_topic: &str,
+) -> Result<(HashMap<String, CursorEntry>, Vec<String>)>
+{
+    let mut new_tips = HashMap::new();
+    let mut to_remove = Vec::new();
+
+    while let Some((name, result)) = results.next().await {
+        match result {
+            Ok(IndexResult::Success { entry }) => {
+                new_tips.insert(name, entry);
+            }
+            Ok(IndexResult::Reset { entry }) => {
+                // Update tip and publish sync command to start fetching blocks from this point
+                new_tips.insert(name.clone(), entry.clone());
+                change_sync_point(entry.tip, run_context.clone(), &sync_topic.to_string()).await?;
+            }
+            Ok(IndexResult::FatalResetError { entry, reason }) => {
+                // Update tip and add index for removal from senders list
+                new_tips.insert(name.clone(), entry);
+                to_remove.push(name.clone());
+                error!("{name} failed to reset, halting and retrying next run: {reason}");
+            }
+            Err(_) => {
+                error!("Actor for {name} index dropped");
+            }
+            _ => {}
+        }
+    }
+
+    Ok((new_tips, to_remove))
+}

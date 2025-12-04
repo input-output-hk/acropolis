@@ -16,4 +16,6 @@ pub trait ChainIndex: Send + Sync + 'static {
         let _ = point;
         Ok(())
     }
+
+    async fn reset(&mut self, start: &Point) -> Result<Point>;
 }
