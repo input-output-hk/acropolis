@@ -21,7 +21,6 @@ use config::Config;
 use tracing::{error, info, warn};
 
 use caryatid_sdk::{async_trait, Context, Module};
-use pallas::ledger::traverse::{MultiEraTx};
 
 use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
@@ -37,7 +36,7 @@ use crate::{
 enum IndexCommand {
     ApplyTxs {
         block: BlockInfo,
-        txs: Vec<MultiEraTx<'static>>,
+        txs:  Vec<Arc<[u8]>>,
         response_tx: oneshot::Sender<IndexResult>,
     },
     Rollback {
@@ -55,7 +54,6 @@ type IndexSenders = HashMap<String, mpsc::Sender<IndexCommand>>;
 type SharedSenders = Arc<Mutex<IndexSenders>>;
 
 struct IndexWrapper {
-    name: String,
     index: Box<dyn ChainIndex>,
     tip: Point,
     halted: bool,
@@ -92,16 +90,21 @@ impl<CS: CursorStore> CustomIndexer<CS> {
 
         let mut tips = self.cursor_store.load().await?;
 
-        let tip = if force_restart {
-            tips.insert(name.clone(), default_start.clone());
-            self.cursor_store.save(&tips).await?;
-            default_start.clone()
-        } else {
-            tips.get(&name).cloned().unwrap_or(default_start.clone())
+        let tip = match (tips.get(&name).cloned(), force_restart) {
+            (_, true) => {
+                tips.insert(name.clone(), default_start.clone());
+                default_start.clone()
+            }
+            (Some(saved), false) => saved,
+            (None, false) => {
+                tips.insert(name.clone(), default_start.clone());
+                default_start.clone()
+            }
         };
 
+        self.cursor_store.save(&tips).await?;
+
         let wrapper = IndexWrapper {
-            name: name.clone(),
             index: Box::new(index),
             tip,
             halted: false,
@@ -178,34 +181,9 @@ where
                 match subscription.read().await {
                     Ok((_, message)) => {
                         match message.as_ref() {
-                            Message::Cardano((block_ref, CardanoMessage::ReceivedTxs(txs_msg_ref))) => {
-                                let block = block_ref.clone();
-
+                            Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
                                 // Do not continue processing if awaiting a rollback due to failed tx decode
                                 if halted.load(Ordering::SeqCst) {
-                                    continue;
-                                }
-
-                                let mut decode_failed = false;
-                                let mut decoded = Vec::with_capacity(txs_msg_ref.txs.len());
-                                for (tx_index, raw_tx) in txs_msg_ref.txs.iter().enumerate() {
-                                    let raw = raw_tx.clone();
-                                    match MultiEraTx::decode(&raw) {
-                                        Ok(tx) => decoded.push(tx),
-                                        Err(e) => {
-                                            warn!(
-                                                "Failed to decode tx {} in block {}, halting: {e:#}",
-                                                tx_index, block.number
-                                            );
-                                            halted.store(true, Ordering::SeqCst);
-                                            decode_failed = true;
-                                            break;
-                                        }
-                                    };  
-                                }
-
-
-                                if decode_failed {
                                     continue;
                                 }
 
@@ -214,13 +192,19 @@ where
                                     map.iter().map(|(n, tx)| (n.clone(), tx.clone())).collect()
                                 };
 
+                                let txs: Vec<Arc<[u8]>> = txs_msg
+                                    .txs
+                                    .iter()
+                                    .map(|tx| Arc::<[u8]>::from(tx.as_slice()))
+                                    .collect();
+
                                 let mut results = FuturesUnordered::new();
                                 for (name, sender) in senders_snapshot {
                                     let (response_tx, response_rx) = oneshot::channel();
 
                                      let cmd = IndexCommand::ApplyTxs {
                                         block: block.clone(),
-                                        txs: decoded.clone(),
+                                        txs: txs.clone(),
                                         response_tx,
                                     };
 
@@ -232,7 +216,9 @@ where
                                 let mut new_tips = HashMap::new();
                                 while let Some((name, result)) = results.next().await {
                                     match result {
-                                        Ok(IndexResult::Success { tip }) => { new_tips.insert(name, tip); }
+                                        Ok(IndexResult::Success {  tip }) => { 
+                                            new_tips.insert(name, tip); 
+                                        }
                                         Ok(IndexResult::Failed { reason }) => { error!("Failed to handle tx at slot {} for {name} index: {reason}", block.slot) }
                                         Err(_) => { /* actor dropped */ }
                                     }
@@ -277,7 +263,6 @@ where
                                         }
                                         Ok(IndexResult::Failed { reason }) => {
                                             error!("Rollback failed for index '{name}': {reason}");
-                                            // the actor marked itself halted internally
                                         }
                                         Err(_) => {
                                             error!("Rollback actor for index '{name}' dropped");

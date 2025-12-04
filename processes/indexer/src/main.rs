@@ -89,10 +89,9 @@ async fn main() -> Result<()> {
 
     // In memory example indexer
 
-    let indexer = CustomIndexer::new(InMemoryCursorStore::new());
-    indexer.add_index(InMemoryPoolCostIndex::new(sender), shelley_start, false).await;
-
-    process.register(Arc::new(indexer));
+    let indexer = Arc::new(CustomIndexer::new(InMemoryCursorStore::new()));
+    process.register(indexer.clone());
+    indexer.add_index(InMemoryPoolCostIndex::new(sender), shelley_start, false).await?;
     process.run().await?;
 
     Ok(())

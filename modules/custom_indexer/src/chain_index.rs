@@ -7,11 +7,7 @@ use pallas::ledger::traverse::MultiEraTx;
 pub trait ChainIndex: Send + Sync + 'static {
     fn name(&self) -> String;
 
-    async fn handle_onchain_tx(
-        &mut self,
-        info: &BlockInfo,
-        tx: &MultiEraTx<'static>,
-    ) -> Result<()> {
+    async fn handle_onchain_tx(&mut self, info: &BlockInfo, tx: &MultiEraTx<'_>) -> Result<()> {
         let _ = (info, tx);
         Ok(())
     }
