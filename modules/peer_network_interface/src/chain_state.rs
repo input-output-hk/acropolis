@@ -899,7 +899,7 @@ mod tests {
         let (h2, b2) = make_block(11, "second block");
         let (h3, b3) = make_block(12, "third block");
 
-        // Meanwhile, another upstream is sending us blocks. 
+        // Meanwhile, another upstream is sending us blocks.
         let p2 = PeerId(1);
 
         assert_eq!(state.handle_roll_forward(p2, h1.clone()), vec![p2]);

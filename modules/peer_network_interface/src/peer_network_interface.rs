@@ -230,7 +230,12 @@ struct BlockSink {
     rolled_back: bool,
 }
 impl BlockSink {
-    pub async fn announce_roll_forward(&mut self, header: &Header, body: &[u8], tip: Option<&Point>) -> Result<()> {
+    pub async fn announce_roll_forward(
+        &mut self,
+        header: &Header,
+        body: &[u8],
+        tip: Option<&Point>,
+    ) -> Result<()> {
         let info = self.make_block_info(header, tip);
         let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
@@ -255,7 +260,11 @@ impl BlockSink {
         Ok(())
     }
 
-    pub async fn announce_roll_backward(&mut self, header: &Header, tip: Option<&Point>) -> Result<()> {
+    pub async fn announce_roll_backward(
+        &mut self,
+        header: &Header,
+        tip: Option<&Point>,
+    ) -> Result<()> {
         self.rolled_back = true;
         let info = self.make_block_info(header, tip);
         let point = acropolis_common::Point::Specific {
