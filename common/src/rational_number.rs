@@ -69,7 +69,7 @@ impl<'a, C> Decode<'a, C> for RationalNumber {
         if matches!(d.datatype()?, minicbor::data::Type::Tag) {
             d.tag()?; // consume the tag
         }
-        
+
         d.array()?;
         let num: u64 = d.u64()?;
         let den: u64 = d.u64()?;

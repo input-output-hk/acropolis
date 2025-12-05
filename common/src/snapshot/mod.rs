@@ -10,13 +10,13 @@
 //! - Error types (`error.rs`)
 
 // Submodules
+mod decode;
 mod error;
 pub mod mark_set_go;
 mod parser;
 pub mod pool_params;
-pub mod streaming_snapshot;
 pub mod protocol_parameters;
-mod decode;
+pub mod streaming_snapshot;
 
 // Re-export error types
 pub use error::SnapshotError;
