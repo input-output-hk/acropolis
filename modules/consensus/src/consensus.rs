@@ -1,10 +1,7 @@
 //! Acropolis consensus module for Caryatid
 //! Maintains a favoured chain based on offered options from multiple sources
 
-use acropolis_common::{
-    messages::{CardanoMessage, Message, StateTransitionMessage},
-    validation::ValidationStatus,
-};
+use acropolis_common::{messages::{CardanoMessage, Message, StateTransitionMessage}, validation::ValidationStatus, BlockIntent};
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
 use config::Config;
@@ -60,6 +57,9 @@ impl Consensus {
         let mut validator_subscriptions: Vec<_> =
             try_join_all(validator_topics.iter().map(|topic| context.subscribe(topic))).await?;
 
+        // True if we expect validation to be performed by the nodes
+        let do_validation = validator_subscriptions.len() > 0;
+
         context.clone().run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
@@ -67,7 +67,16 @@ impl Consensus {
                     return;
                 };
                 match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::BlockAvailable(_block_msg))) => {
+                    Message::Cardano((raw_blk_info, ba @ CardanoMessage::BlockAvailable(_))) => {
+                        let block_info = if do_validation {
+                            raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
+                        }
+                        else {
+                            raw_blk_info.clone()
+                        };
+                        let block = (block_info.clone(), ba.clone());
+                        let block = Arc::new(Message::Cardano(block));
+
                         let span = info_span!("consensus", block = block_info.number);
 
                         async {
@@ -76,7 +85,7 @@ impl Consensus {
                             // Send to all validators and state modules
                             context
                                 .message_bus
-                                .publish(&publish_blocks_topic, message.clone())
+                                .publish(&publish_blocks_topic, block)
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 

@@ -224,36 +224,36 @@ impl GovernanceState {
                 if blk_g.new_epoch {
                     let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                     if blk_g != blk_p {
-                        error!(
+                        outcomes.push_anyhow(anyhow!(
                             "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                        );
+                        ));
                     }
 
                     {
-                        info!("Handling protocol parameters");
                         state.lock().await.handle_protocol_parameters(&params).await?;
-                        info!("Handling protocol parameters -- done!");
                     }
 
                     if blk_g.epoch > 0 {
                         // TODO: make sync more stable
                         let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
                         if blk_g != blk_drep {
-                            error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                            outcomes.push_anyhow(anyhow!(
+                                "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
+                            ));
                         }
 
                         let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                         if blk_g != blk_spo {
-                            error!(
+                            outcomes.push_anyhow(anyhow!(
                                 "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                            );
+                            ));
                         }
 
                         if blk_spo.epoch != d_spo.epoch + 1 {
-                            error!(
+                            outcomes.push_anyhow(anyhow!(
                                 "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
                                 d_spo.epoch
-                            );
+                            ));
                         }
 
                         state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
