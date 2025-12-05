@@ -1,4 +1,6 @@
-use acropolis_common::{protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, UTxOIdentifier};
+use acropolis_common::{
+    protocol_params::ShelleyParams, Slot, TxHash, TxIdentifier, UTxOIdentifier,
+};
 use std::{collections::HashMap, str::FromStr};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
