@@ -1,11 +1,11 @@
 use std::{fs, path::Path, sync::Arc};
 
 use acropolis_common::{BlockInfo, TxHash};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
 
-use crate::stores::{Block, ExtraBlockData};
+use crate::stores::{Block, ExtraBlockData, Tx};
 
 pub struct FjallStore {
     keyspace: Keyspace,
@@ -112,6 +112,19 @@ impl super::Store for FjallStore {
 
     fn get_latest_block(&self) -> Result<Option<Block>> {
         self.blocks.get_latest()
+    }
+
+    fn get_tx_by_hash(&self, hash: &[u8]) -> Result<Option<Tx>> {
+        let Some(block_ref) = self.txs.get_by_hash(hash)? else {
+            return Ok(None);
+        };
+        let Some(block) = self.blocks.get_by_hash(block_ref.block_hash.as_ref())? else {
+            return Err(anyhow!("Referenced block not found"));
+        };
+        Ok(Some(Tx {
+            block,
+            index: block_ref.index as u64,
+        }))
     }
 }
 
@@ -254,6 +267,13 @@ impl FjallTXStore {
     fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: BlockReference) {
         let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
+    }
+
+    fn get_by_hash(&self, hash: &[u8]) -> Result<Option<BlockReference>> {
+        let Some(block_ref) = self.txs.get(hash)? else {
+            return Ok(None);
+        };
+        Ok(minicbor::decode(&block_ref)?)
     }
 }
 

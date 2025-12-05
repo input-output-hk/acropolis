@@ -4,6 +4,8 @@ block-topic = "cardano.block.available"
 snapshot-completion-topic = "cardano.snapshot.complete"
 # The topic to wait for when listening for genesis values from another module
 genesis-completion-topic = "cardano.sequence.bootstrapped"
+# The topic to listen on for runtime sync commands
+sync-command-topic = "cardano.sync.command"
 
 # Upstream node connections
 node-addresses = [
@@ -19,6 +21,7 @@ magic-number = 764824073
 # - "tip": sync from the very end of the chain
 # - "cache": replay messages from a local filesystem cache, then sync from the point right after that cache.
 # - "snapshot": wait for another module to restore from a snapshot, then sync from the point right after that snapshot.
+# - "dynamic": awaits a sync command to begin fetching blocks, can change sync point at runtime. 
 sync-point = "snapshot"
 # The cache dir to use when sync-point is "cache"
 cache-dir = "upstream-cache"

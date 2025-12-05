@@ -22,6 +22,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     fmt::{Display, Formatter},
+    net::{Ipv4Addr, Ipv6Addr},
     ops::{AddAssign, Neg},
     str::FromStr,
 };
@@ -57,6 +58,19 @@ impl From<String> for NetworkId {
             "mainnet" => NetworkId::Mainnet,
             _ => NetworkId::Mainnet,
         }
+    }
+}
+
+impl Display for NetworkId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                NetworkId::Mainnet => "mainnet",
+                NetworkId::Testnet => "testnet",
+            }
+        )
     }
 }
 
@@ -124,13 +138,52 @@ impl Display for Era {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PoolBlockProduction {
     /// Pool ID that produced the blocks
-    pub pool_id: String,
+    pub pool_id: PoolId,
 
     /// Number of blocks produced by this pool in the epoch
     pub block_count: u8,
 
     /// Epoch number
     pub epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EpochBootstrapData {
+    /// Current epoch number
+    pub epoch: u64,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_previous: HashMap<PoolId, u64>,
+    /// Pool ID (hex) → block count
+    pub spo_blocks_current: HashMap<PoolId, u64>,
+    /// Sum of current epoch blocks
+    pub total_blocks_current: u64,
+    /// Sum of previous epoch blocks
+    pub total_blocks_previous: u64,
+}
+
+impl EpochBootstrapData {
+    pub fn new(
+        epoch: u64,
+        blocks_previous_epoch: &[crate::types::PoolBlockProduction],
+        blocks_current_epoch: &[crate::types::PoolBlockProduction],
+    ) -> Self {
+        let blocks_previous: HashMap<PoolId, u64> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let blocks_current: HashMap<PoolId, u64> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
+
+        let total_previous = blocks_previous.values().sum();
+        let total_current = blocks_current.values().sum();
+
+        Self {
+            epoch,
+            spo_blocks_previous: blocks_previous,
+            spo_blocks_current: blocks_current,
+            total_blocks_current: total_current,
+            total_blocks_previous: total_previous,
+        }
+    }
 }
 
 /// Block status
@@ -334,7 +387,14 @@ impl AssetName {
 }
 
 #[derive(
-    Debug, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct NativeAsset {
     #[n(0)]
@@ -370,7 +430,7 @@ pub enum ReferenceScript {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -732,8 +792,50 @@ impl TxOutRef {
     }
 }
 
+impl Display for TxOutRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
+    }
+}
+
 /// Slot
 pub type Slot = u64;
+
+/// Point on the chain
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+pub enum Point {
+    #[default]
+    Origin,
+    Specific {
+        hash: BlockHash,
+        slot: Slot,
+    },
+}
+
+impl Point {
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Origin => 0,
+            Self::Specific { slot, .. } => *slot,
+        }
+    }
+
+    pub fn hash(&self) -> Option<&BlockHash> {
+        match self {
+            Self::Origin => None,
+            Self::Specific { hash, .. } => Some(hash),
+        }
+    }
+}
+
+impl Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Origin => write!(f, "origin"),
+            Self::Specific { hash, slot } => write!(f, "{}@{}", hash, slot),
+        }
+    }
+}
 
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
@@ -785,6 +887,16 @@ pub enum Pot {
     Reserves,
     Treasury,
     Deposits,
+}
+
+impl fmt::Display for Pot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Pot::Reserves => write!(f, "reserves"),
+            Pot::Treasury => write!(f, "treasury"),
+            Pot::Deposits => write!(f, "deposits"),
+        }
+    }
 }
 
 /// Pot Delta - internal change of pot values at genesis / era boundaries
@@ -922,10 +1034,10 @@ pub struct SingleHostAddr {
     pub port: Option<u16>,
 
     /// Optional IPv4 address
-    pub ipv4: Option<[u8; 4]>,
+    pub ipv4: Option<Ipv4Addr>,
 
     /// Optional IPv6 address
-    pub ipv6: Option<[u8; 16]>,
+    pub ipv6: Option<Ipv6Addr>,
 }
 
 /// Relay hostname
@@ -1143,6 +1255,15 @@ pub struct GenesisKeyDelegation {
 pub enum InstantaneousRewardSource {
     Reserves,
     Treasury,
+}
+
+impl fmt::Display for InstantaneousRewardSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InstantaneousRewardSource::Reserves => write!(f, "reserves"),
+            InstantaneousRewardSource::Treasury => write!(f, "treasury"),
+        }
+    }
 }
 
 /// Target of a MIR
@@ -2133,8 +2254,15 @@ pub struct TxCertificateWithPos {
 pub struct AssetInfoRecord {
     pub initial_mint_tx: TxIdentifier,
     pub mint_or_burn_count: u64,
-    pub onchain_metadata: Option<Vec<u8>>,
-    pub metadata_standard: Option<AssetMetadataStandard>,
+    pub metadata: AssetMetadata,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetMetadata {
+    pub cip25_metadata: Option<Vec<u8>>,
+    pub cip25_version: Option<AssetMetadataStandard>,
+    pub cip68_metadata: Option<Vec<u8>>,
+    pub cip68_version: Option<AssetMetadataStandard>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

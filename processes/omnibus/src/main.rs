@@ -27,6 +27,7 @@ use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
 use acropolis_module_rest_blockfrost::BlockfrostREST;
+use acropolis_module_snapshot_bootstrapper::SnapshotBootstrapper;
 use acropolis_module_spdd_state::SPDDState;
 use acropolis_module_spo_state::SPOState;
 use acropolis_module_stake_delta_filter::StakeDeltaFilter;
@@ -93,8 +94,7 @@ pub async fn main() -> Result<()> {
         Config::builder()
             .add_source(File::with_name(&args.config))
             .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()
-            .unwrap(),
+            .build()?,
     );
 
     // Create the process
@@ -102,6 +102,7 @@ pub async fn main() -> Result<()> {
 
     // Register modules
     GenesisBootstrapper::register(&mut process);
+    SnapshotBootstrapper::register(&mut process);
     MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);

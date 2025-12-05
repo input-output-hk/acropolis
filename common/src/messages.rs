@@ -1,12 +1,10 @@
 //! Definition of Acropolis messages
 
-// We don't use these messages in the acropolis_common crate itself
-#![allow(dead_code)]
-
+use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::{Nonce, ProtocolParams};
+use crate::protocol_params::{Nonce, Nonces, PraosParams, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
@@ -25,6 +23,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
 use crate::types::*;
@@ -42,6 +41,13 @@ pub struct RawBlockMessage {
 
     /// Body raw data
     pub body: Vec<u8>,
+}
+
+/// Rollback message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StateTransitionMessage {
+    /// The chain has been rolled back to a specific point
+    Rollback(Point),
 }
 
 /// Snapshot completion message
@@ -302,6 +308,7 @@ pub struct SPOStateMessage {
 #[allow(clippy::large_enum_variant)]
 pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
+    StateTransition(StateTransitionMessage), // Our position on the chain has changed
     BlockValidation(ValidationStatus),       // Result of a block validation
     SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
@@ -315,6 +322,7 @@ pub enum CardanoMessage {
     PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
+    EpochNonce(Option<Nonce>),         // Epoch nonce for the current epoch
     DRepState(DRepStateMessage),       // Active DReps at epoch end
     SPOState(SPOStateMessage),         // Active SPOs at epoch end
     GovernanceProcedures(GovernanceProceduresMessage), // Governance procedures received
@@ -344,9 +352,59 @@ pub struct SnapshotDumpMessage {
     pub block_height: u64,
 }
 
+/// Epoch bootstrap message, sent by snapshot bootstrapper to Epoch State
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct EpochBootstrapMessage {
+    /// Epoch number from the snapshot
+    pub epoch: u64,
+
+    /// Epoch start time
+    /// UNIX timestamp
+    pub epoch_start_time: u64,
+
+    /// Epoch end time
+    /// UNIX timestamp
+    pub epoch_end_time: u64,
+
+    /// When first block of this epoch was created
+    pub first_block_time: u64,
+
+    /// Block height of first block of this epoch
+    pub first_block_height: u64,
+
+    /// When last block of this epoch was created
+    pub last_block_time: u64,
+
+    /// Block height of last block of this epoch
+    pub last_block_height: u64,
+
+    /// Total blocks in this epoch
+    pub total_blocks: usize,
+
+    /// Total txs in this epoch
+    pub total_txs: u64,
+
+    /// Total outputs of all txs in this epoch
+    pub total_outputs: u128,
+
+    /// Total fees in this epoch
+    pub total_fees: u64,
+
+    /// Map of SPO IDs to blocks produced
+    pub spo_blocks: HashMap<PoolId, u64>,
+
+    /// Nonces
+    pub nonces: Nonces,
+
+    /// Praos Params
+    pub praos_params: Option<PraosParams>,
+}
+
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
+    EpochState(EpochBootstrapMessage),
 }
 
 // === Global message enum ===
@@ -453,6 +511,7 @@ pub enum StateQueryResponse {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Transactions(TransactionsCommand),
+    ChainSync(ChainSyncCommand),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

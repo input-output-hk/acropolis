@@ -7,6 +7,7 @@ use crate::{
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::{
         assets::{AssetsStateQuery, AssetsStateQueryResponse, DEFAULT_ASSETS_QUERY_TOPIC},
@@ -58,11 +59,11 @@ impl AssetsState {
         registry: Arc<Mutex<AssetRegistry>>,
     ) -> Result<()> {
         if let Some(sub) = utxo_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
+            let _ = sub.read_ignoring_rollbacks().await?;
             info!("Consumed initial message from utxo_deltas_subscription");
         }
         if let Some(sub) = address_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
+            let _ = sub.read_ignoring_rollbacks().await?;
             info!("Consumed initial message from address_deltas_subscription");
         }
         // Main loop of synchronised messages
@@ -75,7 +76,7 @@ impl AssetsState {
             let current_block: BlockInfo;
 
             // Asset deltas are the synchroniser
-            let (_, asset_msg) = asset_deltas_subscription.read().await?;
+            let (_, asset_msg) = asset_deltas_subscription.read_ignoring_rollbacks().await?;
             match asset_msg.as_ref() {
                 Message::Cardano((ref block_info, CardanoMessage::AssetDeltas(deltas_msg))) => {
                     // rollback only on asset deltas
@@ -118,7 +119,7 @@ impl AssetsState {
 
             // Handle UTxO deltas if subscription is registered (store-info or store-transactions enabled)
             if let Some(sub) = utxo_deltas_subscription.as_mut() {
-                let (_, utxo_msg) = sub.read().await?;
+                let (_, utxo_msg) = sub.read_ignoring_rollbacks().await?;
                 match utxo_msg.as_ref() {
                     Message::Cardano((
                         ref block_info,
@@ -154,7 +155,7 @@ impl AssetsState {
             }
 
             if let Some(sub) = address_deltas_subscription.as_mut() {
-                let (_, address_msg) = sub.read().await?;
+                let (_, address_msg) = sub.read_ignoring_rollbacks().await?;
                 match address_msg.as_ref() {
                     Message::Cardano((
                         ref block_info,
@@ -437,6 +438,18 @@ impl AssetsState {
                             Ok(Some(assets)) => AssetsStateQueryResponse::PolicyIdAssets(assets),
                             Ok(None) => AssetsStateQueryResponse::Error(QueryError::not_found(
                                 format!("Assets for policy {}", hex::encode(policy)),
+                            )),
+                            Err(e) => AssetsStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
+                    AssetsStateQuery::GetAssetsMetadata { assets } => {
+                        let reg = registry.lock().await;
+                        match state.get_assets_metadata(assets, &reg) {
+                            Ok(Some(assets)) => AssetsStateQueryResponse::AssetsMetadata(assets),
+                            Ok(None) => AssetsStateQueryResponse::Error(QueryError::not_found(
+                                "One or more assets not found in registry".to_string(),
                             )),
                             Err(e) => AssetsStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),

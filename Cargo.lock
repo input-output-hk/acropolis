@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "acropolis_cardano"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+]
+
+[[package]]
 name = "acropolis_codec"
 version = "0.1.0"
 dependencies = [
@@ -34,10 +42,12 @@ dependencies = [
  "crc",
  "cryptoxide 0.5.1",
  "dashmap",
+ "env_logger",
  "futures",
  "hex",
+ "log",
  "memmap2",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "num-rational",
  "num-traits",
  "rayon",
@@ -82,7 +92,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -165,7 +175,8 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
+ "pallas 0.33.0",
  "pallas-traverse 0.33.0",
  "tempfile",
  "tokio",
@@ -181,6 +192,22 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "futures",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_custom_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "bincode 1.3.3",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "pallas 0.33.0",
+ "serde",
  "tokio",
  "tracing",
 ]
@@ -274,7 +301,7 @@ dependencies = [
  "config",
  "fjall",
  "hex",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "rayon",
  "tokio",
  "tracing",
@@ -289,7 +316,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
- "minicbor 0.26.5",
+ "minicbor 0.25.1",
  "tempfile",
  "tokio",
  "tracing",
@@ -350,6 +377,7 @@ dependencies = [
 name = "acropolis_module_rest_blockfrost"
 version = "0.1.0"
 dependencies = [
+ "acropolis_cardano",
  "acropolis_common",
  "anyhow",
  "blake2 0.10.6",
@@ -373,10 +401,22 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "async-compression",
  "caryatid_sdk",
  "config",
+ "flate2",
+ "futures-util",
+ "minicbor 0.25.1",
+ "pallas-primitives 0.33.0",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
  "tokio",
+ "tokio-util",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -455,6 +495,9 @@ dependencies = [
  "futures",
  "hex",
  "pallas 0.33.0",
+ "serde",
+ "serde_json",
+ "test-case",
  "tracing",
 ]
 
@@ -473,6 +516,29 @@ dependencies = [
  "sled",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "acropolis_process_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_codec",
+ "acropolis_common",
+ "acropolis_module_block_unpacker",
+ "acropolis_module_custom_indexer",
+ "acropolis_module_genesis_bootstrapper",
+ "acropolis_module_peer_network_interface",
+ "anyhow",
+ "bincode 1.3.3",
+ "caryatid_process",
+ "caryatid_sdk",
+ "clap 4.5.51",
+ "config",
+ "fjall",
+ "pallas 0.33.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -499,6 +565,7 @@ dependencies = [
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
  "acropolis_module_rest_blockfrost",
+ "acropolis_module_snapshot_bootstrapper",
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
@@ -832,6 +899,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert-json-diff"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e4f2b81832e72834d7518d8487a0396a28cc408186a2e8854c0f98011faf12"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-channel"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1154,6 +1231,15 @@ dependencies = [
 
 [[package]]
 name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "bincode"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
@@ -1430,9 +1516,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 dependencies = [
  "serde",
 ]
@@ -1458,16 +1544,15 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951c0ab316e5557315c10b75011b30faeeb032f96c88507946ec154c7f9d4ddd"
+checksum = "5509d9f63ad2d973599703617120dbfeff58078b37895f433cc784b5d3890d6e"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
  "chrono",
  "config",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1475,9 +1560,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c82ea79ce5ede49ce0dde01d204f21d39165d0abd8213281a7ce163a01519df"
+checksum = "a42373dd9604700e51dd07565303522f7b1d2a0002a8db7489c77d846f08c08b"
 dependencies = [
  "anyhow",
  "axum",
@@ -1486,7 +1571,6 @@ dependencies = [
  "futures",
  "hyper 0.14.32",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1494,24 +1578,21 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e53b7ce84ba23710e42d1fc497b2bb36463cbcb0af8aab39b7f14942b4682763"
+checksum = "0432b56f66f5b3d527a704c9c4b090c03567aaefc48350e7bf41fce286431b5d"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "serde",
- "serde_json",
- "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "caryatid_process"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7b38bc5f68d7f2400987524d50300597b607f5f2d76773fdc40a0216d296b01"
+checksum = "a5964024f9c302253bdf84b3f35dc068853ed0c643961072b59f6e69b8f83552"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1531,20 +1612,18 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b81e3dc1a35c175c7fc27f564b9ba9840fa25d24f08785a9cdfe2c2182965c77"
+checksum = "fceb8e403d1123e3a69fe108ea36d3e24c81f98605d2f15ca58f500774e956b0"
 dependencies = [
  "anyhow",
  "async-trait",
  "caryatid_macros",
- "chrono",
  "config",
  "futures",
  "hex",
  "rand 0.9.2",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -2143,6 +2222,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
+name = "deadpool"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be2b1d1d6ec8d846f05e137292d0b89133caf95ef33695424c09568bdd39b1b"
+dependencies = [
+ "deadpool-runtime",
+ "lazy_static",
+ "num_cpus",
+ "tokio",
+]
+
+[[package]]
+name = "deadpool-runtime"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2323,6 +2420,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.109",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
 ]
 
 [[package]]
@@ -2948,6 +3058,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "humantime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
+
+[[package]]
 name = "hyper"
 version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2985,6 +3101,7 @@ dependencies = [
  "http 1.3.1",
  "http-body 1.0.1",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "pin-utils",
@@ -3311,6 +3428,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi 0.5.2",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3561,27 +3689,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0452a60c1863c1f50b5f77cd295e8d2786849f35883f0b9e18e7e6e1b5691b0"
 dependencies = [
  "half 2.7.1",
- "minicbor-derive 0.15.3",
+ "minicbor-derive",
 ]
 
 [[package]]
 name = "minicbor"
-version = "0.26.5"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a309f581ade7597820083bc275075c4c6986e57e53f8d26f88507cfefc8c987"
-dependencies = [
- "half 2.7.1",
- "minicbor-derive 0.16.2",
-]
-
-[[package]]
-name = "minicbor"
-version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f182275033b808ede9427884caa8e05fa7db930801759524ca7925bd8aa7a82"
-dependencies = [
- "minicbor-derive 0.18.2",
-]
+checksum = "f9a1119e42fbacc2bb65d860de6eb7c930562bc71d42dca026d06b0228231f77"
 
 [[package]]
 name = "minicbor-derive"
@@ -3595,34 +3710,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "minicbor-derive"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9882ef5c56df184b8ffc107fc6c61e33ee3a654b021961d790a78571bb9d67a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
-name = "minicbor-derive"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17290c95158a760027059fe3f511970d6857e47ff5008f9e09bffe3d3e1c6af"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
 name = "minicbor-serde"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "546cc904f35809921fa57016a84c97e68d9d27c012e87b9dadc28c233705f783"
 dependencies = [
- "minicbor 2.1.1",
+ "minicbor 2.1.3",
  "serde",
 ]
 
@@ -3722,7 +3815,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bech32 0.11.0",
- "bincode",
+ "bincode 2.0.1",
  "blake2 0.10.6",
  "chrono",
  "ciborium",
@@ -6226,6 +6319,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
+name = "test-case"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2550dd13afcd286853192af8601920d959b14c401fcece38071d53bf0768a8"
+dependencies = [
+ "test-case-macros",
+]
+
+[[package]]
+name = "test-case-core"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adcb7fd841cd518e279be3d5a3eb0636409487998a4aff22f3de87b81e88384f"
+dependencies = [
+ "cfg-if",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.109",
+]
+
+[[package]]
+name = "test-case-macros"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c89e72a01ed4c579669add59014b9a524d609c0c88c6a585ce37485879f6ffb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.109",
+ "test-case-core",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7404,6 +7539,29 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "wiremock"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08db1edfb05d9b3c1542e521aea074442088292f00b5f28e435c714a98f85031"
+dependencies = [
+ "assert-json-diff",
+ "base64 0.22.1",
+ "deadpool",
+ "futures",
+ "http 1.3.1",
+ "http-body-util",
+ "hyper 1.7.0",
+ "hyper-util",
+ "log",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

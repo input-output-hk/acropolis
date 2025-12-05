@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use acropolis_common::{BlockHash, params::SECURITY_PARAMETER_K};
+use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
 
 use crate::{connection::Header, network::PeerId};
@@ -67,6 +67,16 @@ impl SlotBlockData {
         }
     }
 
+    fn header(&self, hash: BlockHash) -> Option<&Header> {
+        for block in &self.blocks {
+            if block.header.hash != hash {
+                continue;
+            }
+            return Some(&block.header);
+        }
+        None
+    }
+
     fn body(&self, hash: BlockHash) -> Option<(&Header, &[u8])> {
         for block in &self.blocks {
             if block.header.hash != hash {
@@ -78,13 +88,25 @@ impl SlotBlockData {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SpecificPoint {
+    slot: u64,
+    hash: BlockHash,
+}
+impl SpecificPoint {
+    fn as_pallas_point(&self) -> Point {
+        Point::Specific(self.slot, self.hash.to_vec())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ChainState {
     pub preferred_upstream: Option<PeerId>,
     blocks: BTreeMap<u64, SlotBlockData>,
-    published_blocks: VecDeque<(u64, BlockHash)>,
-    unpublished_blocks: VecDeque<(u64, BlockHash)>,
-    rolled_back: bool,
+    published_blocks: VecDeque<SpecificPoint>,
+    unpublished_blocks: VecDeque<SpecificPoint>,
+    rolled_back_to: Option<Header>,
+    waiting_for_first_message: bool,
 }
 
 impl ChainState {
@@ -99,19 +121,25 @@ impl ChainState {
         let slot_blocks = self.blocks.entry(header.slot).or_default();
         slot_blocks.track_announcement(id, header);
         if is_preferred {
-            self.unpublished_blocks.push_back((slot, hash));
+            if self.waiting_for_first_message {
+                self.switch_head_to_peer(id);
+            } else {
+                let point = SpecificPoint { slot, hash };
+                self.unpublished_blocks.push_back(point);
+            }
         }
         self.block_announcers(slot, hash)
     }
 
     pub fn handle_roll_backward(&mut self, id: PeerId, point: Point) {
         let is_preferred = self.preferred_upstream == Some(id);
+        let mut rolled_back = false;
         match point {
             Point::Origin => {
                 self.blocks.retain(|_, b| b.track_rollback(id));
                 if is_preferred {
                     if !self.published_blocks.is_empty() {
-                        self.rolled_back = true;
+                        rolled_back = true;
                     }
                     self.published_blocks.clear();
                     self.unpublished_blocks.clear();
@@ -120,22 +148,57 @@ impl ChainState {
             Point::Specific(slot, _) => {
                 self.blocks.retain(|s, b| *s <= slot || b.track_rollback(id));
                 if is_preferred {
-                    while let Some((s, _)) = self.unpublished_blocks.back() {
-                        if *s > slot {
+                    while let Some(block) = self.unpublished_blocks.back() {
+                        if block.slot > slot {
                             self.unpublished_blocks.pop_back();
                         } else {
                             break;
                         }
                     }
-                    while let Some((s, _)) = self.published_blocks.back() {
-                        if *s > slot {
-                            self.rolled_back = true;
+                    while let Some(block) = self.published_blocks.back() {
+                        if block.slot > slot {
+                            rolled_back = true;
                             self.published_blocks.pop_back();
                         } else {
                             break;
                         }
                     }
                 }
+            }
+        }
+        if rolled_back {
+            self.rolled_back_to = Some(self.build_header_for_rollback(point));
+        }
+        if is_preferred {
+            self.waiting_for_first_message = false;
+        }
+    }
+
+    // When we roll back to an earlier point on the chain, we may or may not have the header for that point already.
+    // We need fields from the header to fully populate BlockInfo for downstream consumers.
+    // Build a header with as much accurate information as we have.
+    fn build_header_for_rollback(&self, point: Point) -> Header {
+        let Point::Specific(slot, hash) = point else {
+            return Header {
+                hash: Hash::default(),
+                slot: 0,
+                number: 0,
+                bytes: vec![],
+                era: acropolis_common::Era::Byron,
+            };
+        };
+        let hash = Hash::try_from(hash).unwrap_or_default();
+        if let Some(slot_blocks) = self.blocks.get(&slot)
+            && let Some(header) = slot_blocks.header(hash)
+        {
+            header.clone()
+        } else {
+            Header {
+                hash,
+                slot,
+                number: 0,
+                bytes: vec![],
+                era: acropolis_common::Era::default(),
             }
         }
     }
@@ -152,42 +215,64 @@ impl ChainState {
             return;
         }
         self.preferred_upstream = Some(id);
+        self.switch_head_to_peer(id);
+    }
+
+    fn switch_head_to_peer(&mut self, id: PeerId) {
+        self.waiting_for_first_message = false;
 
         // If there are any blocks queued to be published which our preferred upstream never announced,
         // unqueue them now.
-        while let Some((slot, hash)) = self.unpublished_blocks.back() {
-            let Some(slot_blocks) = self.blocks.get(slot) else {
+        while let Some(block) = self.unpublished_blocks.back() {
+            if let Some(slot_blocks) = self.blocks.get(&block.slot)
+                && slot_blocks.was_hash_announced(id, block.hash)
+            {
                 break;
-            };
-            if !slot_blocks.was_hash_announced(id, *hash) {
-                self.unpublished_blocks.pop_back();
             } else {
+                self.unpublished_blocks.pop_back();
+            }
+        }
+
+        let mut peer_start = None;
+        for (slot, slot_blocks) in self.blocks.iter() {
+            if let Some(hash) = slot_blocks.find_announced_hash(id) {
+                peer_start = Some(SpecificPoint { slot: *slot, hash });
                 break;
             }
         }
 
-        // If we published any blocks which our preferred upstream never announced,
-        // we'll have to publish that we rolled them back
-        while let Some((slot, hash)) = self.published_blocks.back() {
-            let Some(slot_blocks) = self.blocks.get(slot) else {
-                break;
-            };
-            if !slot_blocks.was_hash_announced(id, *hash) {
-                self.rolled_back = true;
+        let Some(peer_start) = peer_start else {
+            // We haven't seen any blocks from this peer yet, we don't know where to roll back to.
+            self.waiting_for_first_message = true;
+            return;
+        };
+
+        let mut rolled_back = false;
+        while let Some(published) = self.published_blocks.back() {
+            if self
+                .blocks
+                .get(&published.slot)
+                .is_none_or(|b| !b.was_hash_announced(id, published.hash))
+            {
                 self.published_blocks.pop_back();
-            } else {
-                break;
+                rolled_back = true;
+                continue;
             }
+
+            // we've found a point that's still on the chain
+            if rolled_back {
+                self.rolled_back_to =
+                    Some(self.build_header_for_rollback(published.as_pallas_point()));
+            }
+            break;
         }
 
         // If this other chain has announced blocks which we haven't published yet,
-        // queue them to be published as soon as we have their bodies
-        let head_slot = self.published_blocks.back().map(|(s, _)| *s);
-        if let Some(slot) = head_slot {
-            for (slot, blocks) in self.blocks.range(slot + 1..) {
-                if let Some(hash) = blocks.find_announced_hash(id) {
-                    self.unpublished_blocks.push_back((*slot, hash));
-                }
+        // queue them to be published
+        let next_slot = self.published_blocks.back().map(|b| b.slot + 1).unwrap_or(peer_start.slot);
+        for (slot, blocks) in self.blocks.range(next_slot..) {
+            if let Some(hash) = blocks.find_announced_hash(id) {
+                self.unpublished_blocks.push_back(SpecificPoint { slot: *slot, hash });
             }
         }
     }
@@ -196,22 +281,27 @@ impl ChainState {
         self.preferred_upstream = None;
     }
 
-    pub fn next_unpublished_block(&self) -> Option<(&Header, &[u8], bool)> {
-        let (slot, hash) = self.unpublished_blocks.front()?;
-        let slot_blocks = self.blocks.get(slot)?;
-        let (header, body) = slot_blocks.body(*hash)?;
-        Some((header, body, self.rolled_back))
+    pub fn next_unpublished_event(&self) -> Option<ChainEvent<'_>> {
+        if let Some(header) = &self.rolled_back_to {
+            return Some(ChainEvent::RollBackward { header });
+        }
+        let block = self.unpublished_blocks.front()?;
+        let slot_blocks = self.blocks.get(&block.slot)?;
+        let (header, body) = slot_blocks.body(block.hash)?;
+        Some(ChainEvent::RollForward { header, body })
     }
 
-    pub fn handle_block_published(&mut self) {
+    pub fn handle_event_published(&mut self) {
+        if self.rolled_back_to.take().is_some() {
+            return;
+        }
         if let Some(published) = self.unpublished_blocks.pop_front() {
             self.published_blocks.push_back(published);
-            self.rolled_back = false;
             while self.published_blocks.len() > SECURITY_PARAMETER_K as usize {
-                let Some((slot, _)) = self.published_blocks.pop_front() else {
+                let Some(block) = self.published_blocks.pop_front() else {
                     break;
                 };
-                self.blocks.remove(&slot);
+                self.blocks.remove(&block.slot);
             }
         }
     }
@@ -222,16 +312,16 @@ impl ChainState {
 
         // send the 5 most recent points
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
         }
 
         // then 5 more points, spaced out by 10 block heights each
         let mut iterator = iterator.step_by(10);
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
         }
 
@@ -239,9 +329,17 @@ impl ChainState {
         // (in case of an implausibly long rollback)
         let mut iterator = iterator.step_by(10);
         for _ in 0..5 {
-            if let Some((slot, hash)) = iterator.next() {
-                result.push(Point::Specific(*slot, hash.to_vec()));
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
             }
+        }
+
+        // finally, in case of a rollback of nearly unprecedented size, fall back to the oldest point we know of
+        let oldest_point = self.published_blocks.front().map(|p| p.as_pallas_point());
+        if oldest_point.as_ref() != result.last()
+            && let Some(point) = oldest_point
+        {
+            result.push(point);
         }
 
         result
@@ -253,6 +351,12 @@ impl ChainState {
             None => vec![],
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainEvent<'a> {
+    RollForward { header: &'a Header, body: &'a [u8] },
+    RollBackward { header: &'a Header },
 }
 
 #[cfg(test)]
@@ -284,25 +388,35 @@ mod tests {
         let peer = PeerId(0);
         state.handle_new_preferred_upstream(peer);
 
-        let (header, body) = make_block(0, "first block");
+        let (h0, _) = make_block(0, "initial block");
+        let (h1, b1) = make_block(1, "new block");
+
+        // our peer will start with a rollback.
+        state.handle_roll_backward(peer, Point::Specific(h0.slot, h0.hash.to_vec()));
+
+        // we don't have any new events to report yet
+        assert_eq!(state.next_unpublished_event(), None);
 
         // simulate a roll forward from our peer
-        let announced = state.handle_roll_forward(peer, header.clone());
+        let announced = state.handle_roll_forward(peer, h1.clone());
         assert_eq!(announced, vec![peer]);
 
-        // we don't have any new blocks to report yet
-        assert_eq!(state.next_unpublished_block(), None);
+        // we don't have any new events to report yet
+        assert_eq!(state.next_unpublished_event(), None);
 
         // report that our peer returned the body
-        state.handle_body_fetched(header.slot, header.hash, body.clone());
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
 
         // NOW we have a new block to report
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&header, body.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
         );
-        state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), None);
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
     }
 
     #[test]
@@ -319,29 +433,35 @@ mod tests {
         state.handle_roll_forward(p1, h2.clone());
 
         // we don't have any new blocks to report yet
-        assert_eq!(state.next_unpublished_block(), None);
+        assert_eq!(state.next_unpublished_event(), None);
 
         // report that our peer returned the SECOND body first.
         state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
 
         // without the first block, we can't use that yet.
-        assert_eq!(state.next_unpublished_block(), None);
+        assert_eq!(state.next_unpublished_event(), None);
 
         // but once it reports the first body...
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
 
         // NOW we have TWO new blocks to report
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h1, b1.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h2, b2.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
         );
-        state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), None);
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
     }
 
     #[test]
@@ -359,42 +479,137 @@ mod tests {
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h1, b1.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         // publish the second block
         assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
         state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h2, b2.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
         );
-        state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), None);
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
 
         // now, roll the chain back to the first block
         state.handle_roll_backward(p1, Point::Specific(h1.slot, h1.hash.to_vec()));
-        assert_eq!(state.next_unpublished_block(), None);
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollBackward { header: &h1 }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
 
-        // and when we advance to the new second block, the system should report it as a rollback
+        // and we should advance to the new second block
         assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
         state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h3, b3.as_slice(), true))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         // and the new third block should not be a rollback
         assert_eq!(state.handle_roll_forward(p1, h4.clone()), vec![p1]);
         state.handle_body_fetched(h4.slot, h4.hash, b4.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h4, b4.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h4,
+                body: b4.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
+    }
+
+    #[test]
+    fn should_ignore_irrelevant_block_fetch_after_rollback() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(0, "first block");
+        let (h2a, b2a) = make_block(1, "second block pre-rollback");
+        let (h3a, b3a) = make_block(2, "third block pre-rollback");
+        let (h2b, b2b) = make_block(1, "second block post-rollback");
+        let (h3b, b3b) = make_block(1, "third block post-rollback");
+
+        // publish the first block
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // publish the second block
+        assert_eq!(state.handle_roll_forward(p1, h2a.clone()), vec![p1]);
+        state.handle_body_fetched(h2a.slot, h2a.hash, b2a.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2a,
+                body: b2a.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // roll forward to the third block, but don't receive the body yet
+        assert_eq!(state.handle_roll_forward(p1, h3a.clone()), vec![p1]);
+
+        // now, roll the chain back to the first block
+        state.handle_roll_backward(p1, Point::Specific(h1.slot, h1.hash.to_vec()));
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollBackward { header: &h1 }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // we should advance to the new second block
+        assert_eq!(state.handle_roll_forward(p1, h2b.clone()), vec![p1]);
+        state.handle_body_fetched(h2b.slot, h2b.hash, b2b.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2b,
+                body: b2b.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // we should not take any action on receiving the original third block
+        state.handle_body_fetched(h3a.slot, h3a.hash, b3a);
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // and the new third block should not be a rollback
+        assert_eq!(state.handle_roll_forward(p1, h3b.clone()), vec![p1]);
+        state.handle_body_fetched(h3b.slot, h3b.hash, b3b.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3b,
+                body: b3b.as_slice(),
+            }),
+        );
+        state.handle_event_published();
     }
 
     #[test]
@@ -411,10 +626,13 @@ mod tests {
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h1, b1.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         // roll forward to the second block, but pretend the body is taking a while to download
         assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
@@ -425,22 +643,26 @@ mod tests {
         // and THEN we got the second body
         state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
 
-        // don't publish the old second block, since it isn't part of the chain
-        assert_eq!(state.next_unpublished_block(), None);
+        // don't publish a rollback, since we never published a roll forward.
+        // also don't publish the old second block, since it isn't part of the chain
+        assert_eq!(state.next_unpublished_event(), None);
 
         // and when we advance to the new second block, the system should not report it as a rollback
         assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
         state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h3, b3.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
         );
-        state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), None);
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
     }
 
     #[test]
-    fn should_gracefully_handle_switching_chains() {
+    fn should_gracefully_switch_to_chain_on_fork() {
         let mut state = ChainState::new();
         let p1 = PeerId(0);
         let p2 = PeerId(1);
@@ -456,26 +678,35 @@ mod tests {
         assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
         state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&h1, b1.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         assert_eq!(state.handle_roll_forward(p1, p1h2.clone()), vec![p1]);
         state.handle_body_fetched(p1h2.slot, p1h2.hash, p1b2.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&p1h2, p1b2.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &p1h2,
+                body: p1b2.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         assert_eq!(state.handle_roll_forward(p1, p1h3.clone()), vec![p1]);
         state.handle_body_fetched(p1h3.slot, p1h3.hash, p1b3.clone());
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&p1h3, p1b3.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &p1h3,
+                body: p1b3.as_slice(),
+            }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
 
         // that other chain forked
         assert_eq!(state.handle_roll_forward(p2, h1.clone()), vec![p1, p2]);
@@ -483,22 +714,164 @@ mod tests {
         state.handle_body_fetched(p2h2.slot, p2h2.hash, p2b2.clone());
         assert_eq!(state.handle_roll_forward(p2, p2h3.clone()), vec![p2]);
         state.handle_body_fetched(p2h3.slot, p2h3.hash, p2b3.clone());
-        assert_eq!(state.next_unpublished_block(), None);
+        assert_eq!(state.next_unpublished_event(), None);
 
         // and then we decided to switch to it
         state.handle_new_preferred_upstream(p2);
 
-        // now we should publish two blocks, and the first should be marked as "rollback"
+        // now we should publish a rollback, followed by two blocks
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&p2h2, p2b2.as_slice(), true))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollBackward { header: &h1 }),
         );
-        state.handle_block_published();
+        state.handle_event_published();
         assert_eq!(
-            state.next_unpublished_block(),
-            Some((&p2h3, p2b3.as_slice(), false))
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &p2h2,
+                body: p2b2.as_slice(),
+            }),
         );
-        state.handle_block_published();
-        assert_eq!(state.next_unpublished_block(), None);
+        state.handle_event_published();
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &p2h3,
+                body: p2b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    #[test]
+    fn should_gracefully_switch_to_new_chain_at_older_head() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(10, "first block");
+        let (h2, b2) = make_block(11, "second block");
+        let (h3, b3) = make_block(12, "third block");
+
+        // publish three blocks on our current chain
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
+        state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h3.clone()), vec![p1]);
+        state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // now a new peer joins, and we switch to them
+        let p2 = PeerId(1);
+        state.handle_new_preferred_upstream(p2);
+
+        // We don't know enough about them to decide whether to roll back yet
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // When they roll back to an earlier block, we roll back to that block.
+        state.handle_roll_backward(p2, Point::Specific(h1.slot, h1.hash.to_vec()));
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollBackward { header: &h1 }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // and when they roll forward to the next block, we follow
+        assert_eq!(state.handle_roll_forward(p2, h2.clone()), vec![p1, p2]);
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    #[test]
+    fn should_gracefully_switch_to_new_chain_at_current_head() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        let (h1, b1) = make_block(10, "first block");
+        let (h2, b2) = make_block(11, "second block");
+        let (h3, b3) = make_block(12, "third block");
+
+        // publish two blocks on our current chain
+        assert_eq!(state.handle_roll_forward(p1, h1.clone()), vec![p1]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        assert_eq!(state.handle_roll_forward(p1, h2.clone()), vec![p1]);
+        state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+
+        // now a new peer joins, and we switch to them
+        let p2 = PeerId(1);
+        state.handle_new_preferred_upstream(p2);
+
+        // We don't know enough about them to decide whether to roll back yet
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // They "roll back" to the point we're on, we don't react
+        state.handle_roll_backward(p2, Point::Specific(h2.slot, h2.hash.to_vec()));
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // They roll forward to the next point
+        assert_eq!(state.handle_roll_forward(p2, h3.clone()), vec![p2]);
+        state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
     }
 }

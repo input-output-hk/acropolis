@@ -1,5 +1,15 @@
 # Top-level configuration for Acropolis omnibus process
 
+# ============================================================================
+# Startup Configuration
+# ============================================================================
+[global.startup]
+method = "mithril"  # Options: "mithril" | "snapshot"
+topic = "cardano.sequence.start"
+
+# ============================================================================
+# Bootstrap Module Configurations
+# ============================================================================
 [module.genesis-bootstrapper]
 
 [module.mithril-snapshot-fetcher]
@@ -10,6 +20,14 @@ download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
 
+[module.snapshot-bootstrapper]
+epoch = 509
+network = "mainnet"
+data-dir = "../../modules/snapshot_bootstrapper/data"
+
+# ============================================================================
+# Core Module Configurations
+# ============================================================================
 [module.peer-network-interface]
 sync-point = "snapshot"
 node-addresses = [
@@ -65,7 +83,6 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-# Enables /epochs/{number}/{next | previous}
 store-spdd = false
 
 [module.historical-accounts-state]
@@ -122,6 +139,7 @@ write-full-cache = "false"
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
+spdd-clear-on-start = true
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
@@ -170,9 +188,9 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.#"
 
-[startup]
-topic = "cardano.sequence.start"
-
+# ============================================================================
+# Message Bus Configuration
+# ============================================================================
 [message-bus.external]
 class = "rabbit-mq"
 url = "amqp://127.0.0.1:5672/%2f"

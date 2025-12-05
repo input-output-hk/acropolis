@@ -78,7 +78,7 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.drep.state"
 
-[startup]
+[global.startup]
 topic = "cardano.sequence.start"
 
 [message-bus.external]

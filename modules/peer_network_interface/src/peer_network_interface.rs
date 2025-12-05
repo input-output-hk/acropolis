@@ -5,8 +5,9 @@ mod network;
 
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus,
+    commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -21,7 +22,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use crate::{
     configuration::{InterfaceConfig, SyncPoint},
     connection::Header,
-    network::NetworkManager,
+    network::{NetworkEvent, NetworkManager},
 };
 
 #[module(
@@ -43,6 +44,7 @@ impl PeerNetworkInterface {
             SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
             _ => None,
         };
+        let command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -78,16 +80,17 @@ impl PeerNetworkInterface {
                 genesis_values,
                 upstream_cache,
                 last_epoch,
+                rolled_back: false,
             };
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
@@ -95,7 +98,7 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
-                    let mut manager = Self::init_manager(cfg, sink);
+                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
@@ -108,7 +111,7 @@ impl PeerNetworkInterface {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
                                 sink.last_epoch = Some(epoch);
                             }
-                            let mut manager = Self::init_manager(cfg, sink);
+                            let mut manager = Self::init_manager(cfg, sink, command_subscription);
                             manager.sync_to_point(point);
                             manager
                         }
@@ -118,6 +121,7 @@ impl PeerNetworkInterface {
                         }
                     }
                 }
+                SyncPoint::Dynamic => Self::init_manager(cfg, sink, command_subscription),
             };
 
             if let Err(err) = manager.run().await {
@@ -128,13 +132,45 @@ impl PeerNetworkInterface {
         Ok(())
     }
 
-    fn init_manager(cfg: InterfaceConfig, sink: BlockSink) -> NetworkManager {
+    fn init_manager(
+        cfg: InterfaceConfig,
+        sink: BlockSink,
+        command_subscription: Box<dyn Subscription<Message>>,
+    ) -> NetworkManager {
         let (events_sender, events) = mpsc::channel(1024);
+        tokio::spawn(Self::forward_commands_to_events(
+            command_subscription,
+            events_sender.clone(),
+        ));
         let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
         for address in cfg.node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
         manager
+    }
+
+    async fn forward_commands_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<()> {
+        while let Ok((_, msg)) = subscription.read().await {
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(p))) =
+                msg.as_ref()
+            {
+                let point = match p {
+                    acropolis_common::Point::Origin => Point::Origin,
+                    acropolis_common::Point::Specific { hash, slot } => {
+                        Point::Specific(*slot, hash.to_vec())
+                    }
+                };
+
+                if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
+                    bail!("event channel closed");
+                }
+            }
+        }
+
+        bail!("subscription closed");
     }
 
     async fn init_cache(
@@ -191,15 +227,11 @@ struct BlockSink {
     genesis_values: GenesisValues,
     upstream_cache: Option<UpstreamCache>,
     last_epoch: Option<u64>,
+    rolled_back: bool,
 }
 impl BlockSink {
-    pub async fn announce(
-        &mut self,
-        header: &Header,
-        body: &[u8],
-        rolled_back: bool,
-    ) -> Result<()> {
-        let info = self.make_block_info(header, rolled_back);
+    pub async fn announce_roll_forward(&mut self, header: &Header, body: &[u8]) -> Result<()> {
+        let info = self.make_block_info(header);
         let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
             body: body.to_vec(),
@@ -215,17 +247,33 @@ impl BlockSink {
             info,
             CardanoMessage::BlockAvailable(raw_block),
         )));
+        self.context.publish(&self.topic, message).await?;
+        self.rolled_back = false;
+        Ok(())
+    }
+
+    pub async fn announce_roll_backward(&mut self, header: &Header) -> Result<()> {
+        self.rolled_back = true;
+        let info = self.make_block_info(header);
+        let point = acropolis_common::Point::Specific {
+            hash: info.hash,
+            slot: info.slot,
+        };
+        let message = Arc::new(Message::Cardano((
+            info,
+            CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
+        )));
         self.context.publish(&self.topic, message).await
     }
 
-    fn make_block_info(&mut self, header: &Header, rolled_back: bool) -> BlockInfo {
+    fn make_block_info(&mut self, header: &Header) -> BlockInfo {
         let slot = header.slot;
         let (epoch, epoch_slot) = self.genesis_values.slot_to_epoch(slot);
         let new_epoch = self.last_epoch != Some(epoch);
         self.last_epoch = Some(epoch);
         let timestamp = self.genesis_values.slot_to_timestamp(slot);
         BlockInfo {
-            status: if rolled_back {
+            status: if self.rolled_back {
                 BlockStatus::RolledBack
             } else {
                 BlockStatus::Volatile

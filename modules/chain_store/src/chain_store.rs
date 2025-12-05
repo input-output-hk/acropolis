@@ -1,12 +1,21 @@
 mod stores;
 
-use crate::stores::{fjall::FjallStore, Block, Store};
-use acropolis_codec::{block::map_to_block_issuer, map_parameters};
+use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
+    caryatid::SubscriptionExt,
     crypto::keyhash_224,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
+    queries::transactions::{
+        TransactionDelegationCertificate, TransactionDelegationCertificates, TransactionInfo,
+        TransactionMIR, TransactionMIRs, TransactionMetadata, TransactionMetadataItem,
+        TransactionOutputAmount, TransactionPoolRetirementCertificate,
+        TransactionPoolRetirementCertificates, TransactionPoolUpdateCertificate,
+        TransactionPoolUpdateCertificates, TransactionStakeCertificate,
+        TransactionStakeCertificates, TransactionWithdrawal, TransactionWithdrawals,
+        TransactionsStateQuery, TransactionsStateQueryResponse, DEFAULT_TRANSACTIONS_QUERY_TOPIC,
+    },
     queries::{
         blocks::{
             BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
@@ -17,11 +26,14 @@ use acropolis_common::{
         misc::Order,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate, PoolId, TxHash,
+    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate,
+    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, StakeAddress, TxHash,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
 use config::Config;
+use pallas::ledger::primitives::{alonzo, conway};
+use pallas_traverse::{MultiEraCert, MultiEraMeta};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -48,6 +60,11 @@ impl ChainStore {
         let block_queries_topic = config
             .get_string(DEFAULT_BLOCKS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCKS_QUERY_TOPIC.1.to_string());
+        let txs_queries_topic = config
+            .get_string(DEFAULT_TRANSACTIONS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_TRANSACTIONS_QUERY_TOPIC.1.to_string());
+        let network_id: NetworkId =
+            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn Store> = match store_type.as_str() {
@@ -89,13 +106,33 @@ impl ChainStore {
             }
         });
 
+        let query_store = store.clone();
+        context.handle(&txs_queries_topic, move |req| {
+            let query_store = query_store.clone();
+            let network_id = network_id.clone();
+            async move {
+                let Message::StateQuery(StateQuery::Transactions(query)) = req.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(
+                        StateQueryResponse::Transactions(TransactionsStateQueryResponse::Error(
+                            QueryError::internal_error("Invalid message for txs-state"),
+                        )),
+                    ));
+                };
+                let res =
+                    Self::handle_txs_query(&query_store, query, network_id).unwrap_or_else(|err| {
+                        TransactionsStateQueryResponse::Error(QueryError::internal_error(
+                            err.to_string(),
+                        ))
+                    });
+                Arc::new(Message::StateQueryResponse(
+                    StateQueryResponse::Transactions(res),
+                ))
+            }
+        });
+
         let mut new_blocks_subscription = context.subscribe(&new_blocks_topic).await?;
         let mut params_subscription = context.subscribe(&params_topic).await?;
         context.run(async move {
-            // Get promise of params message so the params queue is cleared and
-            // the message is ready as soon as possible when we need it
-            let mut params_message = params_subscription.read();
-
             // Validate the first stored block matches what is already persisted when clear-on-start is false
             let Ok((_, first_block_message)) = new_blocks_subscription.read().await else {
                 return;
@@ -115,7 +152,8 @@ impl ChainStore {
 
                 if let Message::Cardano((block_info, _)) = message.as_ref() {
                     if block_info.new_epoch {
-                        let Ok((_, message)) = params_message.await else {
+                        let Ok((_, message)) = params_subscription.read_ignoring_rollbacks().await
+                        else {
                             return;
                         };
                         let mut history = history.lock().await;
@@ -124,8 +162,6 @@ impl ChainStore {
                             return;
                         };
                         history.commit(block_info.number, state);
-                        // Have the next params message ready for the next epoch
-                        params_message = params_subscription.read();
                     }
                 }
             }
@@ -627,7 +663,7 @@ impl ChainStore {
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
-                issuer: map_to_block_issuer(
+                issuer: acropolis_codec::map_to_block_issuer(
                     &header,
                     &state.byron_heavy_delegates,
                     &state.shelley_genesis_delegates,
@@ -712,7 +748,7 @@ impl ChainStore {
             let hash = TxHash::from(*tx.hash());
             for output in tx.outputs() {
                 if let Ok(pallas_address) = output.address() {
-                    if let Ok(address) = map_parameters::map_address(&pallas_address) {
+                    if let Ok(address) = acropolis_codec::map_address(&pallas_address) {
                         addresses
                             .entry(BechOrdAddress(address))
                             .or_insert_with(Vec::new)
@@ -731,6 +767,540 @@ impl ChainStore {
             })
             .collect();
         Ok(BlockInvolvedAddresses { addresses })
+    }
+
+    fn to_tx_info(tx: &Tx) -> Result<TransactionInfo> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut output_amounts = Vec::new();
+        for output in tx_decoded.outputs() {
+            let value = output.value();
+            let lovelace_amount = value.coin();
+            if lovelace_amount != 0 {
+                output_amounts.push(TransactionOutputAmount::Lovelace(lovelace_amount));
+            }
+            for policy in value.assets() {
+                for asset in policy.assets() {
+                    if asset.is_output() {
+                        output_amounts.push(TransactionOutputAmount::Asset(NativeAsset {
+                            name: AssetName::new(asset.name()).ok_or(anyhow!("Bad asset name"))?,
+                            amount: asset.output_coin().ok_or(anyhow!("No output amount"))?,
+                        }));
+                    }
+                }
+            }
+        }
+        let mut mir_cert_count = 0;
+        let mut delegation_count = 0;
+        let mut stake_cert_count = 0;
+        let mut pool_update_count = 0;
+        let mut pool_retire_count = 0;
+        // TODO: check counts use all correct certs
+        for cert in tx_decoded.certs() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    alonzo::Certificate::StakeDeregistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    alonzo::Certificate::StakeDelegation { .. } => delegation_count += 1,
+                    alonzo::Certificate::PoolRegistration { .. } => {
+                        pool_update_count += 1;
+                    }
+                    alonzo::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
+                    alonzo::Certificate::MoveInstantaneousRewardsCert { .. } => mir_cert_count += 1,
+                    _ => (),
+                },
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeRegistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    conway::Certificate::StakeDeregistration { .. } => {
+                        stake_cert_count += 1;
+                    }
+                    conway::Certificate::StakeDelegation { .. } => delegation_count += 1,
+                    conway::Certificate::PoolRegistration { .. } => {
+                        pool_update_count += 1;
+                    }
+                    conway::Certificate::PoolRetirement { .. } => pool_retire_count += 1,
+                    conway::Certificate::Reg { .. } => stake_cert_count += 1,
+                    conway::Certificate::UnReg { .. } => stake_cert_count += 1,
+                    conway::Certificate::StakeRegDeleg { .. } => delegation_count += 1,
+                    conway::Certificate::VoteRegDeleg { .. } => delegation_count += 1,
+                    conway::Certificate::StakeVoteRegDeleg { .. } => delegation_count += 1,
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        Ok(TransactionInfo {
+            hash: TxHash::from(*tx_decoded.hash()),
+            block_hash: BlockHash::from(*block.hash()),
+            block_number: block.number(),
+            block_time: tx.block.extra.timestamp,
+            epoch: tx.block.extra.epoch,
+            slot: block.slot(),
+            index: tx.index,
+            output_amounts,
+            recorded_fee: tx_decoded.fee(),
+            // TODO reporting too many bytes (140)
+            size: tx_decoded.size() as u64,
+            invalid_before: tx_decoded.validity_start(),
+            // TODO
+            invalid_after: None,
+            utxo_count: (tx_decoded.requires().len() + tx_decoded.produces().len()) as u64,
+            withdrawal_count: tx_decoded.withdrawals_sorted_set().len() as u64,
+            mir_cert_count,
+            delegation_count,
+            stake_cert_count,
+            pool_update_count,
+            pool_retire_count,
+            asset_mint_or_burn_count: tx_decoded
+                .mints()
+                .iter()
+                .map(|p| p.assets().len())
+                .sum::<usize>() as u64,
+            redeemer_count: tx_decoded.redeemers().len() as u64,
+            valid_contract: tx_decoded.is_valid(),
+        })
+    }
+
+    fn to_tx_stakes(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionStakeCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        // TODO: check cert types
+        for (index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
+                    alonzo::Certificate::StakeRegistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    alonzo::Certificate::StakeDeregistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: false,
+                        });
+                    }
+                    _ => (),
+                },
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeRegistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    conway::Certificate::StakeDeregistration(cred) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: false,
+                        });
+                    }
+                    conway::Certificate::StakeRegDeleg(cred, _, _) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    conway::Certificate::StakeVoteRegDeleg(cred, _, _, _) => {
+                        certs.push(TransactionStakeCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            registration: true,
+                        });
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
+    fn to_tx_delegations(
+        tx: &Tx,
+        network_id: NetworkId,
+    ) -> Result<Vec<TransactionDelegationCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::StakeDelegation(cred, pool_key_hash) =
+                        cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                }
+                MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
+                    conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    conway::Certificate::StakeRegDeleg(cred, pool_key_hash, _) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, _, _) => {
+                        certs.push(TransactionDelegationCertificate {
+                            index: index as u64,
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
+                            active_epoch: tx.block.extra.epoch + 1,
+                        });
+                    }
+                    _ => (),
+                },
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
+    fn to_tx_withdrawals(tx: &Tx) -> Result<Vec<TransactionWithdrawal>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut withdrawals = Vec::new();
+        for (address, amount) in tx_decoded.withdrawals_sorted_set() {
+            withdrawals.push(TransactionWithdrawal {
+                address: StakeAddress::from_binary(address)?,
+                amount,
+            });
+        }
+        Ok(withdrawals)
+    }
+
+    fn to_tx_mirs(tx: &Tx, network_id: NetworkId) -> Result<Vec<TransactionMIR>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            if let MultiEraCert::AlonzoCompatible(cert) = cert {
+                if let alonzo::Certificate::MoveInstantaneousRewardsCert(cert) =
+                    cert.as_ref().as_ref()
+                {
+                    match &cert.target {
+                        alonzo::InstantaneousRewardTarget::StakeCredentials(creds) => {
+                            for (cred, amount) in creds.clone().to_vec() {
+                                certs.push(TransactionMIR {
+                                    cert_index: cert_index as u64,
+                                    pot: match cert.source {
+                                        alonzo::InstantaneousRewardSource::Reserves => {
+                                            InstantaneousRewardSource::Reserves
+                                        }
+                                        alonzo::InstantaneousRewardSource::Treasury => {
+                                            InstantaneousRewardSource::Treasury
+                                        }
+                                    },
+                                    address: acropolis_codec::map_stake_address(
+                                        &cred,
+                                        network_id.clone(),
+                                    ),
+                                    amount: amount as u64,
+                                });
+                            }
+                        }
+                        alonzo::InstantaneousRewardTarget::OtherAccountingPot(_coin) => {
+                            // TODO
+                        }
+                    }
+                }
+            }
+        }
+        Ok(certs)
+    }
+
+    fn to_tx_pool_updates(
+        tx: &Tx,
+        network_id: NetworkId,
+    ) -> Result<Vec<TransactionPoolUpdateCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::PoolRegistration {
+                        operator,
+                        vrf_keyhash,
+                        pledge,
+                        cost,
+                        margin,
+                        reward_account,
+                        pool_owners,
+                        relays,
+                        pool_metadata,
+                    } = cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolUpdateCertificate {
+                            cert_index: cert_index as u64,
+                            pool_reg: acropolis_codec::to_pool_reg(
+                                operator,
+                                vrf_keyhash,
+                                pledge,
+                                cost,
+                                margin,
+                                reward_account,
+                                pool_owners,
+                                relays,
+                                pool_metadata,
+                                network_id.clone(),
+                                false,
+                            )?,
+                            // Pool registration/updates become active after 2 epochs
+                            active_epoch: tx.block.extra.epoch + 2,
+                        });
+                    }
+                }
+                MultiEraCert::Conway(cert) => {
+                    if let conway::Certificate::PoolRegistration {
+                        operator,
+                        vrf_keyhash,
+                        pledge,
+                        cost,
+                        margin,
+                        reward_account,
+                        pool_owners,
+                        relays,
+                        pool_metadata,
+                    } = cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolUpdateCertificate {
+                            cert_index: cert_index as u64,
+                            pool_reg: acropolis_codec::to_pool_reg(
+                                operator,
+                                vrf_keyhash,
+                                pledge,
+                                cost,
+                                margin,
+                                reward_account,
+                                pool_owners,
+                                relays,
+                                pool_metadata,
+                                network_id.clone(),
+                                false,
+                            )?,
+                            // Pool registration/updates become active after 2 epochs
+                            active_epoch: tx.block.extra.epoch + 2,
+                        });
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
+    fn to_tx_pool_retirements(tx: &Tx) -> Result<Vec<TransactionPoolRetirementCertificate>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut certs = Vec::new();
+        for (cert_index, cert) in tx_decoded.certs().iter().enumerate() {
+            match cert {
+                MultiEraCert::AlonzoCompatible(cert) => {
+                    if let alonzo::Certificate::PoolRetirement(operator, epoch) =
+                        cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolRetirementCertificate {
+                            cert_index: cert_index as u64,
+                            pool_id: acropolis_codec::to_pool_id(operator),
+                            retirement_epoch: *epoch,
+                        });
+                    }
+                }
+                MultiEraCert::Conway(cert) => {
+                    if let conway::Certificate::PoolRetirement(operator, epoch) =
+                        cert.as_ref().as_ref()
+                    {
+                        certs.push(TransactionPoolRetirementCertificate {
+                            cert_index: cert_index as u64,
+                            pool_id: acropolis_codec::to_pool_id(operator),
+                            retirement_epoch: *epoch,
+                        });
+                    }
+                }
+                _ => (),
+            }
+        }
+        Ok(certs)
+    }
+
+    fn to_tx_metadata(tx: &Tx) -> Result<Vec<TransactionMetadataItem>> {
+        let block = pallas_traverse::MultiEraBlock::decode(&tx.block.bytes)?;
+        let txs = block.txs();
+        let Some(tx_decoded) = txs.get(tx.index as usize) else {
+            return Err(anyhow!("Transaction not found in block for given index"));
+        };
+        let mut items = Vec::new();
+        if let MultiEraMeta::AlonzoCompatible(metadata) = tx_decoded.metadata() {
+            for (label, datum) in &metadata.clone().to_vec() {
+                items.push(TransactionMetadataItem {
+                    label: label.to_string(),
+                    json_metadata: acropolis_codec::map_metadata(datum),
+                });
+            }
+        }
+        Ok(items)
+    }
+
+    fn handle_txs_query(
+        store: &Arc<dyn Store>,
+        query: &TransactionsStateQuery,
+        network_id: NetworkId,
+    ) -> Result<TransactionsStateQueryResponse> {
+        match query {
+            TransactionsStateQuery::GetTransactionInfo { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionInfo(
+                    Self::to_tx_info(&tx)?,
+                ))
+            }
+            TransactionsStateQuery::GetTransactionStakeCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionStakeCertificates(
+                        TransactionStakeCertificates {
+                            certificates: Self::to_tx_stakes(&tx, network_id)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionDelegationCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionDelegationCertificates(
+                        TransactionDelegationCertificates {
+                            certificates: Self::to_tx_delegations(&tx, network_id)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionWithdrawals { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionWithdrawals(
+                    TransactionWithdrawals {
+                        withdrawals: Self::to_tx_withdrawals(&tx)?,
+                    },
+                ))
+            }
+            TransactionsStateQuery::GetTransactionMIRs { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionMIRs(
+                    TransactionMIRs {
+                        mirs: Self::to_tx_mirs(&tx, network_id)?,
+                    },
+                ))
+            }
+            TransactionsStateQuery::GetTransactionPoolUpdateCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionPoolUpdateCertificates(
+                        TransactionPoolUpdateCertificates {
+                            pool_updates: Self::to_tx_pool_updates(&tx, network_id)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionPoolRetirementCertificates { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(
+                    TransactionsStateQueryResponse::TransactionPoolRetirementCertificates(
+                        TransactionPoolRetirementCertificates {
+                            pool_retirements: Self::to_tx_pool_retirements(&tx)?,
+                        },
+                    ),
+                )
+            }
+            TransactionsStateQuery::GetTransactionMetadata { tx_hash } => {
+                let Some(tx) = store.get_tx_by_hash(tx_hash.as_ref())? else {
+                    return Ok(TransactionsStateQueryResponse::Error(
+                        QueryError::not_found("Transaction not found"),
+                    ));
+                };
+                Ok(TransactionsStateQueryResponse::TransactionMetadata(
+                    TransactionMetadata {
+                        metadata: Self::to_tx_metadata(&tx)?,
+                    },
+                ))
+            }
+            _ => Ok(TransactionsStateQueryResponse::Error(
+                QueryError::not_implemented("Unimplemented".to_string()),
+            )),
+        }
     }
 
     fn handle_new_params(state: &mut State, message: Arc<Message>) -> Result<()> {

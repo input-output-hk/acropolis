@@ -97,6 +97,7 @@ pub fn validate_vrf_tpraos<'a>(
                 }),
                 Box::new(move || {
                     validate_vrf_leader_value(
+                        &pool_id,
                         &leader_vrf_cert.0.to_vec()[..],
                         &relative_stake,
                         &active_slots_coeff,
@@ -549,7 +550,11 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             Box::new(VrfValidationError::VrfLeaderValueTooBig(
-                VrfLeaderValueTooBigError::VrfLeaderValueTooBig
+                VrfLeaderValueTooBigError::VrfLeaderValueTooBig {
+                    pool_id,
+                    active_stake: 75284250207,
+                    relative_stake: RationalNumber::new(75284250207, 10177811974823000),
+                }
             ))
         );
     }

@@ -2,6 +2,7 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use acropolis_common::{
+    configuration::StartupMethod,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
@@ -381,7 +382,7 @@ impl MithrilSnapshotFetcher {
         // Send completion message
         if let Some(last_block_info) = last_block_info {
             info!(
-                "Finished shapshot at block {}, epoch {}",
+                "Finished snapshot at block {}, epoch {}",
                 last_block_info.number, last_block_info.epoch
             );
             let message_enum =
@@ -397,6 +398,16 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Check if this module is the selected startup method
+        let startup_method = StartupMethod::from_config(&config);
+        if !startup_method.is_mithril() {
+            info!(
+                "Mithril Snapshot Fetcher not enabled (startup.method = '{}')",
+                startup_method
+            );
+            return Ok(());
+        }
+
         let bootstrapped_subscribe_topic = config
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());

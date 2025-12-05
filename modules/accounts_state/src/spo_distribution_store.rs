@@ -1,5 +1,6 @@
 use acropolis_common::{PoolId, StakeAddress};
 use anyhow::Result;
+use bigdecimal::Zero;
 use fjall::{Config, Keyspace, PartitionCreateOptions};
 use std::collections::HashMap;
 
@@ -43,6 +44,19 @@ fn encode_epoch_marker(epoch: u64) -> Vec<u8> {
     epoch.to_be_bytes().to_vec()
 }
 
+#[derive(Debug, Clone)]
+pub struct SPDDStoreConfig {
+    pub path: String,
+    pub retention_epochs: u64,
+    pub clear_on_start: bool,
+}
+
+impl SPDDStoreConfig {
+    pub fn is_enabled(&self) -> bool {
+        !self.retention_epochs.is_zero()
+    }
+}
+
 pub struct SPDDStore {
     keyspace: Keyspace,
     /// Partition for all SPDD data
@@ -58,10 +72,9 @@ pub struct SPDDStore {
 }
 
 impl SPDDStore {
-    #[allow(dead_code)]
-    pub fn new(path: impl AsRef<std::path::Path>, retention_epochs: u64) -> fjall::Result<Self> {
-        let path = path.as_ref();
-        if path.exists() {
+    pub fn new(config: &SPDDStoreConfig) -> fjall::Result<Self> {
+        let path = std::path::Path::new(&config.path);
+        if config.clear_on_start && path.exists() {
             std::fs::remove_dir_all(path)?;
         }
 
@@ -74,23 +87,7 @@ impl SPDDStore {
             keyspace,
             spdd,
             epoch_markers,
-            retention_epochs,
-        })
-    }
-
-    pub fn load(path: impl AsRef<std::path::Path>, retention_epochs: u64) -> fjall::Result<Self> {
-        let path = path.as_ref();
-
-        let keyspace = Config::new(path).open()?;
-        let spdd = keyspace.open_partition("spdd", PartitionCreateOptions::default())?;
-        let epoch_markers =
-            keyspace.open_partition("epoch_markers", PartitionCreateOptions::default())?;
-
-        Ok(Self {
-            keyspace,
-            spdd,
-            epoch_markers,
-            retention_epochs,
+            retention_epochs: config.retention_epochs,
         })
     }
 
@@ -237,11 +234,18 @@ mod tests {
         StakeAddress::new(StakeCredential::AddrKeyHash(keyhash_224(&[byte])), Mainnet)
     }
 
+    fn spdd_store_config(retention_epochs: u64) -> SPDDStoreConfig {
+        SPDDStoreConfig {
+            path: TempDir::new().unwrap().path().to_string_lossy().into_owned(),
+            retention_epochs,
+            clear_on_start: true,
+        }
+    }
+
     #[test]
     fn test_store_and_query_spdd() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut spdd_store =
-            SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
+        let config = spdd_store_config(10);
+        let mut spdd_store = SPDDStore::new(&config).expect("Failed to create SPDD store");
 
         let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
         spdd_state.insert(
@@ -273,9 +277,8 @@ mod tests {
 
     #[test]
     fn test_retention_pruning() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut spdd_store =
-            SPDDStore::new(temp_dir.path(), 2).expect("Failed to create SPDD store");
+        let config = spdd_store_config(2);
+        let mut spdd_store = SPDDStore::new(&config).expect("Failed to create SPDD store");
 
         // Store epochs 1, 2, 3
         for epoch in 1..=3 {
@@ -302,8 +305,8 @@ mod tests {
 
     #[test]
     fn test_query_incomplete_epoch() {
-        let temp_dir = TempDir::new().unwrap();
-        let spdd_store = SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
+        let config = spdd_store_config(10);
+        let spdd_store = SPDDStore::new(&config).expect("Failed to create SPDD store");
 
         assert!(!spdd_store.is_epoch_complete(999).unwrap());
         assert!(spdd_store.query_by_epoch(999).is_err());
@@ -312,9 +315,8 @@ mod tests {
 
     #[test]
     fn test_remove_epoch_data() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut spdd_store =
-            SPDDStore::new(temp_dir.path(), 10).expect("Failed to create SPDD store");
+        let config = spdd_store_config(10);
+        let mut spdd_store = SPDDStore::new(&config).expect("Failed to create SPDD store");
 
         let mut spdd_state: HashMap<PoolId, Vec<(StakeAddress, u64)>> = HashMap::new();
         spdd_state.insert(
