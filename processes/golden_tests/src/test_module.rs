@@ -21,7 +21,6 @@ const DEFAULT_SNAPSHOT_TOPIC: &str = "cardano.snapshot";
 )]
 pub struct TestModule;
 
-/*
 impl TestModule {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // TODO: we need to somehow get test data into the context so this module can unpack it all
@@ -98,4 +97,3 @@ impl TestModule {
         Ok(())
     }
 }
-*/

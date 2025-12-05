@@ -331,7 +331,7 @@ struct SnapshotOption<T>(pub Option<T>);
 
 impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
 where
-    T: minicbor::Decode<'b, C>
+    T: minicbor::Decode<'b, C>,
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         match d.datatype()? {
