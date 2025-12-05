@@ -13,13 +13,15 @@ acropolis_common = { path = "../../common" }
 acropolis_codec = { path = "../../codec" }
 
 caryatid_sdk = { workspace = true }
-
 anyhow = { workspace = true }
 config = { workspace = true }
 futures = "0.3.31"
 hex = { workspace = true }
 pallas = { workspace = true }
 tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+test-case = "3.3.1"
 
 [lib]
 path = "src/tx_unpacker.rs"

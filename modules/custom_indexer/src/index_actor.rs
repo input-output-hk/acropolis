@@ -59,7 +59,7 @@ async fn handle_apply_txs(
     }
 
     // If the index has a tip greater than the current set of transactions early return and continue waiting for chainsync to catch up
-    if block.slot <= wrapper.tip.slot_or_default() {
+    if block.slot <= wrapper.tip.slot() {
         return IndexResult::Success {
             entry: CursorEntry {
                 tip: wrapper.tip.clone(),

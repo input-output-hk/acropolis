@@ -399,9 +399,12 @@ impl State {
         self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
-        // TODO - wipe any delegations to retired pools
         for id in self.retiring_spos.drain(..) {
+            info!(epoch, "SPO {id} has retired");
             self.spos.remove(&id);
+
+            // Wipe any delegations to this pool
+            self.stake_addresses.lock().unwrap().remove_all_delegations_to(&id);
         }
 
         Ok(reward_deltas)

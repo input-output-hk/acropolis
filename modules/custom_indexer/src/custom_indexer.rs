@@ -120,7 +120,7 @@ impl<CS: CursorStore> CustomIndexer<CS> {
             min_point = match min_point {
                 None => Some(index_entry.tip),
                 Some(current) => {
-                    if index_entry.tip.slot_or_default() < current.slot_or_default() {
+                    if index_entry.tip.slot() < current.slot() {
                         Some(index_entry.tip)
                     } else {
                         Some(current)
