@@ -151,60 +151,27 @@ impl TxUnpacker {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                        let inputs = tx.consumes();
-                                        let outputs = tx.produces();
+                                        let (inputs, outputs, tx_total_output, errors) = acropolis_codec::map_transaction_inputs_outputs(tx_index, &tx);
                                         let certs = tx.certs();
                                         let tx_withdrawals = tx.withdrawals_sorted_set();
                                         let mut props = None;
                                         let mut votes = None;
 
+                                        // sum up total output lovelace for a block
+                                        total_output += tx_total_output;
+
                                         if tracing::enabled!(tracing::Level::DEBUG) {
-                                            debug!("Decoded tx with {} inputs, {} outputs, {} certs",
-                                               inputs.len(), outputs.len(), certs.len());
+                                            debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
+                                               inputs.len(), outputs.len(), certs.len(), total_output);
+                                        }
+
+                                        if !errors.is_empty() {
+                                            error!("Errors decoding transaction {tx_hash}: {}", errors.iter().map(|e| e.to_string()).collect::<Vec<String>>().join(", "));
                                         }
 
                                         if publish_utxo_deltas_topic.is_some() {
                                             // Group deltas by tx
-                                            let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
-
-                                            // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
-                                            for input in inputs {
-                                                let oref = input.output_ref();
-                                                let utxo_id = UTxOIdentifier::new(
-                                                    TxHash::from(**oref.hash()),
-                                                    oref.index() as u16);
-
-                                                tx_utxo_deltas.inputs.push(utxo_id);
-                                            }
-
-                                            // Add outputs to UTxORegistry and push TxOutputs to delta
-                                            for (index, output) in outputs {
-                                                let utxo_id = UTxOIdentifier::new(
-                                                    tx_hash,
-                                                    index as u16
-                                                );
-
-                                                match output.address() {
-                                                    Ok(pallas_address) => match acropolis_codec::map_address(&pallas_address) {
-                                                        Ok(address) => {
-                                                            tx_utxo_deltas.outputs.push(TxOutput {
-                                                                utxo_identifier: utxo_id,
-                                                                address,
-                                                                value: acropolis_codec::map_value(&output.value()),
-                                                                datum: acropolis_codec::map_datum(&output.datum()),
-                                                                reference_script: acropolis_codec::map_reference_script(&output.script_ref())
-                                                            });
-
-                                                            // catch all output lovelaces
-                                                            total_output += output.value().coin() as u128;
-                                                        }
-                                                        Err(e) => error!("Output {index} in tx ignored: {e}"),
-                                                    },
-                                                    Err(e) => error!("Can't parse output {index} in tx: {e}"),
-                                                }
-                                            }
-
-                                            utxo_deltas.push(tx_utxo_deltas);
+                                            utxo_deltas.push(TxUTxODeltas {tx_identifier, inputs, outputs});
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
