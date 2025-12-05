@@ -143,15 +143,9 @@ impl State {
         // 1. Load stake addresses - data is already parsed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         for account in &bootstrap_msg.accounts {
-            if let Ok(stake_addr) = StakeAddress::from_string(&account.stake_address) {
-                stake_addresses.insert(stake_addr, account.address_state.clone());
-            } else {
-                warn!(
-                    "Failed to parse stake address during bootstrap: {}",
-                    account.stake_address
-                );
-            }
+            stake_addresses.insert(account.stake_address.clone(), account.address_state.clone());
         }
+
         drop(stake_addresses);
         info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
 
@@ -176,7 +170,7 @@ impl State {
             deposits: bootstrap_msg.pots.deposits,
         };
         info!(
-            "  ✓ Loaded pots: reserves={}, treasury={}, deposits={}",
+            "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 

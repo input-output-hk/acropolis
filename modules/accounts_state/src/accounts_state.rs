@@ -482,7 +482,6 @@ impl AccountsState {
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
 
         // Publishing topics
         let drep_distribution_topic = config
@@ -769,8 +768,10 @@ impl AccountsState {
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
         let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
             None
         };
 

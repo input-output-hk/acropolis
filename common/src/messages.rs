@@ -24,7 +24,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::streaming_snapshot::SnapshotsInfo;
-use crate::stake_addresses::AccountState;
+use crate::snapshot::AccountState;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;

@@ -40,7 +40,7 @@ pub struct StakeAddressState {
 // A self-contained stake address state for exporting across module boundaries
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountState {
-    pub stake_address: String,
+    pub stake_address: StakeAddress,
     pub address_state: StakeAddressState,
 }
 

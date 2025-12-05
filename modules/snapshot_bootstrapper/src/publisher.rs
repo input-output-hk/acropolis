@@ -1,3 +1,4 @@
+use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::{RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
@@ -8,19 +9,17 @@ use acropolis_common::{
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, PoolInfo,
-        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback,
-        UtxoEntry,
+        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback,
+        SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
-    types::{PoolRegistration, Ratio, VrfKeyHash},
-    BlockInfo, EpochBootstrapData, PoolId, StakeAddress,
+    BlockInfo, EpochBootstrapData,
 };
-use anyhow::{anyhow, Result};
+use acropolis_common::{PoolId, PoolRegistration};
+use anyhow::Result;
 use caryatid_sdk::Context;
-use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 /// External epoch context containing nonces and timing information.
 ///
@@ -81,7 +80,7 @@ pub struct SnapshotPublisher {
     snapshot_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
@@ -101,7 +100,7 @@ impl SnapshotPublisher {
             snapshot_topic,
             metadata: None,
             utxo_count: 0,
-            pools: Vec::new(),
+            pools: SPOState::new(),
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
@@ -149,62 +148,6 @@ impl SnapshotPublisher {
             praos_params: Some(PraosParams::mainnet()),
         }
     }
-
-    /// This is a band-aid for now.
-    ///
-    /// Convert PoolInfo (API format with strings) to PoolRegistration (internal format)
-    /// This does all the parsing and validation work so the state module can just use the data
-    fn convert_pool_info_to_registration(pool_info: &PoolInfo) -> Result<PoolRegistration> {
-        let pool_id = PoolId::from_str(&pool_info.pool_id)
-            .map_err(|e| anyhow!("Failed to parse pool ID '{}': {}", pool_info.pool_id, e))?;
-
-        // Parse VRF key hash from hex
-        let vrf_bytes = hex::decode(&pool_info.vrf_key_hash)
-            .map_err(|e| anyhow!("Failed to decode VRF key hash: {}", e))?;
-        if vrf_bytes.len() != 32 {
-            return Err(anyhow!(
-                "VRF key hash must be 32 bytes, got {}",
-                vrf_bytes.len()
-            ));
-        }
-        let vrf_key_hash = VrfKeyHash::new(vrf_bytes.try_into().unwrap());
-
-        // Parse reward account from hex-encoded binary (29 bytes)
-        let reward_account = {
-            let bytes = hex::decode(&pool_info.reward_account)
-                .map_err(|e| anyhow!("Failed to decode reward account: {}", e))?;
-            StakeAddress::from_binary(&bytes)
-                .map_err(|e| anyhow!("Failed to parse reward account from binary: {}", e))?
-        };
-
-        // Parse pool owners from hex-encoded binary (29 bytes each)
-        let mut pool_owners = Vec::new();
-        for owner_str in &pool_info.pool_owners {
-            let bytes = hex::decode(owner_str)
-                .map_err(|e| anyhow!("Failed to decode pool owner: {}", e))?;
-            let owner_addr = StakeAddress::from_binary(&bytes)
-                .map_err(|e| anyhow!("Failed to parse pool owner from binary: {}", e))?;
-            pool_owners.push(owner_addr);
-        }
-
-        // Convert margin from f64 to Ratio
-        let margin = Ratio {
-            numerator: (pool_info.margin * 1_000_000.0) as u64,
-            denominator: 1_000_000,
-        };
-
-        Ok(PoolRegistration {
-            operator: pool_id,
-            vrf_key_hash,
-            pledge: pool_info.pledge,
-            cost: pool_info.cost,
-            margin,
-            reward_account,
-            pool_owners,
-            relays: Vec::new(),  // TODO: Read from relays in parser
-            pool_metadata: None, // TODO: Read pool metadata
-        })
-    }
 }
 
 impl UtxoCallback for SnapshotPublisher {
@@ -221,10 +164,30 @@ impl UtxoCallback for SnapshotPublisher {
 }
 
 impl PoolCallback for SnapshotPublisher {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
-        info!("Received {} pools", pools.len());
-        self.pools.extend(pools);
-        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
+        info!(
+            "Received pools (current: {}, future: {}, retiring: {})",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
+        self.pools.extend(&pools);
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::SPOState(pools),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // Spawn async publish task since this callback is synchronous
+        tokio::spawn(async move {
+            if let Err(e) = context.publish(&snapshot_topic, message).await {
+                tracing::error!("Failed to publish SPO bootstrap: {}", e);
+            }
+        });
+
         Ok(())
     }
 }
@@ -233,6 +196,7 @@ impl StakeCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
+        // TODO: Accumulate account data if needed or send in chunks to AccountState processor
         Ok(())
     }
 }
@@ -279,10 +243,12 @@ impl EpochCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        tokio::spawn(async move {
-            context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                tracing::error!("Failed to publish epoch bootstrap message: {}", e)
-            });
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish epoch bootstrap message: {}", e)
+                });
+            })
         });
 
         Ok(())
@@ -353,7 +319,12 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("Snapshot parsing completed");
         info!("Final statistics:");
         info!("  - UTXOs processed: {}", self.utxo_count);
-        info!("  - Pools: {}", self.pools.len());
+        info!(
+            "  - Pools: {} (future: {}, retiring: {})",
+            self.pools.pools.len(),
+            self.pools.updates.len(),
+            self.pools.retiring.len()
+        );
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
@@ -376,24 +347,9 @@ impl SnapshotCallbacks for SnapshotPublisher {
 
         let snapshots = metadata.and_then(|m| m.snapshots.clone());
 
-        // Convert PoolInfo to PoolRegistration (internal format)
-        let mut pools = Vec::new();
-        let mut retiring_pools = Vec::new();
-        for pool_info in &self.pools {
-            match Self::convert_pool_info_to_registration(pool_info) {
-                Ok(pool_reg) => {
-                    if pool_info.retirement_epoch.is_some() {
-                        retiring_pools.push(pool_reg.operator);
-                    }
-                    pools.push(pool_reg);
-                }
-                Err(e) => {
-                    warn!("Failed to convert pool {}: {}", pool_info.pool_id, e);
-                }
-            }
-        }
+        let pools: Vec<PoolRegistration> = self.pools.pools.values().cloned().collect();
+        let retiring_pools: Vec<PoolId> = self.pools.retiring.keys().cloned().collect();
 
-        // Convert DRepInfo to (DRepCredential, deposit) tuples
         let dreps = self
             .dreps
             .iter()
@@ -426,10 +382,12 @@ impl SnapshotCallbacks for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        tokio::spawn(async move {
-            context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                tracing::error!("Failed to publish accounts bootstrap message: {}", e)
-            });
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish accounts bootstrap message: {}", e)
+                });
+            })
         });
 
         Ok(())
