@@ -1,0 +1,4 @@
+# The topic to publish sync commands on
+sync-command-publisher-topic = "cardano.sync.command"
+# The topic to receive txs on
+txs-subscribe-topic = "cardano.txs"

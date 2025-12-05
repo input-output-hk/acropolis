@@ -98,6 +98,7 @@ impl VolatileIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::TxHash;
 
     #[test]
     fn new_index_is_empty() {
@@ -140,47 +141,47 @@ mod tests {
         assert_eq!(Some(1), index.first_block);
         assert_eq!(2, index.blocks.len());
 
-        let utxo = UTxOIdentifier::new(42, 42, 42);
+        let utxo = UTxOIdentifier::new(TxHash::default(), 422);
         index.add_utxo(&utxo);
 
         assert!(index.blocks[0].is_empty());
         assert!(!index.blocks[1].is_empty());
-        assert_eq!(42, index.blocks[1][0].output_index());
+        assert_eq!(422, index.blocks[1][0].output_index);
     }
 
     #[test]
     fn prune_before_deletes_and_calls_back_with_utxos() {
         let mut index = VolatileIndex::new();
         index.add_block(1);
-        index.add_utxo(&UTxOIdentifier::new(1, 1, 1));
-        index.add_utxo(&UTxOIdentifier::new(2, 2, 2));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 1));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 2));
         index.add_block(2);
-        index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 3));
 
         let pruned = index.prune_before(2);
         assert_eq!(Some(2), index.first_block);
         assert_eq!(1, index.blocks.len());
         assert_eq!(2, pruned.len());
-        assert_eq!(1, pruned[0].output_index());
-        assert_eq!(2, pruned[1].output_index());
+        assert_eq!(1, pruned[0].output_index);
+        assert_eq!(2, pruned[1].output_index);
     }
 
     #[test]
     fn prune_on_or_after_deletes_and_calls_back_with_utxos() {
         let mut index = VolatileIndex::new();
         index.add_block(1);
-        index.add_utxo(&UTxOIdentifier::new(1, 1, 1));
-        index.add_utxo(&UTxOIdentifier::new(2, 2, 2));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 1));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 2));
         index.add_block(2);
-        index.add_utxo(&UTxOIdentifier::new(3, 3, 3));
+        index.add_utxo(&UTxOIdentifier::new(TxHash::default(), 3));
         let pruned = index.prune_on_or_after(1);
         assert_eq!(Some(1), index.first_block);
         assert_eq!(0, index.blocks.len());
         assert_eq!(3, pruned.len());
 
         // Note reverse order of blocks
-        assert_eq!(3, pruned[0].output_index());
-        assert_eq!(1, pruned[1].output_index());
-        assert_eq!(2, pruned[2].output_index());
+        assert_eq!(3, pruned[0].output_index);
+        assert_eq!(1, pruned[1].output_index);
+        assert_eq!(2, pruned[2].output_index);
     }
 }

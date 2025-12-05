@@ -197,6 +197,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_custom_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "bincode 1.3.3",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "pallas 0.33.0",
+ "serde",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_drdd_state"
 version = "0.1.0"
 dependencies = [
@@ -303,18 +319,6 @@ dependencies = [
  "minicbor 0.25.1",
  "tempfile",
  "tokio",
- "tracing",
-]
-
-[[package]]
-name = "acropolis_module_indexer"
-version = "0.1.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "serde",
  "tracing",
 ]
 
@@ -518,16 +522,22 @@ dependencies = [
 name = "acropolis_process_indexer"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "acropolis_module_block_unpacker",
+ "acropolis_module_custom_indexer",
  "acropolis_module_genesis_bootstrapper",
- "acropolis_module_indexer",
  "acropolis_module_peer_network_interface",
  "anyhow",
+ "bincode 1.3.3",
  "caryatid_process",
+ "caryatid_sdk",
  "clap 4.5.51",
  "config",
+ "fjall",
+ "pallas 0.33.0",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -1217,6 +1227,15 @@ checksum = "5845e3504cf59b9588fff324710f27ee519515b8a8a9f1207042da9a9e64f819"
 dependencies = [
  "doc-comment",
  "paste",
+]
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3796,7 +3815,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bech32 0.11.0",
- "bincode",
+ "bincode 2.0.1",
  "blake2 0.10.6",
  "chrono",
  "ciborium",
