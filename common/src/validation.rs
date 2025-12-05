@@ -7,7 +7,12 @@ use std::array::TryFromSliceError;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
-use crate::{protocol_params::{Nonce, ProtocolVersion}, rational_number::RationalNumber, Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash};
+use crate::{
+    protocol_params::{Nonce, ProtocolVersion},
+    rational_number::RationalNumber,
+    Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId,
+    ProposalProcedure, ScriptHash, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash,
+};
 
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
@@ -578,12 +583,17 @@ pub enum GovernanceValidationError {
     // Its protocol version and the protocal version of the previous
     // gov-action pointed to by the proposal
     #[error("Hard fork initiation {purpose:?} mismatches protocol version: {version_mismatch}")]
-    ProposalCantFollow{purpose: (), version_mismatch: Mismatch<ProtocolVersion>},
-//  (StrictMaybe (GovPurposeId 'HardForkPurpose era))
-//  (Mismatch 'RelGT ProtVer)
-
+    ProposalCantFollow {
+        purpose: (),
+        version_mismatch: Mismatch<ProtocolVersion>,
+    },
+    //  (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+    //  (Mismatch 'RelGT ProtVer)
     #[error("Invalid policy hash: proposed {proposed:?}, current {current:?}")]
-    InvalidPolicyHash { proposed: Option<ScriptHash>, current: Option<ScriptHash> },
+    InvalidPolicyHash {
+        proposed: Option<ScriptHash>,
+        current: Option<ScriptHash>,
+    },
 
     #[error("Conway bootstrap era does not allow proposal {0:?}")]
     DisallowedProposalDuringBootstrap(ProposalProcedure),
@@ -605,5 +615,5 @@ pub enum GovernanceValidationError {
 
     // Treasury withdrawal proposals to an invalid reward account
     #[error("Treasury withdrawal return account {0} does not exist")]
-    TreasuryWithdrawalReturnAccountsDoNotExist (StakeAddress),
+    TreasuryWithdrawalReturnAccountsDoNotExist(StakeAddress),
 }
