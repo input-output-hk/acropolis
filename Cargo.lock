@@ -207,6 +207,7 @@ dependencies = [
  "config",
  "fjall",
  "futures",
+ "hex",
  "pallas 0.33.0",
  "serde",
  "tokio",

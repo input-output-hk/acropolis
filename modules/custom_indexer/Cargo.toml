@@ -23,5 +23,8 @@ serde = { workspace = true, features = ["rc"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+hex = "0.4"
+
 [lib]
 path = "src/custom_indexer.rs"

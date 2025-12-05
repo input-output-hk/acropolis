@@ -251,17 +251,19 @@ where
             Ok(IndexResult::Success { entry }) => {
                 new_tips.insert(name, entry);
             }
-            Ok(IndexResult::DecodeError { reason }) => {
+            Ok(IndexResult::DecodeError { entry, reason }) => {
                 error!(
                     "Failed to decode tx at slot {} for index '{}': {}",
                     block_slot, name, reason
                 );
+                new_tips.insert(name, entry);
             }
-            Ok(IndexResult::HandleError { reason }) => {
+            Ok(IndexResult::HandleError { entry, reason }) => {
                 error!(
                     "Failed to handle tx at slot {} for index '{}': {}",
                     block_slot, name, reason
                 );
+                new_tips.insert(name, entry);
             }
             Ok(IndexResult::Halted) => {
                 warn!("Index '{}' is halted", name);

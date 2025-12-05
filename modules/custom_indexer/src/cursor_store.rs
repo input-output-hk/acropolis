@@ -6,7 +6,7 @@ use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
 use tokio::sync::Mutex;
 use tracing::warn;
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CursorEntry {
     pub tip: Point,
     pub halted: bool,
