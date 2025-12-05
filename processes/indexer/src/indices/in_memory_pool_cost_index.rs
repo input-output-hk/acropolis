@@ -1,5 +1,4 @@
 #![allow(unused)]
-use acropolis_codec::map_parameters::to_pool_id;
 use acropolis_common::{BlockInfo, Lovelace, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
@@ -42,13 +41,13 @@ impl ChainIndex for InMemoryPoolCostIndex {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
                     alonzo::Certificate::PoolRegistration { operator, cost, .. } => {
-                        self.state.pools.insert(to_pool_id(operator), *cost);
+                        self.state.pools.insert(acropolis_codec::to_pool_id(operator), *cost);
                         if self.sender.send(self.state.clone()).is_err() {
                             warn!("Pool cost state receiver dropped");
                         }
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
-                        self.state.pools.remove(&to_pool_id(operator));
+                        self.state.pools.remove(&acropolis_codec::to_pool_id(operator));
                         if self.sender.send(self.state.clone()).is_err() {
                             warn!("Pool cost state receiver dropped");
                         }
@@ -58,13 +57,13 @@ impl ChainIndex for InMemoryPoolCostIndex {
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
                     conway::Certificate::PoolRegistration { operator, cost, .. } => {
-                        self.state.pools.insert(to_pool_id(operator), *cost);
+                        self.state.pools.insert(acropolis_codec::to_pool_id(operator), *cost);
                         if self.sender.send(self.state.clone()).is_err() {
                             warn!("Pool cost state receiver dropped");
                         }
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
-                        self.state.pools.remove(&to_pool_id(operator));
+                        self.state.pools.remove(&acropolis_codec::to_pool_id(operator));
                         if self.sender.send(self.state.clone()).is_err() {
                             warn!("Pool cost state receiver dropped");
                         }

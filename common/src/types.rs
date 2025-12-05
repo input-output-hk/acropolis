@@ -764,7 +764,7 @@ impl fmt::Display for UTxOIdentifier {
     }
 }
 
-// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
+/// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TxOutRef {
     pub tx_hash: TxHash,
@@ -783,6 +783,33 @@ impl TxOutRef {
 impl Display for TxOutRef {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{}", self.tx_hash, self.output_index)
+    }
+}
+
+pub type VKey = Vec<u8>;
+pub type Signature = Vec<u8>;
+
+/// VKey Witness
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct VKeyWitness {
+    pub vkey: VKey,
+    pub signature: Signature,
+}
+
+impl VKeyWitness {
+    pub fn new(vkey: VKey, signature: Signature) -> Self {
+        Self { vkey, signature }
+    }
+}
+
+impl Display for VKeyWitness {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "vkey={}, signature={}",
+            hex::encode(self.vkey.clone()),
+            hex::encode(self.signature.clone())
+        )
     }
 }
 

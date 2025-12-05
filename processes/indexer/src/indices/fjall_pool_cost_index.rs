@@ -1,5 +1,4 @@
 #![allow(unused)]
-use acropolis_codec::map_parameters::to_pool_id;
 use acropolis_common::{BlockInfo, Lovelace, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
@@ -58,7 +57,7 @@ impl ChainIndex for FjallPoolCostIndex {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
                     alonzo::Certificate::PoolRegistration { operator, cost, .. } => {
-                        let pool_id = to_pool_id(operator);
+                        let pool_id = acropolis_codec::to_pool_id(operator);
                         let key = pool_id.as_ref();
                         let value = bincode::serialize(cost)?;
 
@@ -70,7 +69,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         }
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
-                        let pool_id = to_pool_id(operator);
+                        let pool_id = acropolis_codec::to_pool_id(operator);
                         let key = pool_id.as_ref();
 
                         self.state.pools.remove(&pool_id);
@@ -85,7 +84,7 @@ impl ChainIndex for FjallPoolCostIndex {
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
                     conway::Certificate::PoolRegistration { operator, cost, .. } => {
-                        let pool_id = to_pool_id(operator);
+                        let pool_id = acropolis_codec::to_pool_id(operator);
                         let key = pool_id.as_ref();
                         let value = bincode::serialize(cost)?;
 
@@ -97,7 +96,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         }
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
-                        let pool_id = to_pool_id(operator);
+                        let pool_id = acropolis_codec::to_pool_id(operator);
                         let key = pool_id.as_ref();
 
                         self.state.pools.remove(&pool_id);

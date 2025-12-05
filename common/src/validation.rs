@@ -8,8 +8,9 @@ use std::array::TryFromSliceError;
 use thiserror::Error;
 
 use crate::{
-    protocol_params::Nonce, rational_number::RationalNumber, Address, Era, GenesisKeyhash,
-    Lovelace, NetworkId, PoolId, Slot, StakeAddress, TxOutRef, Value, VrfKeyHash,
+    protocol_params::Nonce, rational_number::RationalNumber, Address, DataHash, Era,
+    GenesisKeyhash, Lovelace, NetworkId, PoolId, ScriptHash, Slot, StakeAddress, TxOutRef, VKey,
+    VKeyWitness, Value, VrfKeyHash,
 };
 
 /// Transaction Validation Error
@@ -32,11 +33,11 @@ pub enum TransactionValidationError {
     Other(String),
 }
 
-/// UTxO rules failure
-/// Shelley Era Errors:
+/// UTxO Rules Failure
+/// Shelley Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 ///
-/// Allegra Era Errors:
+/// Allegra Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
@@ -107,6 +108,76 @@ pub enum UTxOValidationError {
     /// **Cause:** Malformed UTxO
     #[error("Malformed UTxO: era={era}, reason={reason}")]
     MalformedUTxO { era: Era, reason: String },
+}
+
+/// UTxOW Rules Failure
+/// Shelley Era:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum UTxOWValidationError {
+    /// **Cause:** The VKey witness has invalid signature
+    #[error("Invalid VKey witness: witness={witness}, reason={reason}")]
+    InvalidWitnessesUTxOW {
+        witness: VKeyWitness,
+        reason: String,
+    },
+
+    /// **Cause:** Required VKey witness missing
+    #[error("Missing VKey witness: vkey={}", hex::encode(vkey))]
+    MissingVKeyWitnessesUTxOW { vkey: VKey },
+
+    /// **Cause:** Required script witness missing
+    #[error("Missing script witness: script={script}")]
+    MissingScriptWitnessesUTxOW { script: ScriptHash },
+
+    /// **Cause:** Native script validation failed
+    #[error("Native script validation failed: script={script}")]
+    ScriptWitnessNotValidatingUTXOW { script: ScriptHash },
+
+    /// **Cause:** Extraneous script witness is provided
+    #[error("Script provided but not used: script={script}")]
+    ExtraneousScriptWitnessesUTXOW { script: ScriptHash },
+
+    /// **Cause:** Insufficient genesis signatures for MIR Tx
+    #[error(
+        "Insufficient Genesis Signatures for MIR: gensis_keys={}, count={}", 
+        gensis_keys.iter().map(hex::encode).collect::<Vec<_>>().join(","), 
+        gensis_keys.len()
+    )]
+    MIRInsufficientGenesisSigsUTXOW { gensis_keys: Vec<VKey> },
+
+    /// **Cause:** Metadata without metadata hash
+    #[error(
+        "Metadata without metadata hash: full_hash={}",
+        hex::encode(metadata_hash)
+    )]
+    MissingTxBodyMetadataHash { metadata_hash: DataHash },
+
+    /// **Cause:** Metadata hash mismatch
+    #[error(
+        "Metadata hash mismatch: expected={}, actual={}",
+        hex::encode(expected),
+        hex::encode(actual)
+    )]
+    ConflictingMetadataHash {
+        expected: DataHash,
+        actual: DataHash,
+    },
+
+    /// **Cause:** Invalid metadata
+    /// metadata - bytes, text - size (0..64)
+    #[error("Invalid metadata: reason={reason}")]
+    InvalidMetadata { reason: String },
+
+    /// **Cause:** Metadata hash without actual metadata
+    #[error(
+        "Metadata hash without actual metadata: hash={}",
+        hex::encode(metadata_hash)
+    )]
+    MissingTxMetadata {
+        // hash of metadata included in tx body
+        metadata_hash: DataHash,
+    },
 }
 
 /// Validation error
