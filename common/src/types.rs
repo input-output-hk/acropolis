@@ -206,6 +206,14 @@ impl PartialOrd for BlockInfo {
     }
 }
 
+impl BlockInfo {
+    pub fn with_intent(&self, intent: BlockIntent) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.intent = intent;
+        copy
+    }
+}
+
 // Individual transaction UTxO deltas
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxUTxODeltas {
