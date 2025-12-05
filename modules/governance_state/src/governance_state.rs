@@ -214,7 +214,7 @@ impl GovernanceState {
                 _ => bail!("Unexpected message {message:?} for governance procedures topic"),
             };
 
-            let mut outcomes = ValidationOutcomes::new();
+            let mut outcomes = ValidationOutcomes::default();
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
                 if blk_g.new_epoch {

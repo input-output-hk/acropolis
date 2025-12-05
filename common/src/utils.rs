@@ -25,15 +25,14 @@ macro_rules! declare_cardano_reader {
     };
 }
 
+#[derive(Default, Clone)]
 pub struct ValidationOutcomes {
     outcomes: Vec<ValidationError>,
 }
 
 impl ValidationOutcomes {
     pub fn new() -> Self {
-        Self {
-            outcomes: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn merge(&mut self, with: &mut ValidationOutcomes) {
@@ -55,7 +54,7 @@ impl ValidationOutcomes {
         block: &BlockInfo,
     ) -> anyhow::Result<()> {
         if block.intent.do_validation() {
-            let status = if let Some(result) = self.outcomes.get(0) {
+            let status = if let Some(result) = self.outcomes.first() {
                 // TODO: add multiple responses / decide that they're not necessary
                 ValidationStatus::NoGo(result.clone())
             } else {

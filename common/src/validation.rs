@@ -7,12 +7,7 @@ use std::array::TryFromSliceError;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
-use crate::{
-    protocol_params::{Nonce, ProtocolVersion},
-    rational_number::RationalNumber,
-    Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId,
-    ProposalProcedure, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash,
-};
+use crate::{protocol_params::{Nonce, ProtocolVersion}, rational_number::RationalNumber, Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash};
 
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
@@ -490,7 +485,7 @@ impl Display for MismatchRelation {
     }
 }
 
-/// Partial formalization of validation outcome errors, what's wrong with relation of two entities
+/// Partial formalization of validation outcome errors: what's wrong with relation of two entities
 /// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum Mismatch<T: Debug + Display> {
@@ -575,27 +570,38 @@ pub enum GovernanceValidationError {
     InvalidPrevGovActionId(GovActionId),
 
     #[error("Voting on expired governance action {0:?}")]
-    VotingOnExpiredGovAction(Vec<(Voter, GovActionId)>), /*
-                                                           | ProposalCantFollow
-                                                               -- | The PrevGovActionId of the HardForkInitiation that fails
-                                                               (StrictMaybe (GovPurposeId 'HardForkPurpose era))
-                                                               -- | Its protocol version and the protocal version of the previous gov-action pointed to by the proposal
-                                                               (Mismatch 'RelGT ProtVer)
-                                                           | InvalidPolicyHash
-                                                               -- | The policy script hash in the proposal
-                                                               (StrictMaybe ScriptHash)
-                                                               -- | The policy script hash of the current constitution
-                                                               (StrictMaybe ScriptHash)
-                                                           | DisallowedProposalDuringBootstrap (ProposalProcedure era)
-                                                           | DisallowedVotesDuringBootstrap
-                                                               (NonEmpty (Voter, GovActionId))
-                                                           | -- | Predicate failure for votes by entities that are not present in the ledger state
-                                                             VotersDoNotExist (NonEmpty Voter)
-                                                           | -- | Treasury withdrawals that sum up to zero are not allowed
-                                                             ZeroTreasuryWithdrawals (GovAction era)
-                                                           | -- | Proposals that have an invalid reward account for returns of the deposit
-                                                             ProposalReturnAccountDoesNotExist RewardAccount
-                                                           | -- | Treasury withdrawal proposals to an invalid reward account
-                                                             TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
-                                                         */
+    VotingOnExpiredGovAction(Vec<(Voter, GovActionId)>),
+
+    //The PrevGovActionId of the HardForkInitiation that fails
+    // Its protocol version and the protocal version of the previous
+    // gov-action pointed to by the proposal
+    #[error("Hard fork initiation {purpose:?} mismatches protocol version: {version_mismatch}")]
+    ProposalCantFollow{purpose: (), version_mismatch: Mismatch<ProtocolVersion>},
+//  (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+//  (Mismatch 'RelGT ProtVer)
+
+    #[error("Invalid policy hash: proposed {proposed:?}, current {current:?}")]
+    InvalidPolicyHash { proposed: Option<ScriptHash>, current: Option<ScriptHash> },
+
+    #[error("Conway bootstrap era does not allow proposal {0:?}")]
+    DisallowedProposalDuringBootstrap(ProposalProcedure),
+
+    #[error("Conway bootstrap era does not allow votes {0:?}")]
+    DisallowedVotesDuringBootstrap(Vec<(Voter, GovActionId)>),
+
+    // Predicate failure for votes by entities that are not present in the ledger state
+    #[error("Voters do not present in ledger state: {0:?}")]
+    VotersDoNotExist(Vec<Voter>),
+
+    // Treasury withdrawals that sum up to zero are not allowed
+    #[error("Zero treausury withdrawals in {0}")]
+    ZeroTreasuryWithdrawals(GovActionId),
+
+    // Proposals that have an invalid reward account for returns of the deposit
+    #[error("Return account {0} for the proposal does not exist")]
+    ProposalReturnAccountDoesNotExist(StakeAddress),
+
+    // Treasury withdrawal proposals to an invalid reward account
+    #[error("Treasury withdrawal return account {0} does not exist")]
+    TreasuryWithdrawalReturnAccountsDoNotExist (StakeAddress),
 }
