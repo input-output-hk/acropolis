@@ -512,6 +512,7 @@ dependencies = [
  "config",
  "dashmap",
  "fjall",
+ "pallas 0.33.0",
  "serde_cbor",
  "sled",
  "tokio",

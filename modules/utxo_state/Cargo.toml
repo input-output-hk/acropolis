@@ -22,6 +22,7 @@ serde_cbor = "0.11.2"
 sled = "0.34.7"
 tokio = { workspace = true }
 tracing = { workspace = true }
+pallas = { workspace = true }
 
 [lib]
 path = "src/utxo_state.rs"

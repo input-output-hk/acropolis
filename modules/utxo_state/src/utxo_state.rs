@@ -35,6 +35,8 @@ use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
+mod validations;
+
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_STORE: &str = "memory";
 
