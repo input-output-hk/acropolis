@@ -139,6 +139,7 @@ pub enum ValidationError {
 
 /// Validation status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum ValidationStatus {
     /// All good
     Go,
@@ -505,6 +506,7 @@ impl<T: Debug + Display> Display for Mismatch<T> {
 /// See Haskell node, "GOV" rule in Conway epoch, data ConwayGovPredFailure era
 /// also, "PPUP" rule in Shelley epoch, data ShelleyPpupPredFailure era
 #[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum GovernanceValidationError {
     #[error("Governance action from protocol {0} is not allowed in current protocol version")]
     WrongProtocolForGovernance(ProtocolVersion),
