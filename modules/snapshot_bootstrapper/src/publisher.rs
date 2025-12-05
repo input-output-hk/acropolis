@@ -7,18 +7,18 @@ use acropolis_common::{
         SnapshotMessage, SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
-    serialization::Bech32Conversion,
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, PoolInfo,
         ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback,
         UtxoEntry,
     },
     stake_addresses::AccountState,
-    types::{Credential, PoolRegistration, Ratio, VrfKeyHash},
+    types::{PoolRegistration, Ratio, VrfKeyHash},
     BlockInfo, EpochBootstrapData, PoolId, StakeAddress,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
+use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -155,8 +155,7 @@ impl SnapshotPublisher {
     /// Convert PoolInfo (API format with strings) to PoolRegistration (internal format)
     /// This does all the parsing and validation work so the state module can just use the data
     fn convert_pool_info_to_registration(pool_info: &PoolInfo) -> Result<PoolRegistration> {
-        // Parse pool ID from bech32
-        let pool_id = PoolId::from_bech32(&pool_info.pool_id)
+        let pool_id = PoolId::from_str(&pool_info.pool_id)
             .map_err(|e| anyhow!("Failed to parse pool ID '{}': {}", pool_info.pool_id, e))?;
 
         // Parse VRF key hash from hex
@@ -395,17 +394,11 @@ impl SnapshotCallbacks for SnapshotPublisher {
         }
 
         // Convert DRepInfo to (DRepCredential, deposit) tuples
-        let mut dreps = Vec::new();
-        for drep_info in &self.dreps {
-            match Credential::from_drep_bech32(&drep_info.drep_id) {
-                Ok(cred) => {
-                    dreps.push((cred, drep_info.deposit));
-                }
-                Err(e) => {
-                    warn!("Failed to parse DRep ID {}: {}", drep_info.drep_id, e);
-                }
-            }
-        }
+        let dreps = self
+            .dreps
+            .iter()
+            .map(|drep_info| (drep_info.drep_id.clone(), drep_info.deposit))
+            .collect::<Vec<_>>();
 
         let accounts_bootstrap_message = AccountsBootstrapMessage {
             epoch,

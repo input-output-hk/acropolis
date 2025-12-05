@@ -31,7 +31,7 @@ use tracing::info;
 
 pub use crate::hash::Hash;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-pub use crate::StakeCredential;
+pub use crate::{DRepCredential, StakeCredential};
 
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
@@ -635,21 +635,23 @@ pub struct UtxoEntry {
 // Ledger types for DState parsing
 // -----------------------------------------------------------------------------
 
-/// DRep credential (ledger format for CBOR decoding)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DRepCredential {
-    AddrKeyhash(AddrKeyhash),
-    ScriptHash(ScriptHash),
-}
+/// Local newtype wrapper for DRepCredential to provide custom CBOR decoding
+/// without conflicting with the main Credential type's Decode implementation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LocalDRepCredential(DRepCredential);
 
-impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
+impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
         match variant {
-            0 => Ok(DRepCredential::AddrKeyhash(d.decode_with(ctx)?)),
-            1 => Ok(DRepCredential::ScriptHash(d.decode_with(ctx)?)),
+            0 => Ok(LocalDRepCredential(DRepCredential::ScriptHash(
+                d.decode_with(ctx)?,
+            ))),
+            1 => Ok(LocalDRepCredential(DRepCredential::AddrKeyHash(
+                d.decode_with(ctx)?,
+            ))),
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for DRepCredential",
             )),
@@ -717,7 +719,7 @@ pub struct ApiPoolMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
     /// Bech32-encoded DRep ID
-    pub drep_id: String,
+    pub drep_id: DRepCredential,
     /// Lovelace deposit amount
     pub deposit: u64,
     /// Optional anchor (URL and hash)
@@ -1745,19 +1747,12 @@ impl StreamingSnapshotParser {
 
         // Parse DReps map [0]: StakeCredential -> DRepState
         // Using minicbor's Decode trait - much simpler than manual parsing!
-        let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
+        let dreps_map: BTreeMap<LocalDRepCredential, DRepState> = decoder.decode()?;
 
-        // Convert to DRepInfo for API compatibility
+        // Convert to DRepInfo
         let dreps = dreps_map
             .into_iter()
-            .map(|(cred, state)| {
-                let drep_id = match cred {
-                    StakeCredential::AddrKeyHash(hash) => format!("drep_{}", hex::encode(hash)),
-                    StakeCredential::ScriptHash(hash) => {
-                        format!("drep_script_{}", hex::encode(hash))
-                    }
-                };
-
+            .map(|(LocalDRepCredential(drep_id), state)| {
                 let anchor = match state.anchor {
                     StrictMaybe::Just(a) => Some(AnchorInfo {
                         url: a.url,

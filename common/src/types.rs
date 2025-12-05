@@ -658,7 +658,7 @@ declare_hash_type_with_bech32!(PoolId, 28, "pool");
 
 declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
 declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
-declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepKeyHash, 28, "drep");
 declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
@@ -1958,7 +1958,7 @@ impl GovernanceAction {
 pub enum Voter {
     ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
     ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
-    DRepKey(DrepKeyHash),
+    DRepKey(DRepKeyHash),
     DRepScript(DRepScriptHash),
     StakePoolKey(PoolId),
 }

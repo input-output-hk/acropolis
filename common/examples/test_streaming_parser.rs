@@ -117,7 +117,7 @@ impl DRepCallback for CountingCallbacks {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {}) - {}",
                     i + 1,
-                    drep.drep_id,
+                    drep.drep_id.to_drep_bech32().unwrap(),
                     drep.deposit,
                     anchor.url
                 );
@@ -125,7 +125,7 @@ impl DRepCallback for CountingCallbacks {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {})",
                     i + 1,
-                    drep.drep_id,
+                    drep.drep_id.to_drep_bech32().unwrap(),
                     drep.deposit
                 );
             }
@@ -451,7 +451,7 @@ fn main() {
                     print!(
                         "  {}: {} (deposit: {} lovelace)",
                         i + 1,
-                        drep.drep_id,
+                        drep.drep_id.to_drep_bech32().unwrap(),
                         drep.deposit
                     );
                     if let Some(anchor) = &drep.anchor {
