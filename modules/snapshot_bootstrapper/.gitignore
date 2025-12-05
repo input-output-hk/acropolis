@@ -1,0 +1,2 @@
+# Ignore any downloaded NewEpochSnapshot files
+data/mainnet/*.cbor
