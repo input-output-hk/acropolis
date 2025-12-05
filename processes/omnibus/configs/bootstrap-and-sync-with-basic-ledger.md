@@ -1,0 +1,72 @@
+# Top-level configuration for Acropolis omnibus process
+# Bootstrap from Mithril and network sync, with basic ledger
+# (SPOs, stake, pots, rewards)
+
+# ============================================================================
+# Startup Configuration
+# ============================================================================
+[global.startup]
+method = "mithril"  # Options: "mithril" | "snapshot"
+topic = "cardano.sequence.start"
+
+# ============================================================================
+# Bootstrap Module Configurations
+# ============================================================================
+[module.genesis-bootstrapper]
+
+[module.mithril-snapshot-fetcher]
+aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
+genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
+# Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
+download-max-age = "never"
+# Pause constraint E.g. "epoch:100", "block:1200"
+pause = "none"
+
+# ============================================================================
+# Core Module Configurations
+# ============================================================================
+[module.peer-network-interface]
+sync-point = "snapshot"
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
+]
+magic-number = 764824073
+
+[module.block-unpacker]
+# Direct connection without consensus mediation
+subscribe-topic = "cardano.block.available"
+
+[module.tx-unpacker]
+publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-withdrawals-topic = "cardano.withdrawals"
+publish-certificates-topic = "cardano.certificates"
+publish-block-txs-topic = "cardano.block.txs"
+network-name = "mainnet"
+
+[module.utxo-state]
+address-delta-topic = "cardano.address.delta"
+
+[module.spo-state]
+
+[module.stake-delta-filter]
+
+[module.epochs-state]
+
+[module.accounts-state]
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+
+[module.clock]
+
+# ============================================================================
+# Message Bus Configuration
+# ============================================================================
+[message-bus.internal]
+class = "in-memory"
+
+# Message routing
+[[message-router.route]]  # Everything is internal only
+pattern = "#"
+bus = "internal"
