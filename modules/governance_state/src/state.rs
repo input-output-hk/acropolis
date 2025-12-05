@@ -128,7 +128,7 @@ impl State {
                     .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"))?;
             }
 
-            return Ok(ValidationOutcomes::new());
+            Ok(ValidationOutcomes::new())
         } else {
             // Conway governance
             let mut outcomes = ValidationOutcomes::new();
