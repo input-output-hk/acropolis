@@ -151,7 +151,7 @@ async fn handle_rollback(wrapper: &mut IndexWrapper, point: Point) -> IndexResul
 mod tests {
     use std::sync::Arc;
 
-    use acropolis_common::{BlockHash, BlockInfo, BlockStatus, Era, Point};
+    use acropolis_common::{BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point};
     use caryatid_sdk::async_trait;
     use pallas::ledger::traverse::MultiEraTx;
     use tokio::sync::{mpsc, oneshot};
@@ -207,6 +207,7 @@ mod tests {
     fn test_block(slot: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Volatile,
+            intent: BlockIntent::none(),
             slot,
             number: 1,
             hash: BlockHash::default(),
