@@ -8,9 +8,9 @@ use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
-        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
@@ -128,6 +128,65 @@ pub struct State {
 }
 
 impl State {
+    /// Bootstrap state from snapshot data
+    pub fn bootstrap(&mut self, bootstrap_msg: &AccountsBootstrapMessage) {
+        info!(
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools, {} dreps",
+            bootstrap_msg.epoch,
+            bootstrap_msg.accounts.len(),
+            bootstrap_msg.pools.len(),
+            bootstrap_msg.dreps.len()
+        );
+
+        // 1. Bootstrap stake addresses
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        for account in &bootstrap_msg.accounts {
+            if let Ok(stake_addr) = StakeAddress::from_string(&account.stake_address) {
+                stake_addresses.insert(stake_addr, account.address_state.clone());
+            } else {
+                warn!(
+                    "Failed to parse stake address during bootstrap: {}",
+                    account.stake_address
+                );
+            }
+        }
+        drop(stake_addresses); // Release the lock
+        info!(
+            "  ✓ Loaded {} stake addresses",
+            bootstrap_msg.accounts.len()
+        );
+
+        // 2. Bootstrap pots
+        self.pots = Pots {
+            reserves: bootstrap_msg.pots.reserves,
+            treasury: bootstrap_msg.pots.treasury,
+            deposits: bootstrap_msg.pots.deposits,
+        };
+        info!(
+            "  ✓ Loaded pots: reserves={}, treasury={}, deposits={}",
+            self.pots.reserves, self.pots.treasury, self.pots.deposits
+        );
+
+        // 3. Note: Pools and DReps will be populated via SPOState and DRepState messages
+        // The snapshot bootstrap provides the initial state, but pools and dreps are managed
+        // by their respective state modules and communicated through the message bus.
+        info!(
+            "  ℹ Pools ({}) and DReps ({}) will be loaded from state messages",
+            bootstrap_msg.pools.len(),
+            bootstrap_msg.dreps.len()
+        );
+
+        // 4. Bootstrap snapshots (if available)
+        if let Some(_snapshots_info) = &bootstrap_msg.snapshots {
+            info!("  ✓ Snapshot data available for rewards calculation");
+            // TODO: Convert SnapshotsInfo to EpochSnapshots structure
+            // This requires getting the raw snapshot data, not just the info
+            // For now, snapshots will be built incrementally as the chain progresses
+        }
+
+        info!("Accounts state bootstrap complete");
+    }
+
     /// Get the stake address state for a give stake key
     pub fn get_stake_state(&self, stake_key: &StakeAddress) -> Option<StakeAddressState> {
         self.stake_addresses.lock().unwrap().get(stake_key)

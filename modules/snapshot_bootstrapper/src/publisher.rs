@@ -3,7 +3,8 @@ use acropolis_common::snapshot::{RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, PotBalances,
+        SnapshotMessage, SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
@@ -174,7 +175,6 @@ impl StakeCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
-        // TODO: Accumulate account data if needed or send in chunks to AccountState processor
         Ok(())
     }
 }
@@ -299,10 +299,55 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
-        // We could send a Resolver reference from here for large data, i.e. the UTXO set,
-        // which could be a file reference. For a file reference, we'd extend the parser to
-        // give us a callback value with the offset into the file; and we'd make the streaming
-        // UTXO parser public and reusable, adding it to the resolver implementation.
+
+        // Now that we have all the data, publish the complete accounts bootstrap message
+        let metadata = self.metadata.as_ref();
+        let epoch = metadata.map(|m| m.epoch).unwrap_or(0);
+
+        let pots = metadata
+            .map(|m| PotBalances {
+                treasury: m.pot_balances.treasury,
+                reserves: m.pot_balances.reserves,
+                deposits: m.pot_balances.deposits,
+            })
+            .unwrap_or(PotBalances {
+                treasury: 0,
+                reserves: 0,
+                deposits: 0,
+            });
+
+        let snapshots = metadata.and_then(|m| m.snapshots.clone());
+
+        let accounts_bootstrap_message = AccountsBootstrapMessage {
+            epoch,
+            accounts: self.accounts.clone(),
+            pools: self.pools.clone(),
+            dreps: self.dreps.clone(),
+            pots,
+            snapshots,
+        };
+
+        info!(
+            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools, {} dreps",
+            epoch,
+            accounts_bootstrap_message.accounts.len(),
+            accounts_bootstrap_message.pools.len(),
+            accounts_bootstrap_message.dreps.len(),
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::AccountsState(accounts_bootstrap_message),
+        )));
+
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        tokio::spawn(async move {
+            context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                tracing::error!("Failed to publish accounts bootstrap message: {}", e)
+            });
+        });
+
         Ok(())
     }
 }

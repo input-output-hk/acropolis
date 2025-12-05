@@ -18,7 +18,7 @@ use tracing::{error, warn};
 
 /// State of an individual stake address
 #[serde_as]
-#[derive(Debug, Default, Clone, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressState {
     /// Is it registered (or only used in addresses)?
     pub registered: bool,
@@ -38,7 +38,7 @@ pub struct StakeAddressState {
 }
 
 // A self-contained stake address state for exporting across module boundaries
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountState {
     pub stake_address: String,
     pub address_state: StakeAddressState,

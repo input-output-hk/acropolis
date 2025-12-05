@@ -3,7 +3,11 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    configuration::StartupMethod,
+    messages::{
+        AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse, StateTransitionMessage,
+    },
     queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -51,6 +55,9 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
+
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
 const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
@@ -64,11 +71,65 @@ const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
 pub struct AccountsState;
 
 impl AccountsState {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, accounts_data: &AccountsBootstrapMessage) {
+        // Initialize accounts state from snapshot data
+        state.bootstrap(accounts_data);
+
+        info!(
+            "Accounts state bootstrapped successfully for epoch {} with {} accounts",
+            accounts_data.epoch,
+            accounts_data.accounts.len()
+        );
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+    ) -> Result<()> {
+        // Check we're subscribed to snapshot messages first
+        let snapshot_subscription = match snapshot_subscription.as_mut() {
+            Some(sub) => sub,
+            None => {
+                info!("No snapshot subscription available, using default state");
+                return Ok(());
+            }
+        };
+
+        info!("Waiting for snapshot bootstrap messages...");
+
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::AccountsState(accounts_data),
+                )) => {
+                    let mut state = history.lock().await.get_or_init_with(State::default);
+                    Self::handle_bootstrap(&mut state, accounts_data);
+                    history.lock().await.commit(accounts_data.epoch, state);
+                    info!("Accounts state bootstrap complete");
+                    return Ok(());
+                }
+                Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
+                    info!("Snapshot complete without accounts bootstrap data, using default state");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Async run loop
     #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -83,6 +144,9 @@ impl AccountsState {
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
     ) -> Result<()> {
+        // Wait for the snapshot bootstrap (if available)
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
+
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
@@ -415,6 +479,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating protocol parameters subscriber on '{parameters_topic}'");
 
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
@@ -698,11 +767,19 @@ impl AccountsState {
         let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
+        // Only subscribe to Snapshot if we're using Snapshot to start-up
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
         // Start run task
         context.run(async move {
             Self::run(
                 history,
                 spdd_store,
+                snapshot_subscription,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
