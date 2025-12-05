@@ -62,7 +62,7 @@ impl Consensus {
             try_join_all(validator_topics.iter().map(|topic| context.subscribe(topic))).await?;
 
         // True if we expect validation to be performed by the nodes
-        let do_validation = validator_subscriptions.len() > 0;
+        let do_validation = !validator_subscriptions.is_empty();
 
         context.clone().run(async move {
             loop {
