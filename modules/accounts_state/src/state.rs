@@ -140,7 +140,7 @@ impl State {
             bootstrap_msg.dreps.len()
         );
 
-        // 1. Load stake addresses - data is already parsed
+        // 1. Load stake addresses
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         for account in &bootstrap_msg.accounts {
             if let Ok(stake_addr) = StakeAddress::from_string(&account.stake_address) {
@@ -155,32 +155,31 @@ impl State {
         drop(stake_addresses);
         info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
 
-        // 2. Load pools - data is already in PoolRegistration format
+        // 2. Load pools
         for pool_reg in &bootstrap_msg.pools {
             self.spos.insert(pool_reg.operator, pool_reg.clone());
         }
         info!("Loaded {} pools", self.spos.len());
 
-        // 3. Load retiring pools - list is already prepared
+        // 3. Load retiring pools
         self.retiring_spos = bootstrap_msg.retiring_pools.clone();
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
-        // 4. Load DReps - data is already in (DRepCredential, deposit) format
+        // 4. Load DReps
         self.dreps = bootstrap_msg.dreps.clone();
         info!("Loaded {} DReps", self.dreps.len());
 
-        // 5. Load pots - direct assignment
+        // 5. Load pots
         self.pots = Pots {
             reserves: bootstrap_msg.pots.reserves,
             treasury: bootstrap_msg.pots.treasury,
             deposits: bootstrap_msg.pots.deposits,
         };
         info!(
-            "  ✓ Loaded pots: reserves={}, treasury={}, deposits={}",
+            "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // 6. Note about snapshots
         if bootstrap_msg.snapshots.is_some() {
             info!("Snapshot metadata available");
         }
