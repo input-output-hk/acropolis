@@ -93,7 +93,7 @@ impl GovernanceState {
     declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
     declare_cardano_reader!(read_drep, DRepStakeDistribution, DRepStakeDistributionMessage);
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
-    
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
