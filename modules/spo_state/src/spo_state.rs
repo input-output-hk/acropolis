@@ -778,7 +778,8 @@ impl SPOState {
                                     .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
                             }
                         }
-                        _ => error!("Unexpected message type: {message:?}"),
+                        // There will be other snapshot messages that we're not interested in
+                        _ => ()
                     }
                 }
             });
