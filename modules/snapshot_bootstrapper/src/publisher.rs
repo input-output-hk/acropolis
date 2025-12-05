@@ -167,7 +167,7 @@ impl UtxoCallback for SnapshotPublisher {
 impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: SPOState) -> Result<()> {
         info!(
-            "Received pools (registers: {}, future: {}, retiring: {}",
+            "Received pools (current: {}, future: {}, retiring: {})",
             pools.pools.len(),
             pools.updates.len(),
             pools.retiring.len()
