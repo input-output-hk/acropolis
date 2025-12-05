@@ -327,6 +327,26 @@ impl AsRef<SnapshotContext> for SnapshotContext {
     }
 }
 
+struct SnapshotOption<T>(pub Option<T>);
+
+impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
+where
+    T: minicbor::Decode<'b, C>
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        match d.datatype()? {
+            Type::Null | Type::Undefined => {
+                d.skip()?;
+                Ok(SnapshotOption(None))
+            }
+            _ => {
+                let t = T::decode(d, ctx)?;
+                Ok(SnapshotOption(Some(t)))
+            }
+        }
+    }
+}
+
 struct SnapshotPoolRegistration(pub PoolRegistration);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistration
@@ -348,7 +368,7 @@ where
                 .map(|a| a.0)
                 .collect(),
             relays: (Vec::<SnapshotRelay>::decode(d, ctx)?).into_iter().map(|r| r.0).collect(),
-            pool_metadata: (SnapshotPoolMetadataOption::decode(d, ctx)?).0,
+            pool_metadata: (SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?).0.map(|m| m.0),
         }))
     }
 }
@@ -441,22 +461,14 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     }
 }
 
-struct SnapshotPoolMetadataOption(pub Option<PoolMetadata>);
+struct SnapshotPoolMetadata(pub PoolMetadata);
 
-impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadataOption {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        match d.datatype()? {
-            Type::Null | Type::Undefined => {
-                d.skip()?;
-                Ok(SnapshotPoolMetadataOption(None))
-            }
-            _ => {
-                d.array()?;
-                let url = d.str()?.to_string();
-                let hash = (Hash::<32>::decode(d, ctx)?).to_vec();
-                Ok(SnapshotPoolMetadataOption(Some(PoolMetadata { url, hash })))
-            }
-        }
+        d.array()?;
+        let url = d.str()?.to_string();
+        let hash = (Hash::<32>::decode(d, ctx)?).to_vec();
+        Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }
 
