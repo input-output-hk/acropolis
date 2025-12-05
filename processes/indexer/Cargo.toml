@@ -8,17 +8,23 @@ description = "Acropolis indexer process containing core modules"
 license = "Apache-2.0"
 
 [dependencies]
+acropolis_codec = { path = "../../codec" }
 acropolis_common = { path = "../../common" }
 acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
 acropolis_module_peer_network_interface = { path = "../../modules/peer_network_interface" }
 acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
-acropolis_module_indexer = { path = "../../modules/indexer" }
+acropolis_module_custom_indexer = { path = "../../modules/custom_indexer" }
 
 caryatid_process = { workspace = true }
+caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+bincode = "1"
 clap = { workspace = true }
 config = { workspace = true }
+fjall = "2.7.0"
+pallas = { workspace = true}
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
 tokio = { workspace = true }
 

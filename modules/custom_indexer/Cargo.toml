@@ -1,7 +1,7 @@
 # Acropolis indexer module
 
 [package]
-name = "acropolis_module_indexer"
+name = "acropolis_module_custom_indexer"
 version = "0.1.0"
 edition = "2021"
 authors = ["William Hankins <william@sundae.fi>"]
@@ -14,9 +14,13 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+bincode = "1"
 config = { workspace = true }
+fjall = "2.7.0"
+pallas = { workspace = true}
 serde = { workspace = true, features = ["rc"] }
+tokio = { workspace = true }
 tracing = { workspace = true }
 
 [lib]
-path = "src/indexer.rs"
+path = "src/custom_indexer.rs"

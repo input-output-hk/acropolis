@@ -1,6 +1,7 @@
 downloads
 cache
 upstream-cache
+spdd_db
 
 # DB files
 fjall-*/

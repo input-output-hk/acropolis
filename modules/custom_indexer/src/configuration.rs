@@ -3,11 +3,12 @@ use config::Config;
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct IndexerConfig {
-    pub sync_command_topic: String,
+pub struct CustomIndexerConfig {
+    pub sync_command_publisher_topic: String,
+    pub txs_subscribe_topic: String,
 }
 
-impl IndexerConfig {
+impl CustomIndexerConfig {
     pub fn try_load(config: &Config) -> Result<Self> {
         let full_config = Config::builder()
             .add_source(config::File::from_str(
