@@ -93,7 +93,7 @@ fn vrf_result<'a>(header: &'a MultiEraHeader) -> Option<&'a VrfCert> {
 mod tests {
     use acropolis_common::{
         crypto::keyhash_256, protocol_params::NonceHash, serialization::Bech32Conversion,
-        BlockHash, BlockStatus, Era,
+        BlockHash, BlockIntent, BlockStatus, Era,
     };
 
     use super::*;
@@ -114,6 +114,7 @@ mod tests {
             hex::decode(include_str!("./data/7854823.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Validate,
             slot: 73614529,
             hash: BlockHash::try_from(
                 hex::decode("4884996cff870563ffddab5d1255a82a58482ba9351536f5b72c882f883c8947")
