@@ -129,16 +129,18 @@ pub struct State {
 
 impl State {
     /// Bootstrap state from snapshot data
+    /// All data arrives pre-processed and ready to use directly
     pub fn bootstrap(&mut self, bootstrap_msg: &AccountsBootstrapMessage) {
         info!(
-            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools, {} dreps",
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
             bootstrap_msg.epoch,
             bootstrap_msg.accounts.len(),
             bootstrap_msg.pools.len(),
+            bootstrap_msg.retiring_pools.len(),
             bootstrap_msg.dreps.len()
         );
 
-        // 1. Bootstrap stake addresses
+        // 1. Load stake addresses - data is already parsed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         for account in &bootstrap_msg.accounts {
             if let Ok(stake_addr) = StakeAddress::from_string(&account.stake_address) {
@@ -150,13 +152,24 @@ impl State {
                 );
             }
         }
-        drop(stake_addresses); // Release the lock
-        info!(
-            "  ✓ Loaded {} stake addresses",
-            bootstrap_msg.accounts.len()
-        );
+        drop(stake_addresses);
+        info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
 
-        // 2. Bootstrap pots
+        // 2. Load pools - data is already in PoolRegistration format
+        for pool_reg in &bootstrap_msg.pools {
+            self.spos.insert(pool_reg.operator, pool_reg.clone());
+        }
+        info!("Loaded {} pools", self.spos.len());
+
+        // 3. Load retiring pools - list is already prepared
+        self.retiring_spos = bootstrap_msg.retiring_pools.clone();
+        info!("Loaded {} retiring pools", self.retiring_spos.len());
+
+        // 4. Load DReps - data is already in (DRepCredential, deposit) format
+        self.dreps = bootstrap_msg.dreps.clone();
+        info!("Loaded {} DReps", self.dreps.len());
+
+        // 5. Load pots - direct assignment
         self.pots = Pots {
             reserves: bootstrap_msg.pots.reserves,
             treasury: bootstrap_msg.pots.treasury,
@@ -167,21 +180,9 @@ impl State {
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // 3. Note: Pools and DReps will be populated via SPOState and DRepState messages
-        // The snapshot bootstrap provides the initial state, but pools and dreps are managed
-        // by their respective state modules and communicated through the message bus.
-        info!(
-            "  ℹ Pools ({}) and DReps ({}) will be loaded from state messages",
-            bootstrap_msg.pools.len(),
-            bootstrap_msg.dreps.len()
-        );
-
-        // 4. Bootstrap snapshots (if available)
-        if let Some(_snapshots_info) = &bootstrap_msg.snapshots {
-            info!("  ✓ Snapshot data available for rewards calculation");
-            // TODO: Convert SnapshotsInfo to EpochSnapshots structure
-            // This requires getting the raw snapshot data, not just the info
-            // For now, snapshots will be built incrementally as the chain progresses
+        // 6. Note about snapshots
+        if bootstrap_msg.snapshots.is_some() {
+            info!("Snapshot metadata available");
         }
 
         info!("Accounts state bootstrap complete");

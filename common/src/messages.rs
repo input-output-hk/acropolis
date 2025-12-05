@@ -23,7 +23,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::streaming_snapshot::{DRepInfo, PoolInfo, SnapshotsInfo};
+use crate::snapshot::streaming_snapshot::SnapshotsInfo;
 use crate::stake_addresses::AccountState;
 use std::collections::HashMap;
 
@@ -414,6 +414,7 @@ pub struct PotBalances {
 }
 
 /// Accounts bootstrap message containing all data needed to bootstrap accounts state
+/// All data is in internal format, ready for direct use by the state module
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AccountsBootstrapMessage {
     /// Epoch number this snapshot is for
@@ -422,11 +423,14 @@ pub struct AccountsBootstrapMessage {
     /// All account states (stake addresses with delegations and balances)
     pub accounts: Vec<AccountState>,
 
-    /// All registered stake pools
-    pub pools: Vec<PoolInfo>,
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
 
-    /// All registered DReps
-    pub dreps: Vec<DRepInfo>,
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
 
     /// Pot balances (treasury, reserves, deposits)
     pub pots: PotBalances,

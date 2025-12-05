@@ -7,18 +7,20 @@ use acropolis_common::{
         SnapshotMessage, SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
+    serialization::Bech32Conversion,
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, PoolInfo,
         ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback,
         UtxoEntry,
     },
     stake_addresses::AccountState,
-    BlockInfo, EpochBootstrapData,
+    types::{Credential, PoolRegistration, Ratio, VrfKeyHash},
+    BlockInfo, EpochBootstrapData, PoolId, StakeAddress,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 /// External epoch context containing nonces and timing information.
 ///
@@ -146,6 +148,63 @@ impl SnapshotPublisher {
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
         }
+    }
+
+    /// This is a band-aid for now.
+    ///
+    /// Convert PoolInfo (API format with strings) to PoolRegistration (internal format)
+    /// This does all the parsing and validation work so the state module can just use the data
+    fn convert_pool_info_to_registration(pool_info: &PoolInfo) -> Result<PoolRegistration> {
+        // Parse pool ID from bech32
+        let pool_id = PoolId::from_bech32(&pool_info.pool_id)
+            .map_err(|e| anyhow!("Failed to parse pool ID '{}': {}", pool_info.pool_id, e))?;
+
+        // Parse VRF key hash from hex
+        let vrf_bytes = hex::decode(&pool_info.vrf_key_hash)
+            .map_err(|e| anyhow!("Failed to decode VRF key hash: {}", e))?;
+        if vrf_bytes.len() != 32 {
+            return Err(anyhow!(
+                "VRF key hash must be 32 bytes, got {}",
+                vrf_bytes.len()
+            ));
+        }
+        let vrf_key_hash = VrfKeyHash::new(vrf_bytes.try_into().unwrap());
+
+        // Parse reward account from hex-encoded binary (29 bytes)
+        let reward_account = {
+            let bytes = hex::decode(&pool_info.reward_account)
+                .map_err(|e| anyhow!("Failed to decode reward account: {}", e))?;
+            StakeAddress::from_binary(&bytes)
+                .map_err(|e| anyhow!("Failed to parse reward account from binary: {}", e))?
+        };
+
+        // Parse pool owners from hex-encoded binary (29 bytes each)
+        let mut pool_owners = Vec::new();
+        for owner_str in &pool_info.pool_owners {
+            let bytes = hex::decode(owner_str)
+                .map_err(|e| anyhow!("Failed to decode pool owner: {}", e))?;
+            let owner_addr = StakeAddress::from_binary(&bytes)
+                .map_err(|e| anyhow!("Failed to parse pool owner from binary: {}", e))?;
+            pool_owners.push(owner_addr);
+        }
+
+        // Convert margin from f64 to Ratio
+        let margin = Ratio {
+            numerator: (pool_info.margin * 1_000_000.0) as u64,
+            denominator: 1_000_000,
+        };
+
+        Ok(PoolRegistration {
+            operator: pool_id,
+            vrf_key_hash,
+            pledge: pool_info.pledge,
+            cost: pool_info.cost,
+            margin,
+            reward_account,
+            pool_owners,
+            relays: Vec::new(),  // TODO: Read from relays in parser
+            pool_metadata: None, // TODO: Read pool metadata
+        })
     }
 }
 
@@ -318,20 +377,52 @@ impl SnapshotCallbacks for SnapshotPublisher {
 
         let snapshots = metadata.and_then(|m| m.snapshots.clone());
 
+        // Convert PoolInfo to PoolRegistration (internal format)
+        let mut pools = Vec::new();
+        let mut retiring_pools = Vec::new();
+        for pool_info in &self.pools {
+            match Self::convert_pool_info_to_registration(pool_info) {
+                Ok(pool_reg) => {
+                    if pool_info.retirement_epoch.is_some() {
+                        retiring_pools.push(pool_reg.operator);
+                    }
+                    pools.push(pool_reg);
+                }
+                Err(e) => {
+                    warn!("Failed to convert pool {}: {}", pool_info.pool_id, e);
+                }
+            }
+        }
+
+        // Convert DRepInfo to (DRepCredential, deposit) tuples
+        let mut dreps = Vec::new();
+        for drep_info in &self.dreps {
+            match Credential::from_drep_bech32(&drep_info.drep_id) {
+                Ok(cred) => {
+                    dreps.push((cred, drep_info.deposit));
+                }
+                Err(e) => {
+                    warn!("Failed to parse DRep ID {}: {}", drep_info.drep_id, e);
+                }
+            }
+        }
+
         let accounts_bootstrap_message = AccountsBootstrapMessage {
             epoch,
             accounts: self.accounts.clone(),
-            pools: self.pools.clone(),
-            dreps: self.dreps.clone(),
+            pools,
+            retiring_pools,
+            dreps,
             pots,
             snapshots,
         };
 
         info!(
-            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools, {} dreps",
+            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
             epoch,
             accounts_bootstrap_message.accounts.len(),
             accounts_bootstrap_message.pools.len(),
+            accounts_bootstrap_message.retiring_pools.len(),
             accounts_bootstrap_message.dreps.len(),
         );
 
