@@ -13,13 +13,6 @@ use crate::{
 };
 
 /// Transaction Validation Error
-///
-/// Shelley Era Errors:
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
-///
-/// Allegra Era Errors:
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
-///
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum TransactionValidationError {
     /// **Cause**: Raw Transaction CBOR is invalid
@@ -30,7 +23,7 @@ pub enum TransactionValidationError {
     #[error("Malformed Transaction: era={era}, reason={reason}")]
     MalformedTransaction { era: Era, reason: String },
 
-    /// **Cause**: UTXO validation error
+    /// **Cause**: UTxO rules failure
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
@@ -39,6 +32,12 @@ pub enum TransactionValidationError {
     Other(String),
 }
 
+/// UTxO rules failure
+/// Shelley Era Errors:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
+///
+/// Allegra Era Errors:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
     /// ------------ Shelley Era Errors ------------

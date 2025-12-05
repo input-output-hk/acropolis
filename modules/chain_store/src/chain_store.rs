@@ -1,11 +1,6 @@
 mod stores;
 
 use crate::stores::{fjall::FjallStore, Block, Store, Tx};
-use acropolis_codec::{
-    block::map_to_block_issuer,
-    map_parameters,
-    map_parameters::{map_metadata, map_stake_address, to_pool_id, to_pool_reg},
-};
 use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -616,7 +611,7 @@ impl ChainStore {
                 slot: header.slot(),
                 epoch: block.extra.epoch,
                 epoch_slot: block.extra.epoch_slot,
-                issuer: map_to_block_issuer(
+                issuer: acropolis_codec::map_to_block_issuer(
                     &header,
                     &state.byron_heavy_delegates,
                     &state.shelley_genesis_delegates,
@@ -701,7 +696,7 @@ impl ChainStore {
             let hash = TxHash::from(*tx.hash());
             for output in tx.outputs() {
                 if let Ok(pallas_address) = output.address() {
-                    if let Ok(address) = map_parameters::map_address(&pallas_address) {
+                    if let Ok(address) = acropolis_codec::map_address(&pallas_address) {
                         addresses
                             .entry(BechOrdAddress(address))
                             .or_insert_with(Vec::new)
@@ -837,14 +832,14 @@ impl ChainStore {
                     alonzo::Certificate::StakeRegistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: true,
                         });
                     }
                     alonzo::Certificate::StakeDeregistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: false,
                         });
                     }
@@ -854,28 +849,28 @@ impl ChainStore {
                     conway::Certificate::StakeRegistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: true,
                         });
                     }
                     conway::Certificate::StakeDeregistration(cred) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: false,
                         });
                     }
                     conway::Certificate::StakeRegDeleg(cred, _, _) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: true,
                         });
                     }
                     conway::Certificate::StakeVoteRegDeleg(cred, _, _, _) => {
                         certs.push(TransactionStakeCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
                             registration: true,
                         });
                     }
@@ -905,8 +900,8 @@ impl ChainStore {
                     {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
-                            pool_id: to_pool_id(pool_key_hash),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
@@ -915,24 +910,24 @@ impl ChainStore {
                     conway::Certificate::StakeDelegation(cred, pool_key_hash) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
-                            pool_id: to_pool_id(pool_key_hash),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
                     conway::Certificate::StakeRegDeleg(cred, pool_key_hash, _) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
-                            pool_id: to_pool_id(pool_key_hash),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
                     conway::Certificate::StakeVoteRegDeleg(cred, pool_key_hash, _, _) => {
                         certs.push(TransactionDelegationCertificate {
                             index: index as u64,
-                            address: map_stake_address(cred, network_id.clone()),
-                            pool_id: to_pool_id(pool_key_hash),
+                            address: acropolis_codec::map_stake_address(cred, network_id.clone()),
+                            pool_id: acropolis_codec::to_pool_id(pool_key_hash),
                             active_epoch: tx.block.extra.epoch + 1,
                         });
                     }
@@ -985,7 +980,10 @@ impl ChainStore {
                                             InstantaneousRewardSource::Treasury
                                         }
                                     },
-                                    address: map_stake_address(&cred, network_id.clone()),
+                                    address: acropolis_codec::map_stake_address(
+                                        &cred,
+                                        network_id.clone(),
+                                    ),
                                     amount: amount as u64,
                                 });
                             }
@@ -1027,7 +1025,7 @@ impl ChainStore {
                     {
                         certs.push(TransactionPoolUpdateCertificate {
                             cert_index: cert_index as u64,
-                            pool_reg: to_pool_reg(
+                            pool_reg: acropolis_codec::to_pool_reg(
                                 operator,
                                 vrf_keyhash,
                                 pledge,
@@ -1060,7 +1058,7 @@ impl ChainStore {
                     {
                         certs.push(TransactionPoolUpdateCertificate {
                             cert_index: cert_index as u64,
-                            pool_reg: to_pool_reg(
+                            pool_reg: acropolis_codec::to_pool_reg(
                                 operator,
                                 vrf_keyhash,
                                 pledge,
@@ -1099,7 +1097,7 @@ impl ChainStore {
                     {
                         certs.push(TransactionPoolRetirementCertificate {
                             cert_index: cert_index as u64,
-                            pool_id: to_pool_id(operator),
+                            pool_id: acropolis_codec::to_pool_id(operator),
                             retirement_epoch: *epoch,
                         });
                     }
@@ -1110,7 +1108,7 @@ impl ChainStore {
                     {
                         certs.push(TransactionPoolRetirementCertificate {
                             cert_index: cert_index as u64,
-                            pool_id: to_pool_id(operator),
+                            pool_id: acropolis_codec::to_pool_id(operator),
                             retirement_epoch: *epoch,
                         });
                     }
@@ -1132,7 +1130,7 @@ impl ChainStore {
             for (label, datum) in &metadata.clone().to_vec() {
                 items.push(TransactionMetadataItem {
                     label: label.to_string(),
-                    json_metadata: map_metadata(datum),
+                    json_metadata: acropolis_codec::map_metadata(datum),
                 });
             }
         }

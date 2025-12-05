@@ -1,7 +1,6 @@
 //! Shelley era transaction validation
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 
-use acropolis_codec;
 use acropolis_common::{
     protocol_params::ShelleyParams, validation::UTxOValidationError, Address, Era, Lovelace,
     NetworkId, TxIdentifier, UTxOIdentifier,
@@ -168,13 +167,12 @@ pub fn validate_wrong_network(
             })
         })?;
 
-        let address =
-            acropolis_codec::map_parameters::map_address(&pallas_address).map_err(|e| {
-                Box::new(UTxOValidationError::MalformedUTxO {
-                    era: Era::Shelley,
-                    reason: format!("Invalid address at output {index}: {}", e),
-                })
-            })?;
+        let address = acropolis_codec::map_address(&pallas_address).map_err(|e| {
+            Box::new(UTxOValidationError::MalformedUTxO {
+                era: Era::Shelley,
+                reason: format!("Invalid address at output {index}: {}", e),
+            })
+        })?;
 
         let is_network_correct = match &address {
             // NOTE:
@@ -218,13 +216,12 @@ pub fn validate_wrong_network_withdrawal(
                 })
             })?;
 
-        let stake_address = acropolis_codec::map_parameters::map_address(&pallas_reward_adddess)
-            .map_err(|e| {
-                Box::new(UTxOValidationError::MalformedUTxO {
-                    era: Era::Shelley,
-                    reason: format!("Invalid reward address at withdrawal {index}: {}", e),
-                })
-            })?;
+        let stake_address = acropolis_codec::map_address(&pallas_reward_adddess).map_err(|e| {
+            Box::new(UTxOValidationError::MalformedUTxO {
+                era: Era::Shelley,
+                reason: format!("Invalid reward address at withdrawal {index}: {}", e),
+            })
+        })?;
 
         let stake_address = match stake_address {
             Address::Stake(stake_address) => stake_address,

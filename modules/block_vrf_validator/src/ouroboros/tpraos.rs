@@ -184,7 +184,7 @@ mod tests {
         protocol_params::NonceHash,
         serialization::Bech32Conversion,
         validation::{VrfLeaderValueTooBigError, WrongLeaderVrfKeyError},
-        BlockHash, BlockStatus, Era,
+        BlockHash, BlockIntent, BlockStatus, Era,
     };
 
     use super::*;
@@ -207,6 +207,7 @@ mod tests {
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Validate,
             slot: 4492800,
             hash: BlockHash::try_from(
                 hex::decode("aa83acbf5904c0edfe4d79b3689d3d00fcfc553cf360fd2229b98d464c28e9de")
@@ -259,6 +260,7 @@ mod tests {
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 5824849,
             hash: BlockHash::try_from(
                 hex::decode("1038b2c76a23ea7d89cbd84d7744c97560eb3412661beed6959d748e24ff8229")
@@ -317,6 +319,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -375,6 +378,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -434,6 +438,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -502,6 +507,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")

@@ -397,8 +397,8 @@ mod tests {
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
-        Address, AssetName, BlockHash, ByronAddress, Datum, Era, NativeAsset, ReferenceScript,
-        TxHash, TxUTxODeltas, Value,
+        Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
+        ReferenceScript, TxHash, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -413,6 +413,7 @@ mod tests {
     fn create_block(status: BlockStatus, slot: u64, number: u64) -> BlockInfo {
         BlockInfo {
             status,
+            intent: BlockIntent::Apply,
             slot,
             number,
             hash: BlockHash::default(),

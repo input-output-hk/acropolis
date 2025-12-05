@@ -5,7 +5,7 @@ use acropolis_common::{
     configuration::StartupMethod,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
@@ -330,6 +330,8 @@ impl MithrilSnapshotFetcher {
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
+                            // Consensus will set the Validate bit if wanted
+                            intent: BlockIntent::Apply,
                             slot,
                             number,
                             hash: BlockHash::from(*block.hash()),
