@@ -22,6 +22,17 @@ pub struct ProtocolParams {
     pub conway: Option<ConwayParams>,
 }
 
+impl ProtocolParams {
+    /// Calculate Transaction's Mininum required fee for shelley Era
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Tx.hs#L254
+    pub fn shelley_min_fee(&self, tx_bytes: u32) -> Result<u64> {
+        self.shelley
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Shelley params are not set"))
+            .map(|shelley_params| shelley_params.min_fee(tx_bytes))
+    }
+}
+
 //
 // Byron protocol parameters
 //
@@ -133,6 +144,13 @@ pub struct ShelleyParams {
 
     #[serde_as(as = "HashMap<Hex, _>")]
     pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
+}
+
+impl ShelleyParams {
+    pub fn min_fee(&self, tx_bytes: u32) -> u64 {
+        (tx_bytes as u64 * self.protocol_params.minfee_a as u64)
+            + (self.protocol_params.minfee_b as u64)
+    }
 }
 
 #[serde_as]

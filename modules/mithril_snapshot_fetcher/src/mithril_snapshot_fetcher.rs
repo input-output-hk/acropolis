@@ -330,6 +330,7 @@ impl MithrilSnapshotFetcher {
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
+                            // Consensus will set the Validate bit if wanted
                             intent: BlockIntent::Apply,
                             slot,
                             number,

@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 use acropolis_common::protocol_params::{Nonce, Nonces};
 use acropolis_common::{BlockHash, Point};
 use serde::{Deserialize, Deserializer};

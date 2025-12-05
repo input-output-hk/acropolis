@@ -448,6 +448,15 @@ impl StakeAddressMap {
         }
     }
 
+    /// Remove all delegations to a given SPO
+    pub fn remove_all_delegations_to(&mut self, spo: &PoolId) {
+        for sas in self.inner.values_mut() {
+            if sas.delegated_spo.as_ref() == Some(spo) {
+                sas.delegated_spo = None;
+            }
+        }
+    }
+
     /// Record a drep delegation
     pub fn record_drep_delegation(
         &mut self,
@@ -652,6 +661,26 @@ mod tests {
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_spo,
                 Some(SPO_HASH)
+            );
+        }
+
+        #[test]
+        fn test_spo_delegation_and_retirement() {
+            let mut stake_addresses = StakeAddressMap::new();
+            let stake_address = create_stake_address(STAKE_KEY_HASH);
+
+            stake_addresses.register_stake_address(&stake_address);
+            assert!(stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
+            assert_eq!(
+                stake_addresses.get(&stake_address).unwrap().delegated_spo,
+                Some(SPO_HASH)
+            );
+
+            // Retire the SPO
+            stake_addresses.remove_all_delegations_to(&SPO_HASH);
+            assert_eq!(
+                stake_addresses.get(&stake_address).unwrap().delegated_spo,
+                None
             );
         }
 

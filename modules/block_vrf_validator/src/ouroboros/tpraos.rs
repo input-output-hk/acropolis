@@ -207,7 +207,7 @@ mod tests {
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
-            intent: BlockIntent::Apply,
+            intent: BlockIntent::Validate,
             slot: 4492800,
             hash: BlockHash::try_from(
                 hex::decode("aa83acbf5904c0edfe4d79b3689d3d00fcfc553cf360fd2229b98d464c28e9de")

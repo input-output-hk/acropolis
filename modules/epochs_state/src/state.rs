@@ -1,5 +1,6 @@
 //! Acropolis epochs_state: state storage
 
+use acropolis_common::messages::EpochBootstrapMessage;
 use acropolis_common::{
     crypto::keyhash_224,
     genesis_values::GenesisValues,
@@ -84,6 +85,35 @@ impl State {
             nonces: None,
             praos_params: None,
         }
+    }
+
+    /// Bootstrap state from snapshot data
+    /// This initializes the epoch state with block production data from a snapshot
+    pub fn bootstrap(&mut self, epoch_data: &EpochBootstrapMessage) {
+        info!(
+            "Bootstrapping state from snapshot for epoch {}",
+            epoch_data.epoch
+        );
+
+        self.epoch = epoch_data.epoch;
+        self.epoch_start_time = epoch_data.epoch_start_time;
+        self.first_block_time = epoch_data.first_block_time;
+        self.first_block_height = epoch_data.first_block_height;
+        self.last_block_time = epoch_data.last_block_time;
+        self.last_block_height = epoch_data.last_block_height;
+        self.epoch_blocks = epoch_data.total_blocks;
+        self.epoch_txs = epoch_data.total_txs;
+        self.epoch_outputs = epoch_data.total_outputs;
+        self.epoch_fees = epoch_data.total_fees;
+        self.blocks_minted = epoch_data.spo_blocks.iter().map(|(k, v)| (*k, *v as usize)).collect();
+
+        self.nonces = Some(epoch_data.nonces.clone());
+        self.praos_params = epoch_data.praos_params.clone();
+
+        info!(
+            "Bootstrapped epoch state: epoch={}, blocks={}",
+            self.epoch, self.epoch_blocks,
+        );
     }
 
     /// Handle protocol parameters updates

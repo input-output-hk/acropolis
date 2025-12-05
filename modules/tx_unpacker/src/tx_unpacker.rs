@@ -1,7 +1,5 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
-
-use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
@@ -22,6 +20,11 @@ use tracing::{debug, error, info, info_span, Instrument};
 
 mod utxo_registry;
 use crate::utxo_registry::UTxORegistry;
+
+#[cfg(test)]
+mod test_utils;
+#[cfg(test)]
+mod validations;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.utxos";
@@ -222,14 +225,14 @@ impl TxUnpacker {
                                                 ) {
                                                     Ok(utxo_id) => {
                                                         match output.address() {
-                                                            Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
+                                                            Ok(pallas_address) => match acropolis_codec::map_address(&pallas_address) {
                                                                 Ok(address) => {
                                                                     tx_utxo_deltas.outputs.push(TxOutput {
                                                                         utxo_identifier: utxo_id,
                                                                         address,
-                                                                        value: map_parameters::map_value(&output.value()),
-                                                                        datum: map_parameters::map_datum(&output.datum()),
-                                                                        reference_script: map_parameters::map_reference_script(&output.script_ref())
+                                                                        value: acropolis_codec::map_value(&output.value()),
+                                                                        datum: acropolis_codec::map_datum(&output.datum()),
+                                                                        reference_script: acropolis_codec::map_reference_script(&output.script_ref())
                                                                     });
 
                                                                     // catch all output lovelaces
@@ -253,7 +256,7 @@ impl TxUnpacker {
 
                                             // Mint deltas
                                             for policy_group in tx.mints().iter() {
-                                                if let Some((policy_id, deltas)) = map_parameters::map_mint_burn(policy_group) {
+                                                if let Some((policy_id, deltas)) = acropolis_codec::map_mint_burn(policy_group) {
                                                     tx_deltas.push((policy_id, deltas));
                                                 }
                                             }
@@ -277,7 +280,7 @@ impl TxUnpacker {
 
                                         if publish_certificates_topic.is_some() {
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
+                                                match acropolis_codec::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },
@@ -314,7 +317,7 @@ impl TxUnpacker {
                                                                 &mut alonzo_babbage_update_proposals,
                                                                 &alonzo_update.proposed_protocol_parameter_updates,
                                                                 alonzo_update.epoch,
-                                                                map_parameters::map_alonzo_protocol_param_update
+                                                                acropolis_codec::map_alonzo_protocol_param_update
                                                             );
                                                         }
                                                     }
@@ -328,7 +331,7 @@ impl TxUnpacker {
                                                                 &mut alonzo_babbage_update_proposals,
                                                                 &babbage_update.proposed_protocol_parameter_updates,
                                                                 babbage_update.epoch,
-                                                                map_parameters::map_babbage_protocol_param_update
+                                                                acropolis_codec::map_babbage_protocol_param_update
                                                             );
                                                         }
                                                     }
@@ -353,7 +356,7 @@ impl TxUnpacker {
                                                 let mut proc_id = GovActionId { transaction_id: tx_hash, action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
-                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
+                                                        .and_then (|proc_id| acropolis_codec::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
                                                     {
                                                         Ok(g) => proposal_procedures.push(g),
                                                         Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
@@ -363,7 +366,7 @@ impl TxUnpacker {
 
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
-                                                match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
+                                                match acropolis_codec::map_all_governance_voting_procedures(pallas_vp) {
                                                     Ok(vp) => voting_procedures.push((tx_hash, vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }

@@ -26,7 +26,6 @@ async-compression = { version = "0.4.32", features = ["tokio", "gzip"] }
 reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3.31"
 tokio-util = "0.7.17"
-hex = "0.4.3"
 
 [dev-dependencies]
 wiremock = "0.6.5"

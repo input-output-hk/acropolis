@@ -10,9 +10,107 @@ use thiserror::Error;
 use crate::{
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber, 
-    CommitteeCredential, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, 
-    ProposalProcedure, Slot, StakeAddress, Voter, VrfKeyHash,
+    Address, Era, CommitteeCredential, GenesisKeyhash, GovActionId, 
+    Lovelace, NetworkId, PoolId, ProposalProcedure, Slot, StakeAddress, 
+    TxOutRef, Value, Voter, VrfKeyHash,
 };
+
+/// Transaction Validation Error
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum TransactionValidationError {
+    /// **Cause**: Raw Transaction CBOR is invalid
+    #[error("CBOR Decoding error: {0}")]
+    CborDecodeError(String),
+
+    /// **Cause**: Transaction is not in correct form.
+    #[error("Malformed Transaction: era={era}, reason={reason}")]
+    MalformedTransaction { era: Era, reason: String },
+
+    /// **Cause**: UTxO rules failure
+    #[error("{0}")]
+    UTxOValidationError(#[from] UTxOValidationError),
+
+    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    #[error("{0}")]
+    Other(String),
+}
+
+/// UTxO rules failure
+/// Shelley Era Errors:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
+///
+/// Allegra Era Errors:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum UTxOValidationError {
+    /// ------------ Shelley Era Errors ------------
+    /// **Cause:** The UTXO has expired
+    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
+    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+
+    /// **Cause:** The input set is empty. (genesis transactions are exceptions)
+    #[error("Input Set Empty UTXO")]
+    InputSetEmptyUTxO,
+
+    /// **Cause:** The fee is too small.
+    #[error("Fee is too small: supplied={supplied}, required={required}")]
+    FeeTooSmallUTxO {
+        supplied: Lovelace,
+        required: Lovelace,
+    },
+
+    /// **Cause:** Some of transaction inputs are not in current UTxOs set.
+    #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
+    BadInputsUTxO {
+        bad_input: TxOutRef,
+        bad_input_index: usize,
+    },
+
+    /// **Cause:** Some of transaction outputs are on a different network than the expected one.
+    #[error(
+        "Wrong network: expected={expected}, wrong_address={}, output_index={output_index}", 
+        wrong_address.to_string().unwrap_or("Invalid address".to_string()), 
+    )]
+    WrongNetwork {
+        expected: NetworkId,
+        wrong_address: Address,
+        output_index: usize,
+    },
+
+    /// **Cause:** Some of withdrawal accounts are on a different network than the expected one.
+    #[error(
+        "Wrong network withdrawal: expected={expected}, wrong_account={}, withdrawal_index={withdrawal_index}",
+        wrong_account.to_string().unwrap_or("Invalid stake address".to_string()),
+    )]
+    WrongNetworkWithdrawal {
+        expected: NetworkId,
+        wrong_account: StakeAddress,
+        withdrawal_index: usize,
+    },
+
+    /// **Cause:** The value of the UTXO is not conserved.
+    /// Consumed = inputs + withdrawals + refunds, Produced = outputs + fees + deposits
+    #[error("Value not conserved: consumed={consumed:?}, produced={produced:?}]")]
+    ValueNotConservedUTxO { consumed: Value, produced: Value },
+
+    /// **Cause:** Some of the outputs don't have minimum required lovelace
+    #[error(
+        "Output too small UTxO: output_index={output_index}, lovelace={lovelace}, required_lovelace={required_lovelace}"
+    )]
+    OutputTooSmallUTxO {
+        output_index: usize,
+        lovelace: Lovelace,
+        required_lovelace: Lovelace,
+    },
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** Malformed UTxO
+    #[error("Malformed UTxO: era={era}, reason={reason}")]
+    MalformedUTxO { era: Era, reason: String },
+}
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -28,6 +126,18 @@ pub enum ValidationError {
 
     #[error("Governance failure: {0}")]
     BadGovernance(#[from] GovernanceValidationError),
+
+    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
+    BadTransaction {
+        tx_index: u16,
+        error: TransactionValidationError,
+    },
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+
+    #[error("Malformed transaction")]
+    MalformedTransaction(u16, String),
 
     #[error("Doubly spent UTXO: {0}")]
     DoubleSpendUTXO(String),

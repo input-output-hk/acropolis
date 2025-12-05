@@ -2,6 +2,7 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
     ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
@@ -10,7 +11,9 @@ use acropolis_common::snapshot::{
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
+use tracing::info;
 
+use acropolis_common::EpochBootstrapData;
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
@@ -159,6 +162,18 @@ impl ProposalCallback for CountingCallbacks {
     }
 }
 
+impl EpochCallback for CountingCallbacks {
+    fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
+        info!(
+            "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
+            data.epoch,
+            data.total_blocks_current,
+            data.total_blocks_previous
+        );
+        Ok(())
+    }
+}
+
 impl SnapshotCallbacks for CountingCallbacks {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
         eprintln!("Snapshot Metadata:");
@@ -228,7 +243,7 @@ impl SnapshotCallbacks for CountingCallbacks {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id[..16],
+                    &production.pool_id,
                     production.block_count,
                     production.epoch
                 );
@@ -249,7 +264,7 @@ impl SnapshotCallbacks for CountingCallbacks {
                 eprintln!(
                     "    [{}] Pool {} produced {} blocks (epoch {})",
                     i + 1,
-                    &production.pool_id[..16],
+                    &production.pool_id,
                     production.block_count,
                     production.epoch
                 );

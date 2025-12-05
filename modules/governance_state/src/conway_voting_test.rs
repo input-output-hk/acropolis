@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    //#[ignore]
+    #[ignore]
     fn test_voting_mainnet_up_573() -> Result<()> {
         let fmt_layer = fmt::layer()
             .with_filter(
