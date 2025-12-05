@@ -44,3 +44,11 @@ That is, SPOs, Dreps GovernanceOutcomes and Parameters are all epoch-based chann
 Parameters are published in the beginning of the corresponding epoch, with its first
 block; SPO, Drep, GovOutcomes publish info about previous epoch at the first block of next
 epoch.
+
+Validation
+----------
+
+If validation is requested (by specifying `Intent` field in `BlockInfo`), the response
+is forwarded to `cardano.validation.governance` topic by default
+(or any other topic, specified in `validation-outcome-topic` parameter)
+

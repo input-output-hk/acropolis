@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-
 use acropolis_common::{
     messages::{SPOStakeDistributionMessage, SPOStateMessage},
     PoolId, VrfKeyHash,
 };
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 /// Epoch data for block vrf validation
 #[derive(Debug, Default)]
@@ -15,6 +15,16 @@ pub struct Snapshot {
     pub active_stakes: HashMap<PoolId, u64>,
 
     pub total_active_stakes: u64,
+}
+
+impl Display for Snapshot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "total_active: {}, active stakes: {:?}",
+            self.total_active_stakes, self.active_stakes
+        )
+    }
 }
 
 impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {

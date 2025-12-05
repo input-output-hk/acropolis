@@ -70,6 +70,7 @@ impl State {
         spdd_msg: &SPOStakeDistributionMessage,
     ) {
         let new_snapshot = Snapshot::from((spo_state_msg, spdd_msg));
+        tracing::info!("new_snapshot: {new_snapshot}");
         self.epoch_snapshots.push(new_snapshot);
     }
 
