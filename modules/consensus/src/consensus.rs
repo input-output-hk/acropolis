@@ -1,7 +1,11 @@
 //! Acropolis consensus module for Caryatid
 //! Maintains a favoured chain based on offered options from multiple sources
 
-use acropolis_common::{messages::{CardanoMessage, Message, StateTransitionMessage}, validation::ValidationStatus, BlockIntent};
+use acropolis_common::{
+    messages::{CardanoMessage, Message, StateTransitionMessage},
+    validation::ValidationStatus,
+    BlockIntent,
+};
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
 use config::Config;
@@ -70,8 +74,7 @@ impl Consensus {
                     Message::Cardano((raw_blk_info, ba @ CardanoMessage::BlockAvailable(_))) => {
                         let block_info = if do_validation {
                             raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                        }
-                        else {
+                        } else {
                             raw_blk_info.clone()
                         };
                         let block = (block_info.clone(), ba.clone());

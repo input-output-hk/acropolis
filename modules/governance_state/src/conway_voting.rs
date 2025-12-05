@@ -1,5 +1,7 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::protocol_params::ConwayParams;
+use acropolis_common::utils::ValidationOutcomes;
+use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
     AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
@@ -13,8 +15,6 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::ops::Range;
 use tracing::{debug, error, info};
-use acropolis_common::utils::ValidationOutcomes;
-use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionStatus {
@@ -140,16 +140,17 @@ impl ConwayVoting {
                 None => {
                     outcomes.push(ValidationError::BadGovernance(
                         GovernanceValidationError::GovActionsDoNotExist {
-                            action_id: vec![action_id.clone()]
-                        }
+                            action_id: vec![action_id.clone()],
+                        },
                     ));
                 }
 
                 Some(vs) if !vs.is_active(current_epoch) => {
                     outcomes.push(ValidationError::BadGovernance(
-                        GovernanceValidationError::VotingOnExpiredGovAction(vec![
-                            (voter.clone(), action_id.clone()),
-                        ]),
+                        GovernanceValidationError::VotingOnExpiredGovAction(vec![(
+                            voter.clone(),
+                            action_id.clone(),
+                        )]),
                     ));
                 }
 
@@ -160,10 +161,14 @@ impl ConwayVoting {
                         // Re-voting is allowed; new vote must be treated as the proper one,
                         // older is to be discarded.
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!("Governance vote by {} for {} already registered! \
+                            debug!(
+                                "Governance vote by {} for {} already registered! \
                                 New: {:?}, old: {:?} from {}",
-                                voter, action_id, procedure,
-                                prev_vote, prev_trans.encode_hex::<String>()
+                                voter,
+                                action_id,
+                                procedure,
+                                prev_vote,
+                                prev_trans.encode_hex::<String>()
                             );
                         }
                     }

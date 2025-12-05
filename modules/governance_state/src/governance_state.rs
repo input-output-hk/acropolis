@@ -3,10 +3,11 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
+    declare_cardano_reader,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage,
-        Message, ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
+        StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -14,7 +15,7 @@ use acropolis_common::{
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
     utils::ValidationOutcomes,
-    declare_cardano_reader, BlockInfo,
+    BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -40,7 +41,7 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str,&str) =
+const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
@@ -89,9 +90,17 @@ impl GovernanceStateConfig {
 }
 
 impl GovernanceState {
-    declare_cardano_reader!(read_governance, GovernanceProcedures, GovernanceProceduresMessage);
+    declare_cardano_reader!(
+        read_governance,
+        GovernanceProcedures,
+        GovernanceProceduresMessage
+    );
     declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
-    declare_cardano_reader!(read_drep, DRepStakeDistribution, DRepStakeDistributionMessage);
+    declare_cardano_reader!(
+        read_drep,
+        DRepStakeDistribution,
+        DRepStakeDistributionMessage
+    );
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
     async fn run(

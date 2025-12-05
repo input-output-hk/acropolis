@@ -9,9 +9,9 @@ use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
+use std::fmt::Formatter;
 use std::ops::Deref;
 use std::{collections::HashMap, fmt::Display};
-use std::fmt::Formatter;
 
 #[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParams {
@@ -267,8 +267,10 @@ impl ProtocolVersion {
         Self { major, minor }
     }
 
-    pub fn conway() -> Self { Self { major: 9, minor: 0 } }
-    
+    pub fn conway() -> Self {
+        Self { major: 9, minor: 0 }
+    }
+
     pub fn is_chang(&self) -> Result<bool> {
         if self.major == 9 {
             if self.minor != 0 {

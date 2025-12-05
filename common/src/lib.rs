@@ -27,8 +27,8 @@ pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
 pub mod upstream_cache;
-pub mod validation;
 pub mod utils;
+pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;

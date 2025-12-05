@@ -9,10 +9,9 @@ use thiserror::Error;
 
 use crate::{
     protocol_params::{Nonce, ProtocolVersion},
-    rational_number::RationalNumber, 
-    Address, Era, CommitteeCredential, GenesisKeyhash, GovActionId, 
-    Lovelace, NetworkId, PoolId, ProposalProcedure, Slot, StakeAddress, 
-    TxOutRef, Value, Voter, VrfKeyHash,
+    rational_number::RationalNumber,
+    Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId,
+    ProposalProcedure, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash,
 };
 
 /// Transaction Validation Error
@@ -474,7 +473,7 @@ pub enum MismatchRelation {
     RelGt,
     RelLtEq,
     RelGtEq,
-    RelSubset
+    RelSubset,
 }
 
 impl Display for MismatchRelation {
@@ -485,7 +484,7 @@ impl Display for MismatchRelation {
             MismatchRelation::RelGt => ">",
             MismatchRelation::RelLtEq => "<=",
             MismatchRelation::RelGtEq => ">=",
-            MismatchRelation::RelSubset => " in "
+            MismatchRelation::RelSubset => " in ",
         };
         write!(f, "{}", str)
     }
@@ -499,7 +498,7 @@ pub enum Mismatch<T: Debug + Display> {
     Expected(T, MismatchRelation),
 }
 
-impl <T: Debug + Display> Display for Mismatch<T> {
+impl<T: Debug + Display> Display for Mismatch<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Supplied(val, relation) => write!(f, "{relation} {val}"),
@@ -514,7 +513,7 @@ impl <T: Debug + Display> Display for Mismatch<T> {
 pub enum GovernanceValidationError {
     #[error("Governance action from protocol {0} is not allowed in current protocol version")]
     WrongProtocolForGovernance(ProtocolVersion),
-    
+
     /// An update was proposed by a key hash that is not one of the genesis keys.
     /// `mismatchSupplied` ~ key hashes which were a part of the update.
     /// `mismatchExpected` ~ key hashes of the genesis keys.
@@ -544,10 +543,16 @@ pub enum GovernanceValidationError {
     MalformedConwayProposal { action: ProposalProcedure }, // TODO: add parameter (GovAction era)
 
     #[error("Proposal procedure network id mismatch: {reward_account:?} and {network:?}")]
-    ProposalProcedureNetworkIdMismatch { reward_account: StakeAddress, network: NetworkId },
+    ProposalProcedureNetworkIdMismatch {
+        reward_account: StakeAddress,
+        network: NetworkId,
+    },
 
     #[error("Treasury withdrawals network id mismatch: {reward_accounts:?} and {network:?}")]
-    TreasuryWithdrawalsNetworkIdMismatch { reward_accounts: Vec<StakeAddress>, network: NetworkId },
+    TreasuryWithdrawalsNetworkIdMismatch {
+        reward_accounts: Vec<StakeAddress>,
+        network: NetworkId,
+    },
 
     #[error("Proposal deposit mismatch: {0}")]
     ProposalDepositIncorrect(Mismatch<Lovelace>),
@@ -567,31 +572,30 @@ pub enum GovernanceValidationError {
     ExpirationEpochTooSmall(Vec<(CommitteeCredential, u64)>),
 
     #[error("InvalidPrevGovActionId: {0}")]
-    InvalidPrevGovActionId (GovActionId),
+    InvalidPrevGovActionId(GovActionId),
 
     #[error("Voting on expired governance action {0:?}")]
-    VotingOnExpiredGovAction (Vec<(Voter, GovActionId)>)
-/*
-  | ProposalCantFollow
-      -- | The PrevGovActionId of the HardForkInitiation that fails
-      (StrictMaybe (GovPurposeId 'HardForkPurpose era))
-      -- | Its protocol version and the protocal version of the previous gov-action pointed to by the proposal
-      (Mismatch 'RelGT ProtVer)
-  | InvalidPolicyHash
-      -- | The policy script hash in the proposal
-      (StrictMaybe ScriptHash)
-      -- | The policy script hash of the current constitution
-      (StrictMaybe ScriptHash)
-  | DisallowedProposalDuringBootstrap (ProposalProcedure era)
-  | DisallowedVotesDuringBootstrap
-      (NonEmpty (Voter, GovActionId))
-  | -- | Predicate failure for votes by entities that are not present in the ledger state
-    VotersDoNotExist (NonEmpty Voter)
-  | -- | Treasury withdrawals that sum up to zero are not allowed
-    ZeroTreasuryWithdrawals (GovAction era)
-  | -- | Proposals that have an invalid reward account for returns of the deposit
-    ProposalReturnAccountDoesNotExist RewardAccount
-  | -- | Treasury withdrawal proposals to an invalid reward account
-    TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
-*/
+    VotingOnExpiredGovAction(Vec<(Voter, GovActionId)>), /*
+                                                           | ProposalCantFollow
+                                                               -- | The PrevGovActionId of the HardForkInitiation that fails
+                                                               (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+                                                               -- | Its protocol version and the protocal version of the previous gov-action pointed to by the proposal
+                                                               (Mismatch 'RelGT ProtVer)
+                                                           | InvalidPolicyHash
+                                                               -- | The policy script hash in the proposal
+                                                               (StrictMaybe ScriptHash)
+                                                               -- | The policy script hash of the current constitution
+                                                               (StrictMaybe ScriptHash)
+                                                           | DisallowedProposalDuringBootstrap (ProposalProcedure era)
+                                                           | DisallowedVotesDuringBootstrap
+                                                               (NonEmpty (Voter, GovActionId))
+                                                           | -- | Predicate failure for votes by entities that are not present in the ledger state
+                                                             VotersDoNotExist (NonEmpty Voter)
+                                                           | -- | Treasury withdrawals that sum up to zero are not allowed
+                                                             ZeroTreasuryWithdrawals (GovAction era)
+                                                           | -- | Proposals that have an invalid reward account for returns of the deposit
+                                                             ProposalReturnAccountDoesNotExist RewardAccount
+                                                           | -- | Treasury withdrawal proposals to an invalid reward account
+                                                             TreasuryWithdrawalReturnAccountsDoNotExist (NonEmpty RewardAccount)
+                                                         */
 }

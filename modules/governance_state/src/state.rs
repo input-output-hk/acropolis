@@ -1,5 +1,9 @@
 //! Acropolis Governance State: State storage
 
+use crate::{
+    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting, ValidationOutcomes,
+    VotingRegistrationState,
+};
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
     messages::{
@@ -16,10 +20,6 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
-use crate::{
-    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
-    ValidationOutcomes, VotingRegistrationState
-};
 
 pub struct State {
     publisher: RollbackAwarePublisher<Message>,
@@ -58,7 +58,7 @@ impl State {
             spo_stake: HashMap::new(),
         }
     }
-    
+
     /// Update current fields to new epoch values. The function should be called
     /// after all block processing is done.
     pub fn advance_epoch(&mut self, epoch_blk: &BlockInfo) -> Result<()> {
@@ -128,33 +128,32 @@ impl State {
                     .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"))?;
             }
 
-            return Ok(ValidationOutcomes::new())
+            return Ok(ValidationOutcomes::new());
         } else {
             // Conway governance
             let mut outcomes = ValidationOutcomes::new();
             for pproc in &governance_message.proposal_procedures {
-                 outcomes.merge(&mut self
-                     .conway_voting
-                     .insert_proposal_procedure(block.epoch, pproc)
-                     .map_err(|e| anyhow!("Error handling Conway governance_message: '{e}'"))?
-                 );
+                outcomes.merge(
+                    &mut self
+                        .conway_voting
+                        .insert_proposal_procedure(block.epoch, pproc)
+                        .map_err(|e| anyhow!("Error handling Conway governance_message: '{e}'"))?,
+                );
             }
 
             for (trans, vproc) in &governance_message.voting_procedures {
                 for (voter, voter_votes) in vproc.votes.iter() {
-                    outcomes.merge(&mut self
-                        .conway_voting
-                        .insert_voting_procedure(
-                            block.epoch,
-                            voter,
-                            trans,
-                            voter_votes,
-                        )
-                        .map_err(|e| anyhow!(
-                            "Error handling Conway voting block {}, trans {} '{e}'",
-                            block.number,
-                            trans.encode_hex::<String>(),
-                        ))?
+                    outcomes.merge(
+                        &mut self
+                            .conway_voting
+                            .insert_voting_procedure(block.epoch, voter, trans, voter_votes)
+                            .map_err(|e| {
+                                anyhow!(
+                                    "Error handling Conway voting block {}, trans {} '{e}'",
+                                    block.number,
+                                    trans.encode_hex::<String>(),
+                                )
+                            })?,
                     );
                 }
             }

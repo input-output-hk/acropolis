@@ -1,6 +1,6 @@
 use acropolis_common::{
     AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash,
-    ProtocolParamUpdate
+    ProtocolParamUpdate,
 };
 use anyhow::{bail, Result};
 use std::collections::{HashMap, HashSet};

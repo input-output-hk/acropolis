@@ -1,13 +1,14 @@
-use anyhow::bail;
-use std::sync::Arc;
-use caryatid_sdk::Context;
-use tracing::error;
-use crate::BlockInfo;
 use crate::messages::CardanoMessage::BlockValidation;
 use crate::messages::Message;
 use crate::validation::{ValidationError, ValidationStatus};
+use crate::BlockInfo;
+use anyhow::bail;
+use caryatid_sdk::Context;
+use std::sync::Arc;
+use tracing::error;
 
-#[macro_export] macro_rules! declare_cardano_reader {
+#[macro_export]
+macro_rules! declare_cardano_reader {
     ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
         async fn $name(s: &mut Box<dyn Subscription<Message>>) -> Result<(BlockInfo, $msg_type)> {
             info!("Waiting in topic {}", stringify!($msg_constructor));
@@ -16,7 +17,8 @@ use crate::validation::{ValidationError, ValidationStatus};
                     Ok((blk.clone(), body.clone()))
                 }
                 msg => Err(anyhow!(
-                    "Unexpected message {msg:?} for {} topic", stringify!($msg_constructor)
+                    "Unexpected message {msg:?} for {} topic",
+                    stringify!($msg_constructor)
                 )),
             }
         }
@@ -29,7 +31,9 @@ pub struct ValidationOutcomes {
 
 impl ValidationOutcomes {
     pub fn new() -> Self {
-        Self { outcomes: Vec::new() }
+        Self {
+            outcomes: Vec::new(),
+        }
     }
 
     pub fn merge(&mut self, with: &mut ValidationOutcomes) {
@@ -54,19 +58,18 @@ impl ValidationOutcomes {
             let status = if let Some(result) = self.outcomes.get(0) {
                 // TODO: add multiple responses / decide that they're not necessary
                 ValidationStatus::NoGo(result.clone())
-            }
-            else {
+            } else {
                 ValidationStatus::Go
             };
 
-            let outcome_msg = Arc::new(
-                Message::Cardano((block.clone(), BlockValidation(status)))
-            );
+            let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
-        }
-        else if !self.outcomes.is_empty() {
-            error!("Error in validation, block {block:?}: outcomes {:?}", self.outcomes);
+        } else if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
         }
         self.outcomes.clear();
         Ok(())
@@ -78,9 +81,7 @@ impl ValidationOutcomes {
             return Ok(());
         }
 
-        let res = self.outcomes.iter().map(
-            |e| format!("{}; ", e)
-        ).collect::<String>();
+        let res = self.outcomes.iter().map(|e| format!("{}; ", e)).collect::<String>();
 
         bail!("Validation failed: {}", res)
     }
