@@ -47,24 +47,30 @@ async fn main() -> Result<()> {
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
 
-    // watch channel to send latest state to consumer on index change
-    /*
-    let (sender, receiver) = watch::channel(FjallPoolCostState {
+    let (sender_1, receiver_1) = watch::channel(InMemoryPoolCostState {
         pools: BTreeMap::new(),
     });
-    */
-
-    let (sender, receiver) = watch::channel(InMemoryPoolCostState {
+    let (sender_2, receiver_2) = watch::channel(FjallPoolCostState {
         pools: BTreeMap::new(),
     });
 
     // Example receiver
     {
-        let mut rx = receiver.clone();
         tokio::spawn(async move {
-            while rx.changed().await.is_ok() {
-                let snapshot = rx.borrow().clone();
-                tracing::info!("New PoolCostIndex state: {:?}", snapshot.pools);
+            let mut r1 = receiver_1.clone();
+            let mut r2 = receiver_2.clone();
+
+            loop {
+                tokio::select! {
+                    _ = r1.changed() => {
+                        let state = r1.borrow_and_update().clone();
+                        tracing::info!("Index 1 updated: {:?}", state.pools);
+                    }
+                    _ = r2.changed() => {
+                        let state = r2.borrow_and_update().clone();
+                        tracing::info!("Index 2 updated: {:?}", state.pools);
+                    }
+                }
             }
         });
     }
@@ -75,23 +81,24 @@ async fn main() -> Result<()> {
         slot: 16588737,
     };
 
-    // Fjall backed example indexer
-    /*
-    let indexer = CustomIndexer::new(FjallCursorStore::new("fjall-cursor-store")?);
+    let indexer = Arc::new(CustomIndexer::new(FjallCursorStore::new(
+        "fjall-cursor-store",
+    )?));
+    process.register(indexer.clone());
     indexer
         .add_index(
-            FjallPoolCostIndex::new("fjall-pool-cost-index", sender)?,
+            InMemoryPoolCostIndex::new(sender_1),
+            shelley_start.clone(),
+            true,
+        )
+        .await?;
+    indexer
+        .add_index(
+            FjallPoolCostIndex::new("fjall-pool-cost-index", sender_2)?,
             shelley_start,
             false,
         )
-        .await;
-    */
-
-    // In memory example indexer
-
-    let indexer = Arc::new(CustomIndexer::new(InMemoryCursorStore::new()));
-    process.register(indexer.clone());
-    indexer.add_index(InMemoryPoolCostIndex::new(sender), shelley_start, false).await?;
+        .await?;
     process.run().await?;
 
     Ok(())

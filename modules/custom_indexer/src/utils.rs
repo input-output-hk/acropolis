@@ -17,9 +17,15 @@ pub async fn change_sync_point(
     context: Arc<Context<Message>>,
     topic: &String,
 ) -> Result<()> {
-    let msg = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+    let msg = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(
+        point.clone(),
+    )));
     context.publish(topic, Arc::new(msg)).await?;
-    info!("Publishing sync command on {}", topic);
+    info!(
+        "Publishing sync command on {} for slot {}",
+        topic,
+        point.slot()
+    );
 
     Ok(())
 }

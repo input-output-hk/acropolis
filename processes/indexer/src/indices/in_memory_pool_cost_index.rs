@@ -34,24 +34,21 @@ impl InMemoryPoolCostIndex {
 #[async_trait]
 impl ChainIndex for InMemoryPoolCostIndex {
     fn name(&self) -> String {
-        "pool-cost-index".into()
+        "fjall-pool-cost-index".into()
     }
 
     async fn handle_onchain_tx(&mut self, _info: &BlockInfo, tx: &MultiEraTx<'_>) -> Result<()> {
+        let mut changed = false;
         for cert in tx.certs().iter() {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
                     alonzo::Certificate::PoolRegistration { operator, cost, .. } => {
                         self.state.pools.insert(to_pool_id(operator), *cost);
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        changed = true;
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
                         self.state.pools.remove(&to_pool_id(operator));
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        changed = true;
                     }
 
                     _ => {}
@@ -59,20 +56,19 @@ impl ChainIndex for InMemoryPoolCostIndex {
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
                     conway::Certificate::PoolRegistration { operator, cost, .. } => {
                         self.state.pools.insert(to_pool_id(operator), *cost);
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        changed = true;
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
                         self.state.pools.remove(&to_pool_id(operator));
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        changed = true;
                     }
                     _ => {}
                 },
                 _ => {}
             }
+        }
+        if changed && self.sender.send(self.state.clone()).is_err() {
+            warn!("Pool cost state receiver dropped");
         }
         Ok(())
     }
