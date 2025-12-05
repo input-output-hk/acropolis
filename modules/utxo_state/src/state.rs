@@ -126,7 +126,7 @@ impl State {
     /// Look up a UTXO
     pub async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         match self.volatile_utxos.get(key) {
-            Some(key) => Ok(Some(key.clone())),
+            Some(utxo) => Ok(Some(utxo.clone())),
             None => Ok(self.immutable_utxos.lookup_utxo(key).await?),
         }
     }
