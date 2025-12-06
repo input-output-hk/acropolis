@@ -233,7 +233,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{Address, AddressDelta, UTxOIdentifier, Value};
+    use acropolis_common::{Address, AddressDelta, TxHash, UTxOIdentifier, Value};
     use tempfile::tempdir;
 
     fn dummy_address() -> Address {
@@ -284,7 +284,7 @@ mod tests {
         let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
-        let utxo = UTxOIdentifier::new(0, 0, 0);
+        let utxo = UTxOIdentifier::new(TxHash::default(), 0);
         let tx_id = TxIdentifier::new(0, 0);
         let deltas = vec![delta(&addr, tx_id, vec![], vec![utxo], 0, 1)];
 
@@ -295,7 +295,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         // Drain volatile to immutable
         state.volatile.epoch_start_block = 1;
@@ -305,7 +308,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         // Perisist immutable to disk
         state.immutable.persist_epoch(0, &state.config).await?;
@@ -314,7 +320,10 @@ mod tests {
         let utxos = state.get_address_utxos(&addr).await?;
         assert!(utxos.is_some());
         assert_eq!(utxos.as_ref().unwrap().len(), 1);
-        assert_eq!(utxos.as_ref().unwrap()[0], UTxOIdentifier::new(0, 0, 0));
+        assert_eq!(
+            utxos.as_ref().unwrap()[0],
+            UTxOIdentifier::new(TxHash::default(), 0)
+        );
 
         Ok(())
     }
@@ -326,7 +335,7 @@ mod tests {
         let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
-        let utxo = UTxOIdentifier::new(0, 0, 0);
+        let utxo = UTxOIdentifier::new(TxHash::default(), 0);
         let tx_id_create = TxIdentifier::new(0, 0);
         let tx_id_spend = TxIdentifier::new(1, 0);
 
@@ -377,8 +386,8 @@ mod tests {
         let mut state = setup_state_and_store().await?;
 
         let addr = dummy_address();
-        let utxo_old = UTxOIdentifier::new(0, 0, 0);
-        let utxo_new = UTxOIdentifier::new(0, 1, 0);
+        let utxo_old = UTxOIdentifier::new(TxHash::default(), 0);
+        let utxo_new = UTxOIdentifier::new(TxHash::default(), 1);
         let tx_id_create_old = TxIdentifier::new(0, 0);
         let tx_id_spend_old_create_new = TxIdentifier::new(1, 0);
 

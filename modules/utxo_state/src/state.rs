@@ -126,7 +126,7 @@ impl State {
     /// Look up a UTXO
     pub async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         match self.volatile_utxos.get(key) {
-            Some(key) => Ok(Some(key.clone())),
+            Some(utxo) => Ok(Some(utxo.clone())),
             None => Ok(self.immutable_utxos.lookup_utxo(key).await?),
         }
     }
@@ -205,12 +205,7 @@ impl State {
                 }
             }
             _ => {
-                error!(
-                    "UTXO output {} unknown in transaction {} of block {}",
-                    &input.output_index(),
-                    input.tx_index(),
-                    input.block_number()
-                );
+                error!("UTXO output {} unknown", &input);
             }
         }
 
@@ -244,12 +239,7 @@ impl State {
                 self.volatile_created.add_utxo(&key);
 
                 if self.volatile_utxos.insert(key, value).is_some() {
-                    error!(
-                        "Saw UTXO {}:{}:{} before",
-                        output.utxo_identifier.block_number(),
-                        output.utxo_identifier.tx_index(),
-                        output.utxo_identifier.output_index(),
-                    );
+                    error!("Saw UTXO {} before", output.utxo_identifier);
                 }
             }
             BlockStatus::Bootstrap | BlockStatus::Immutable => {
@@ -408,7 +398,7 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        ReferenceScript, TxUTxODeltas, Value,
+        ReferenceScript, TxHash, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -458,7 +448,7 @@ mod tests {
         let reference_script_bytes = vec![0xde, 0xad, 0xbe, 0xef];
 
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -532,7 +522,7 @@ mod tests {
     async fn observe_input_spends_utxo() {
         let mut state = new_state();
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -571,7 +561,7 @@ mod tests {
     async fn rollback_removes_future_created_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -612,7 +602,7 @@ mod tests {
 
         // Create the UTXO in block 10
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -662,7 +652,7 @@ mod tests {
     async fn prune_shifts_new_utxos_into_immutable() {
         let mut state = new_state();
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -710,7 +700,7 @@ mod tests {
     async fn prune_deletes_old_spent_utxos() {
         let mut state = new_state();
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,
@@ -829,7 +819,7 @@ mod tests {
         state.register_address_delta_observer(observer.clone());
 
         let output = TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: create_address(99),
             value: Value::new(
                 42,

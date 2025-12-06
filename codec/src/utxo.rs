@@ -63,14 +63,14 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
     Value::new(lovelace, assets)
 }
 
-pub fn map_transaction_inputs(inputs: &Vec<MultiEraInput>) -> Vec<TxOutRef> {
+pub fn map_transaction_inputs(inputs: &Vec<MultiEraInput>) -> Vec<UTxOIdentifier> {
     let mut parsed_inputs = Vec::new();
     for input in inputs {
         // MultiEraInput
         let oref = input.output_ref();
-        let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
+        let utxo = UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
-        parsed_inputs.push(tx_ref);
+        parsed_inputs.push(utxo);
     }
 
     parsed_inputs
@@ -102,13 +102,14 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
     }
 }
 
+/// Parse transaction inputs and outputs, and return the parsed inputs, outputs, total output lovelace, and errors
 pub fn map_transaction_inputs_outputs(
-    block_number: u32,
     tx_index: u16,
     tx: &MultiEraTx,
 ) -> (
-    Vec<TxOutRef>,
-    Vec<(TxOutRef, TxOutput)>,
+    Vec<UTxOIdentifier>,
+    Vec<TxOutput>,
+    u128,
     Vec<ValidationError>,
 ) {
     let mut parsed_inputs = Vec::new();
@@ -120,42 +121,36 @@ pub fn map_transaction_inputs_outputs(
             tx_index,
             format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
         ));
-        return (parsed_inputs, parsed_outputs, errors);
+        return (parsed_inputs, parsed_outputs, 0, errors);
     };
 
     let inputs = tx.consumes();
     let outputs = tx.produces();
 
     for input in inputs {
-        let tx_ref = TxOutRef::new(
+        let utxo = UTxOIdentifier::new(
             TxHash::from(**input.output_ref().hash()),
             input.output_ref().index() as u16,
         );
-        parsed_inputs.push(tx_ref);
+        parsed_inputs.push(utxo);
     }
 
+    let mut total_output = 0;
     for (index, output) in outputs {
-        let tx_out_ref = TxOutRef {
-            tx_hash,
-            output_index: index as u16,
-        };
-
-        let utxo_id = UTxOIdentifier::new(block_number, tx_index, tx_out_ref.output_index);
+        let utxo = UTxOIdentifier::new(tx_hash, index as u16);
 
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
                     // Add TxOutput to utxo_deltas
-                    parsed_outputs.push((
-                        tx_out_ref,
-                        TxOutput {
-                            utxo_identifier: utxo_id,
-                            address,
-                            value: map_value(&output.value()),
-                            datum: map_datum(&output.datum()),
-                            reference_script: map_reference_script(&output.script_ref()),
-                        },
-                    ));
+                    parsed_outputs.push(TxOutput {
+                        utxo_identifier: utxo,
+                        address,
+                        value: map_value(&output.value()),
+                        datum: map_datum(&output.datum()),
+                        reference_script: map_reference_script(&output.script_ref()),
+                    });
+                    total_output += output.value().coin() as u128;
                 }
                 Err(e) => {
                     errors.push(ValidationError::MalformedTransaction(
@@ -171,5 +166,5 @@ pub fn map_transaction_inputs_outputs(
         }
     }
 
-    (parsed_inputs, parsed_outputs, errors)
+    (parsed_inputs, parsed_outputs, total_output, errors)
 }

@@ -690,8 +690,8 @@ mod tests {
     };
     use acropolis_common::{
         Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName,
-        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxIdentifier, TxOutput,
-        TxUTxODeltas, UTxOIdentifier, Value,
+        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxIdentifier,
+        TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
     };
     use serde_cbor::Value as CborValue;
 
@@ -845,7 +845,7 @@ mod tests {
 
     fn make_output(policy_id: PolicyId, asset_name: AssetName, datum: Option<Vec<u8>>) -> TxOutput {
         TxOutput {
-            utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+            utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
             address: dummy_address(),
             value: Value {
                 lovelace: 0,
@@ -1263,7 +1263,7 @@ mod tests {
             StoreTransactions::None,
         );
 
-        let input = UTxOIdentifier::new(0, 0, 0);
+        let input = UTxOIdentifier::new(TxHash::default(), 0);
         let output = make_output(policy_id, name, None);
 
         let tx_deltas = TxUTxODeltas {
@@ -1428,7 +1428,7 @@ mod tests {
             tx_identifier,
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(0, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..output.clone()
             }],
         };
@@ -1436,7 +1436,7 @@ mod tests {
             tx_identifier,
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(0, 0, 1),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 1),
                 ..output
             }],
         };
@@ -1470,7 +1470,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(9, 0),
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(9, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..out1
             }],
         };
@@ -1478,7 +1478,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(10, 0),
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(10, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..out2
             }],
         };
@@ -1513,7 +1513,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(9, 0),
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(9, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..base_output.clone()
             }],
         };
@@ -1521,7 +1521,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(8, 0),
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(8, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..base_output.clone()
             }],
         };
@@ -1529,7 +1529,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(7, 0),
             inputs: Vec::new(),
             outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(7, 0, 0),
+                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
                 ..base_output
             }],
         };
