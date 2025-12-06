@@ -38,6 +38,22 @@ pub struct SPOState {
     pub retiring: BTreeMap<PoolId, u64>,
 }
 
+impl SPOState {
+    pub fn new() -> Self {
+        Self {
+            pools: BTreeMap::new(),
+            updates: BTreeMap::new(),
+            retiring: BTreeMap::new(),
+        }
+    }
+
+    pub fn extend(&mut self, extension: &Self) {
+        self.pools.extend(extension.pools.clone());
+        self.updates.extend(extension.updates.clone());
+        self.retiring.extend(extension.retiring.clone());
+    }
+}
+
 pub struct DRepState {}
 
 pub struct ProposalState {}
