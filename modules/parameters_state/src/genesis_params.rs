@@ -156,6 +156,7 @@ fn map_conway(genesis: &conway::GenesisFile) -> Result<ConwayParams> {
         d_rep_activity: genesis.d_rep_activity,
         min_fee_ref_script_cost_per_byte: RationalNumber::from(
             genesis.min_fee_ref_script_cost_per_byte,
+            1,
         ),
         plutus_v3_cost_model: CostModel::new(genesis.plutus_v3_cost_model.clone()),
         constitution: map_constitution(&genesis.constitution)?,

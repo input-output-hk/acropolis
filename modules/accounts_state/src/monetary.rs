@@ -92,7 +92,7 @@ fn calculate_monetary_expansion(
     reserves: Lovelace,
     eta: &BigDecimal,
 ) -> BigDecimal {
-    let monetary_expansion_factor = params.protocol_params.monetary_expansion;
+    let monetary_expansion_factor = params.protocol_params.monetary_expansion.clone();
     let monetary_expansion =
         (BigDecimal::from(reserves) * eta * BigDecimal::from(monetary_expansion_factor.numer())
             / BigDecimal::from(monetary_expansion_factor.denom()))

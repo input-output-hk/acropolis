@@ -1,16 +1,87 @@
 use anyhow::{anyhow, Result};
 use bigdecimal::BigDecimal;
+use minicbor::Decode;
+use num_rational::Ratio;
 use num_traits::ToPrimitive;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{DeserializeAs, SerializeAs};
+use std::fmt;
+use std::ops::Deref;
 use std::str::FromStr;
 
-pub type RationalNumber = num_rational::Ratio<u64>;
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RationalNumber(pub Ratio<u64>);
 
 pub fn rational_number_from_f32(f: f32) -> Result<RationalNumber> {
     RationalNumber::approximate_float_unsigned(f)
         .ok_or_else(|| anyhow!("Cannot convert {f} to Rational"))
+}
+
+impl RationalNumber {
+    pub const fn new(numerator: u64, denominator: u64) -> Self {
+        RationalNumber(Ratio::new_raw(numerator, denominator))
+    }
+    pub fn approximate_float_unsigned(f: f32) -> Option<Self> {
+        // Call the underlying Ratio function and map the result back to Self (RationalNumber)
+        Ratio::approximate_float_unsigned(f).map(RationalNumber)
+    }
+    pub fn from(numerator: u64, denominator: u64) -> Self {
+        RationalNumber(Ratio::new(numerator, denominator))
+    }
+    pub const ZERO: RationalNumber = Self::new(0, 1);
+    pub const ONE: RationalNumber = Self::new(1, 1);
+}
+
+// Implement Deref to automatically access Ratio's methods
+impl Deref for RationalNumber {
+    type Target = Ratio<u64>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromStr for RationalNumber {
+    // The associated error type must implement Debug
+    type Err = num_rational::ParseRatioError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Delegate the parsing logic to the underlying Ratio<u64> implementation
+        Ratio::from_str(s).map(RationalNumber)
+    }
+}
+
+impl fmt::Display for RationalNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Delegate the formatting task to the inner Ratio<u64> field (self.0)
+        write!(f, "{}", self.0)
+    }
+}
+
+// Implement the required minicbor::Decode
+impl<'a, C> Decode<'a, C> for RationalNumber {
+    fn decode(
+        d: &mut minicbor::Decoder<'a>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        // Handle optional CBOR tag 30 for rationals (used in snapshots)
+        if matches!(d.datatype()?, minicbor::data::Type::Tag) {
+            d.tag()?; // consume the tag
+        }
+
+        d.array()?;
+        let num: u64 = d.u64()?;
+        let den: u64 = d.u64()?;
+
+        if den == 0 {
+            return Err(minicbor::decode::Error::message(
+                "Denominator cannot be zero",
+            ));
+        }
+
+        Ok(RationalNumber(Ratio::new(num, den)))
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
@@ -112,7 +183,7 @@ impl SerializeAs<RationalNumber> for ChameleonFraction {
     where
         S: Serializer,
     {
-        let ch = ChameleonFraction::from_rational(*src);
+        let ch = ChameleonFraction::from_rational(src.clone());
         ch.serialize(serializer)
     }
 }

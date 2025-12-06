@@ -59,7 +59,7 @@ run:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG)
 
 fmt:
-	$(CARGO) fmt --all
+	$(CARGO) fmt --all -- --check
 
 clippy:
 	$(CARGO) clippy --workspace -- -D warnings
