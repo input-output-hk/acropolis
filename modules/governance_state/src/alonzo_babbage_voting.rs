@@ -165,6 +165,7 @@ mod tests {
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
+                tip_slot: None,
                 hash: BlockHash::default(),
             };
 

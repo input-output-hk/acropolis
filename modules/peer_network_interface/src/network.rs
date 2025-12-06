@@ -172,7 +172,8 @@ impl NetworkManager {
     // is full and this method is blocked on writing to it, the queue can never drain.
     fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) {
         match event {
-            PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header)) => {
+            PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header, tip)) => {
+                self.chain.handle_tip(peer, tip);
                 let slot = header.slot;
                 let hash = header.hash;
                 let request_body_from = self.chain.handle_roll_forward(peer, header);
@@ -181,10 +182,12 @@ impl NetworkManager {
                     self.request_block(slot, hash, request_body_from);
                 }
             }
-            PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point)) => {
+            PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
+                self.chain.handle_tip(peer, tip);
                 self.chain.handle_roll_backward(peer, point);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
+                self.chain.handle_tip(peer, tip.clone());
                 // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
                 // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
                 if let Some(peer) = self.peers.get(&peer) {
@@ -208,13 +211,12 @@ impl NetworkManager {
             return;
         };
         warn!("disconnected from {}", peer.conn.address);
-        let was_preferred = self.chain.preferred_upstream.is_some_and(|i| i == id);
-        if was_preferred {
+        self.chain.handle_disconnect(id);
+        if self.chain.preferred_upstream.is_none() {
             if let Some(new_preferred) = self.peers.keys().next().copied() {
                 self.set_preferred_upstream(new_preferred);
             } else {
                 warn!("no upstream peers!");
-                self.clear_preferred_upstream();
             }
         }
         for (requested_hash, requested_slot) in peer.reqs {
@@ -248,22 +250,19 @@ impl NetworkManager {
         self.chain.handle_new_preferred_upstream(id);
     }
 
-    fn clear_preferred_upstream(&mut self) {
-        self.chain.clear_preferred_upstream();
-    }
-
     async fn publish_events(&mut self) -> Result<()> {
         while let Some(event) = self.chain.next_unpublished_event() {
+            let tip = self.chain.preferred_upstream_tip();
             match event {
                 ChainEvent::RollForward { header, body } => {
-                    self.block_sink.announce_roll_forward(header, body).await?;
+                    self.block_sink.announce_roll_forward(header, body, tip).await?;
                     self.published_blocks += 1;
                     if self.published_blocks.is_multiple_of(100) {
                         info!("Published block {}", header.number);
                     }
                 }
                 ChainEvent::RollBackward { header } => {
-                    self.block_sink.announce_roll_backward(header).await?;
+                    self.block_sink.announce_roll_backward(header, tip).await?;
                 }
             }
             self.chain.handle_event_published();
