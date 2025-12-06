@@ -23,6 +23,8 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use crate::snapshot::streaming_snapshot::SnapshotsInfo;
+use crate::snapshot::AccountState;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -400,11 +402,49 @@ pub struct EpochBootstrapMessage {
     pub praos_params: Option<PraosParams>,
 }
 
+/// Pot balances from snapshot
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PotBalances {
+    /// Treasury balance
+    pub treasury: u64,
+    /// Reserves balance
+    pub reserves: u64,
+    /// Deposits balance
+    pub deposits: u64,
+}
+
+/// Accounts bootstrap message containing all data needed to bootstrap accounts state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountsBootstrapMessage {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
+
+    /// Pot balances (treasury, reserves, deposits)
+    pub pots: PotBalances,
+
+    /// Snapshot data for rewards calculation (Mark, Set, Go)
+    pub snapshots: Option<SnapshotsInfo>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
     EpochState(EpochBootstrapMessage),
+    AccountsState(AccountsBootstrapMessage),
 }
 
 // === Global message enum ===

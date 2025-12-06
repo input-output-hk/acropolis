@@ -8,9 +8,9 @@ use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
-        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
@@ -128,6 +128,60 @@ pub struct State {
 }
 
 impl State {
+    /// Bootstrap state from snapshot data
+    /// All data arrives pre-processed and ready to use directly
+    pub fn bootstrap(&mut self, bootstrap_msg: &AccountsBootstrapMessage) {
+        info!(
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            bootstrap_msg.epoch,
+            bootstrap_msg.accounts.len(),
+            bootstrap_msg.pools.len(),
+            bootstrap_msg.retiring_pools.len(),
+            bootstrap_msg.dreps.len()
+        );
+
+        // 1. Load stake addresses - data is already parsed
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        for account in &bootstrap_msg.accounts {
+            stake_addresses.insert(account.stake_address.clone(), account.address_state.clone());
+        }
+
+        drop(stake_addresses);
+        info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
+
+        // 2. Load pools - data is already in PoolRegistration format
+        for pool_reg in &bootstrap_msg.pools {
+            self.spos.insert(pool_reg.operator, pool_reg.clone());
+        }
+        info!("Loaded {} pools", self.spos.len());
+
+        // 3. Load retiring pools - list is already prepared
+        self.retiring_spos = bootstrap_msg.retiring_pools.clone();
+        info!("Loaded {} retiring pools", self.retiring_spos.len());
+
+        // 4. Load DReps - data is already in (DRepCredential, deposit) format
+        self.dreps = bootstrap_msg.dreps.clone();
+        info!("Loaded {} DReps", self.dreps.len());
+
+        // 5. Load pots - direct assignment
+        self.pots = Pots {
+            reserves: bootstrap_msg.pots.reserves,
+            treasury: bootstrap_msg.pots.treasury,
+            deposits: bootstrap_msg.pots.deposits,
+        };
+        info!(
+            "Loaded pots: reserves={}, treasury={}, deposits={}",
+            self.pots.reserves, self.pots.treasury, self.pots.deposits
+        );
+
+        // 6. Note about snapshots
+        if bootstrap_msg.snapshots.is_some() {
+            info!("Snapshot metadata available");
+        }
+
+        info!("Accounts state bootstrap complete");
+    }
+
     /// Get the stake address state for a give stake key
     pub fn get_stake_state(&self, stake_key: &StakeAddress) -> Option<StakeAddressState> {
         self.stake_addresses.lock().unwrap().get(stake_key)

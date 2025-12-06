@@ -1,19 +1,21 @@
+use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::{RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, PotBalances,
+        SnapshotMessage, SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, PoolInfo,
-        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback,
-        UtxoEntry,
+        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback,
+        SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
     BlockInfo, EpochBootstrapData,
 };
+use acropolis_common::{PoolId, PoolRegistration};
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
@@ -78,7 +80,7 @@ pub struct SnapshotPublisher {
     snapshot_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
@@ -98,7 +100,7 @@ impl SnapshotPublisher {
             snapshot_topic,
             metadata: None,
             utxo_count: 0,
-            pools: Vec::new(),
+            pools: SPOState::new(),
             accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
@@ -162,10 +164,30 @@ impl UtxoCallback for SnapshotPublisher {
 }
 
 impl PoolCallback for SnapshotPublisher {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
-        info!("Received {} pools", pools.len());
-        self.pools.extend(pools);
-        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
+        info!(
+            "Received pools (current: {}, future: {}, retiring: {})",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
+        self.pools.extend(&pools);
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::SPOState(pools),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // Spawn async publish task since this callback is synchronous
+        tokio::spawn(async move {
+            if let Err(e) = context.publish(&snapshot_topic, message).await {
+                tracing::error!("Failed to publish SPO bootstrap: {}", e);
+            }
+        });
+
         Ok(())
     }
 }
@@ -221,10 +243,12 @@ impl EpochCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        tokio::spawn(async move {
-            context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                tracing::error!("Failed to publish epoch bootstrap message: {}", e)
-            });
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish epoch bootstrap message: {}", e)
+                });
+            })
         });
 
         Ok(())
@@ -295,14 +319,77 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("Snapshot parsing completed");
         info!("Final statistics:");
         info!("  - UTXOs processed: {}", self.utxo_count);
-        info!("  - Pools: {}", self.pools.len());
+        info!(
+            "  - Pools: {} (future: {}, retiring: {})",
+            self.pools.pools.len(),
+            self.pools.updates.len(),
+            self.pools.retiring.len()
+        );
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
-        // We could send a Resolver reference from here for large data, i.e. the UTXO set,
-        // which could be a file reference. For a file reference, we'd extend the parser to
-        // give us a callback value with the offset into the file; and we'd make the streaming
-        // UTXO parser public and reusable, adding it to the resolver implementation.
+
+        // Now that we have all the data, publish the complete accounts bootstrap message
+        let metadata = self.metadata.as_ref();
+        let epoch = metadata.map(|m| m.epoch).unwrap_or(0);
+
+        let pots = metadata
+            .map(|m| PotBalances {
+                treasury: m.pot_balances.treasury,
+                reserves: m.pot_balances.reserves,
+                deposits: m.pot_balances.deposits,
+            })
+            .unwrap_or(PotBalances {
+                treasury: 0,
+                reserves: 0,
+                deposits: 0,
+            });
+
+        let snapshots = metadata.and_then(|m| m.snapshots.clone());
+
+        let pools: Vec<PoolRegistration> = self.pools.pools.values().cloned().collect();
+        let retiring_pools: Vec<PoolId> = self.pools.retiring.keys().cloned().collect();
+
+        let dreps = self
+            .dreps
+            .iter()
+            .map(|drep_info| (drep_info.drep_id.clone(), drep_info.deposit))
+            .collect::<Vec<_>>();
+
+        let accounts_bootstrap_message = AccountsBootstrapMessage {
+            epoch,
+            accounts: self.accounts.clone(),
+            pools,
+            retiring_pools,
+            dreps,
+            pots,
+            snapshots,
+        };
+
+        info!(
+            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            epoch,
+            accounts_bootstrap_message.accounts.len(),
+            accounts_bootstrap_message.pools.len(),
+            accounts_bootstrap_message.retiring_pools.len(),
+            accounts_bootstrap_message.dreps.len(),
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::AccountsState(accounts_bootstrap_message),
+        )));
+
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish accounts bootstrap message: {}", e)
+                });
+            })
+        });
+
         Ok(())
     }
 }
