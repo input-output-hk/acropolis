@@ -1784,7 +1784,7 @@ impl StreamingSnapshotParser {
 
     /// Parse PState to extract stake pools
     /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
-    fn parse_pstate(decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
+    pub fn parse_pstate(decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
         // Parse PState array
         let pstate_len = decoder
             .array()
