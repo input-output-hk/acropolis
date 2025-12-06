@@ -4,7 +4,7 @@ use acropolis_common::{
         CardanoMessage, Message, RawTxsMessage, SnapshotDumpMessage, SnapshotMessage,
         SnapshotStateMessage,
     },
-    BlockHash, BlockInfo, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
 };
 use anyhow::{Context as AnyhowContext, Result};
 use caryatid_sdk::{module, Context};
@@ -40,6 +40,7 @@ impl TestModule {
         let transaction_message = Message::Cardano((
             BlockInfo {
                 status: BlockStatus::Volatile,
+                intent: BlockIntent::Apply,
                 slot: 1,
                 number: 1,
                 hash: BlockHash::default(),
