@@ -4,9 +4,9 @@
 
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
-    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
-    ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
-    SnapshotsCallback, StakeCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, ProposalCallback,
+    RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, StakeCallback,
+    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 use anyhow::Result;
 use std::env;

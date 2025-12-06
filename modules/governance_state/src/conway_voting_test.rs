@@ -5,7 +5,7 @@ mod tests {
     use acropolis_common::{
         protocol_params::ProtocolParams, rational_number::RationalNumber,
         ConstitutionalCommitteeKeyHash, ConstitutionalCommitteeScriptHash, Credential,
-        DRepCredential, DRepScriptHash, DelegatedStake, DrepKeyHash, GovActionId, KeyHash,
+        DRepCredential, DRepKeyHash, DRepScriptHash, DelegatedStake, GovActionId, KeyHash,
         Lovelace, PoolId, ProposalProcedure, SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult,
         Voter, VotingProcedure,
     };
@@ -15,7 +15,7 @@ mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
         ops::Bound::Included,
-        str::FromStr,
+        str::FromStr,   
     };
 
     use tracing_subscriber::prelude::*;
@@ -58,7 +58,7 @@ mod tests {
         pub fn to_voter(&self) -> Result<Voter> {
             let key = self.1;
             match &self.0 {
-                0 => Ok(Voter::DRepKey(DrepKeyHash::from(key))),
+                0 => Ok(Voter::DRepKey(DRepKeyHash::from(key))),
                 1 => Ok(Voter::DRepScript(DRepScriptHash::from(key))),
                 2 => Ok(Voter::StakePoolKey(PoolId::from(key))),
                 3 => Ok(Voter::ConstitutionalCommitteeKey(
