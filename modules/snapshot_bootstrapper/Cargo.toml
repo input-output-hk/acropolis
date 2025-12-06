@@ -14,7 +14,7 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
-pallas-primitives = { workspace = true }
+pallas-traverse = { workspace = true }
 config = { workspace = true }
 minicbor = { version = "0.25.1", features = ["std", "half", "derive"] }
 tokio = { workspace = true }
