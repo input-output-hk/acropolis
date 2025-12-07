@@ -219,6 +219,7 @@ mod tests {
             epoch: 208,
             epoch_slot: 0,
             new_epoch: true,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -272,6 +273,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 36049,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -331,6 +333,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -390,6 +393,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -450,6 +454,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -519,6 +524,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
