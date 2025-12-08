@@ -36,6 +36,10 @@ use crate::{
 
 type IndexSenders = HashMap<String, mpsc::Sender<IndexCommand>>;
 type SharedSenders = Arc<Mutex<IndexSenders>>;
+type IndexResponse = (
+    String,
+    Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
+);
 
 struct IndexWrapper {
     index: Box<dyn ChainIndex>,
@@ -81,7 +85,7 @@ impl<CS: CursorStore> CustomIndexer<CS> {
         if force_restart || entry.halted {
             index.reset(&default_start).await?;
             entry.tip = default_start.clone();
-            entry.halted = false;
+            entry.halted = true;
         }
 
         cursors.insert(name.clone(), entry.clone());
@@ -173,10 +177,10 @@ where
                                     .collect();
 
                                 // Send txs to all index tasks
-                                let mut responses = send_txs_to_indexers(&senders, block, &txs).await;
+                                let responses = send_txs_to_indexers(&senders, block, &txs).await;
 
                                 // Get responses with new tips and any halts that occured
-                                let new_entries = process_tx_responses(&mut responses, block.slot).await;
+                                let new_entries = process_tx_responses(responses, block.slot).await;
 
                                 // Save the new entries to the cursor store
                                 cursor_store.save(&new_entries).await?;
@@ -215,7 +219,7 @@ where
                                     }
                                 }
                             }
-                            _ => (),
+                            _ => error!("Unexpected message type: {message:?}"),
                         }
                     }
                     Err(e) => {
@@ -232,18 +236,10 @@ where
     }
 }
 
-async fn process_tx_responses<F>(
-    results: &mut FuturesUnordered<F>,
+async fn process_tx_responses<F: futures::Future<Output = IndexResponse> + Send>(
+    mut results: FuturesUnordered<F>,
     block_slot: u64,
-) -> HashMap<String, CursorEntry>
-where
-    F: futures::Future<
-        Output = (
-            String,
-            Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
-        ),
-    >,
-{
+) -> HashMap<String, CursorEntry> {
     let mut new_tips = HashMap::new();
 
     while let Some((name, result)) = results.next().await {
@@ -271,22 +267,15 @@ where
             Err(_) => {
                 error!("Actor for index '{}' dropped unexpectedly", name);
             }
-            _ => {}
+            _ => error!("Unexpected index result type: {result:?}"),
         }
     }
 
     new_tips
 }
 
-async fn process_rollback_responses(
-    mut results: FuturesUnordered<
-        impl futures::Future<
-            Output = (
-                String,
-                Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
-            ),
-        >,
-    >,
+async fn process_rollback_responses<F: futures::Future<Output = IndexResponse> + Send>(
+    mut results: FuturesUnordered<F>,
     run_context: Arc<Context<Message>>,
     sync_topic: &str,
 ) -> Result<(HashMap<String, CursorEntry>, Vec<String>)> {
@@ -312,7 +301,7 @@ async fn process_rollback_responses(
             Err(_) => {
                 error!("Actor for {name} index dropped");
             }
-            _ => {}
+            _ => error!("Unexpected index result type: {result:?}"),
         }
     }
 
