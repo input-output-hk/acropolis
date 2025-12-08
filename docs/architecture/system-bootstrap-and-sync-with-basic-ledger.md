@@ -110,7 +110,7 @@ address format, but it was hardly ever used (only 5 exist on mainnet!)
 and has now been withdrawn, although the old ones are still valid.
 
 To handle this, we add another module, the [Stake Delta Filter](../../modules/stake_delta_filter)
-which keeps a list of all the stake delegations, which it receives from `cardano.tx.certificates`
+which keeps a list of all the stake delegations, which it receives from `cardano.certificates`
 and converts any pointers into their full form.
 It also filters out any address deltas that don't include any stake address information (some
 addresses don't).  The cleaned-up deltas are then published on `cardano.stake.deltas`, which
@@ -122,18 +122,67 @@ treasury and deposit accounts.  To start this off it receives `cardano.pot.delta
 genesis bootstrapper which sets the initial reserves allocation - at this point the treasury
 and deposits are zero.
 
-Then at the start of each epoch a proportion of the reserves is allocated to the treasury, and
-a further portion to pay rewards (which we'll come to soon).  It also needs to track SPO and
-stake address registrations and deregistrations to keep account of the deposits, which it receives
-through `cardano.tx.certificates`.
+Another new module, [Epoch State](../../modules/epoch_state) counts up all the fees paid on
+transactions in each epoch, and also how many blocks each SPO produced.  It sends this to
+Accounts State on `cardano.epoch.activity`.
+
+Then at the start of each epoch, a proportion of the reserves, plus
+the fees, is allocated to the treasury, and a further portion to pay
+rewards.
 
 ### Rewards
 
-TODO
+The Cardano rewards system is an accounts-based layer on top of the raw UTXO model.  Each
+stake address has a reward account, and rewards are earned for block production both by SPOs
+- to recompense them for running the network - and to ordinary users who delegate their stake
+to them - as a kind of yield for holding Ada and participating in the Proof of Stake system.
+
+The rewards calculation is complex, and deserves its own page (TODO) but at this level we can
+survey what is required to do it in the Accounts State module.  It needs:
+
+* The current set of SPOs and all their parameters such as fixed cost and margin
+(`cardano.spo.state`)
+* Delegation events indicating which stake addresses are delegated to which SPOs
+(`cardano.certificates`)
+* Stake address deltas (`cardano.stake.deltas`) as already mentioned
+* Counts of blocks produced per SPO for each epoch (`cardano.epoch.activity`)
+
+The result of this is at each new epoch (actually a fixed time into it),
+Accounts State looks at each SPO and its success in producing
+blocks in the previous epoch, derives a total share of the rewards
+available to be paid to that SPO and its delegators, calculates the
+amount for the SPO itself, then splits the remainder according to the
+stakes of the delegators captured from two epochs ago.  These rewards
+are then held ready to actually be paid at the start of the next
+epoch.
+
+### Deposits
+
+Accounts State also needs to track SPO and stake address registrations
+and deregistrations to keep account of the deposits, which it receives
+through `cardano.tx.certificates`.  When an SPO retires, or a stake address
+is deregistered, the deposit is paid back to their reward account.
 
 ### Withdrawals
 
-TODO
+The value accumulated in a reward account cannot be spent directly like a UTXO, but there is a
+mechanism to withdraw it - a transaction can have a withdrawal added, which adds a specified
+value to the sum of the input values for the transaction, which can then be moved to other UTXOs.
+User wallets usually do this automatically when required so the user isn't aware of it.
+
+Accounts State gets withdrawal information from `cardano.withdrawals` sent by the Tx Unpacker.
+
+### Instantaneous Rewards
+
+In earlier eras of Cardano, there was also the Move Instantaneous
+Rewards (MIR) mechanism to move rewards the other way, direct from
+reserves or treasury to a reward account.  This was used to move
+rewards from the Incentivised Testnet (ITN) at the beginning of
+Shelley, and occasionally since for adjustments.  Since Conway,
+new MIRs are no longer allowed.
+
+Accounts State receives MIRs through the `cardano.certificates` topic, stores
+them up and processes them at the start of each epoch.
 
 ## Configuration
 
