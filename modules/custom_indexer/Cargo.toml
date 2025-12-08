@@ -17,10 +17,15 @@ anyhow = { workspace = true }
 bincode = "1"
 config = { workspace = true }
 fjall = "2.7.0"
+futures = "0.3"
 pallas = { workspace = true}
 serde = { workspace = true, features = ["rc"] }
+thiserror = "2.0.17"
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+hex = "0.4"
 
 [lib]
 path = "src/custom_indexer.rs"
