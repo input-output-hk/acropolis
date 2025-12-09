@@ -11,23 +11,22 @@ pub trait ChainIndex: Send + Sync + 'static {
 
     /// High-level transaction handler.
     ///
-    /// The indexer runtime calls this when `wants_raw_bytes() == false`.
-    /// Implementors receive a fully decoded `MultiEraTx` using Acropolis’s
-    /// Pallas dependency. Most indexes should override this unless they
-    /// need to control decoding themselves.
+    /// Most indexes override this
     async fn handle_onchain_tx(&mut self, info: &BlockInfo, tx: &MultiEraTx<'_>) -> Result<()> {
         let _ = (info, tx);
         Ok(())
     }
 
-    /// Low-level transaction handler that receives raw CBOR bytes.
+    /// Low-level raw-bytes handler.
     ///
-    /// The indexer runtime calls this when `wants_raw_bytes() == true`.
-    /// Implementors can parse the bytes using their own Pallas versions,
-    /// bypass decoding in the runtime, or operate directly on the CBOR.
+    /// Default behavior:
+    ///   - decode the tx using Pallas
+    ///   - call the high-level handler
+    ///
+    /// Indexes that want raw bytes override this and bypass decoding entirely.
     async fn handle_onchain_tx_bytes(&mut self, info: &BlockInfo, raw_tx: &[u8]) -> Result<()> {
-        let _ = (info, raw_tx);
-        Ok(())
+        let tx = MultiEraTx::decode(raw_tx)?;
+        self.handle_onchain_tx(info, &tx).await
     }
 
     /// Called when the chain rolls back to a point.
@@ -37,14 +36,6 @@ pub trait ChainIndex: Send + Sync + 'static {
     async fn handle_rollback(&mut self, point: &Point) -> Result<()> {
         let _ = point;
         Ok(())
-    }
-
-    /// Selects between decoded-transaction mode and raw-bytes mode.
-    ///
-    /// `false` (default): runtime decodes transactions and calls `handle_onchain_tx`.
-    /// `true`: runtime skips decoding and calls `handle_onchain_tx_bytes`.
-    fn wants_raw_bytes(&self) -> bool {
-        false
     }
 
     /// Resets the index to a known chain point.
