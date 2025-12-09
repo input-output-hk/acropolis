@@ -85,7 +85,7 @@ The `SnapshotPublisher` implements the streaming snapshot callbacks:
 
 - `UtxoCallback`: Receives individual UTXO entries
 - `PoolCallback`: Receives pool information
-- `StakeCallback`: Receives account/stake information
+- `AccountsCallback`: Receives account/stake information
 - `DRepCallback`: Receives DRep (delegated representative) information
 - `ProposalCallback`: Receives governance proposals
 - `SnapshotCallbacks`: Receives metadata and completion signals

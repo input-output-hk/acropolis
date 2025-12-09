@@ -5,9 +5,9 @@
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
-    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, ProposalCallback,
-    RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, StakeCallback,
-    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
+    ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
+    SnapshotsCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 use acropolis_common::PoolRegistration;
 use anyhow::Result;
@@ -92,7 +92,7 @@ impl PoolCallback for CountingCallbacks {
     }
 }
 
-impl StakeCallback for CountingCallbacks {
+impl AccountsCallback for CountingCallbacks {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         self.account_count = accounts.len();
         if !accounts.is_empty() {

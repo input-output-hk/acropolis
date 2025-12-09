@@ -1,16 +1,18 @@
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::{BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback};
+use acropolis_common::snapshot::{
+    AccountsCallback, BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback,
+};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, PotBalances,
-        SnapshotMessage, SnapshotStateMessage,
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
+        SnapshotStateMessage,
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback,
-        SnapshotCallbacks, SnapshotMetadata, StakeCallback, UtxoCallback, UtxoEntry,
+        SnapshotCallbacks, SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
     BlockInfo, EpochBootstrapData,
@@ -195,7 +197,7 @@ impl PoolCallback for SnapshotPublisher {
     }
 }
 
-impl StakeCallback for SnapshotPublisher {
+impl AccountsCallback for SnapshotPublisher {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         info!("Received {} accounts", accounts.len());
         self.accounts.extend(accounts);
@@ -332,19 +334,7 @@ impl SnapshotCallbacks for SnapshotPublisher {
         let metadata = self.metadata.as_ref();
         let epoch = metadata.map(|m| m.epoch).unwrap_or(0);
 
-        let pots = metadata
-            .map(|m| PotBalances {
-                treasury: m.pot_balances.treasury,
-                reserves: m.pot_balances.reserves,
-                deposits: m.pot_balances.deposits,
-            })
-            .unwrap_or(PotBalances {
-                treasury: 0,
-                reserves: 0,
-                deposits: 0,
-            });
-
-        let snapshots = metadata.and_then(|m| m.snapshots.clone());
+        let pots = metadata.map(|m| m.pot_balances.clone()).unwrap_or_default();
 
         let pools: Vec<PoolRegistration> = self.pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = self.pools.retiring.keys().cloned().collect();
@@ -368,7 +358,6 @@ impl SnapshotCallbacks for SnapshotPublisher {
             retiring_pools,
             dreps,
             pots,
-            snapshots,
             bootstrap_snapshots,
         };
 

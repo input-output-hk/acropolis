@@ -628,26 +628,13 @@ pub struct AnchorInfo {
     pub data_hash: String,
 }
 
-/// Pot balances (treasury, reserves, deposits)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PotBalances {
-    /// Current reserves pot balance in Lovelace
-    pub reserves: u64,
-    /// Current treasury pot balance in Lovelace
-    pub treasury: u64,
-    /// Current deposits pot balance in Lovelace
-    pub deposits: u64,
-    /// Current fees accumulated in Lovelace
-    pub fees: u64,
-}
-
 /// Snapshot metadata extracted before streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
     /// Epoch number
     pub epoch: u64,
     /// Pot balances
-    pub pot_balances: PotBalances,
+    pub pot_balances: crate::Pots,
     /// Total number of UTXOs (for progress tracking)
     pub utxo_count: Option<u64>,
     /// Block production statistics for previous epoch
@@ -678,8 +665,8 @@ pub trait PoolCallback {
     fn on_pools(&mut self, spo_state: SPOState) -> Result<()>;
 }
 
-/// Callback invoked with bulk stake account data
-pub trait StakeCallback {
+/// Callback invoked with bulk account data
+pub trait AccountsCallback {
     /// Called once with all account states
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()>;
 }
@@ -700,7 +687,7 @@ pub trait ProposalCallback {
 pub trait SnapshotCallbacks:
     UtxoCallback
     + PoolCallback
-    + StakeCallback
+    + AccountsCallback
     + DRepCallback
     + ProposalCallback
     + SnapshotsCallback
@@ -1228,14 +1215,15 @@ impl StreamingSnapshotParser {
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
         callbacks.on_epoch(epoch_bootstrap)?;
 
+        // Note: fees is parsed but not stored in Pots (not needed downstream)
+        let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
             snapshots: snapshots_info,
-            pot_balances: PotBalances {
+            pot_balances: crate::Pots {
                 reserves,
                 treasury,
                 deposits,
-                fees: fees as u64,
             },
             utxo_count: Some(utxo_count),
             blocks_previous_epoch,
@@ -2007,7 +1995,7 @@ impl PoolCallback for CollectingCallbacks {
     }
 }
 
-impl StakeCallback for CollectingCallbacks {
+impl AccountsCallback for CollectingCallbacks {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
         self.accounts = accounts;
         Ok(())
@@ -2064,11 +2052,10 @@ mod tests {
         callbacks
             .on_metadata(SnapshotMetadata {
                 epoch: 507,
-                pot_balances: PotBalances {
+                pot_balances: crate::Pots {
                     reserves: 1000000,
                     treasury: 2000000,
                     deposits: 500000,
-                    fees: 100000,
                 },
                 utxo_count: Some(100),
                 blocks_previous_epoch: Vec::new(),

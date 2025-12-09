@@ -34,18 +34,8 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 // up to the point of start of the calculation, rather than point of snapshot
 const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
 
-/// Global 'pot' account state
-#[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
-pub struct Pots {
-    /// Unallocated reserves
-    pub reserves: Lovelace,
-
-    /// Treasury
-    pub treasury: Lovelace,
-
-    /// Deposits
-    pub deposits: Lovelace,
-}
+// Re-export Pots from common
+pub use acropolis_common::Pots;
 
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
@@ -165,11 +155,7 @@ impl State {
         info!("Loaded {} DReps", self.dreps.len());
 
         // 5. Load pots - direct assignment
-        self.pots = Pots {
-            reserves: bootstrap_msg.pots.reserves,
-            treasury: bootstrap_msg.pots.treasury,
-            deposits: bootstrap_msg.pots.deposits,
-        };
+        self.pots = bootstrap_msg.pots.clone();
         info!(
             "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits

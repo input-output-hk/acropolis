@@ -23,8 +23,8 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::streaming_snapshot::SnapshotsInfo;
 use crate::snapshot::{AccountState, BootstrapSnapshots};
+use crate::Pots;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -402,17 +402,6 @@ pub struct EpochBootstrapMessage {
     pub praos_params: Option<PraosParams>,
 }
 
-/// Pot balances from snapshot
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PotBalances {
-    /// Treasury balance
-    pub treasury: u64,
-    /// Reserves balance
-    pub reserves: u64,
-    /// Deposits balance
-    pub deposits: u64,
-}
-
 /// Accounts bootstrap message containing all data needed to bootstrap accounts state
 /// All data is in internal format, ready for direct use by the state module
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -433,10 +422,7 @@ pub struct AccountsBootstrapMessage {
     pub dreps: Vec<(DRepCredential, u64)>,
 
     /// Pot balances (treasury, reserves, deposits)
-    pub pots: PotBalances,
-
-    /// Snapshot metadata for rewards calculation (Mark, Set, Go) - summary info
-    pub snapshots: Option<SnapshotsInfo>,
+    pub pots: Pots,
 
     /// Pre-processed bootstrap snapshots (Mark, Set, Go)
     /// Contains per-SPO delegator lists ready for accounts_state to use
