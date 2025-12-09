@@ -15,7 +15,7 @@ mod tests {
     use std::{
         collections::{BTreeMap, HashMap},
         ops::Bound::Included,
-        str::FromStr,   
+        str::FromStr,
     };
 
     use tracing_subscriber::prelude::*;
