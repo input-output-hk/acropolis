@@ -70,12 +70,12 @@ async fn handle_apply_txs(
     }
 
     // Decode the transactions and call handle_onchain_tx for each, halting if decode or the handler return an error
+    let raw_mode = wrapper.index.wants_raw_bytes();
     for raw in txs {
-        let decoded = match MultiEraTx::decode(raw.as_ref()) {
-            Ok(tx) => tx,
-            Err(e) => {
+        if raw_mode {
+            if let Err(e) = wrapper.index.handle_onchain_tx_bytes(&block, &raw).await {
                 wrapper.halted = true;
-                return IndexResult::DecodeError {
+                return IndexResult::HandleError {
                     entry: CursorEntry {
                         tip: wrapper.tip.clone(),
                         halted: true,
@@ -83,16 +83,30 @@ async fn handle_apply_txs(
                     reason: e.to_string(),
                 };
             }
-        };
-        if let Err(e) = wrapper.index.handle_onchain_tx(&block, &decoded).await {
-            wrapper.halted = true;
-            return IndexResult::HandleError {
-                entry: CursorEntry {
-                    tip: wrapper.tip.clone(),
-                    halted: true,
-                },
-                reason: e.to_string(),
+        } else {
+            let decoded = match MultiEraTx::decode(raw.as_ref()) {
+                Ok(tx) => tx,
+                Err(e) => {
+                    wrapper.halted = true;
+                    return IndexResult::DecodeError {
+                        entry: CursorEntry {
+                            tip: wrapper.tip.clone(),
+                            halted: true,
+                        },
+                        reason: e.to_string(),
+                    };
+                }
             };
+            if let Err(e) = wrapper.index.handle_onchain_tx(&block, &decoded).await {
+                wrapper.halted = true;
+                return IndexResult::HandleError {
+                    entry: CursorEntry {
+                        tip: wrapper.tip.clone(),
+                        halted: true,
+                    },
+                    reason: e.to_string(),
+                };
+            }
         }
     }
 
