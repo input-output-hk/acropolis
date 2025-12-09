@@ -3,13 +3,13 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use std::array::TryFromSliceError;
+use std::{array::TryFromSliceError, collections::HashSet};
 
 use thiserror::Error;
 
 use crate::{
-    protocol_params::Nonce, rational_number::RationalNumber, Address, DataHash, Era,
-    GenesisKeyhash, Lovelace, NetworkId, PoolId, ScriptHash, Slot, StakeAddress, TxOutRef, VKey,
+    hash::Hash, protocol_params::Nonce, rational_number::RationalNumber, Address, DataHash, Era,
+    GenesisKeyhash, KeyHash, Lovelace, NetworkId, PoolId, ScriptHash, Slot, StakeAddress, TxOutRef,
     VKeyWitness, Value, VrfKeyHash,
 };
 
@@ -116,35 +116,39 @@ pub enum UTxOValidationError {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOWValidationError {
     /// **Cause:** The VKey witness has invalid signature
-    #[error("Invalid VKey witness: witness={witness}, reason={reason}")]
+    #[error("Invalid VKey witness: key_hash={key_hash}, witness={witness}")]
     InvalidWitnessesUTxOW {
+        key_hash: KeyHash,
         witness: VKeyWitness,
-        reason: String,
     },
 
     /// **Cause:** Required VKey witness missing
-    #[error("Missing VKey witness: vkey={}", hex::encode(vkey))]
-    MissingVKeyWitnessesUTxOW { vkey: VKey },
+    #[error("Missing VKey witness: key_hash={key_hash}")]
+    MissingVKeyWitnessesUTxOW { key_hash: KeyHash },
 
     /// **Cause:** Required script witness missing
-    #[error("Missing script witness: script={script}")]
-    MissingScriptWitnessesUTxOW { script: ScriptHash },
+    #[error("Missing script witness: script_hash={script_hash}")]
+    MissingScriptWitnessesUTxOW { script_hash: ScriptHash },
 
     /// **Cause:** Native script validation failed
-    #[error("Native script validation failed: script={script}")]
-    ScriptWitnessNotValidatingUTXOW { script: ScriptHash },
+    #[error("Native script validation failed: script_hash={script_hash}")]
+    ScriptWitnessNotValidatingUTXOW { script_hash: ScriptHash },
 
     /// **Cause:** Extraneous script witness is provided
-    #[error("Script provided but not used: script={script}")]
-    ExtraneousScriptWitnessesUTXOW { script: ScriptHash },
+    #[error("Script provided but not used: script_hash={script_hash}")]
+    ExtraneousScriptWitnessesUTXOW { script_hash: ScriptHash },
 
     /// **Cause:** Insufficient genesis signatures for MIR Tx
     #[error(
-        "Insufficient Genesis Signatures for MIR: gensis_keys={}, count={}", 
-        gensis_keys.iter().map(hex::encode).collect::<Vec<_>>().join(","), 
-        gensis_keys.len()
+        "Insufficient Genesis Signatures for MIR: gensis_keys={}, count={}, quorum={}", 
+        gensis_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(","), 
+        gensis_keys.len(),
+        quorum
     )]
-    MIRInsufficientGenesisSigsUTXOW { gensis_keys: Vec<VKey> },
+    MIRInsufficientGenesisSigsUTXOW {
+        gensis_keys: HashSet<Hash<28>>,
+        quorum: u32,
+    },
 
     /// **Cause:** Metadata without metadata hash
     #[error(
@@ -178,6 +182,12 @@ pub enum UTxOWValidationError {
         // hash of metadata included in tx body
         metadata_hash: DataHash,
     },
+
+    /// **Cause:** Address is malformed
+    #[error(
+        "Malformed address: address={}, reason={reason}", address.to_string().unwrap_or("Invalid address".to_string())
+    )]
+    MalformedAddress { address: Address, reason: String },
 }
 
 /// Validation error

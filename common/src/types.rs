@@ -2,6 +2,7 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::crypto::keyhash_224;
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
 use crate::{
@@ -411,10 +412,133 @@ pub enum Datum {
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum ReferenceScript {
-    Native(Vec<u8>),
+    Native(NativeScript),
     PlutusV1(Vec<u8>),
     PlutusV2(Vec<u8>),
     PlutusV3(Vec<u8>),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum NativeScript {
+    ScriptPubkey(AddrKeyhash),
+    ScriptAll(Vec<NativeScript>),
+    ScriptAny(Vec<NativeScript>),
+    ScriptNOfK(u32, Vec<NativeScript>),
+    InvalidBefore(u64),
+    InvalidHereafter(u64),
+}
+
+impl<'b, C> minicbor::decode::Decode<'b, C> for NativeScript {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let size = d.array()?;
+
+        let assert_size = |expected| {
+            // NOTE: unwrap_or allows for indefinite arrays.
+            if expected != size.unwrap_or(expected) {
+                return Err(minicbor::decode::Error::message(
+                    "unexpected array size in NativeScript",
+                ));
+            }
+            Ok(())
+        };
+
+        let variant = d.u32()?;
+
+        let script = match variant {
+            0 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptPubkey(d.decode_with(ctx)?))
+            }
+            1 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAll(d.decode_with(ctx)?))
+            }
+            2 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAny(d.decode_with(ctx)?))
+            }
+            3 => {
+                assert_size(3)?;
+                Ok(NativeScript::ScriptNOfK(
+                    d.decode_with(ctx)?,
+                    d.decode_with(ctx)?,
+                ))
+            }
+            4 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidBefore(d.decode_with(ctx)?))
+            }
+            5 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidHereafter(d.decode_with(ctx)?))
+            }
+            _ => Err(minicbor::decode::Error::message(
+                "unknown variant id for native script",
+            )),
+        }?;
+
+        if size.is_none() {
+            let next = d.datatype()?;
+            if next != minicbor::data::Type::Break {
+                return Err(minicbor::decode::Error::type_mismatch(next));
+            }
+        }
+
+        Ok(script)
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for NativeScript {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            NativeScript::ScriptPubkey(v) => {
+                e.array(2)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAll(v) => {
+                e.array(2)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAny(v) => {
+                e.array(2)?;
+                e.encode_with(2, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptNOfK(a, b) => {
+                e.array(3)?;
+                e.encode_with(3, ctx)?;
+                e.encode_with(a, ctx)?;
+                e.encode_with(b, ctx)?;
+            }
+            NativeScript::InvalidBefore(v) => {
+                e.array(2)?;
+                e.encode_with(4, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::InvalidHereafter(v) => {
+                e.array(2)?;
+                e.encode_with(5, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl NativeScript {
+    pub fn compute_hash(&self) -> ScriptHash {
+        let mut data = vec![0u8];
+        let raw_bytes = minicbor::to_vec(self).expect("Failed to encode NativeScript to CBOR");
+        data.extend_from_slice(raw_bytes.as_slice());
+        ScriptHash::from(keyhash_224(&data))
+    }
 }
 
 /// Value (lovelace + multiasset)
@@ -790,7 +914,7 @@ pub type VKey = Vec<u8>;
 pub type Signature = Vec<u8>;
 
 /// VKey Witness
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct VKeyWitness {
     pub vkey: VKey,
     pub signature: Signature,
@@ -799,6 +923,10 @@ pub struct VKeyWitness {
 impl VKeyWitness {
     pub fn new(vkey: VKey, signature: Signature) -> Self {
         Self { vkey, signature }
+    }
+
+    pub fn key_hash(&self) -> KeyHash {
+        keyhash_224(&self.vkey)
     }
 }
 
@@ -2513,5 +2641,19 @@ mod tests {
         assert_eq!(serialized_back, serialized);
 
         Ok(())
+    }
+
+    #[test]
+    fn resolve_hash_correctly() {
+        let native_script = NativeScript::ScriptPubkey(
+            AddrKeyhash::from_str("976ec349c3a14f58959088e13e98f6cd5a1e8f27f6f3160b25e415ca")
+                .unwrap(),
+        );
+        let script_hash = native_script.compute_hash();
+        assert_eq!(
+            script_hash,
+            ScriptHash::from_str("c3a33acb8903cf42611e26b15c7731f537867c6469f5bf69c837e4a3")
+                .unwrap()
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::address::map_address;
 use acropolis_common::{validation::ValidationError, *};
-use pallas_primitives::conway;
+use pallas_primitives::{alonzo, conway};
 use pallas_traverse::{MultiEraInput, MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
 
 pub fn map_value(pallas_value: &MultiEraValue) -> Value {
@@ -84,10 +84,29 @@ pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
     }
 }
 
+pub fn map_native_script(script: &alonzo::NativeScript) -> NativeScript {
+    match script {
+        alonzo::NativeScript::ScriptPubkey(addr_key_hash) => {
+            NativeScript::ScriptPubkey(AddrKeyhash::from(**addr_key_hash))
+        }
+        alonzo::NativeScript::ScriptAll(scripts) => {
+            NativeScript::ScriptAll(scripts.iter().map(map_native_script).collect())
+        }
+        alonzo::NativeScript::ScriptAny(scripts) => {
+            NativeScript::ScriptAny(scripts.iter().map(map_native_script).collect())
+        }
+        alonzo::NativeScript::ScriptNOfK(n, scripts) => {
+            NativeScript::ScriptNOfK(*n, scripts.iter().map(map_native_script).collect())
+        }
+        alonzo::NativeScript::InvalidBefore(slot_no) => NativeScript::InvalidBefore(*slot_no),
+        alonzo::NativeScript::InvalidHereafter(slot_no) => NativeScript::InvalidHereafter(*slot_no),
+    }
+}
+
 pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<ReferenceScript> {
     match script {
         Some(conway::PseudoScript::NativeScript(script)) => {
-            Some(ReferenceScript::Native(script.raw_cbor().to_vec()))
+            Some(ReferenceScript::Native(map_native_script(script)))
         }
         Some(conway::PseudoScript::PlutusV1Script(script)) => {
             Some(ReferenceScript::PlutusV1(script.as_ref().to_vec()))
