@@ -201,7 +201,6 @@ impl SPOState {
                             }
 
                             // publish spo message
-                            error!("Publish");
                             if let Err(e) = spo_state_publisher.publish(message).await {
                                 error!("Error publishing SPO State: {e:#}")
                             }
