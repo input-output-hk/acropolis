@@ -26,7 +26,6 @@ use parameters_updater::ParametersUpdater;
 use state::State;
 
 const CONFIG_ENACT_STATE_TOPIC: &str = "enact-state-topic";
-const CONFIG_BLOCKS_TOPIC: &str = "blocks-topic";
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const CONFIG_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
@@ -44,7 +43,6 @@ struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub network_name: String,
     pub enact_state_topic: Option<String>,
-    pub blocks_topic: Option<String>,
     pub protocol_parameters_topic: String,
     pub parameters_query_topic: String,
     pub store_history: bool,
@@ -76,7 +74,6 @@ impl ParametersStateConfig {
             context,
             network_name: Self::conf(config, CONFIG_NETWORK_NAME),
             enact_state_topic: Self::conf_option(config, CONFIG_ENACT_STATE_TOPIC),
-            blocks_topic: Self::conf_option(config, CONFIG_BLOCKS_TOPIC),
             protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
             parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
             store_history: Self::conf_bool(config, CONFIG_STORE_HISTORY),
@@ -112,10 +109,8 @@ impl ParametersState {
         config: Arc<ParametersStateConfig>,
         history: Arc<Mutex<StateHistory<State>>>,
         mut enact_s: Option<Box<dyn Subscription<Message>>>,
-        mut epoch_s: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
         loop {
-
             // Normal (Conway) behaviour - fetch from goverance enacted
             if let Some(ref mut sub) = enact_s {
                 let (_, message) = sub.read().await?;
@@ -171,53 +166,12 @@ impl ParametersState {
                     msg => error!("Unexpected message {msg:?} for enact state topic"),
                 }
             }
-
-            if let Some(ref mut sub) = epoch_s {
-                let (_, message) = sub.read().await?;
-                match message.as_ref() {
-                    Message::Cardano((block, _)) => {
-                        // Get current state and current params
-                        let mut state = {
-                            let mut h = history.lock().await;
-                            h.get_or_init_with(|| State::new(config.network_name.clone()))
-                        };
-
-                        if block.new_epoch {
-                            // Get current params
-                            let current_params = state.current_params.get_params();
-
-                            // Trigger genesis changes if required
-                            let new_params = state.handle_new_epoch(block)?;
-
-                            // Publish protocol params message
-                            Self::publish_update(&config, block, new_params.clone())?;
-
-                            // Commit state on params change
-                            if current_params != new_params.params {
-                                info!(
-                                    "New parameter set from genesis [from epoch, params]: [{},{}]",
-                                    block.epoch,
-                                    serde_json::to_string(&new_params.params)?
-                                );
-                                let mut h = history.lock().await;
-                                h.commit(block.epoch, state);
-                            }
-                        }
-                    }
-                    msg => error!("Unexpected message {msg:?} for epoch activity topic"),
-                }
-            }
         }
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
         let enact_s = match cfg.enact_state_topic {
-            Some(ref topic) => Some(cfg.context.subscribe(topic).await?),
-            None => None
-        };
-
-        let blocks_s = match cfg.blocks_topic {
             Some(ref topic) => Some(cfg.context.subscribe(topic).await?),
             None => None
         };
@@ -288,7 +242,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, history, enact_s, blocks_s)
+            Self::run(cfg, history, enact_s)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });

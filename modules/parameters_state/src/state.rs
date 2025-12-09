@@ -70,22 +70,6 @@ impl State {
         Ok(params_message)
     }
 
-    // Handle a new epoch from a block message, just to spot genesis changes
-    pub fn handle_new_epoch(
-        &mut self,
-        block: &BlockInfo,
-    ) -> Result<ProtocolParamsMessage> {
-        info!(epoch = block.epoch, "New epoch");
-        if self.current_era != Some(block.era) {
-            self.apply_genesis(block)?;
-        }
-        let params_message = ProtocolParamsMessage {
-            params: self.current_params.get_params(),
-        };
-
-        Ok(params_message)
-    }
-
     #[allow(dead_code)]
     pub async fn tick(&self) -> Result<()> {
         Ok(())

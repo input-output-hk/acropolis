@@ -31,14 +31,12 @@ mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
-const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
-    ("stake-drep-distribution-topic", "cardano.drep.distribution");
-const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
-    ("stake-spo-distribution-topic", "cardano.spo.distribution");
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
+const CONFIG_GOVERNANCE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
+const CONFIG_DREP_DISTRIBUTION_TOPIC: &str = "stake-drep-distribution-topic";
+const CONFIG_SPO_DISTRIBUTION_TOPIC: &str = "stake-spo-distribution-topic";
+const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
-const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -51,9 +49,9 @@ const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
-    subscribe_topic: String,
-    drep_distribution_topic: String,
-    spo_distribution_topic: String,
+    governance_topic: String,
+    drep_distribution_topic: Option<String>,
+    spo_distribution_topic: Option<String>,
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
@@ -67,13 +65,21 @@ impl GovernanceStateConfig {
         actual
     }
 
+    fn conf_option(config: &Arc<Config>, key: &str) -> Option<String> {
+        let actual = config.get_string(key).ok();
+        if let Some(ref value) = actual {
+            info!("Creating subscriber on '{}' for {}", value, key);
+        }
+        actual
+    }
+
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
-            subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
-            spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
-            protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
-            enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
+            governance_topic: Self::conf(config, CONFIG_GOVERNANCE_TOPIC),
+            drep_distribution_topic: Self::conf_option(config, CONFIG_DREP_DISTRIBUTION_TOPIC),
+            spo_distribution_topic: Self::conf_option(config, CONFIG_SPO_DISTRIBUTION_TOPIC),
+            protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
+            enact_state_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
@@ -127,8 +133,8 @@ impl GovernanceState {
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         mut governance_s: Box<dyn Subscription<Message>>,
-        mut drep_s: Box<dyn Subscription<Message>>,
-        mut spo_s: Box<dyn Subscription<Message>>,
+        mut drep_s: Option<Box<dyn Subscription<Message>>>,
+        mut spo_s: Option<Box<dyn Subscription<Message>>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
@@ -263,26 +269,30 @@ impl GovernanceState {
 
                     if blk_g.epoch > 0 {
                         // TODO: make sync more stable
-                        let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
-                        if blk_g != blk_drep {
-                            error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
-                        }
+                        if let Some(ref mut drep_s) = drep_s {
+                            if let Some(ref mut spo_s) = spo_s {
+                                let (blk_drep, d_drep) = Self::read_drep(drep_s).await?;
+                                if blk_g != blk_drep {
+                                    error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                                }
 
-                        let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
-                        if blk_g != blk_spo {
-                            error!(
-                                "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                            );
-                        }
+                                let (blk_spo, d_spo) = Self::read_spo(spo_s).await?;
+                                if blk_g != blk_spo {
+                                    error!(
+                                        "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                                    );
+                                }
 
-                        if blk_spo.epoch != d_spo.epoch + 1 {
-                            error!(
-                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                d_spo.epoch
-                            );
-                        }
+                                if blk_spo.epoch != d_spo.epoch + 1 {
+                                    error!(
+                                        "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                        d_spo.epoch
+                                    );
+                                }
 
-                        state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                                state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                            }
+                        }
                     }
 
                     {
@@ -296,9 +306,15 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
-        let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
-        let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
-        let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
+        let gt = context.clone().subscribe(&cfg.governance_topic).await?;
+        let dt = match cfg.drep_distribution_topic {
+            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
+            None => None
+        };
+        let st = match cfg.spo_distribution_topic {
+            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
+            None => None
+        };
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
         tokio::spawn(async move {

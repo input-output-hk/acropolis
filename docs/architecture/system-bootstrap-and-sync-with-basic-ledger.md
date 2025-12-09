@@ -25,6 +25,8 @@ flowchart LR
   ES(Epochs State)
   AC(Accounts State)
   SDF(Stake Delta Filter)
+  PARAM(Parameters State)
+  GOV(Governance State)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
   MSF -- cardano.block.available --> BU
@@ -39,10 +41,14 @@ flowchart LR
   TXU  -- cardano.certificates --> SPO
   TXU  -- cardano.certificates --> AC
   TXU  -- cardano.withdrawals --> AC
+  TXU  -- cardano.goverance --> GOV
   SPO  SPO_AC@-- cardano.spo.state --> AC
   GEN  -- cardano.pot.deltas --> AC
   TXU  -- cardano.block.txs --> ES
   ES   ES_AC@-- cardano.epoch.activity --> AC
+  PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
+  PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
+  GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
 
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
@@ -54,16 +60,23 @@ flowchart LR
   click ES "https://github.com/input-output-hk/acropolis/tree/main/modules/epochs_state/"
   click AC "https://github.com/input-output-hk/acropolis/tree/main/modules/accounts_state/"
   click SDF "https://github.com/input-output-hk/acropolis/tree/main/modules/stake_delta_filter/"
+  click PARAM "https://github.com/input-output-hk/acropolis/tree/main/modules/parameters_state/"
+  click GOV "https://github.com/input-output-hk/acropolis/tree/main/modules/governance_state/"
 
   classDef NEW fill:#efe
   class SPO NEW
   class ES NEW
   class AC NEW
   class SDF NEW
+  class PARAM NEW
+  class GOV NEW
 
   classDef EPOCH stroke:#008
   class SPO_AC EPOCH
   class ES_AC EPOCH
+  class PARAM_GOV EPOCH
+  class PARAM_AC EPOCH
+  class GOV_PARAM EPOCH
 ```
 
 ## Data flow
@@ -186,6 +199,21 @@ new MIRs are no longer allowed.
 
 Accounts State receives MIRs through the `cardano.certificates` topic, stores
 them up and processes them at the start of each epoch.
+
+### Parameters and Governance
+
+Although at this stage we aren't handling the full governance of the Conway era (CIP-1694)
+even before that there was a governance mechanism to alter protocol parameters, managed
+by the founding entities.  We need to track this in order to maintain the correct values of
+various calculation parameters as we move through the chain.
+
+To do this, we introduce two new modules: [Governance State](../../modules/governance_state)
+and [Parameter State](../../modules/parameter_state).  The Governance State gets governance
+events from the Tx Unpacker on `cardano.governance`.  If anything changes during an epoch,
+it sends a `cardano.enact.state` message to the Parameter State, which then sends a
+`cardano.protocol.parameters` with the updated parameter set.  This is picked up by Accounts
+State to get its calculation parameters, and also by Governance State since the parameters
+affect the voting system as well.
 
 ## Configuration
 

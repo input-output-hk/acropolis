@@ -42,6 +42,7 @@ subscribe-topic = "cardano.block.available"
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
+publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
 network-name = "mainnet"
 
@@ -57,8 +58,9 @@ block-subscribe-topic = "cardano.block.available"
 block-subscribe-topic = "cardano.block.available"
 
 [module.parameters-state]
-# Subscribe to blocks just to get a tick to trigger genesis outputs
-blocks-topic = "cardano.block.available"
+enact-state-topic = "cardano.enact.state"
+
+[module.governance-state]
 
 [module.accounts-state]
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
