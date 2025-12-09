@@ -1,5 +1,6 @@
 //! Shelley era UTxOW Rules
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+#![allow(dead_code)]
 
 use std::collections::HashSet;
 
@@ -241,7 +242,7 @@ pub fn validate_missing_extra_scripts(
 /// are verified
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
 pub fn validate_verified_wits(
-    vkey_witnesses: &Vec<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     tx_hash: TxHash,
 ) -> Result<(), Box<UTxOWValidationError>> {
     for vkey_witness in vkey_witnesses.iter() {

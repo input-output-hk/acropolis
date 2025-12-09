@@ -25,9 +25,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 pallas = { workspace = true }
 cryptoxide = "0.5.1"
-rand_core = "0.9.3"
 thiserror = "2.0.17"
-zeroize = "1.8.2"
 hex = { workspace = true }
 
 [dev-dependencies]

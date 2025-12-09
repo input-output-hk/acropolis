@@ -521,13 +521,11 @@ dependencies = [
  "pallas 0.33.0",
  "quickcheck",
  "quickcheck_macros",
- "rand_core 0.9.3",
  "serde_cbor",
  "sled",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
- "zeroize",
 ]
 
 [[package]]

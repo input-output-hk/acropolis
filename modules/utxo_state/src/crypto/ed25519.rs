@@ -1,31 +1,8 @@
 //! Ed25519 and Ed25519Extended Asymmetric Keys
 //!
-//! In this module we have both [`SecretKey`] which is a normal Ed25519
-//! asymmetric key and [`SecretKeyExtended`] asymmetric key.
-//! They can both be used to generate [`Signature`] and submit valid
-//! transactions.
-//!
-//! However, only the [`SecretKeyExtended`] can be used for HD derivation
-//! (using [ed25519_bip32] or otherwise).
-
-use cryptoxide::ed25519::{
-    self, EXTENDED_KEY_LENGTH, PRIVATE_KEY_LENGTH, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
-};
-use rand_core::{CryptoRng, RngCore};
-use std::{any::type_name, convert::TryFrom, fmt, str::FromStr};
+use cryptoxide::ed25519::{self, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use std::{convert::TryFrom, fmt, str::FromStr};
 use thiserror::Error;
-use zeroize::Zeroize;
-
-/// Ed25519 Secret Key
-#[derive(Clone)]
-pub struct SecretKey([u8; Self::SIZE]);
-
-/// Ed25519 Extended Secret Key
-///
-/// unlike [`SecretKey`], an extended key can be derived see
-/// [`pallas_crypto::derivation`]
-#[derive(Clone)]
-pub struct SecretKeyExtended([u8; Self::SIZE]);
 
 /// Ed25519 Public Key. Can be used to verify a [`Signature`]. A [`PublicKey`]
 /// is associated to a [`SecretKey`]
@@ -53,15 +30,6 @@ pub enum TryFromSignatureError {
     InvalidSize,
 }
 
-/// Error type used when retrieving a [`SecretKeyExtended`] via
-/// [`SecretKeyExtended::from_bytes`] or [`TryFrom`].
-///
-#[derive(Debug, Error)]
-pub enum TryFromSecretKeyExtendedError {
-    #[error("Invalid Ed25519 Extended Secret Key format")]
-    InvalidBitTweaks,
-}
-
 macro_rules! impl_size_zero {
     ($Type:ty, $Size:expr) => {
         impl $Type {
@@ -78,127 +46,8 @@ macro_rules! impl_size_zero {
     };
 }
 
-impl_size_zero!(SecretKey, PRIVATE_KEY_LENGTH);
-impl_size_zero!(SecretKeyExtended, EXTENDED_KEY_LENGTH);
 impl_size_zero!(PublicKey, PUBLIC_KEY_LENGTH);
 impl_size_zero!(Signature, SIGNATURE_LENGTH);
-
-impl SecretKey {
-    /// generate a new [`SecretKey`] with the given random number generator
-    pub fn new<Rng>(mut rng: Rng) -> Self
-    where
-        Rng: RngCore + CryptoRng,
-    {
-        let mut s = Self::zero();
-        rng.fill_bytes(&mut s.0);
-        s
-    }
-
-    /// get the [`PublicKey`] associated to this key
-    ///
-    /// Unlike the [`SecretKey`], the [`PublicKey`] can be safely
-    /// publicly shared. The key can then be used to verify any
-    /// [`Signature`] generated with this [`SecretKey`] and the original
-    /// message.
-    pub fn public_key(&self) -> PublicKey {
-        let (mut sk, pk) = ed25519::keypair(&self.0);
-
-        // the `sk` is a private component, scrubbing it reduce the
-        // risk of an adversary accessing the memory remains of this
-        // value
-        sk.zeroize();
-
-        PublicKey(pk)
-    }
-
-    /// create a [`Signature`] for the given message with this [`SecretKey`].
-    ///
-    /// The [`Signature`] can then be verified against the associated
-    /// [`PublicKey`] and the original message.
-    pub fn sign<T>(&self, msg: T) -> Signature
-    where
-        T: AsRef<[u8]>,
-    {
-        let (mut sk, _) = ed25519::keypair(&self.0);
-
-        let signature = ed25519::signature(msg.as_ref(), &sk);
-
-        // we don't need this signature component, make sure to scrub the
-        // content before releasing the results
-        sk.zeroize();
-
-        Signature(signature)
-    }
-}
-
-impl SecretKeyExtended {
-    /// generate a new [`SecretKeyExtended`] with the given random number
-    /// generator
-    pub fn new<Rng>(mut rng: Rng) -> Self
-    where
-        Rng: RngCore + CryptoRng,
-    {
-        let mut s = Self::zero();
-        rng.fill_bytes(&mut s.0);
-
-        s.0[0] &= 0b1111_1000;
-        s.0[31] &= 0b0011_1111;
-        s.0[31] |= 0b0100_0000;
-
-        debug_assert!(
-            s.check_structure(),
-            "checking we properly set the bit tweaks for the extended Ed25519"
-        );
-
-        s
-    }
-
-    #[inline]
-    #[allow(clippy::verbose_bit_mask)]
-    fn check_structure(&self) -> bool {
-        (self.0[0] & 0b0000_0111) == 0
-            && (self.0[31] & 0b0100_0000) == 0b0100_0000
-            && (self.0[31] & 0b1000_0000) == 0
-    }
-
-    /// Retrieve a [`SecretKeyExtended`] from the given `bytes`` array.
-    ///
-    /// # error
-    ///
-    /// This function will check that the given bytes are valid for
-    /// an Ed25519 Extended Secret key. I.e. it will check that the
-    /// proper bits have been zeroed.
-    pub fn from_bytes(bytes: [u8; Self::SIZE]) -> Result<Self, TryFromSecretKeyExtendedError> {
-        let candidate = Self(bytes);
-        if candidate.check_structure() {
-            Ok(candidate)
-        } else {
-            Err(TryFromSecretKeyExtendedError::InvalidBitTweaks)
-        }
-    }
-
-    /// get the [`PublicKey`] associated to this key
-    ///
-    /// Unlike the [`SecretKeyExtended`], the [`PublicKey`] can be safely
-    /// publicly shared. The key can then be used to verify any
-    /// [`Signature`] generated with this [`SecretKeyExtended`] and the original
-    /// message.
-    pub fn public_key(&self) -> PublicKey {
-        let pk = ed25519::extended_to_public(&self.0);
-
-        PublicKey::from(pk)
-    }
-
-    /// create a `Signature` for the given message with this `SecretKey`.
-    ///
-    /// The `Signature` can then be verified against the associated `PublicKey`
-    /// and the original message.
-    pub fn sign<T: AsRef<[u8]>>(&self, msg: T) -> Signature {
-        let signature = ed25519::signature_extended(msg.as_ref(), &self.0);
-
-        Signature::from(signature)
-    }
-}
 
 impl PublicKey {
     /// verify the cryptographic [`Signature`] against the `message` and the
@@ -209,20 +58,6 @@ impl PublicKey {
         T: AsRef<[u8]>,
     {
         ed25519::verify(message.as_ref(), &self.0, &signature.0)
-    }
-}
-
-/* Drop ******************************************************************** */
-
-impl Drop for SecretKey {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-impl Drop for SecretKeyExtended {
-    fn drop(&mut self) {
-        self.0.zeroize();
     }
 }
 
@@ -251,40 +86,6 @@ impl fmt::Debug for PublicKey {
         f.debug_tuple("PublicKey<Ed25519>").field(&hex::encode(self.as_ref())).finish()
     }
 }
-
-macro_rules! impl_secret_fmt {
-    ($Type:ty) => {
-        /// conveniently provide a proper implementation to debug for the
-        /// SecretKey types when only *testing* the library
-        #[cfg(test)]
-        impl fmt::Debug for $Type {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_tuple(&format!(
-                    "SecretKey<{typename}>",
-                    typename = type_name::<Self>()
-                ))
-                .field(&hex::encode(&self.0))
-                .finish()
-            }
-        }
-
-        /// conveniently provide an incomplete implementation of Debug for the
-        /// SecretKey.
-        #[cfg(not(test))]
-        impl fmt::Debug for $Type {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.debug_struct(&format!(
-                    "SecretKey<{typename}>",
-                    typename = type_name::<Self>()
-                ))
-                .finish_non_exhaustive()
-            }
-        }
-    };
-}
-
-impl_secret_fmt!(SecretKey);
-impl_secret_fmt!(SecretKeyExtended);
 
 /* AsRef ******************************************************************* */
 
@@ -329,19 +130,6 @@ impl From<PublicKey> for [u8; PublicKey::SIZE] {
 impl From<[u8; Self::SIZE]> for Signature {
     fn from(bytes: [u8; Self::SIZE]) -> Self {
         Self(bytes)
-    }
-}
-
-impl From<[u8; Self::SIZE]> for SecretKey {
-    fn from(bytes: [u8; Self::SIZE]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl TryFrom<[u8; Self::SIZE]> for SecretKeyExtended {
-    type Error = TryFromSecretKeyExtendedError;
-    fn try_from(bytes: [u8; Self::SIZE]) -> Result<Self, Self::Error> {
-        Self::from_bytes(bytes)
     }
 }
 
@@ -402,31 +190,6 @@ mod tests {
     use quickcheck::{Arbitrary, Gen, TestResult};
     use quickcheck_macros::quickcheck;
 
-    impl Arbitrary for SecretKey {
-        fn arbitrary(g: &mut Gen) -> Self {
-            let mut s = Self::zero();
-            s.0.iter_mut().for_each(|byte| {
-                *byte = u8::arbitrary(g);
-            });
-            s
-        }
-    }
-
-    impl Arbitrary for SecretKeyExtended {
-        fn arbitrary(g: &mut Gen) -> Self {
-            let mut s = Self::zero();
-            s.0.iter_mut().for_each(|byte| {
-                *byte = u8::arbitrary(g);
-            });
-
-            s.0[0] &= 0b1111_1000;
-            s.0[31] &= 0b0011_1111;
-            s.0[31] |= 0b0100_0000;
-
-            s
-        }
-    }
-
     impl Arbitrary for PublicKey {
         fn arbitrary(g: &mut Gen) -> Self {
             let mut s = Self::zero();
@@ -445,22 +208,6 @@ mod tests {
             });
             s
         }
-    }
-
-    #[quickcheck]
-    fn signing_verify_works(signing_key: SecretKey, message: Vec<u8>) -> bool {
-        let public_key = signing_key.public_key();
-        let signature = signing_key.sign(&message);
-
-        public_key.verify(message, &signature)
-    }
-
-    #[quickcheck]
-    fn signing_verify_works_extended(signing_key: SecretKeyExtended, message: Vec<u8>) -> bool {
-        let public_key = signing_key.public_key();
-        let signature = signing_key.sign(&message);
-
-        public_key.verify(message, &signature)
     }
 
     #[quickcheck]

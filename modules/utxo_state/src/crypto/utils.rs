@@ -1,6 +1,7 @@
 use crate::crypto::ed25519;
 use acropolis_common::VKeyWitness;
 
+#[allow(dead_code)]
 pub fn verify_ed25519_signature(witness: &VKeyWitness, data_to_verify: &[u8]) -> bool {
     let mut pub_key_src: [u8; ed25519::PublicKey::SIZE] = [0; ed25519::PublicKey::SIZE];
     pub_key_src.copy_from_slice(&witness.vkey);
