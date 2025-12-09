@@ -5,7 +5,6 @@ use anyhow::Result;
 use pallas::ledger::traverse::{self, MultiEraTx};
 mod shelley;
 
-#[allow(dead_code)]
 pub fn validate_shelley_tx<F>(
     raw_tx: &[u8],
     shelley_params: &ShelleyParams,

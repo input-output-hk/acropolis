@@ -150,6 +150,16 @@ impl UTxORegistry {
         }
     }
 
+    /// Lookup a TxOutRef and return its identifier
+    pub fn lookup_by_hash(&self, tx_ref: TxOutRef) -> Result<TxIdentifier> {
+        self.live_map.get(&tx_ref).copied().ok_or_else(|| {
+            anyhow::anyhow!(
+                "TxHash not found or already spent: {:?}",
+                hex::encode(tx_ref.tx_hash)
+            )
+        })
+    }
+
     /// Rollback to block N-1
     pub fn rollback_before(&mut self, block_number: u32) -> Result<(), String> {
         // Remove tx ouputs created at or after rollback block
@@ -170,22 +180,10 @@ impl UTxORegistry {
 #[cfg(test)]
 mod tests {
     use crate::utxo_registry::UTxORegistry;
-    use acropolis_common::{params::SECURITY_PARAMETER_K, TxHash, TxIdentifier, TxOutRef};
-    use anyhow::Result;
+    use acropolis_common::{params::SECURITY_PARAMETER_K, TxHash, TxOutRef};
 
     fn make_hash(byte: u8) -> TxHash {
         TxHash::new([byte; 32])
-    }
-    impl UTxORegistry {
-        /// Lookup unspent tx output
-        pub fn lookup_by_hash(&self, tx_ref: TxOutRef) -> Result<TxIdentifier> {
-            self.live_map.get(&tx_ref).copied().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "TxHash not found or already spent: {:?}",
-                    hex::encode(tx_ref.tx_hash)
-                )
-            })
-        }
     }
 
     #[test]
