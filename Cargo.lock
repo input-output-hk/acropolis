@@ -206,8 +206,11 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "fjall",
+ "futures",
+ "hex",
  "pallas 0.33.0",
  "serde",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]

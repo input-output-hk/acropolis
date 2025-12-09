@@ -59,7 +59,7 @@ impl VolatileHistoricalEpochsState {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{BlockHash, BlockStatus, Era};
+    use acropolis_common::{BlockHash, BlockIntent, BlockStatus, Era};
 
     use super::*;
 
@@ -70,11 +70,13 @@ mod tests {
             number: 1,
             epoch: 1,
             status: BlockStatus::Volatile,
+            intent: BlockIntent::Apply,
             slot: 1,
             hash: BlockHash::default(),
             epoch_slot: 1,
             new_epoch: false,
             timestamp: 1,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let ea = EpochActivityMessage {

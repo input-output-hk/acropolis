@@ -1,5 +1,6 @@
 #![allow(unused)]
-use acropolis_common::{BlockInfo, Lovelace, PoolId};
+use acropolis_codec::to_pool_id;
+use acropolis_common::{BlockInfo, Lovelace, Point, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
 use caryatid_sdk::async_trait;
@@ -33,46 +34,47 @@ impl InMemoryPoolCostIndex {
 #[async_trait]
 impl ChainIndex for InMemoryPoolCostIndex {
     fn name(&self) -> String {
-        "pool-cost-index".into()
+        "fjall-pool-cost-index".into()
     }
 
     async fn handle_onchain_tx(&mut self, _info: &BlockInfo, tx: &MultiEraTx<'_>) -> Result<()> {
+        let mut changed = false;
         for cert in tx.certs().iter() {
             match cert {
                 MultiEraCert::AlonzoCompatible(cert) => match cert.as_ref().as_ref() {
                     alonzo::Certificate::PoolRegistration { operator, cost, .. } => {
-                        self.state.pools.insert(acropolis_codec::to_pool_id(operator), *cost);
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        self.state.pools.insert(to_pool_id(operator), *cost);
+                        changed = true;
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
-                        self.state.pools.remove(&acropolis_codec::to_pool_id(operator));
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        self.state.pools.remove(&to_pool_id(operator));
+                        changed = true;
                     }
 
                     _ => {}
                 },
                 MultiEraCert::Conway(cert) => match cert.as_ref().as_ref() {
                     conway::Certificate::PoolRegistration { operator, cost, .. } => {
-                        self.state.pools.insert(acropolis_codec::to_pool_id(operator), *cost);
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        self.state.pools.insert(to_pool_id(operator), *cost);
+                        changed = true;
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
-                        self.state.pools.remove(&acropolis_codec::to_pool_id(operator));
-                        if self.sender.send(self.state.clone()).is_err() {
-                            warn!("Pool cost state receiver dropped");
-                        }
+                        self.state.pools.remove(&to_pool_id(operator));
+                        changed = true;
                     }
                     _ => {}
                 },
                 _ => {}
             }
         }
+        if changed && self.sender.send(self.state.clone()).is_err() {
+            warn!("Pool cost state receiver dropped");
+        }
         Ok(())
+    }
+
+    async fn reset(&mut self, start: &Point) -> Result<Point> {
+        self.state.pools = BTreeMap::new();
+        Ok(start.clone())
     }
 }

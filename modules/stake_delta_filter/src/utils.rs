@@ -433,9 +433,9 @@ mod test {
     use crate::*;
     use acropolis_common::hash::Hash;
     use acropolis_common::{
-        messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockStatus,
-        ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
-        ShelleyAddressPointer, StakeAddress, StakeCredential,
+        messages::AddressDeltasMessage, Address, AddressDelta, BlockHash, BlockInfo, BlockIntent,
+        BlockStatus, ByronAddress, Era, ShelleyAddress, ShelleyAddressDelegationPart,
+        ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeCredential,
     };
     use acropolis_common::{TxIdentifier, Value};
     use bech32::{Bech32, Hrp};
@@ -586,6 +586,7 @@ mod test {
 
         let block = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 2498243,
             number: 1,
             hash: BlockHash::default(),
@@ -593,6 +594,7 @@ mod test {
             epoch_slot: 14243,
             new_epoch: true,
             timestamp: 2498243,
+            tip_slot: None,
             era: Era::Conway,
         };
 

@@ -4,7 +4,7 @@ mod connection;
 mod network;
 
 use acropolis_common::{
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockIntent, BlockStatus,
     commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
@@ -230,15 +230,23 @@ struct BlockSink {
     rolled_back: bool,
 }
 impl BlockSink {
-    pub async fn announce_roll_forward(&mut self, header: &Header, body: &[u8]) -> Result<()> {
-        let info = self.make_block_info(header);
+    pub async fn announce_roll_forward(
+        &mut self,
+        header: &Header,
+        body: &[u8],
+        tip: Option<&Point>,
+    ) -> Result<()> {
+        let info = self.make_block_info(header, tip);
         let raw_block = RawBlockMessage {
             header: header.bytes.clone(),
             body: body.to_vec(),
         };
         if let Some(cache) = self.upstream_cache.as_mut() {
             let record = UpstreamCacheRecord {
-                id: info.clone(),
+                id: BlockInfo {
+                    tip_slot: None, // when replaying, we don't care where the tip was
+                    ..info.clone()
+                },
                 message: Arc::new(raw_block.clone()),
             };
             cache.write_record(&record)?;
@@ -252,9 +260,13 @@ impl BlockSink {
         Ok(())
     }
 
-    pub async fn announce_roll_backward(&mut self, header: &Header) -> Result<()> {
+    pub async fn announce_roll_backward(
+        &mut self,
+        header: &Header,
+        tip: Option<&Point>,
+    ) -> Result<()> {
         self.rolled_back = true;
-        let info = self.make_block_info(header);
+        let info = self.make_block_info(header, tip);
         let point = acropolis_common::Point::Specific {
             hash: info.hash,
             slot: info.slot,
@@ -266,7 +278,7 @@ impl BlockSink {
         self.context.publish(&self.topic, message).await
     }
 
-    fn make_block_info(&mut self, header: &Header) -> BlockInfo {
+    fn make_block_info(&mut self, header: &Header, tip: Option<&Point>) -> BlockInfo {
         let slot = header.slot;
         let (epoch, epoch_slot) = self.genesis_values.slot_to_epoch(slot);
         let new_epoch = self.last_epoch != Some(epoch);
@@ -278,12 +290,14 @@ impl BlockSink {
             } else {
                 BlockStatus::Volatile
             },
+            intent: BlockIntent::Apply,
             slot,
             number: header.number,
             hash: header.hash,
             epoch,
             epoch_slot,
             new_epoch,
+            tip_slot: tip.map(|p| p.slot_or_default()),
             timestamp,
             era: header.era,
         }

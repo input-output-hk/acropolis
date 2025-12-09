@@ -4,7 +4,7 @@ use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
 use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::protocol_params::Nonces;
-use acropolis_common::{BlockInfo, BlockStatus, Era, Point};
+use acropolis_common::{BlockInfo, BlockIntent, BlockStatus, Era, Point};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -72,6 +72,7 @@ impl BootstrapContext {
         let (_, epoch_slot) = genesis.slot_to_epoch(slot);
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot,
             number: header.block_number,
             hash: *hash,
@@ -79,6 +80,7 @@ impl BootstrapContext {
             epoch_slot,
             new_epoch: true,
             timestamp: genesis.slot_to_timestamp(slot),
+            tip_slot: None,
             era: Era::Conway, // TODO: Make dynamic with era history
         };
 

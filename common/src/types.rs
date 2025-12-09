@@ -196,11 +196,23 @@ pub enum BlockStatus {
     RolledBack, // Volatile, restarted after rollback
 }
 
+/// Block status
+#[bitmask(u8)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum BlockIntent {
+    Validate = 0b00000001, // Just validate the block
+    Apply = 0b00000010,    // Apply the block
+    ValidateAndApply = BlockIntent::Validate.bits | BlockIntent::Apply.bits, // Validate and apply block
+}
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
     /// Block status
     pub status: BlockStatus,
+
+    /// Block intent
+    pub intent: BlockIntent,
 
     /// Slot number
     pub slot: u64,
@@ -221,6 +233,10 @@ pub struct BlockInfo {
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
+    /// Which slot was the tip at when we received this block?
+    #[serde(default)]
+    pub tip_slot: Option<u64>,
+
     /// UNIX timestamp
     #[serde(default)]
     pub timestamp: u64,
@@ -238,6 +254,15 @@ impl Ord for BlockInfo {
 impl PartialOrd for BlockInfo {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl BlockInfo {
+    pub fn is_at_tip(&self) -> bool {
+        // The slot of a newly-reported block can be later than the slot of the tip.
+        // This is because the tip is the most recent slot with a _validated_ block,
+        // and we can receive and propagate blocks which have not yet been validated.
+        self.tip_slot.is_some_and(|s| s <= self.slot)
     }
 }
 

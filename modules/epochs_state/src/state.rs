@@ -308,13 +308,14 @@ mod tests {
         crypto::keyhash_224,
         protocol_params::{Nonce, NonceHash},
         state_history::{StateHistory, StateHistoryStore},
-        BlockHash, BlockInfo, BlockStatus, Era,
+        BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
     };
     use tokio::sync::Mutex;
 
     fn make_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 0,
             number: epoch * 10,
             hash: BlockHash::default(),
@@ -323,12 +324,14 @@ mod tests {
             new_epoch: false,
             timestamp: 99999,
             era: Era::Shelley,
+            tip_slot: None,
         }
     }
 
     fn make_new_epoch_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 0,
             number: epoch * 10,
             hash: BlockHash::default(),
@@ -337,12 +340,14 @@ mod tests {
             new_epoch: true,
             timestamp: 99999,
             era: Era::Shelley,
+            tip_slot: None,
         }
     }
 
     fn make_rolled_back_block(epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::RolledBack,
+            intent: BlockIntent::Apply,
             slot: 0,
             number: epoch * 10,
             hash: BlockHash::default(),
@@ -351,6 +356,7 @@ mod tests {
             new_epoch: false,
             timestamp: 99999,
             era: Era::Conway,
+            tip_slot: None,
         }
     }
 
