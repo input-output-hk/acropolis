@@ -49,16 +49,24 @@ network-name = "mainnet"
 address-delta-topic = "cardano.address.delta"
 
 [module.spo-state]
+block-subscribe-topic = "cardano.block.available"
 
 [module.stake-delta-filter]
 
 [module.epochs-state]
+
+[module.parameters-state]
+# Subscribe to blocks just to get a tick to trigger genesis outputs
+blocks-topic = "cardano.block.available"
 
 [module.accounts-state]
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
 [module.clock]
+
+[module.spy]
+topic = "cardano.spo.state"
 
 # ============================================================================
 # Message Bus Configuration

@@ -127,6 +127,8 @@ store-drdd = false
 [module.governance-state]
 
 [module.parameters-state]
+# Listen for governance actions
+enact-state-topic = "cardano.enact.state"
 store-history = false
 
 [module.stake-delta-filter]
@@ -136,6 +138,9 @@ write-full-cache = "false"
 [module.epochs-state]
 
 [module.accounts-state]
+# Optional subscription for when governance is active
+drep-state-topic = "cardano.drep.state"
+
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"

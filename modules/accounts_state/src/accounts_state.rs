@@ -39,13 +39,15 @@ use verifier::Verifier;
 use crate::spo_distribution_store::SPDDStore;
 mod spo_distribution_store;
 
+// Subscriptions
 const DEFAULT_SPO_STATE_TOPIC: &str = "cardano.spo.state";
 const DEFAULT_EPOCH_ACTIVITY_TOPIC: &str = "cardano.epoch.activity";
 const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
-const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
+
+// Publishers
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
@@ -79,7 +81,7 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
-        mut drep_state_subscription: Box<dyn Subscription<Message>>,
+        mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
     ) -> Result<()> {
@@ -128,6 +130,7 @@ impl AccountsState {
             let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
+
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -161,28 +164,30 @@ impl AccountsState {
                     None => None,
                 };
 
-                // Handle DRep
-                let (_, message) = drep_state_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
-                        let span = info_span!(
-                            "account_state.handle_drep_state",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, block_info);
-                            state.handle_drep_state(dreps_msg);
+                // Handle DRep (if configured)
+                if let Some(ref mut subscription) = drep_state_subscription {
+                    let (_, message) = subscription.read_ignoring_rollbacks().await?;
+                    match message.as_ref() {
+                        Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
+                            let span = info_span!(
+                                "account_state.handle_drep_state",
+                                block = block_info.number
+                            );
+                            async {
+                                Self::check_sync(&current_block, block_info);
+                                state.handle_drep_state(dreps_msg);
 
-                            let drdd = state.generate_drdd();
-                            if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
-                                error!("Error publishing drep voting stake distribution: {e:#}")
+                                let drdd = state.generate_drdd();
+                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                    error!("Error publishing drep voting stake distribution: {e:#}")
+                                }
                             }
+                            .instrument(span)
+                                .await;
                         }
-                        .instrument(span)
-                        .await;
-                    }
 
-                    _ => error!("Unexpected message type: {message:?}"),
+                        _ => error!("Unexpected message type: {message:?}"),
+                    }
                 }
 
                 // Handle SPOs
@@ -405,14 +410,16 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
-        let drep_state_topic =
-            config.get_string("drep-state-topic").unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
-        info!("Creating DRep state subscriber on '{drep_state_topic}'");
-
         let parameters_topic = config
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating protocol parameters subscriber on '{parameters_topic}'");
+
+        // Optional topics
+        let drep_state_topic = config.get_string("drep-state-topic").ok();
+        if let Some(ref topic) = drep_state_topic {
+            info!("Creating DRep state subscriber on '{topic}'");
+        }
 
         // Publishing topics
         let drep_distribution_topic = config
@@ -698,7 +705,10 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
-        let drep_state_subscription = context.subscribe(&drep_state_topic).await?;
+        let drep_state_subscription =  match drep_state_topic {
+            Some(ref topic) => Some(context.subscribe(topic).await?),
+            None => None
+        };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Start run task

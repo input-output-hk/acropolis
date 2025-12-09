@@ -92,8 +92,8 @@ impl SPOState {
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
-        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        mut epoch_activity_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut spdd_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
@@ -117,6 +117,7 @@ impl SPOState {
             let (_, certs_message) = certificates_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
+
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -200,6 +201,7 @@ impl SPOState {
                             }
 
                             // publish spo message
+                            error!("Publish");
                             if let Err(e) = spo_state_publisher.publish(message).await {
                                 error!("Error publishing SPO State: {e:#}")
                             }
@@ -221,19 +223,21 @@ impl SPOState {
 
             // read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                // Handle SPDD
-                let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::SPOStakeDistribution(spdd_message),
-                )) = spdd_message.as_ref()
-                {
-                    let span = info_span!("spo_state.handle_spdd", block = block_info.number);
-                    span.in_scope(|| {
-                        Self::check_sync(&current_block, block_info);
-                        // update epochs_history
-                        epochs_history.handle_spdd(block_info, spdd_message);
-                    });
+                if let Some(spdd_subscription) = spdd_subscription.as_mut() {
+                    // Handle SPDD
+                    let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::SPOStakeDistribution(spdd_message),
+                    )) = spdd_message.as_ref()
+                    {
+                        let span = info_span!("spo_state.handle_spdd", block = block_info.number);
+                        span.in_scope(|| {
+                            Self::check_sync(&current_block, block_info);
+                            // update epochs_history
+                            epochs_history.handle_spdd(block_info, spdd_message);
+                        });
+                    }
                 }
 
                 // Handle SPO rewards
@@ -282,28 +286,31 @@ impl SPOState {
                 }
 
                 // Handle EpochActivityMessage
-                let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::EpochActivity(epoch_activity_message),
-                )) = ea_message.as_ref()
-                {
-                    let span =
-                        info_span!("spo_state.handle_epoch_activity", block = block_info.number);
-                    span.in_scope(|| {
-                        Self::check_sync(&current_block, block_info);
-                        // update epochs_history
-                        let spos: Vec<(PoolId, usize)> = epoch_activity_message
-                            .spo_blocks
-                            .iter()
-                            .map(|(hash, count)| (*hash, *count))
-                            .collect();
-                        epochs_history.handle_epoch_activity(
-                            block_info,
-                            epoch_activity_message,
-                            &spos,
-                        );
-                    });
+                if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
+                    let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks()
+                        .await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::EpochActivity(epoch_activity_message),
+                    )) = ea_message.as_ref()
+                    {
+                        let span =
+                            info_span!("spo_state.handle_epoch_activity", block = block_info.number);
+                        span.in_scope(|| {
+                            Self::check_sync(&current_block, block_info);
+                            // update epochs_history
+                            let spos: Vec<(PoolId, usize)> = epoch_activity_message
+                                .spo_blocks
+                                .iter()
+                                .map(|(hash, count)| (*hash, *count))
+                                .collect();
+                            epochs_history.handle_epoch_activity(
+                                block_info,
+                                epoch_activity_message,
+                                &spos,
+                            );
+                        });
+                    }
                 }
             }
 
@@ -772,37 +779,49 @@ impl SPOState {
         }
 
         // Subscriptions
+        // Mandatory
         let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
         let block_subscription = context.subscribe(&block_subscribe_topic).await?;
-        let epoch_activity_subscription =
-            context.subscribe(&epoch_activity_subscribe_topic).await?;
-        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
+
+        // Optional depending on store features
         // only when stake_addresses are enabled
         let withdrawals_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&withdrawals_subscribe_topic).await?)
         } else {
             None
         };
+
         // when historical spo's votes are enabled
         let governance_subscription = if store_config.store_votes {
             Some(context.subscribe(&governance_subscribe_topic).await?)
         } else {
             None
         };
+
         // when epochs_history is enabled
         let spo_rewards_subscription = if store_config.store_epochs_history {
             Some(context.subscribe(&spo_rewards_subscribe_topic).await?)
         } else {
             None
         };
-        // when state_addresses are enabled
+        let epoch_activity_subscription =  if store_config.store_epochs_history {
+            Some(context.subscribe(&epoch_activity_subscribe_topic).await?)
+        } else {
+            None
+        };
+        let spdd_subscription =  if store_config.store_epochs_history {
+            Some(context.subscribe(&spdd_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        // when stake_addresses are enabled
         let stake_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_deltas_subscribe_topic).await?)
         } else {
             None
         };
-        // when state_addresses are enabled
         let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_reward_deltas_subscribe_topic).await?)
         } else {

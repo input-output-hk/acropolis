@@ -133,8 +133,8 @@ rewards.
 ### Rewards
 
 The Cardano rewards system is an accounts-based layer on top of the raw UTXO model.  Each
-stake address has a reward account, and rewards are earned for block production both by SPOs
-- to recompense them for running the network - and to ordinary users who delegate their stake
+stake address has a reward account, and rewards are earned for block production both by SPOs -
+to recompense them for running the network - and to ordinary users who delegate their stake
 to them - as a kind of yield for holding Ada and participating in the Proof of Stake system.
 
 The rewards calculation is complex, and deserves its own page (TODO) but at this level we can
