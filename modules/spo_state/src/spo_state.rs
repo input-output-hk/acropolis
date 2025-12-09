@@ -117,7 +117,6 @@ impl SPOState {
             let (_, certs_message) = certificates_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
-
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -286,15 +285,17 @@ impl SPOState {
 
                 // Handle EpochActivityMessage
                 if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
-                    let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks()
-                        .await?;
+                    let (_, ea_message) =
+                        epoch_activity_subscription.read_ignoring_rollbacks().await?;
                     if let Message::Cardano((
                         block_info,
                         CardanoMessage::EpochActivity(epoch_activity_message),
                     )) = ea_message.as_ref()
                     {
-                        let span =
-                            info_span!("spo_state.handle_epoch_activity", block = block_info.number);
+                        let span = info_span!(
+                            "spo_state.handle_epoch_activity",
+                            block = block_info.number
+                        );
                         span.in_scope(|| {
                             Self::check_sync(&current_block, block_info);
                             // update epochs_history
@@ -804,12 +805,12 @@ impl SPOState {
         } else {
             None
         };
-        let epoch_activity_subscription =  if store_config.store_epochs_history {
+        let epoch_activity_subscription = if store_config.store_epochs_history {
             Some(context.subscribe(&epoch_activity_subscribe_topic).await?)
         } else {
             None
         };
-        let spdd_subscription =  if store_config.store_epochs_history {
+        let spdd_subscription = if store_config.store_epochs_history {
             Some(context.subscribe(&spdd_subscribe_topic).await?)
         } else {
             None

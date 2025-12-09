@@ -309,11 +309,11 @@ impl GovernanceState {
         let gt = context.clone().subscribe(&cfg.governance_topic).await?;
         let dt = match cfg.drep_distribution_topic {
             Some(ref topic) => Some(context.clone().subscribe(topic).await?),
-            None => None
+            None => None,
         };
         let st = match cfg.spo_distribution_topic {
             Some(ref topic) => Some(context.clone().subscribe(topic).await?),
-            None => None
+            None => None,
         };
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 

@@ -173,7 +173,7 @@ impl ParametersState {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
         let enact_s = match cfg.enact_state_topic {
             Some(ref topic) => Some(cfg.context.subscribe(topic).await?),
-            None => None
+            None => None,
         };
 
         let store_history = cfg.store_history;
@@ -242,9 +242,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, history, enact_s)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg, history, enact_s).await.unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

@@ -130,7 +130,6 @@ impl AccountsState {
             let (_, certs_message) = certs_subscription.read().await?;
             let new_epoch = match certs_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
-
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -178,12 +177,13 @@ impl AccountsState {
                                 state.handle_drep_state(dreps_msg);
 
                                 let drdd = state.generate_drdd();
-                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await
+                                {
                                     error!("Error publishing drep voting stake distribution: {e:#}")
                                 }
                             }
                             .instrument(span)
-                                .await;
+                            .await;
                         }
 
                         _ => error!("Unexpected message type: {message:?}"),
@@ -705,9 +705,9 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
-        let drep_state_subscription =  match drep_state_topic {
+        let drep_state_subscription = match drep_state_topic {
             Some(ref topic) => Some(context.subscribe(topic).await?),
-            None => None
+            None => None,
         };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
