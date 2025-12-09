@@ -40,7 +40,7 @@ pub use crate::{
 };
 
 // Import snapshot parsing support
-use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+use super::mark_set_go::{BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback};
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -641,8 +641,6 @@ pub struct SnapshotMetadata {
     pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
     /// Block production statistics for current epoch
     pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
-    /// Parsed snapshots (Mark, Set, Go, Fee)
-    pub snapshots: Option<SnapshotsInfo>,
 }
 
 // -----------------------------------------------------------------------------
@@ -665,10 +663,31 @@ pub trait PoolCallback {
     fn on_pools(&mut self, spo_state: SPOState) -> Result<()>;
 }
 
-/// Callback invoked with bulk account data
+/// Data needed to bootstrap accounts state, parsed from the snapshot.
+/// This is a pure data structure - the publisher is responsible for
+/// converting it to the appropriate message type.
+#[derive(Debug, Clone)]
+pub struct AccountsBootstrapData {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(crate::DRepCredential, u64)>,
+    /// Treasury, reserves, and deposits
+    pub pots: crate::Pots,
+    /// Pre-processed bootstrap snapshots (mark/set/go) for rewards calculation
+    pub bootstrap_snapshots: Option<BootstrapSnapshots>,
+}
+
+/// Callback invoked with accounts bootstrap data
 pub trait AccountsCallback {
-    /// Called once with all account states
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()>;
+    /// Called once with all data needed to bootstrap accounts state
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()>;
 }
 
 /// Callback invoked with bulk DRep data
@@ -1182,34 +1201,48 @@ impl StreamingSnapshotParser {
             }
         }
 
-        // Emit bulk callbacks
-        callbacks.on_pools(pools)?;
-        callbacks.on_dreps(dreps)?;
-        callbacks.on_accounts(accounts)?;
-        callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
+        // Build pool registrations list for AccountsBootstrapMessage
+        let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
+        let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
 
-        // Emit metadata callback with accurate deposits, fees, utxo count, and snapshots
-        let snapshots_info = match snapshots_result {
-            Ok(_raw_snapshots) => {
-                // For metadata, we can provide basic info without converting to API format
-                Some(SnapshotsInfo {
-                    mark: SnapshotInfo {
-                        name: "Mark".to_string(),
-                        sections_count: _raw_snapshots.mark.0.len() as u64,
-                    },
-                    set: SnapshotInfo {
-                        name: "Set".to_string(),
-                        sections_count: _raw_snapshots.set.0.len() as u64,
-                    },
-                    go: SnapshotInfo {
-                        name: "Go".to_string(),
-                        sections_count: _raw_snapshots.go.0.len() as u64,
-                    },
-                    fee: _raw_snapshots.fee,
-                })
+        // Convert DRepInfo to (credential, deposit) tuples
+        let drep_deposits: Vec<(crate::DRepCredential, u64)> =
+            dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
+
+        // Build pre-processed bootstrap snapshots if raw data is available
+        let bootstrap_snapshots = match snapshots_result {
+            Ok(raw_snapshots) => {
+                let bs = BootstrapSnapshots::from_raw(
+                    epoch,
+                    raw_snapshots.clone(),
+                    &accounts,
+                    &pool_registrations,
+                );
+                Some(bs)
             }
             Err(_) => None,
         };
+
+        // Build the accounts bootstrap data
+        let accounts_bootstrap_data = AccountsBootstrapData {
+            epoch,
+            accounts,
+            pools: pool_registrations,
+            retiring_pools,
+            dreps: drep_deposits,
+            pots: crate::Pots {
+                reserves,
+                treasury,
+                deposits,
+            },
+            bootstrap_snapshots,
+        };
+
+        // Emit bulk callbacks
+        callbacks.on_pools(pools)?;
+        callbacks.on_dreps(dreps)?;
+        callbacks.on_accounts(accounts_bootstrap_data)?;
+        callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
         let epoch_bootstrap =
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
@@ -1219,7 +1252,6 @@ impl StreamingSnapshotParser {
         let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
-            snapshots: snapshots_info,
             pot_balances: crate::Pots {
                 reserves,
                 treasury,
@@ -1936,28 +1968,6 @@ impl StreamingSnapshotParser {
     }
 }
 
-/// Information about a parsed snapshot (Mark, Set, or Go)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotInfo {
-    /// Name of the snapshot (Mark, Set, or Go)
-    pub name: String,
-    /// Number of sections in the snapshot
-    pub sections_count: u64,
-}
-
-/// Information about all four snapshots (Mark, Set, Go, Fee)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotsInfo {
-    /// Mark snapshot information
-    pub mark: SnapshotInfo,
-    /// Set snapshot information
-    pub set: SnapshotInfo,
-    /// Go snapshot information
-    pub go: SnapshotInfo,
-    /// Fee value from the snapshots
-    pub fee: u64,
-}
-
 // -----------------------------------------------------------------------------
 // Helper: Simple callback handler for testing
 // -----------------------------------------------------------------------------
@@ -1996,8 +2006,8 @@ impl PoolCallback for CollectingCallbacks {
 }
 
 impl AccountsCallback for CollectingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.accounts = accounts;
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()> {
+        self.accounts = data.accounts;
         Ok(())
     }
 }
@@ -2060,7 +2070,6 @@ mod tests {
                 utxo_count: Some(100),
                 blocks_previous_epoch: Vec::new(),
                 blocks_current_epoch: Vec::new(),
-                snapshots: None,
             })
             .unwrap();
 

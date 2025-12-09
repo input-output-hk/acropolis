@@ -93,13 +93,16 @@ impl PoolCallback for CountingCallbacks {
 }
 
 impl AccountsCallback for CountingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.account_count = accounts.len();
-        if !accounts.is_empty() {
-            eprintln!("Parsed {} stake accounts", accounts.len());
+    fn on_accounts(
+        &mut self,
+        data: acropolis_common::snapshot::AccountsBootstrapData,
+    ) -> Result<()> {
+        self.account_count = data.accounts.len();
+        if !data.accounts.is_empty() {
+            eprintln!("Parsed {} stake accounts", data.accounts.len());
 
             // Show first 10 accounts
-            for (i, account) in accounts.iter().take(10).enumerate() {
+            for (i, account) in data.accounts.iter().take(10).enumerate() {
                 eprintln!(
                     "  Account #{}: {} (utxo: {}, rewards: {}, pool: {:?}, drep: {:?})",
                     i + 1,
@@ -112,8 +115,17 @@ impl AccountsCallback for CountingCallbacks {
             }
         }
 
+        eprintln!(
+            "AccountsBootstrapData: epoch={}, pools={}, retiring={}, dreps={}, snapshots={}",
+            data.epoch,
+            data.pools.len(),
+            data.retiring_pools.len(),
+            data.dreps.len(),
+            data.bootstrap_snapshots.is_some()
+        );
+
         // Keep first 10 for summary
-        self.sample_accounts = accounts.into_iter().take(10).collect();
+        self.sample_accounts = data.accounts.into_iter().take(10).collect();
         Ok(())
     }
 }
@@ -221,30 +233,6 @@ impl SnapshotCallbacks for CountingCallbacks {
             metadata.blocks_current_epoch.len(),
             total_blocks_current
         );
-
-        // Show snapshots info if available
-        if let Some(snapshots_info) = &metadata.snapshots {
-            eprintln!("  Snapshots Info:");
-            eprintln!(
-                "    Mark snapshot: {} sections",
-                snapshots_info.mark.sections_count
-            );
-            eprintln!(
-                "    Set snapshot: {} sections",
-                snapshots_info.set.sections_count
-            );
-            eprintln!(
-                "    Go snapshot: {} sections",
-                snapshots_info.go.sections_count
-            );
-            eprintln!(
-                "    Fee value: {} lovelace ({} ADA)",
-                snapshots_info.fee,
-                snapshots_info.fee as f64 / 1_000_000.0
-            );
-        } else {
-            eprintln!("  No snapshots data available");
-        }
 
         // Show top block producers if any
         if !metadata.blocks_previous_epoch.is_empty() {
@@ -444,18 +432,6 @@ fn main() {
                     metadata.blocks_current_epoch.len(),
                     total_blocks_current
                 );
-
-                // Show snapshots info summary
-                if let Some(snapshots_info) = &metadata.snapshots {
-                    println!("  Snapshots Summary:");
-                    println!(
-                        "    Mark: {} sections, Set: {} sections, Go: {} sections, Fee: {} ADA",
-                        snapshots_info.mark.sections_count,
-                        snapshots_info.set.sections_count,
-                        snapshots_info.go.sections_count,
-                        snapshots_info.fee as f64 / 1_000_000.0
-                    );
-                }
 
                 println!();
             }

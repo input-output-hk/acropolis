@@ -841,6 +841,19 @@ impl Display for Point {
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
 
+/// Global 'pot' account state (treasury, reserves, deposits)
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Pots {
+    /// Unallocated reserves
+    pub reserves: Lovelace,
+
+    /// Treasury
+    pub treasury: Lovelace,
+
+    /// Deposits
+    pub deposits: Lovelace,
+}
+
 /// Rational number = numerator / denominator
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Ratio {

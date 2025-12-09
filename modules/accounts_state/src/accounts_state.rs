@@ -104,7 +104,6 @@ impl AccountsState {
 
         loop {
             let (_, message) = snapshot_subscription.read().await?;
-            info!("Received message on snapshot topic");
 
             match message.as_ref() {
                 Message::Snapshot(SnapshotMessage::Startup) => {
@@ -138,11 +137,22 @@ impl AccountsState {
                     info!("Accounts state bootstrap complete");
                     return Ok(());
                 }
-                Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                    info!("Snapshot complete without accounts bootstrap data, using default state");
-                    return Ok(());
+                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
+                    _,
+                ))) => {
+                    // SPOState is handled by spo_state module, ignore here
                 }
-                _ => {}
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::EpochState(_),
+                )) => {
+                    // EpochState is handled by epochs_state module, ignore here
+                }
+                other => {
+                    info!(
+                        "Received unexpected message type on snapshot topic: {:?}",
+                        std::any::type_name_of_val(other)
+                    );
+                }
             }
         }
     }

@@ -1,8 +1,6 @@
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::{
-    AccountsCallback, BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback,
-};
+use acropolis_common::snapshot::{AccountsCallback, RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
@@ -14,10 +12,8 @@ use acropolis_common::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback,
         SnapshotCallbacks, SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
-    stake_addresses::AccountState,
     BlockInfo, EpochBootstrapData,
 };
-use acropolis_common::{PoolId, PoolRegistration};
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
@@ -83,12 +79,9 @@ pub struct SnapshotPublisher {
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     pools: SPOState,
-    accounts: Vec<AccountState>,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
-    /// Raw snapshot data (mark/set/go stake distributions) for rewards calculation
-    raw_snapshots: Option<RawSnapshotsContainer>,
 }
 
 impl SnapshotPublisher {
@@ -105,11 +98,9 @@ impl SnapshotPublisher {
             metadata: None,
             utxo_count: 0,
             pools: SPOState::new(),
-            accounts: Vec::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
             epoch_context,
-            raw_snapshots: None,
         }
     }
 
@@ -198,10 +189,46 @@ impl PoolCallback for SnapshotPublisher {
 }
 
 impl AccountsCallback for SnapshotPublisher {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        info!("Received {} accounts", accounts.len());
-        self.accounts.extend(accounts);
-        // TODO: Accumulate account data if needed or send in chunks to AccountState processor
+    fn on_accounts(
+        &mut self,
+        data: acropolis_common::snapshot::AccountsBootstrapData,
+    ) -> Result<()> {
+        info!(
+            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps, snapshots: {}",
+            data.epoch,
+            data.accounts.len(),
+            data.pools.len(),
+            data.retiring_pools.len(),
+            data.dreps.len(),
+            data.bootstrap_snapshots.is_some(),
+        );
+
+        // Convert the parsed data to the message type
+        let message = AccountsBootstrapMessage {
+            epoch: data.epoch,
+            accounts: data.accounts,
+            pools: data.pools,
+            retiring_pools: data.retiring_pools,
+            dreps: data.dreps,
+            pots: data.pots,
+            bootstrap_snapshots: data.bootstrap_snapshots,
+        };
+
+        let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::AccountsState(message),
+        )));
+
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, msg).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish accounts bootstrap message: {}", e)
+                });
+            })
+        });
+
         Ok(())
     }
 }
@@ -262,32 +289,31 @@ impl EpochCallback for SnapshotPublisher {
 
 impl SnapshotsCallback for SnapshotPublisher {
     fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
-        info!("📸 Raw Snapshots Data:");
-
         // Calculate total stakes and delegator counts from VMap data
         let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
         let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
         let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
 
+        info!("Raw Snapshots Data:");
         info!(
-            "  • Mark snapshot: {} delegators, {} total stake (ADA)",
+            "  Mark snapshot: {} delegators, {} total stake (ADA)",
             snapshots.mark.0.len(),
             mark_total as f64 / 1_000_000.0
         );
         info!(
-            "  • Set snapshot: {} delegators, {} total stake (ADA)",
+            "  Set snapshot: {} delegators, {} total stake (ADA)",
             snapshots.set.0.len(),
             set_total as f64 / 1_000_000.0
         );
         info!(
-            "  • Go snapshot: {} delegators, {} total stake (ADA)",
+            "  Go snapshot: {} delegators, {} total stake (ADA)",
             snapshots.go.0.len(),
             go_total as f64 / 1_000_000.0
         );
-        info!("  • Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
+        info!("  Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
 
-        // Store raw snapshots for inclusion in AccountsBootstrapMessage
-        self.raw_snapshots = Some(snapshots);
+        // Note: Raw snapshots are now processed by the streaming parser and
+        // included in the AccountsBootstrapMessage passed to on_accounts
 
         Ok(())
     }
@@ -326,65 +352,10 @@ impl SnapshotCallbacks for SnapshotPublisher {
             self.pools.updates.len(),
             self.pools.retiring.len()
         );
-        info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps.len());
         info!("  - Proposals: {}", self.proposals.len());
 
-        // Now that we have all the data, publish the complete accounts bootstrap message
-        let metadata = self.metadata.as_ref();
-        let epoch = metadata.map(|m| m.epoch).unwrap_or(0);
-
-        let pots = metadata.map(|m| m.pot_balances.clone()).unwrap_or_default();
-
-        let pools: Vec<PoolRegistration> = self.pools.pools.values().cloned().collect();
-        let retiring_pools: Vec<PoolId> = self.pools.retiring.keys().cloned().collect();
-
-        let dreps = self
-            .dreps
-            .iter()
-            .map(|drep_info| (drep_info.drep_id.clone(), drep_info.deposit))
-            .collect::<Vec<_>>();
-
-        // Build pre-processed bootstrap snapshots if raw data is available
-        let bootstrap_snapshots = self
-            .raw_snapshots
-            .take()
-            .map(|raw| BootstrapSnapshots::from_raw(epoch, raw, &self.accounts, &pools));
-
-        let accounts_bootstrap_message = AccountsBootstrapMessage {
-            epoch,
-            accounts: self.accounts.clone(),
-            pools,
-            retiring_pools,
-            dreps,
-            pots,
-            bootstrap_snapshots,
-        };
-
-        info!(
-            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps, snapshots: {}",
-            epoch,
-            accounts_bootstrap_message.accounts.len(),
-            accounts_bootstrap_message.pools.len(),
-            accounts_bootstrap_message.retiring_pools.len(),
-            accounts_bootstrap_message.dreps.len(),
-            accounts_bootstrap_message.bootstrap_snapshots.is_some(),
-        );
-
-        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::AccountsState(accounts_bootstrap_message),
-        )));
-
-        let context = self.context.clone();
-        let snapshot_topic = self.snapshot_topic.clone();
-
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                    tracing::error!("Failed to publish accounts bootstrap message: {}", e)
-                });
-            })
-        });
+        // Note: AccountsBootstrapMessage is now published via on_accounts callback
 
         Ok(())
     }
