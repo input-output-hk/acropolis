@@ -717,66 +717,6 @@ impl TxIdentifier {
     }
 }
 
-impl From<CompactUTxOIdentifier> for TxIdentifier {
-    fn from(id: CompactUTxOIdentifier) -> Self {
-        Self::new(id.block_number(), id.tx_index())
-    }
-}
-
-// Compact UTxO identifier (block_number, tx_index, output_index) used for internal storage
-// TODO Not currently used - could be used as a part of optimisation of AddressState etc.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Encode,
-    minicbor::Decode,
-)]
-pub struct CompactUTxOIdentifier(#[n(0)] [u8; 8]);
-
-impl CompactUTxOIdentifier {
-    pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
-        let mut buf = [0u8; 8];
-        buf[..4].copy_from_slice(&block_number.to_be_bytes());
-        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
-        buf[6..].copy_from_slice(&output_index.to_be_bytes());
-        Self(buf)
-    }
-
-    pub fn block_number(&self) -> u32 {
-        u32::from_be_bytes(self.0[..4].try_into().unwrap())
-    }
-
-    pub fn tx_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
-    }
-
-    pub fn output_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[6..8].try_into().unwrap())
-    }
-
-    pub fn to_bytes(&self) -> [u8; 8] {
-        self.0
-    }
-}
-
-impl fmt::Display for CompactUTxOIdentifier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}:{}:{}",
-            self.block_number(),
-            self.tx_index(),
-            self.output_index()
-        )
-    }
-}
-
 // Full UTXO identifier as used in the outside world, with TX hash and output index
 #[derive(
     Debug,
