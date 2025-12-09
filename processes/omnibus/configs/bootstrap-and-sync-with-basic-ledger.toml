@@ -54,6 +54,7 @@ block-subscribe-topic = "cardano.block.available"
 [module.stake-delta-filter]
 
 [module.epochs-state]
+block-subscribe-topic = "cardano.block.available"
 
 [module.parameters-state]
 # Subscribe to blocks just to get a tick to trigger genesis outputs
@@ -64,9 +65,6 @@ verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
 [module.clock]
-
-[module.spy]
-topic = "cardano.spo.state"
 
 # ============================================================================
 # Message Bus Configuration
