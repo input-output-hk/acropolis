@@ -9,3 +9,4 @@ to become a full Cardano node.
 - Building a node from the ground up:
   - [Simple Mithril UTXOs](system-simple-mithril-utxo.md) - The most basic UTXO follower from a Mithril snapshot
   - [Mithril and Sync UTXOs](system-simple-mithril-and-sync-utxo.md) - Adding a live network sync
+  - [Basic ledger](system-bootstrap-and-sync-with-basic-ledger.md) - Adding basic (Shelley-era) ledger state

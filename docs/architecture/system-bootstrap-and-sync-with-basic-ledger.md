@@ -116,15 +116,18 @@ It also filters out any address deltas that don't include any stake address info
 addresses don't).  The cleaned-up deltas are then published on `cardano.stake.deltas`, which
 is what the Accounts State actually subscribes to.
 
+### Epoch activity
+
+Another new module, [Epoch State](../../modules/epoch_state) counts up all the fees paid on
+transactions in each epoch, and also how many blocks each SPO produced.  It gets this information
+from block data sent on `cardano.block.txs` .It sends the totals to
+Accounts State on `cardano.epoch.activity`.
+
 ### Monetary pots
 The Accounts State module also tracks the global monetary 'pots', including the reserves,
 treasury and deposit accounts.  To start this off it receives `cardano.pot.deltas` from the
 genesis bootstrapper which sets the initial reserves allocation - at this point the treasury
 and deposits are zero.
-
-Another new module, [Epoch State](../../modules/epoch_state) counts up all the fees paid on
-transactions in each epoch, and also how many blocks each SPO produced.  It sends this to
-Accounts State on `cardano.epoch.activity`.
 
 Then at the start of each epoch, a proportion of the reserves, plus
 the fees, is allocated to the treasury, and a further portion to pay
