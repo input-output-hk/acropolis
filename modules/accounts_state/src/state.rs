@@ -130,7 +130,8 @@ pub struct State {
 impl State {
     /// Bootstrap state from snapshot data
     /// All data arrives pre-processed and ready to use directly
-    pub fn bootstrap(&mut self, bootstrap_msg: &AccountsBootstrapMessage) {
+    /// Takes ownership of bootstrap_msg to avoid cloning large snapshot data
+    pub fn bootstrap(&mut self, mut bootstrap_msg: AccountsBootstrapMessage) {
         info!(
             "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
             bootstrap_msg.epoch,
@@ -174,12 +175,77 @@ impl State {
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // 6. Note about snapshots
-        if bootstrap_msg.snapshots.is_some() {
-            info!("Snapshot metadata available");
+        // 6. Load mark/set/go snapshots if available
+        if let Some(bs) = bootstrap_msg.bootstrap_snapshots.take() {
+            // Convert pre-processed snapshots to internal format
+            let mark_snapshot = Snapshot::from_bootstrap(bs.mark, &self.pots);
+            let set_snapshot = Snapshot::from_bootstrap(bs.set, &self.pots);
+            let go_snapshot = Snapshot::from_bootstrap(bs.go, &self.pots);
+
+            self.epoch_snapshots = EpochSnapshots {
+                mark: Arc::new(mark_snapshot),
+                set: Arc::new(set_snapshot),
+                go: Arc::new(go_snapshot),
+            };
+
+            info!(
+                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
+                self.epoch_snapshots.mark.epoch,
+                self.epoch_snapshots.mark.spos.len(),
+                self.epoch_snapshots.set.epoch,
+                self.epoch_snapshots.set.spos.len(),
+                self.epoch_snapshots.go.epoch,
+                self.epoch_snapshots.go.spos.len(),
+            );
+        } else {
+            info!("No bootstrap snapshot data available");
         }
 
-        info!("Accounts state bootstrap complete");
+        // Final summary log
+        info!(
+            "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
+             pots(reserves={}, treasury={}, deposits={})",
+            bootstrap_msg.epoch,
+            bootstrap_msg.accounts.len(),
+            self.spos.len(),
+            self.dreps.len(),
+            self.pots.reserves,
+            self.pots.treasury,
+            self.pots.deposits,
+        );
+
+        // Log sample stake addresses for verification via REST API
+        // Note: utxo_value is not populated from snapshot (would require UTxO aggregation)
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+
+        let total = stake_addresses.len();
+        let with_delegation =
+            stake_addresses.iter().filter(|(_, s)| s.delegated_spo.is_some()).count();
+        let with_rewards = stake_addresses.iter().filter(|(_, s)| s.rewards > 0).count();
+
+        info!(
+            "Stake address stats: total={}, with_delegation={}, with_rewards={}",
+            total, with_delegation, with_rewards
+        );
+
+        // Show accounts with delegations
+        let sample_accounts: Vec<_> = stake_addresses
+            .iter()
+            .filter(|(_, state)| state.delegated_spo.is_some())
+            .take(5)
+            .collect();
+
+        if !sample_accounts.is_empty() {
+            info!("Sample stake addresses for REST API verification:");
+            for (addr, state) in sample_accounts {
+                info!(
+                    "  {} -> rewards={}, delegated_to={:?}",
+                    addr.to_string().unwrap(),
+                    state.rewards,
+                    state.delegated_spo
+                );
+            }
+        }
     }
 
     /// Get the stake address state for a give stake key

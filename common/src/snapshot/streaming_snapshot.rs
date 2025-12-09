@@ -318,8 +318,21 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
 
-struct SnapshotContext {
+/// Context for snapshot decoding that provides network information
+pub struct SnapshotContext {
     network: NetworkId,
+}
+
+impl SnapshotContext {
+    /// Create a new snapshot context with the given network
+    pub fn new(network: NetworkId) -> Self {
+        Self { network }
+    }
+
+    /// Get the network from this context
+    pub fn network(&self) -> NetworkId {
+        self.network.clone()
+    }
 }
 
 impl AsRef<SnapshotContext> for SnapshotContext {
@@ -328,7 +341,8 @@ impl AsRef<SnapshotContext> for SnapshotContext {
     }
 }
 
-struct SnapshotOption<T>(pub Option<T>);
+/// Option wrapper for snapshot CBOR decoding (handles null/undefined)
+pub struct SnapshotOption<T>(pub Option<T>);
 
 impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
 where
@@ -348,7 +362,7 @@ where
     }
 }
 
-struct SnapshotPoolRegistration(pub PoolRegistration);
+pub struct SnapshotPoolRegistration(pub PoolRegistration);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistration
 where
@@ -374,7 +388,8 @@ where
     }
 }
 
-struct SnapshotRatio(pub Ratio);
+/// Ratio wrapper for snapshot CBOR decoding (handles tagged rationals)
+pub struct SnapshotRatio(pub Ratio);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -395,7 +410,8 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
 // Network types for pool relays
 pub type SnapshotPort = u32;
 
-struct SnapshotStakeAddress(pub StakeAddress);
+/// Stake address wrapper for snapshot CBOR decoding (from raw bytes)
+pub struct SnapshotStakeAddress(pub StakeAddress);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -407,7 +423,8 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     }
 }
 
-struct SnapshotStakeAddressFromCred(pub StakeAddress);
+/// Stake address wrapper for snapshot CBOR decoding (from credential bytes, requires context)
+pub struct SnapshotStakeAddressFromCred(pub StakeAddress);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
 where
@@ -424,7 +441,8 @@ where
     }
 }
 
-struct SnapshotRelay(pub Relay);
+/// Relay wrapper for snapshot CBOR decoding
+pub struct SnapshotRelay(pub Relay);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -462,7 +480,8 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     }
 }
 
-struct SnapshotPoolMetadata(pub PoolMetadata);
+/// Pool metadata wrapper for snapshot CBOR decoding
+pub struct SnapshotPoolMetadata(pub PoolMetadata);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -575,6 +594,14 @@ pub struct DRepInfo {
     pub deposit: u64,
     /// Optional anchor (URL and hash)
     pub anchor: Option<AnchorInfo>,
+}
+
+/// Nullable type (like Maybe but with explicit null vs undefined)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Nullable<T> {
+    Undefined,
+    Null,
+    Some(T),
 }
 
 /// Governance proposal

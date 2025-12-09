@@ -2,7 +2,8 @@
 
 use crate::state::{Pots, RegistrationChange};
 use acropolis_common::{
-    stake_addresses::StakeAddressMap, Lovelace, PoolId, PoolRegistration, Ratio, StakeAddress,
+    snapshot::BootstrapSnapshot, stake_addresses::StakeAddressMap, Lovelace, PoolId,
+    PoolRegistration, Ratio, StakeAddress,
 };
 use imbl::OrdMap;
 use std::collections::HashMap;
@@ -185,6 +186,40 @@ impl Snapshot {
                 }
             })
             .sum()
+    }
+
+    /// Convert from a pre-processed BootstrapSnapshot
+    ///
+    /// The BootstrapSnapshot is built by the publisher from raw CBOR data,
+    /// this just converts it to the internal Snapshot format.
+    pub fn from_bootstrap(bs: BootstrapSnapshot, pots: &Pots) -> Self {
+        let mut snapshot = Self {
+            epoch: bs.epoch,
+            pots: pots.clone(),
+            blocks: 0, // Not available from bootstrap data
+            registration_changes: Vec::new(),
+            spos: HashMap::new(),
+        };
+
+        // Convert each BootstrapSnapshotSPO to SnapshotSPO
+        for (pool_id, bs_spo) in bs.spos {
+            snapshot.spos.insert(
+                pool_id,
+                SnapshotSPO {
+                    delegators: bs_spo.delegators,
+                    total_stake: bs_spo.total_stake,
+                    pledge: bs_spo.pledge,
+                    fixed_cost: bs_spo.cost,
+                    margin: bs_spo.margin,
+                    blocks_produced: 0, // Not available from bootstrap
+                    pool_owners: bs_spo.pool_owners,
+                    reward_account: bs_spo.reward_account,
+                    two_previous_reward_account_is_registered: true, // Assume registered during bootstrap
+                },
+            );
+        }
+
+        snapshot
     }
 }
 

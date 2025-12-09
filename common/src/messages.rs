@@ -24,7 +24,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::streaming_snapshot::SnapshotsInfo;
-use crate::snapshot::AccountState;
+use crate::snapshot::{AccountState, BootstrapSnapshots};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -435,8 +435,12 @@ pub struct AccountsBootstrapMessage {
     /// Pot balances (treasury, reserves, deposits)
     pub pots: PotBalances,
 
-    /// Snapshot data for rewards calculation (Mark, Set, Go)
+    /// Snapshot metadata for rewards calculation (Mark, Set, Go) - summary info
     pub snapshots: Option<SnapshotsInfo>,
+
+    /// Pre-processed bootstrap snapshots (Mark, Set, Go)
+    /// Contains per-SPO delegator lists ready for accounts_state to use
+    pub bootstrap_snapshots: Option<BootstrapSnapshots>,
 }
 
 #[allow(clippy::large_enum_variant)]

@@ -30,4 +30,7 @@ pub use streaming_snapshot::{
 };
 
 // Re-export snapshot types
-pub use mark_set_go::{RawSnapshotsContainer, SnapshotsCallback, VMap};
+pub use mark_set_go::{
+    BootstrapSnapshot, BootstrapSnapshotSPO, BootstrapSnapshots, RawSnapshotsContainer,
+    SnapshotsCallback, VMap,
+};

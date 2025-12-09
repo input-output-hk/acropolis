@@ -72,14 +72,17 @@ pub struct AccountsState;
 
 impl AccountsState {
     /// Handle bootstrap message from snapshot
-    fn handle_bootstrap(state: &mut State, accounts_data: &AccountsBootstrapMessage) {
-        // Initialize accounts state from snapshot data
+    /// Takes ownership of accounts_data to avoid cloning large snapshot data
+    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) {
+        let epoch = accounts_data.epoch;
+        let accounts_len = accounts_data.accounts.len();
+
+        // Initialize accounts state from snapshot data (takes ownership)
         state.bootstrap(accounts_data);
 
         info!(
             "Accounts state bootstrapped successfully for epoch {} with {} accounts",
-            accounts_data.epoch,
-            accounts_data.accounts.len()
+            epoch, accounts_len
         );
     }
 
@@ -101,17 +104,37 @@ impl AccountsState {
 
         loop {
             let (_, message) = snapshot_subscription.read().await?;
+            info!("Received message on snapshot topic");
 
             match message.as_ref() {
                 Message::Snapshot(SnapshotMessage::Startup) => {
                     info!("Received snapshot startup signal, awaiting bootstrap data...");
                 }
                 Message::Snapshot(SnapshotMessage::Bootstrap(
-                    SnapshotStateMessage::AccountsState(accounts_data),
+                    SnapshotStateMessage::AccountsState(_),
                 )) => {
+                    info!("Received AccountsState bootstrap message");
+                    // Extract ownership of the accounts data to avoid cloning large snapshots
+                    let accounts_data = match Arc::try_unwrap(message) {
+                        Ok(Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::AccountsState(data),
+                        ))) => data,
+                        Err(arc_msg) => {
+                            // Arc has other references, need to clone
+                            match arc_msg.as_ref() {
+                                Message::Snapshot(SnapshotMessage::Bootstrap(
+                                    SnapshotStateMessage::AccountsState(data),
+                                )) => data.clone(),
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    let epoch = accounts_data.epoch;
                     let mut state = history.lock().await.get_or_init_with(State::default);
                     Self::handle_bootstrap(&mut state, accounts_data);
-                    history.lock().await.commit(accounts_data.epoch, state);
+                    history.lock().await.commit(epoch, state);
                     info!("Accounts state bootstrap complete");
                     return Ok(());
                 }

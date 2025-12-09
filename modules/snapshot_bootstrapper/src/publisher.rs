@@ -1,6 +1,6 @@
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::{RawSnapshotsContainer, SnapshotsCallback};
+use acropolis_common::snapshot::{BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{
@@ -85,6 +85,8 @@ pub struct SnapshotPublisher {
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
+    /// Raw snapshot data (mark/set/go stake distributions) for rewards calculation
+    raw_snapshots: Option<RawSnapshotsContainer>,
 }
 
 impl SnapshotPublisher {
@@ -105,6 +107,7 @@ impl SnapshotPublisher {
             dreps: Vec::new(),
             proposals: Vec::new(),
             epoch_context,
+            raw_snapshots: None,
         }
     }
 
@@ -281,12 +284,8 @@ impl SnapshotsCallback for SnapshotPublisher {
         );
         info!("  • Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
 
-        // TODO: Send snapshot data to appropriate message bus topics
-        // This could involve publishing messages for:
-        // - Mark snapshot → MarkSnapshotState processor
-        // - Set snapshot → SetSnapshotState processor
-        // - Go snapshot → GoSnapshotState processor
-        // - Fee data → FeesState processor
+        // Store raw snapshots for inclusion in AccountsBootstrapMessage
+        self.raw_snapshots = Some(snapshots);
 
         Ok(())
     }
@@ -356,6 +355,12 @@ impl SnapshotCallbacks for SnapshotPublisher {
             .map(|drep_info| (drep_info.drep_id.clone(), drep_info.deposit))
             .collect::<Vec<_>>();
 
+        // Build pre-processed bootstrap snapshots if raw data is available
+        let bootstrap_snapshots = self
+            .raw_snapshots
+            .take()
+            .map(|raw| BootstrapSnapshots::from_raw(epoch, raw, &self.accounts, &pools));
+
         let accounts_bootstrap_message = AccountsBootstrapMessage {
             epoch,
             accounts: self.accounts.clone(),
@@ -364,15 +369,17 @@ impl SnapshotCallbacks for SnapshotPublisher {
             dreps,
             pots,
             snapshots,
+            bootstrap_snapshots,
         };
 
         info!(
-            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps, snapshots: {}",
             epoch,
             accounts_bootstrap_message.accounts.len(),
             accounts_bootstrap_message.pools.len(),
             accounts_bootstrap_message.retiring_pools.len(),
             accounts_bootstrap_message.dreps.len(),
+            accounts_bootstrap_message.bootstrap_snapshots.is_some(),
         );
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(

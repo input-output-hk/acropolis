@@ -2,18 +2,21 @@
 // Mark, Set, Go Snapshots Support
 // ================================================================================================
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use log::info;
+use std::collections::HashMap;
 
 use minicbor::Decoder;
 use serde::Serialize;
 
 pub use crate::hash::Hash;
+use crate::snapshot::streaming_snapshot::{SnapshotContext, SnapshotPoolRegistration};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
+use crate::{Lovelace, NetworkId, PoolId, PoolRegistration, Ratio, StakeAddress};
 
 /// VMap<K, V> representation for CBOR Map types
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct VMap<K, V>(pub Vec<(K, V)>);
 
 impl<'b, C, K, V> minicbor::Decode<'b, C> for VMap<K, V>
@@ -49,7 +52,7 @@ where
 }
 
 /// Raw snapshots container with VMap data
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct RawSnapshotsContainer {
     pub mark: VMap<StakeCredential, i64>,
     pub set: VMap<StakeCredential, i64>,
@@ -77,54 +80,28 @@ pub trait SnapshotsCallback {
 pub struct Snapshot {
     /// snapshot_stake: stake distribution map (credential -> lovelace amount)
     pub snapshot_stake: VMap<StakeCredential, i64>,
-    // snapshot_delegations: delegation map (credential -> stake pool key hash)
-    // pub snapshot_delegations: VMap<Credential, StakePool>,
-
-    // snapshot_pool_params: pool parameters map (stake pool key hash -> pool params)
-    //  snapshot_pool_params: VMap<Vec<u8>, Vec<u8>>,
+    // snapshot_delegations: vmap<credential, key_hash<stake_pool>>,)
+    pub snapshot_delegations: VMap<StakeCredential, Hash<28>>,
+    // snapshot_pool_params: vmap<key_hash<stake_pool>, pool_params>,
+    pub snapshot_pool_params: VMap<Hash<28>, PoolRegistration>,
 }
 
 impl Snapshot {
     /// Parse a single snapshot (Mark, Set, or Go)
     pub fn parse_single_snapshot(decoder: &mut Decoder, snapshot_name: &str) -> Result<Snapshot> {
+        Self::parse_single_snapshot_with_network(decoder, snapshot_name, NetworkId::Mainnet)
+    }
+
+    /// Parse a single snapshot with a specific network ID
+    pub fn parse_single_snapshot_with_network(
+        decoder: &mut Decoder,
+        snapshot_name: &str,
+        network: NetworkId,
+    ) -> Result<Snapshot> {
         info!("        {snapshot_name} snapshot - checking data type...");
 
         // Check what type we have - could be array, map, or simple value
         match decoder.datatype().context("Failed to read snapshot datatype")? {
-            minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                info!(
-                    "        {snapshot_name} snapshot is a map - treating as stake distribution directly"
-                );
-                // Try VMap first, then fallback to simple map
-                match decoder.decode::<VMap<StakeCredential, i64>>() {
-                    Ok(snapshot_stake) => {
-                        info!(
-                            "        {} snapshot - successfully decoded {} stake entries with VMap",
-                            snapshot_name,
-                            snapshot_stake.0.len()
-                        );
-                        Ok(Snapshot { snapshot_stake })
-                    }
-                    Err(vmap_error) => {
-                        info!(
-                            "        {snapshot_name} snapshot - VMap decode failed: {vmap_error}"
-                        );
-                        info!(
-                            "        {snapshot_name} snapshot - trying simple BTreeMap<bytes, i64>"
-                        );
-
-                        // Reset decoder and try simple map format
-                        // Note: We can't reset the decoder, so we need to handle this differently
-                        // For now, return an empty snapshot to continue processing
-                        info!(
-                            "        {snapshot_name} snapshot - using empty fallback due to format mismatch"
-                        );
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
-                    }
-                }
-            }
             minicbor::data::Type::Array => {
                 info!("        {snapshot_name} snapshot is an array");
                 decoder.array().context("Failed to parse snapshot array")?;
@@ -139,105 +116,253 @@ impl Snapshot {
                         // First element is snapshot_stake
                         let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
 
-                        // Skip delegations (second element)
-                        decoder.skip().context("Failed to skip snapshot_delegations")?;
+                        // Parse delegations (second element)
+                        info!("        {snapshot_name} snapshot - parsing snapshot_delegations...");
+                        let delegations: VMap<StakeCredential, Hash<28>> =
+                            decoder.decode().context("Failed to parse snapshot_delegations")?;
 
-                        // Skip pool_params (third element)
-                        decoder.skip().context("Failed to skip snapshot_pool_params")?;
+                        // Parse pool_params (third element) using SnapshotPoolRegistration
+                        info!("        {snapshot_name} snapshot - parsing snapshot_pool_params...");
 
-                        Ok(Snapshot { snapshot_stake })
+                        // Create context for network-aware decoding
+                        let mut ctx = SnapshotContext::new(network);
+
+                        // Parse pool params map with context
+                        let pool_params = parse_pool_params_map(decoder, &mut ctx)
+                            .context("Failed to parse snapshot_pool_params")?;
+
+                        info!("        {snapshot_name} snapshot - parse completed successfully.");
+
+                        Ok(Snapshot {
+                            snapshot_stake,
+                            snapshot_delegations: delegations,
+                            snapshot_pool_params: pool_params,
+                        })
                     }
                     other_type => {
                         info!(
                             "        {snapshot_name} snapshot - first element is {other_type:?}, skipping entire array"
                         );
-                        // We don't know how many elements are in this array, so just skip the first element
-                        // and let the array parsing naturally complete
-                        decoder.skip().context("Failed to skip first element")?;
-
-                        // Try to skip remaining elements, but don't fail if there aren't exactly 3
-                        loop {
-                            match decoder.datatype() {
-                                Ok(minicbor::data::Type::Break) => {
-                                    // End of indefinite array
-                                    break;
-                                }
-                                Ok(_) => {
-                                    // More elements to skip
-                                    decoder.skip().ok(); // Don't fail on individual skips
-                                }
-                                Err(_) => {
-                                    // End of definite array or other error - break
-                                    break;
-                                }
-                            }
-                        }
-
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
+                        Err(Error::msg(
+                            "Unexpected first element type in snapshot array",
+                        ))
                     }
                 }
             }
-            minicbor::data::Type::U32
-            | minicbor::data::Type::U64
-            | minicbor::data::Type::U8
-            | minicbor::data::Type::U16 => {
-                let value = decoder.u64().context("Failed to parse snapshot value")?;
-                info!("        {snapshot_name} snapshot is a simple value: {value}");
-
-                // Return empty snapshot for simple values
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
-            minicbor::data::Type::Break => {
-                info!(
-                    "        {snapshot_name} snapshot is a Break token - indicates end of indefinite structure"
-                );
-                // Don't consume the break token, let the parent structure handle it
-                // Return empty snapshot
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
-            minicbor::data::Type::Tag => {
-                info!(
-                    "        {snapshot_name} snapshot starts with a CBOR tag, trying to skip tag and parse content"
-                );
-                let _tag = decoder.tag().context("Failed to read CBOR tag")?;
-                info!(
-                    "        {snapshot_name} snapshot - found tag {_tag}, checking tagged content..."
-                );
-
-                // After consuming tag, try to parse the tagged content
-                match decoder.datatype().context("Failed to read tagged content datatype")? {
-                    minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                        let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
-                        Ok(Snapshot { snapshot_stake })
-                    }
-                    other_tagged_type => {
-                        info!(
-                            "        {snapshot_name} snapshot - tagged content is {other_tagged_type:?}, skipping"
-                        );
-                        decoder.skip().ok(); // Don't fail on skip
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
-                    }
-                }
-            }
-            other_type => {
-                info!(
-                    "        {snapshot_name} snapshot has unexpected type: {other_type:?}, skipping..."
-                );
-                decoder.skip().ok(); // Don't fail on skip
-
-                // Return empty snapshot
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
+            other_type => Err(Error::msg(format!(
+                "Unexpected snapshot data type: {other_type:?}"
+            ))),
         }
     }
+}
+
+// ================================================================================================
+// Bootstrap Snapshot Types (for message passing to accounts_state)
+// ================================================================================================
+
+/// SPO data for a bootstrap stake snapshot - serializable version for message passing
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct BootstrapSnapshotSPO {
+    /// List of delegator stake addresses and amounts
+    pub delegators: Vec<(StakeAddress, Lovelace)>,
+
+    /// Total stake delegated
+    pub total_stake: Lovelace,
+
+    /// Pledge
+    pub pledge: Lovelace,
+
+    /// Fixed cost
+    pub cost: Lovelace,
+
+    /// Margin
+    pub margin: Ratio,
+
+    /// Reward account
+    pub reward_account: StakeAddress,
+
+    /// Pool owners
+    pub pool_owners: Vec<StakeAddress>,
+}
+
+/// Bootstrap snapshot - serializable version for message passing
+/// This is the pre-processed format ready for accounts_state to use
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct BootstrapSnapshot {
+    /// Epoch this snapshot is for
+    pub epoch: u64,
+
+    /// Map of SPOs by operator ID with their delegators and stake
+    pub spos: HashMap<PoolId, BootstrapSnapshotSPO>,
+
+    /// Total stake across all SPOs
+    pub total_stake: Lovelace,
+}
+
+/// Container for the three bootstrap snapshots (mark, set, go)
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+pub struct BootstrapSnapshots {
+    /// Mark snapshot (epoch N-1)
+    pub mark: BootstrapSnapshot,
+
+    /// Set snapshot (epoch N-2)
+    pub set: BootstrapSnapshot,
+
+    /// Go snapshot (epoch N-3)
+    pub go: BootstrapSnapshot,
+
+    /// Fee from snapshots
+    pub fee: u64,
+}
+
+impl BootstrapSnapshots {
+    /// Build bootstrap snapshots from raw snapshot data, accounts, and pools
+    ///
+    /// # Arguments
+    /// * `epoch` - Current epoch we're bootstrapping into
+    /// * `raw_snapshots` - Raw stake distributions from CBOR parsing
+    /// * `accounts` - Account states with delegation info
+    /// * `pools` - Pool registrations
+    pub fn from_raw(
+        epoch: u64,
+        raw_snapshots: RawSnapshotsContainer,
+        accounts: &[AccountState],
+        pools: &[PoolRegistration],
+    ) -> Self {
+        // Build delegation map: stake credential -> pool id
+        let delegations: HashMap<StakeCredential, PoolId> = accounts
+            .iter()
+            .filter_map(|account| {
+                account
+                    .address_state
+                    .delegated_spo
+                    .map(|pool_id| (account.stake_address.credential.clone(), pool_id))
+            })
+            .collect();
+
+        // Build pool map for quick lookup
+        let pool_map: HashMap<PoolId, &PoolRegistration> =
+            pools.iter().map(|p| (p.operator, p)).collect();
+
+        // Build the three snapshots
+        let mark = Self::build_snapshot(
+            epoch.saturating_sub(1),
+            raw_snapshots.mark,
+            &delegations,
+            &pool_map,
+        );
+
+        let set = Self::build_snapshot(
+            epoch.saturating_sub(2),
+            raw_snapshots.set,
+            &delegations,
+            &pool_map,
+        );
+
+        let go = Self::build_snapshot(
+            epoch.saturating_sub(3),
+            raw_snapshots.go,
+            &delegations,
+            &pool_map,
+        );
+
+        info!(
+            "Built bootstrap snapshots: mark(epoch {}, {} SPOs, {} stake), \
+             set(epoch {}, {} SPOs, {} stake), go(epoch {}, {} SPOs, {} stake)",
+            mark.epoch,
+            mark.spos.len(),
+            mark.total_stake,
+            set.epoch,
+            set.spos.len(),
+            set.total_stake,
+            go.epoch,
+            go.spos.len(),
+            go.total_stake
+        );
+
+        Self {
+            mark,
+            set,
+            go,
+            fee: raw_snapshots.fee,
+        }
+    }
+
+    fn build_snapshot(
+        epoch: u64,
+        stake_map: VMap<StakeCredential, i64>,
+        delegations: &HashMap<StakeCredential, PoolId>,
+        pools: &HashMap<PoolId, &PoolRegistration>,
+    ) -> BootstrapSnapshot {
+        let mut snapshot = BootstrapSnapshot {
+            epoch,
+            spos: HashMap::new(),
+            total_stake: 0,
+        };
+
+        // Initialize SPOs from pool registrations
+        for (pool_id, pool_reg) in pools {
+            snapshot.spos.insert(
+                *pool_id,
+                BootstrapSnapshotSPO {
+                    delegators: Vec::new(),
+                    total_stake: 0,
+                    pledge: pool_reg.pledge,
+                    cost: pool_reg.cost,
+                    margin: pool_reg.margin.clone(),
+                    pool_owners: pool_reg.pool_owners.clone(),
+                    reward_account: pool_reg.reward_account.clone(),
+                },
+            );
+        }
+
+        // Build delegator lists from stake map + delegation info
+        for (credential, amount) in stake_map.0 {
+            if amount <= 0 {
+                continue;
+            }
+            let stake = amount as Lovelace;
+
+            if let Some(pool_id) = delegations.get(&credential) {
+                if let Some(snap_spo) = snapshot.spos.get_mut(pool_id) {
+                    let stake_address = StakeAddress::new(credential, NetworkId::Mainnet);
+                    snap_spo.delegators.push((stake_address, stake));
+                    snap_spo.total_stake += stake;
+                    snapshot.total_stake += stake;
+                }
+            }
+        }
+
+        snapshot
+    }
+}
+
+/// Parse pool params map using SnapshotPoolRegistration for clean decoding
+fn parse_pool_params_map(
+    decoder: &mut Decoder,
+    ctx: &mut SnapshotContext,
+) -> Result<VMap<Hash<28>, PoolRegistration>, minicbor::decode::Error> {
+    let map_len = decoder.map()?;
+    let mut pairs = Vec::new();
+
+    match map_len {
+        Some(len) => {
+            for _ in 0..len {
+                let key: Hash<28> = decoder.decode_with(ctx)?;
+                let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
+                pairs.push((key, value.0));
+            }
+        }
+        None => {
+            // Indefinite-length map
+            while decoder.datatype()? != minicbor::data::Type::Break {
+                let key: Hash<28> = decoder.decode_with(ctx)?;
+                let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
+                pairs.push((key, value.0));
+            }
+            decoder.skip()?; // Skip the break
+        }
+    }
+
+    Ok(VMap(pairs))
 }
