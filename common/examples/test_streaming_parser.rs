@@ -2,9 +2,9 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
-use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
