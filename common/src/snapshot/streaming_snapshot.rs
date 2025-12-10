@@ -431,6 +431,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
 
 /// Stake address wrapper for snapshot CBOR decoding (from credential bytes, requires context)
 pub struct SnapshotStakeAddressFromCred(pub StakeAddress);
+struct SnapshotStakeAddressFromCred(pub StakeAddress);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
 where
@@ -839,9 +840,11 @@ impl StreamingSnapshotParser {
     ///   5: StakeDistr,
     /// ]
     /// ```
-    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C) -> Result<()> {
+    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C, network: NetworkId) -> Result<()> {
         let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
+
+        let mut ctx = SnapshotContext { network };
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
@@ -969,8 +972,8 @@ impl StreamingSnapshotParser {
                 Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
             // Parse PState [3][1][0][1] for pools
-            let pools =
-                Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
+            let pools = Self::parse_pstate(&mut decoder, &mut ctx)
+                .context("Failed to parse PState for pools")?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
             // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
@@ -1241,7 +1244,7 @@ impl StreamingSnapshotParser {
 
         // Parse mark/set/go snapshots (EpochState[4])
         let snapshots_result =
-            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, epoch);
+            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
         // Send raw snapshot data to callback (for logging/monitoring)
         if let Ok(ref parsed_snapshots) = snapshots_result {
@@ -1712,7 +1715,7 @@ impl StreamingSnapshotParser {
 
     /// Parse PState to extract stake pools
     /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
-    pub fn parse_pstate(decoder: &mut Decoder) -> Result<SPOState> {
+    pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
         // Parse PState array
         let pstate_len = decoder
             .array()
@@ -1732,10 +1735,6 @@ impl StreamingSnapshotParser {
         }
 
         let mut pools = BTreeMap::new();
-        let mut ctx = SnapshotContext {
-            // TODO: make this configurable (currently is mainnet)
-            network: NetworkId::Mainnet,
-        };
         match decoder.map()? {
             Some(pool_count) => {
                 // Definite-length map
@@ -1743,7 +1742,7 @@ impl StreamingSnapshotParser {
                     let pool_id: PoolId =
                         decoder.decode().context(format!("Failed to decode pool id #{i}"))?;
                     let pool: SnapshotPoolRegistration = decoder
-                        .decode_with(&mut ctx)
+                        .decode_with(ctx)
                         .context(format!("Failed to decode pool for pool #{i}"))?;
                     pools.insert(pool_id, pool.0);
                 }
@@ -1762,7 +1761,7 @@ impl StreamingSnapshotParser {
                                 .decode()
                                 .context(format!("Failed to decode pool id #{count}"))?;
                             let pool: SnapshotPoolRegistration = decoder
-                                .decode_with(&mut ctx)
+                                .decode_with(ctx)
                                 .context(format!("Failed to decode pool for pool #{count}"))?;
                             pools.insert(pool_id, pool.0);
                             count += 1;
@@ -1776,7 +1775,7 @@ impl StreamingSnapshotParser {
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let updates: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder.decode_with(&mut ctx)?;
+        let updates: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder.decode_with(ctx)?;
         let updates = updates.into_iter().map(|(id, pool)| (id, pool.0)).collect();
 
         // Parse retiring map [2]: PoolId -> Epoch
@@ -1938,6 +1937,7 @@ impl StreamingSnapshotParser {
     /// Epoch State / Snapshots / Fee
     fn parse_snapshots_with_hybrid_approach(
         decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
         _epoch: u64,
     ) -> Result<ParsedSnapshotsContainer> {
         let snapshots_len = decoder
@@ -1951,12 +1951,29 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        let mark = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
-            .context("Failed to parse Mark snapshot")?;
-        let set = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
+        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
+
+        // Parse each snapshot using snapshot.rs functions
+        let mut parsed_snapshots = Vec::new();
+
+        // Parse Mark snapshot [0]
+        info!("    Parsing Mark snapshot...");
+        let mark_snapshot =
+            super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Mark")
+                .context("Failed to parse Mark snapshot")?;
+        parsed_snapshots.push(mark_snapshot);
+
+        // Parse Set snapshot [1]
+        info!("    Parsing Set snapshot...");
+        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Set")
             .context("Failed to parse Set snapshot")?;
-        let go = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
+        parsed_snapshots.push(set_snapshot);
+
+        // Parse Go snapshot [2]
+        info!("    Parsing Go snapshot...");
+        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Go")
             .context("Failed to parse Go snapshot")?;
+        parsed_snapshots.push(go_snapshot);
 
         let fee = decoder.decode::<u64>().unwrap_or(0);
 

@@ -1,9 +1,9 @@
-use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::{AccountsCallback, RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
+    ledger_state::SPOState,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
         SnapshotStateMessage,
@@ -163,9 +163,29 @@ impl UtxoCallback for SnapshotPublisher {
 
 impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: SPOState) -> Result<()> {
-        info!("Received {} pools", pools.pools.len());
+        info!(
+            "Received pools (current: {}, future: {}, retiring: {})",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
         self.pools.extend(&pools);
-        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::SPOState(pools),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // Spawn async publish task since this callback is synchronous
+        tokio::spawn(async move {
+            if let Err(e) = context.publish(&snapshot_topic, message).await {
+                tracing::error!("Failed to publish SPO bootstrap: {}", e);
+            }
+        });
+
         Ok(())
     }
 }

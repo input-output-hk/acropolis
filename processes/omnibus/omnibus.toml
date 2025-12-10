@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -83,7 +83,7 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = false
+store-spdd = true
 
 [module.historical-accounts-state]
 # Clear state on start up (default true)

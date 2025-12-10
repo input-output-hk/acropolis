@@ -12,6 +12,7 @@ use acropolis_common::snapshot::{
     SnapshotsCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 use acropolis_common::PoolRegistration;
+use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
@@ -417,14 +418,7 @@ impl SnapshotsCallback for CountingCallbacks {
         if !snapshots.mark.0.is_empty() {
             eprintln!("  Sample stakes (first 5):");
             for (i, (cred, amount)) in snapshots.mark.0.iter().take(5).enumerate() {
-                let cred_str = match cred {
-                    acropolis_common::StakeCredential::AddrKeyHash(h) => {
-                        format!("KeyHash({}...)", &hex::encode(&h[..4]))
-                    }
-                    acropolis_common::StakeCredential::ScriptHash(h) => {
-                        format!("ScriptHash({}...)", &hex::encode(&h[..4]))
-                    }
-                };
+                let cred_str = cred.to_string().unwrap_or_default();
                 eprintln!(
                     "    [{}] {} -> {:.2} ADA",
                     i + 1,
@@ -441,14 +435,7 @@ impl SnapshotsCallback for CountingCallbacks {
         if !snapshots.set.0.is_empty() {
             eprintln!("  Sample stakes (first 5):");
             for (i, (cred, amount)) in snapshots.set.0.iter().take(5).enumerate() {
-                let cred_str = match cred {
-                    acropolis_common::StakeCredential::AddrKeyHash(h) => {
-                        format!("KeyHash({}...)", &hex::encode(&h[..4]))
-                    }
-                    acropolis_common::StakeCredential::ScriptHash(h) => {
-                        format!("ScriptHash({}...)", &hex::encode(&h[..4]))
-                    }
-                };
+                let cred_str = cred.to_string().unwrap_or_default();
                 eprintln!(
                     "    [{}] {} -> {:.2} ADA",
                     i + 1,
@@ -465,14 +452,7 @@ impl SnapshotsCallback for CountingCallbacks {
         if !snapshots.go.0.is_empty() {
             eprintln!("  Sample stakes (first 5):");
             for (i, (cred, amount)) in snapshots.go.0.iter().take(5).enumerate() {
-                let cred_str = match cred {
-                    acropolis_common::StakeCredential::AddrKeyHash(h) => {
-                        format!("KeyHash({}...)", &hex::encode(&h[..4]))
-                    }
-                    acropolis_common::StakeCredential::ScriptHash(h) => {
-                        format!("ScriptHash({}...)", &hex::encode(&h[..4]))
-                    }
-                };
+                let cred_str = cred.to_string().unwrap_or_default();
                 eprintln!(
                     "    [{}] {} -> {:.2} ADA",
                     i + 1,
@@ -517,7 +497,7 @@ fn main() {
     println!("Starting parse...");
     let start = Instant::now();
 
-    match parser.parse(&mut callbacks) {
+    match parser.parse(&mut callbacks, NetworkId::Mainnet) {
         Ok(()) => {
             let duration = start.elapsed();
             println!("Parse completed successfully in {duration:.2?}");
