@@ -572,8 +572,12 @@ impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
         let variant = d.u16()?;
 
         match variant {
-            0 => Ok(DRepCredential::AddrKeyhash(d.decode_with(ctx)?)),
-            1 => Ok(DRepCredential::ScriptHash(d.decode_with(ctx)?)),
+            0 => Ok(LocalDRepCredential(DRepCredential::AddrKeyHash(
+                d.decode_with(ctx)?,
+            ))),
+            1 => Ok(LocalDRepCredential(DRepCredential::ScriptHash(
+                d.decode_with(ctx)?,
+            ))),
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for DRepCredential",
             )),
