@@ -37,6 +37,7 @@ pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::{
     Constitution, EpochBootstrapData, Lovelace, MultiHostName, NetworkId, PoolId, PoolMetadata,
     PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
+    TxHash, UTxOIdentifier,
 };
 
 // Import snapshot parsing support
@@ -473,6 +474,23 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     }
 }
 
+struct SnapshotUTxOIdentifier(pub UTxOIdentifier);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxOIdentifier {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let Ok(tx_hash) = TxHash::try_from(d.bytes()?) else {
+            return Err(minicbor::decode::Error::message(
+                "Invalid TxHash (wrong size?)",
+            ));
+        };
+        let output_index = d.u64()? as u16;
+        Ok(SnapshotUTxOIdentifier(UTxOIdentifier {
+            tx_hash,
+            output_index,
+        }))
+    }
+}
+
 // -----------------------------------------------------------------------------
 // DRep State
 // -----------------------------------------------------------------------------
@@ -520,10 +538,8 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
 /// UTXO entry with transaction hash, index, address, and value
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UtxoEntry {
-    /// Transaction hash (hex-encoded)
-    pub tx_hash: String,
-    /// Output index
-    pub output_index: u64,
+    /// UTxO Identifier
+    pub utxo: UTxOIdentifier,
     /// Hex encoded Cardano addresses
     pub address: String,
     /// Lovelace amount
@@ -1612,17 +1628,17 @@ impl StreamingSnapshotParser {
         // Parse key: TransactionInput (array [tx_hash, output_index])
         decoder.array().context("Failed to parse TxIn array")?;
 
-        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
-        let output_index = decoder.u64().context("Failed to parse output_index")?;
-        let tx_hash = hex::encode(tx_hash_bytes);
+        let utxo = (decoder
+            .decode::<SnapshotUTxOIdentifier>()
+            .context("Failed to parse UTxOIdentifier")?)
+        .0;
 
         // Parse value: TransactionOutput
         let (address, value) = Self::parse_transaction_output(decoder)
             .context("Failed to parse transaction output")?;
 
         Ok(UtxoEntry {
-            tx_hash,
-            output_index,
+            utxo,
             address,
             value,
             datum: None,      // TODO: Extract from TxOut
