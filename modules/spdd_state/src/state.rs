@@ -1,4 +1,5 @@
 use acropolis_common::{
+    snapshot::streaming_snapshot::cbor::decode::info,
     state_history::{StateHistory, StateHistoryStore},
     DelegatedStake, PoolId,
 };
@@ -40,6 +41,7 @@ impl State {
         }
 
         self.spdd_history.commit(epoch, next);
+        info!("SPDD snapshot applied for epoch {}", epoch);
     }
 
     #[allow(dead_code)]

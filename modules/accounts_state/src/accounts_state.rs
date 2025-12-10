@@ -57,6 +57,8 @@ const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: (&str, &str) =
+    ("snapshot-completion-topic", "cardano.snapshot.complete");
 
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
@@ -72,12 +74,11 @@ pub struct AccountsState;
 
 impl AccountsState {
     /// Handle bootstrap message from snapshot
-    /// Takes ownership of accounts_data to avoid cloning large snapshot data
     fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) {
         let epoch = accounts_data.epoch;
         let accounts_len = accounts_data.accounts.len();
 
-        // Initialize accounts state from snapshot data (takes ownership)
+        // Initialize accounts state from snapshot data
         state.bootstrap(accounts_data);
 
         info!(
@@ -87,21 +88,24 @@ impl AccountsState {
     }
 
     /// Wait for and process snapshot bootstrap messages
+    /// Returns the BlockInfo from SnapshotComplete if bootstrap occurred, None otherwise
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-    ) -> Result<()> {
+        mut completion_subscription: Option<Box<dyn Subscription<Message>>>,
+    ) -> Result<Option<BlockInfo>> {
         // Check we're subscribed to snapshot messages first
         let snapshot_subscription = match snapshot_subscription.as_mut() {
             Some(sub) => sub,
             None => {
                 info!("No snapshot subscription available, using default state");
-                return Ok(());
+                return Ok(None);
             }
         };
 
         info!("Waiting for snapshot bootstrap messages...");
 
+        // Wait for bootstrap data on snapshot topic
         loop {
             let (_, message) = snapshot_subscription.read().await?;
 
@@ -113,20 +117,16 @@ impl AccountsState {
                     SnapshotStateMessage::AccountsState(_),
                 )) => {
                     info!("Received AccountsState bootstrap message");
-                    // Extract ownership of the accounts data to avoid cloning large snapshots
                     let accounts_data = match Arc::try_unwrap(message) {
                         Ok(Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::AccountsState(data),
                         ))) => data,
-                        Err(arc_msg) => {
-                            // Arc has other references, need to clone
-                            match arc_msg.as_ref() {
-                                Message::Snapshot(SnapshotMessage::Bootstrap(
-                                    SnapshotStateMessage::AccountsState(data),
-                                )) => data.clone(),
-                                _ => unreachable!(),
-                            }
-                        }
+                        Err(arc_msg) => match arc_msg.as_ref() {
+                            Message::Snapshot(SnapshotMessage::Bootstrap(
+                                SnapshotStateMessage::AccountsState(data),
+                            )) => data.clone(),
+                            _ => unreachable!(),
+                        },
                         _ => unreachable!(),
                     };
 
@@ -135,24 +135,39 @@ impl AccountsState {
                     Self::handle_bootstrap(&mut state, accounts_data);
                     history.lock().await.commit(epoch, state);
                     info!("Accounts state bootstrap complete");
-                    return Ok(());
+                    break;
                 }
-                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
-                    _,
-                ))) => {
-                    // SPOState is handled by spo_state module, ignore here
+                _ => {
+                    // Ignore other messages (e.g., EpochState, SPOState bootstrap messages)
                 }
-                Message::Snapshot(SnapshotMessage::Bootstrap(
-                    SnapshotStateMessage::EpochState(_),
-                )) => {
-                    // EpochState is handled by epochs_state module, ignore here
-                }
-                other => {
-                    info!(
-                        "Received unexpected message type on snapshot topic: {:?}",
-                        std::any::type_name_of_val(other)
-                    );
-                }
+            }
+        }
+
+        // Now wait for SnapshotComplete on the completion topic
+        let completion_subscription = match completion_subscription.as_mut() {
+            Some(sub) => sub,
+            None => {
+                info!("No completion subscription available");
+                return Ok(None);
+            }
+        };
+
+        info!("Waiting for SnapshotComplete message...");
+        let (_, message) = completion_subscription.read().await?;
+        match message.as_ref() {
+            Message::Cardano((block_info, CardanoMessage::SnapshotComplete)) => {
+                info!(
+                    "Received SnapshotComplete at block {}, epoch {}",
+                    block_info.number, block_info.epoch
+                );
+                Ok(Some(block_info.clone()))
+            }
+            other => {
+                error!(
+                    "Unexpected message on completion topic: {:?}",
+                    std::any::type_name_of_val(other)
+                );
+                Ok(None)
             }
         }
     }
@@ -163,6 +178,7 @@ impl AccountsState {
         history: Arc<Mutex<StateHistory<State>>>,
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        completion_subscription: Option<Box<dyn Subscription<Message>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -178,7 +194,36 @@ impl AccountsState {
         verifier: &Verifier,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
-        Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
+        let bootstrap_block_info = Self::wait_for_bootstrap(
+            history.clone(),
+            snapshot_subscription,
+            completion_subscription,
+        )
+        .await?;
+
+        // Publish SPDD after bootstrap if bootstrap occurred
+        if let Some(block_info) = bootstrap_block_info {
+            let state = history.lock().await.get_current_state();
+            let spdd = state.generate_spdd();
+            if let Err(e) = spo_publisher.publish_spdd(&block_info, spdd).await {
+                error!("Error publishing SPO stake distribution after bootstrap: {e:#}");
+            } else {
+                info!(
+                    "Published SPDD after bootstrap for epoch {}",
+                    block_info.epoch
+                );
+            }
+
+            // Store SPDD history if enabled
+            if let Some(spdd_store) = spdd_store.as_ref() {
+                let spdd_state = state.dump_spdd_state();
+                let mut spdd_store_guard = spdd_store.lock().await;
+                // active stakes taken at beginning of epoch i is for epoch + 1
+                if let Err(e) = spdd_store_guard.store_spdd(block_info.epoch + 1, spdd_state) {
+                    error!("Error storing SPDD state after bootstrap: {e:#}");
+                }
+            }
+        }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
@@ -516,6 +561,10 @@ impl AccountsState {
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
+        let snapshot_completion_topic = config
+            .get_string(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.1.to_string());
+
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
@@ -800,13 +849,20 @@ impl AccountsState {
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
-            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
-            Some(context.subscribe(&snapshot_subscribe_topic).await?)
-        } else {
-            info!("Skipping snapshot subscription (startup method is not snapshot)");
-            None
-        };
+        let (snapshot_subscription, completion_subscription) =
+            if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+                info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+                info!(
+                    "Creating subscriber for snapshot completion on '{snapshot_completion_topic}'"
+                );
+                (
+                    Some(context.subscribe(&snapshot_subscribe_topic).await?),
+                    Some(context.subscribe(&snapshot_completion_topic).await?),
+                )
+            } else {
+                info!("Skipping snapshot subscription (startup method is not snapshot)");
+                (None, None)
+            };
 
         // Start run task
         context.run(async move {
@@ -814,6 +870,7 @@ impl AccountsState {
                 history,
                 spdd_store,
                 snapshot_subscription,
+                completion_subscription,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,

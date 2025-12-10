@@ -40,7 +40,9 @@ pub use crate::{
 };
 
 // Import snapshot parsing support
-use super::mark_set_go::{BootstrapSnapshots, RawSnapshotsContainer, SnapshotsCallback};
+use super::mark_set_go::{
+    BootstrapSnapshots, ParsedSnapshotsContainer, RawSnapshotsContainer, SnapshotsCallback,
+};
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -1237,20 +1239,13 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        // Parse mark/set/go snapshots (EpochState[4])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, epoch);
 
-        match &snapshots_result {
-            Ok(raw_snapshots) => {
-                info!("    Successfully parsed mark/set/go snapshots!");
-                // Call the raw snapshots callback
-                callbacks.on_snapshots(raw_snapshots.clone())?;
-            }
-            Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Continuing with empty snapshots...");
-            }
+        // Send raw snapshot data to callback (for logging/monitoring)
+        if let Ok(ref parsed_snapshots) = snapshots_result {
+            callbacks.on_snapshots(parsed_snapshots.to_raw())?;
         }
 
         // Build pool registrations list for AccountsBootstrapMessage
@@ -1261,18 +1256,13 @@ impl StreamingSnapshotParser {
         let drep_deposits: Vec<(crate::DRepCredential, u64)> =
             dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
 
-        // Build pre-processed bootstrap snapshots if raw data is available
+        // Build bootstrap snapshots using historical delegations from parsed data
         let bootstrap_snapshots = match snapshots_result {
-            Ok(raw_snapshots) => {
-                let bs = BootstrapSnapshots::from_raw(
-                    epoch,
-                    raw_snapshots.clone(),
-                    &accounts,
-                    &pool_registrations,
-                );
-                Some(bs)
+            Ok(parsed_snapshots) => Some(BootstrapSnapshots::from_parsed(epoch, parsed_snapshots)),
+            Err(e) => {
+                info!("Failed to parse snapshots: {}, continuing without", e);
+                None
             }
-            Err(_) => None,
         };
 
         // Build the accounts bootstrap data
@@ -1949,74 +1939,36 @@ impl StreamingSnapshotParser {
     fn parse_snapshots_with_hybrid_approach(
         decoder: &mut Decoder,
         _epoch: u64,
-    ) -> Result<RawSnapshotsContainer> {
-        info!("    Starting snapshots parsing...");
-
-        // SnapShots = [Mark, Set, Go, Fee] or possibly different structure
+    ) -> Result<ParsedSnapshotsContainer> {
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
             .ok_or_else(|| anyhow!("SnapShots must be a definite-length array"))?;
 
-        // Investigate actual structure before enforcing 3 elements
         if snapshots_len != 4 {
             return Err(anyhow!(
                 "SnapShots array must have exactly 4 elements (Mark, Set, Go, Fee), got {snapshots_len}"
             ));
         }
 
-        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
-
-        // Parse each snapshot using snapshot.rs functions
-        let mut parsed_snapshots = Vec::new();
-
-        // Parse Mark snapshot [0]
-        info!("    Parsing Mark snapshot...");
-        let mark_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
+        let mark = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
             .context("Failed to parse Mark snapshot")?;
-        parsed_snapshots.push(mark_snapshot);
-
-        // Parse Set snapshot [1]
-        info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
+        let set = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
             .context("Failed to parse Set snapshot")?;
-        parsed_snapshots.push(set_snapshot);
-
-        // Parse Go snapshot [2]
-        info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
+        let go = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
             .context("Failed to parse Go snapshot")?;
-        parsed_snapshots.push(go_snapshot);
 
-        // Parse Fee snapshot [3]
-        info!("    Parsing Fee snapshot...");
-        let fee_value = match decoder.decode::<u64>() {
-            Ok(fee) => {
-                info!("    Successfully parsed Fee value: {}", fee);
-                fee
-            }
-            Err(e) => {
-                info!("    Failed to parse Fee value: {}, using 0", e);
-                0
-            }
-        };
+        let fee = decoder.decode::<u64>().unwrap_or(0);
 
         info!(
-            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
+            "Parsed snapshots: mark({} delegators), set({} delegators), go({} delegators), fee={}",
+            mark.snapshot_stake.0.len(),
+            set.snapshot_stake.0.len(),
+            go.snapshot_stake.0.len(),
+            fee
         );
 
-        // Create raw snapshots container with VMap data directly
-        let raw_snapshots = RawSnapshotsContainer {
-            mark: parsed_snapshots[0].snapshot_stake.clone(),
-            set: parsed_snapshots[1].snapshot_stake.clone(),
-            go: parsed_snapshots[2].snapshot_stake.clone(),
-            fee: fee_value,
-        };
-
-        info!("    Raw snapshots container created with VMap data");
-
-        // Return only the raw snapshots - no more API compatibility needed
-        Ok(raw_snapshots)
+        Ok(ParsedSnapshotsContainer { mark, set, go, fee })
     }
 }
 

@@ -311,9 +311,6 @@ impl SnapshotsCallback for SnapshotPublisher {
         );
         info!("  Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
 
-        // Note: Raw snapshots are now processed by the streaming parser and
-        // included in the AccountsBootstrapMessage passed to on_accounts
-
         Ok(())
     }
 }

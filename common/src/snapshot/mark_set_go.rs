@@ -1,5 +1,8 @@
 //! Mark, Set, Go Snapshots Support
-
+//!
+//! Handles parsing and processing of Cardano's mark/set/go stake snapshots:
+//! - CBOR parsing: `VMap`, `Snapshot`, `ParsedSnapshotsContainer`
+//! - Processed bootstrap types: `BootstrapSnapshot`, `BootstrapSnapshots`
 use anyhow::{Context, Error, Result};
 use log::info;
 use std::collections::HashMap;
@@ -7,13 +10,10 @@ use std::collections::HashMap;
 use minicbor::Decoder;
 use serde::Serialize;
 
-pub use crate::hash::Hash;
 use crate::snapshot::streaming_snapshot::{SnapshotContext, SnapshotPoolRegistration};
-pub use crate::stake_addresses::{AccountState, StakeAddressState};
-pub use crate::StakeCredential;
-use crate::{Lovelace, NetworkId, PoolId, PoolRegistration, Ratio, StakeAddress};
+use crate::{Lovelace, NetworkId, PoolId, PoolRegistration, Ratio, StakeAddress, StakeCredential};
 
-/// VMap<K, V> representation for CBOR Map types
+/// Generic CBOR Map type represented as a vector of key-value pairs
 #[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct VMap<K, V>(pub Vec<(K, V)>);
 
@@ -41,7 +41,7 @@ where
                     let value = V::decode(d, ctx)?;
                     pairs.push((key, value));
                 }
-                d.skip()?; // Skip the break
+                d.skip()?;
             }
         }
 
@@ -49,45 +49,20 @@ where
     }
 }
 
-/// Raw snapshots container with VMap data
-#[derive(Debug, Clone, Serialize, serde::Deserialize)]
-pub struct RawSnapshotsContainer {
-    pub mark: VMap<StakeCredential, i64>,
-    pub set: VMap<StakeCredential, i64>,
-    pub go: VMap<StakeCredential, i64>,
-    pub fee: u64,
-}
-
-/// Callback trait for mark, set, go snapshots
-pub trait SnapshotsCallback {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()>;
-}
-
-/// From ttps://github.com/rrruko/nes-cddl-hs/blob/main/nes.cddl
-/// Snapshot data structure matching the CDDL schema
-/// snapshot = [
-///   snapshot_stake : stake,
-///   snapshot_delegations : vmap<credential, key_hash<stake_pool>>,
-///   snapshot_pool_params : vmap<key_hash<stake_pool>, pool_params>,
-/// ]
-/// stake = vmap<credential, compactform_coin>
-/// credential = [0, addr_keyhash // 1, script_hash]
+/// Snapshot data structure matching the CDDL schema from
+/// https://github.com/rrruko/nes-cddl-hs/blob/main/nes.cddl
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub snapshot_stake: VMap<StakeCredential, i64>,
-    // snapshot_delegations: vmap<credential, key_hash<stake_pool>>,)
     pub snapshot_delegations: VMap<StakeCredential, PoolId>,
-    // snapshot_pool_params: vmap<key_hash<stake_pool>, pool_params>,
     pub snapshot_pool_params: VMap<PoolId, PoolRegistration>,
 }
 
 impl Snapshot {
-    /// Parse a single snapshot (Mark, Set, or Go)
     pub fn parse_single_snapshot(decoder: &mut Decoder, snapshot_name: &str) -> Result<Snapshot> {
         Self::parse_single_snapshot_with_network(decoder, snapshot_name, NetworkId::Mainnet)
     }
 
-    /// Parse a single snapshot with a specific network ID
     pub fn parse_single_snapshot_with_network(
         decoder: &mut Decoder,
         snapshot_name: &str,
@@ -100,19 +75,20 @@ impl Snapshot {
                 match decoder.datatype().context("Failed to read first element datatype")? {
                     minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
                         let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
-                        let delegations: VMap<StakeCredential, PoolId> =
+                        let snapshot_delegations: VMap<StakeCredential, PoolId> =
                             decoder.decode().context("Failed to parse snapshot_delegations")?;
 
                         let mut ctx = SnapshotContext::new(network);
-                        let pool_params = parse_pool_params_map(decoder, &mut ctx)
-                            .context("Failed to parse snapshot_pool_params")?;
+                        let snapshot_pool_params =
+                            Self::parse_pool_params_map(decoder, &mut ctx)
+                                .context("Failed to parse snapshot_pool_params")?;
 
                         info!("Parsed {snapshot_name} snapshot successfully");
 
                         Ok(Snapshot {
                             snapshot_stake,
-                            snapshot_delegations: delegations,
-                            snapshot_pool_params: pool_params,
+                            snapshot_delegations,
+                            snapshot_pool_params,
                         })
                     }
                     other_type => Err(Error::msg(format!(
@@ -125,113 +101,110 @@ impl Snapshot {
             ))),
         }
     }
+
+    fn parse_pool_params_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+    ) -> Result<VMap<PoolId, PoolRegistration>, minicbor::decode::Error> {
+        let map_len = decoder.map()?;
+        let mut pairs = Vec::new();
+
+        match map_len {
+            Some(len) => {
+                for _ in 0..len {
+                    let key: PoolId = decoder.decode_with(ctx)?;
+                    let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
+                    pairs.push((key, value.0));
+                }
+            }
+            None => {
+                // Indefinite-length map
+                while decoder.datatype()? != minicbor::data::Type::Break {
+                    let key: PoolId = decoder.decode_with(ctx)?;
+                    let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
+                    pairs.push((key, value.0));
+                }
+                decoder.skip()?;
+            }
+        }
+        Ok(VMap(pairs))
+    }
 }
 
-/// SPO data for a bootstrap stake snapshot - serializable version for message passing
+/// Raw snapshots container with just stake VMap data (for callbacks/logging)
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct RawSnapshotsContainer {
+    pub mark: VMap<StakeCredential, i64>,
+    pub set: VMap<StakeCredential, i64>,
+    pub go: VMap<StakeCredential, i64>,
+    pub fee: u64,
+}
+
+/// Callback trait for receiving raw snapshot data during parsing
+pub trait SnapshotsCallback {
+    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()>;
+}
+
+/// Full parsed snapshots container with delegations and pool params
+#[derive(Debug, Clone)]
+pub struct ParsedSnapshotsContainer {
+    pub mark: Snapshot,
+    pub set: Snapshot,
+    pub go: Snapshot,
+    pub fee: u64,
+}
+
+impl ParsedSnapshotsContainer {
+    /// Convert to raw container (this is just for callbacks that only need stake data)
+    pub fn to_raw(&self) -> RawSnapshotsContainer {
+        RawSnapshotsContainer {
+            mark: self.mark.snapshot_stake.clone(),
+            set: self.set.snapshot_stake.clone(),
+            go: self.go.snapshot_stake.clone(),
+            fee: self.fee,
+        }
+    }
+}
+
+/// SPO data within a bootstrap snapshot
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 pub struct BootstrapSnapshotSPO {
-    /// List of delegator stake addresses and amounts
     pub delegators: Vec<(StakeAddress, Lovelace)>,
-
-    /// Total stake delegated
     pub total_stake: Lovelace,
-
-    /// Pledge
     pub pledge: Lovelace,
-
-    /// Fixed cost
     pub cost: Lovelace,
-
-    /// Margin
     pub margin: Ratio,
-
-    /// Reward account
     pub reward_account: StakeAddress,
-
-    /// Pool owners
     pub pool_owners: Vec<StakeAddress>,
 }
 
-/// Bootstrap snapshot - serializable version for message passing
-/// This is the pre-processed format ready for accounts_state to use
+/// Pre-processed snapshot ready for accounts_state consumption
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 pub struct BootstrapSnapshot {
-    /// Epoch this snapshot is for
     pub epoch: u64,
-
-    /// Map of SPOs by operator ID with their delegators and stake
     pub spos: HashMap<PoolId, BootstrapSnapshotSPO>,
-
-    /// Total stake across all SPOs
     pub total_stake: Lovelace,
 }
 
-/// Container for the three bootstrap snapshots (mark, set, go)
+/// Container for mark/set/go bootstrap snapshots
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 pub struct BootstrapSnapshots {
-    /// Mark snapshot (epoch N-1)
+    /// Epoch N-2
     pub mark: BootstrapSnapshot,
-
-    /// Set snapshot (epoch N-2)
+    /// Epoch N-1
     pub set: BootstrapSnapshot,
-
-    /// Go snapshot (epoch N-3)
+    /// Epoch N
     pub go: BootstrapSnapshot,
-
-    /// Fee from snapshots
     pub fee: u64,
 }
 
 impl BootstrapSnapshots {
-    /// Build bootstrap snapshots from raw snapshot data, accounts, and pools
-    ///
-    /// # Arguments
-    /// * `epoch` - Current epoch we're bootstrapping into
-    /// * `raw_snapshots` - Raw stake distributions from CBOR parsing
-    /// * `accounts` - Account states with delegation info
-    /// * `pools` - Pool registrations
-    pub fn from_raw(
-        epoch: u64,
-        raw_snapshots: RawSnapshotsContainer,
-        accounts: &[AccountState],
-        pools: &[PoolRegistration],
-    ) -> Self {
-        // Build delegation map: stake credential -> pool id
-        let delegations: HashMap<StakeCredential, PoolId> = accounts
-            .iter()
-            .filter_map(|account| {
-                account
-                    .address_state
-                    .delegated_spo
-                    .map(|pool_id| (account.stake_address.credential.clone(), pool_id))
-            })
-            .collect();
-
-        // Build pool map for quick lookup
-        let pool_map: HashMap<PoolId, &PoolRegistration> =
-            pools.iter().map(|p| (p.operator, p)).collect();
-
-        // Build the three snapshots
-        let mark = Self::build_snapshot(
-            epoch.saturating_sub(1),
-            raw_snapshots.mark,
-            &delegations,
-            &pool_map,
-        );
-
-        let set = Self::build_snapshot(
-            epoch.saturating_sub(2),
-            raw_snapshots.set,
-            &delegations,
-            &pool_map,
-        );
-
-        let go = Self::build_snapshot(
-            epoch.saturating_sub(3),
-            raw_snapshots.go,
-            &delegations,
-            &pool_map,
-        );
+    /// Build bootstrap snapshots from fully parsed snapshot data.
+    /// Uses the historical delegations and pool params from each snapshot.
+    pub fn from_parsed(epoch: u64, parsed: ParsedSnapshotsContainer) -> Self {
+        let mark = Self::build_snapshot(epoch.saturating_sub(2), &parsed.mark);
+        let set = Self::build_snapshot(epoch.saturating_sub(1), &parsed.set);
+        let go = Self::build_snapshot(epoch.saturating_sub(0), &parsed.go);
 
         info!(
             "Built bootstrap snapshots: mark(epoch {}, {} SPOs, {} stake), \
@@ -251,24 +224,21 @@ impl BootstrapSnapshots {
             mark,
             set,
             go,
-            fee: raw_snapshots.fee,
+            fee: parsed.fee,
         }
     }
 
-    fn build_snapshot(
-        epoch: u64,
-        stake_map: VMap<StakeCredential, i64>,
-        delegations: &HashMap<StakeCredential, PoolId>,
-        pools: &HashMap<PoolId, &PoolRegistration>,
-    ) -> BootstrapSnapshot {
+    fn build_snapshot(epoch: u64, parsed: &Snapshot) -> BootstrapSnapshot {
         let mut snapshot = BootstrapSnapshot {
             epoch,
             spos: HashMap::new(),
             total_stake: 0,
         };
 
-        // Initialize SPOs from pool registrations
-        for (pool_id, pool_reg) in pools {
+        let delegations: HashMap<StakeCredential, PoolId> =
+            parsed.snapshot_delegations.0.iter().cloned().collect();
+
+        for (pool_id, pool_reg) in &parsed.snapshot_pool_params.0 {
             snapshot.spos.insert(
                 *pool_id,
                 BootstrapSnapshotSPO {
@@ -283,16 +253,15 @@ impl BootstrapSnapshots {
             );
         }
 
-        // Build delegator lists from stake map + delegation info
-        for (credential, amount) in stake_map.0 {
-            if amount <= 0 {
+        for (credential, amount) in &parsed.snapshot_stake.0 {
+            if *amount <= 0 {
                 continue;
             }
-            let stake = amount as Lovelace;
+            let stake = *amount as Lovelace;
 
-            if let Some(pool_id) = delegations.get(&credential) {
+            if let Some(pool_id) = delegations.get(credential) {
                 if let Some(snap_spo) = snapshot.spos.get_mut(pool_id) {
-                    let stake_address = StakeAddress::new(credential, NetworkId::Mainnet);
+                    let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
                     snap_spo.delegators.push((stake_address, stake));
                     snap_spo.total_stake += stake;
                     snapshot.total_stake += stake;
@@ -302,33 +271,4 @@ impl BootstrapSnapshots {
 
         snapshot
     }
-}
-
-/// Parse pool params map using SnapshotPoolRegistration
-fn parse_pool_params_map(
-    decoder: &mut Decoder,
-    ctx: &mut SnapshotContext,
-) -> Result<VMap<PoolId, PoolRegistration>, minicbor::decode::Error> {
-    let map_len = decoder.map()?;
-    let mut pairs = Vec::new();
-
-    match map_len {
-        Some(len) => {
-            for _ in 0..len {
-                let key: PoolId = decoder.decode_with(ctx)?;
-                let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
-                pairs.push((key, value.0));
-            }
-        }
-        None => {
-            // Indefinite-length map
-            while decoder.datatype()? != minicbor::data::Type::Break {
-                let key: PoolId = decoder.decode_with(ctx)?;
-                let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
-                pairs.push((key, value.0));
-            }
-            decoder.skip()?; // Skip the break
-        }
-    }
-    Ok(VMap(pairs))
 }

@@ -356,7 +356,7 @@ impl StakeAddressMap {
                 DRepChoice::Key(hash) => {
                     let cred = DRepCredential::AddrKeyHash(hash);
                     let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep address {cred:?}");
+                        // warn!("Delegated to unregistered DRep address {cred:?}");
                         return;
                     };
                     total
@@ -364,7 +364,7 @@ impl StakeAddressMap {
                 DRepChoice::Script(hash) => {
                     let cred = DRepCredential::ScriptHash(hash);
                     let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep script {cred:?}");
+                        // warn!("Delegated to unregistered DRep script {cred:?}");
                         return;
                     };
                     total
