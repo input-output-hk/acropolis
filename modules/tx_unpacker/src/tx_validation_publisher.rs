@@ -36,9 +36,8 @@ impl TxValidationPublisher {
                 tx_errors[0].0,
                 tx_errors[0].1.clone(),
             );
-            ValidationStatus::NoGo(ValidationError::BadTransaction {
-                tx_index: tx_errors[0].0,
-                error: tx_errors[0].1.clone(),
+            ValidationStatus::NoGo(ValidationError::BadTransactions {
+                bad_transactions: tx_errors,
             })
         };
         self.context

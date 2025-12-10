@@ -12,6 +12,47 @@ use crate::{
     Lovelace, NetworkId, PoolId, Slot, StakeAddress, TxOutRef, Value, VrfKeyHash,
 };
 
+/// Validation error
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
+pub enum ValidationError {
+    #[error("VRF failure: {0}")]
+    BadVRF(#[from] VrfValidationError),
+
+    #[error("KES failure: {0}")]
+    BadKES(#[from] KesValidationError),
+
+    #[error(
+        "Invalid Transactions: {}", 
+        bad_transactions
+            .iter()
+            .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )]
+    BadTransactions {
+        bad_transactions: Vec<(u16, TransactionValidationError)>,
+    },
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+
+    #[error("Malformed transaction")]
+    MalformedTransaction(u16, String),
+
+    #[error("Doubly spent UTXO: {0}")]
+    DoubleSpendUTXO(String),
+}
+
+/// Validation status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ValidationStatus {
+    /// All good
+    Go,
+
+    /// Error
+    NoGo(ValidationError),
+}
+
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum TransactionValidationError {
@@ -107,41 +148,6 @@ pub enum UTxOValidationError {
     /// **Cause:** Malformed UTxO
     #[error("Malformed UTxO: era={era}, reason={reason}")]
     MalformedUTxO { era: Era, reason: String },
-}
-
-/// Validation error
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
-pub enum ValidationError {
-    #[error("VRF failure: {0}")]
-    BadVRF(#[from] VrfValidationError),
-
-    #[error("KES failure: {0}")]
-    BadKES(#[from] KesValidationError),
-
-    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
-    BadTransaction {
-        tx_index: u16,
-        error: TransactionValidationError,
-    },
-
-    #[error("CBOR Decoding error")]
-    CborDecodeError(usize, String),
-
-    #[error("Malformed transaction")]
-    MalformedTransaction(u16, String),
-
-    #[error("Doubly spent UTXO: {0}")]
-    DoubleSpendUTXO(String),
-}
-
-/// Validation status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum ValidationStatus {
-    /// All good
-    Go,
-
-    /// Error
-    NoGo(ValidationError),
 }
 
 /// Reference
