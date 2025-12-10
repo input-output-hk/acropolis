@@ -2504,13 +2504,13 @@ pub struct SnapshotSPO {
     pub pool_owners: Vec<StakeAddress>,
 
     /// Is the reward account from two epochs ago registered at the time of this snapshot?
-    /// Used for rewards calculation edge cases. Defaults to true for bootstrap.
-    #[serde(default = "default_true")]
+    /// Used for rewards calculation edge cases. Defaults to false.
+    #[serde(default = "default_false")]
     pub two_previous_reward_account_is_registered: bool,
 }
 
-fn default_true() -> bool {
-    true
+fn default_false() -> bool {
+    false
 }
 
 /// Snapshot of stake distribution taken at the end of a particular epoch.

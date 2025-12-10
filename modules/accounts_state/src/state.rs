@@ -161,7 +161,6 @@ impl State {
             info!("No bootstrap snapshot data available");
         }
 
-        // Final summary log
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",

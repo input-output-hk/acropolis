@@ -8,10 +8,10 @@ use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParameters
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
-    ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
-    SnapshotsCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
-use acropolis_common::{NetworkId, PoolRegistration};
+use acropolis_common::{NetworkId, PoolRegistration, SnapshotsContainer};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
@@ -402,7 +402,7 @@ impl SnapshotCallbacks for CountingCallbacks {
 }
 
 impl SnapshotsCallback for CountingCallbacks {
-    fn on_snapshots(&mut self, snapshots: acropolis_common::SnapshotsContainer) -> Result<()> {
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         eprintln!("Snapshots Data:");
         eprintln!();
 

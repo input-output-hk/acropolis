@@ -309,21 +309,39 @@ impl EpochCallback for SnapshotPublisher {
 
 impl SnapshotsCallback for SnapshotPublisher {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
+        // Calculate totals from processed snapshots
+        let mark_delegators: usize =
+            snapshots.mark.spos.values().map(|spo| spo.delegators.len()).sum();
+        let mark_stake: u64 = snapshots.mark.spos.values().map(|spo| spo.total_stake).sum();
+
+        let set_delegators: usize =
+            snapshots.set.spos.values().map(|spo| spo.delegators.len()).sum();
+        let set_stake: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
+
+        let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
+        let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
+
         info!("Snapshots Data:");
         info!(
-            "  Mark snapshot (epoch {}): {} SPOs",
+            "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
             snapshots.mark.epoch,
-            snapshots.mark.spos.len()
+            snapshots.mark.spos.len(),
+            mark_delegators,
+            mark_stake / 1_000_000
         );
         info!(
-            "  Set snapshot (epoch {}): {} SPOs",
+            "  Set snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
             snapshots.set.epoch,
-            snapshots.set.spos.len()
+            snapshots.set.spos.len(),
+            set_delegators,
+            set_stake / 1_000_000
         );
         info!(
-            "  Go snapshot (epoch {}): {} SPOs",
+            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
             snapshots.go.epoch,
-            snapshots.go.spos.len()
+            snapshots.go.spos.len(),
+            go_delegators,
+            go_stake / 1_000_000
         );
 
         Ok(())

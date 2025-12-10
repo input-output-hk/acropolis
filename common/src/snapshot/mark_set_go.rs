@@ -15,7 +15,6 @@ use crate::{
     NetworkId, PoolId, PoolRegistration, Pots, Snapshot, SnapshotsContainer, StakeCredential,
 };
 
-// Re-export SnapshotPoolRegistration for CBOR decoding
 use crate::snapshot::streaming_snapshot::SnapshotPoolRegistration;
 
 /// VMap<K, V> representation for CBOR Map types
