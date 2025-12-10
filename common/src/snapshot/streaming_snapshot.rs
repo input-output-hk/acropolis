@@ -2153,8 +2153,7 @@ mod tests {
         // Test UTXO callback
         callbacks
             .on_utxo(UtxoEntry {
-                tx_hash: "abc123".to_string(),
-                output_index: 0,
+                utxo: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
                 address: "addr1...".to_string(),
                 value: 5000000,
                 datum: None,

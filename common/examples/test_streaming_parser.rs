@@ -48,10 +48,9 @@ impl UtxoCallback for CountingCallbacks {
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
                 eprintln!(
-                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
+                    "  UTXO #{}: {} → {} ({} lovelace)",
                     self.utxo_count,
-                    &utxo.tx_hash[..16],
-                    utxo.output_index,
+                    utxo.utxo,
                     &utxo.address[..utxo.address.len().min(32)],
                     utxo.value
                 );
@@ -567,10 +566,9 @@ fn main() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
                     println!(
-                        "  {}: {}:{} → {} ({} lovelace)",
+                        "  {}: {} → {} ({} lovelace)",
                         i + 1,
-                        &utxo.tx_hash[..16],
-                        utxo.output_index,
+                        utxo.utxo,
                         &utxo.address[..32],
                         utxo.value
                     );
