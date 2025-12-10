@@ -10,7 +10,6 @@ use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
-use tracing::error;
 
 /// a Byron-era address
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -600,9 +599,7 @@ impl<'b, C> minicbor::Decode<'b, C> for StakeAddress {
         d: &mut minicbor::Decoder<'b>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
-        error!("decode stakeaddress");
         let bytes = d.bytes()?;
-        error!("end decode stakeaddress");
         Self::from_binary(bytes)
             .map_err(|e| minicbor::decode::Error::message(format!("invalid stake address: {e}")))
     }
