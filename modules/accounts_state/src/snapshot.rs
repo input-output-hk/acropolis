@@ -2,7 +2,7 @@
 
 use crate::state::{Pots, RegistrationChange};
 use acropolis_common::{
-    snapshot::BootstrapSnapshot, stake_addresses::StakeAddressMap, Lovelace, PoolId,
+    snapshot::RawSnapshotsContainer, stake_addresses::StakeAddressMap, Lovelace, PoolId,
     PoolRegistration, Ratio, StakeAddress,
 };
 use imbl::OrdMap;
@@ -192,7 +192,7 @@ impl Snapshot {
     ///
     /// The BootstrapSnapshot is built by the publisher from raw CBOR data,
     /// this just converts it to the internal Snapshot format.
-    pub fn from_bootstrap(bs: BootstrapSnapshot, pots: &Pots) -> Self {
+    pub fn from_bootstrap(bs: RawSnapshotsContainer, pots: &Pots) -> Self {
         let mut snapshot = Self {
             epoch: bs.epoch,
             pots: pots.clone(),

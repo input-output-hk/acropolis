@@ -34,15 +34,13 @@ pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
+use crate::{Constitution, DRepCredential, EpochBootstrapData, PoolId, PoolMetadata, Relay};
 pub use crate::{
     Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
     StakeAddress, StakeCredential,
 };
-
 // Import snapshot parsing support
-use super::mark_set_go::{
-    BootstrapSnapshots, ParsedSnapshotsContainer, RawSnapshotsContainer, SnapshotsCallback,
-};
+use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -319,26 +317,9 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::Constitution;
-use crate::{DRepCredential, EpochBootstrapData, PoolId, PoolMetadata, Relay};
-/// Alias minicbor as cbor for pool_params module
-pub use minicbor as cbor;
-/// Alias minicbor as cbor for pool_params module
-/// Context for snapshot decoding that provides network information
+
 pub struct SnapshotContext {
-    network: NetworkId,
-}
-
-impl SnapshotContext {
-    /// Create a new snapshot context with the given network
-    pub fn new(network: NetworkId) -> Self {
-        Self { network }
-    }
-
-    /// Get the network from this context
-    pub fn network(&self) -> NetworkId {
-        self.network.clone()
-    }
+    pub network: NetworkId,
 }
 
 impl AsRef<SnapshotContext> for SnapshotContext {
@@ -347,8 +328,7 @@ impl AsRef<SnapshotContext> for SnapshotContext {
     }
 }
 
-/// Option wrapper for snapshot CBOR decoding (handles null/undefined)
-pub struct SnapshotOption<T>(pub Option<T>);
+struct SnapshotOption<T>(pub Option<T>);
 
 impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
 where
@@ -394,8 +374,7 @@ where
     }
 }
 
-/// Ratio wrapper for snapshot CBOR decoding (handles tagged rationals)
-pub struct SnapshotRatio(pub Ratio);
+struct SnapshotRatio(pub Ratio);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -416,8 +395,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
 // Network types for pool relays
 pub type SnapshotPort = u32;
 
-/// Stake address wrapper for snapshot CBOR decoding (from raw bytes)
-pub struct SnapshotStakeAddress(pub StakeAddress);
+struct SnapshotStakeAddress(pub StakeAddress);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -429,8 +407,6 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     }
 }
 
-/// Stake address wrapper for snapshot CBOR decoding (from credential bytes, requires context)
-pub struct SnapshotStakeAddressFromCred(pub StakeAddress);
 struct SnapshotStakeAddressFromCred(pub StakeAddress);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
@@ -448,8 +424,7 @@ where
     }
 }
 
-/// Relay wrapper for snapshot CBOR decoding
-pub struct SnapshotRelay(Relay);
+struct SnapshotRelay(pub Relay);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -487,8 +462,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     }
 }
 
-/// Pool metadata wrapper for snapshot CBOR decoding
-pub struct SnapshotPoolMetadata(pub PoolMetadata);
+struct SnapshotPoolMetadata(pub PoolMetadata);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -603,14 +577,6 @@ pub struct DRepInfo {
     pub anchor: Option<AnchorInfo>,
 }
 
-/// Nullable type (like Maybe but with explicit null vs undefined)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Nullable<T> {
-    Undefined,
-    Null,
-    Some(T),
-}
-
 /// Governance proposal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GovernanceProposal {
@@ -688,7 +654,7 @@ pub struct AccountsBootstrapData {
     /// Treasury, reserves, and deposits
     pub pots: crate::Pots,
     /// Pre-processed bootstrap snapshots (mark/set/go) for rewards calculation
-    pub bootstrap_snapshots: Option<BootstrapSnapshots>,
+    pub snapshots: Option<RawSnapshotsContainer>,
 }
 
 /// Callback invoked with accounts bootstrap data
@@ -1231,9 +1197,9 @@ impl StreamingSnapshotParser {
             // check for delayed as a way to know we're parsing correctly up to here.
             let delayed: bool = remainder_decoder.decode()?;
             assert!(
-                    !delayed,
-                    "unimplemented import scenario: snapshot contains a ratified delaying governance action"
-                );
+                !delayed,
+                "unimplemented import scenario: snapshot contains a ratified delaying governance action"
+            );
         }
 
         // Epoch State / Ledger State / UTxO State / utxosStakeDistr
@@ -1242,31 +1208,30 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Parse mark/set/go snapshots (EpochState[4])
+        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
-        // Send raw snapshot data to callback (for logging/monitoring)
-        if let Ok(ref parsed_snapshots) = snapshots_result {
-            callbacks.on_snapshots(parsed_snapshots.to_raw())?;
-        }
+        let bootstrap_snapshots = match snapshots_result {
+            Ok(raw_snapshots) => {
+                info!("    Successfully parsed mark/set/go snapshots!");
+                callbacks.on_snapshots(raw_snapshots.clone())?;
+                Some(raw_snapshots)
+            }
+            Err(e) => {
+                info!("    Failed to parse snapshots: {}", e);
+                info!("    Continuing with empty snapshots...");
+                None
+            }
+        };
 
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
 
         // Convert DRepInfo to (credential, deposit) tuples
-        let drep_deposits: Vec<(crate::DRepCredential, u64)> =
+        let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
-
-        // Build bootstrap snapshots using historical delegations from parsed data
-        let bootstrap_snapshots = match snapshots_result {
-            Ok(parsed_snapshots) => Some(BootstrapSnapshots::from_parsed(epoch, parsed_snapshots)),
-            Err(e) => {
-                info!("Failed to parse snapshots: {}, continuing without", e);
-                None
-            }
-        };
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1280,7 +1245,7 @@ impl StreamingSnapshotParser {
                 treasury,
                 deposits,
             },
-            bootstrap_snapshots,
+            snapshots: bootstrap_snapshots,
         };
 
         // Emit bulk callbacks
@@ -1939,7 +1904,9 @@ impl StreamingSnapshotParser {
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
         _epoch: u64,
-    ) -> Result<ParsedSnapshotsContainer> {
+    ) -> Result<RawSnapshotsContainer> {
+        info!("    Starting snapshots parsing...");
+
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
@@ -1978,14 +1945,21 @@ impl StreamingSnapshotParser {
         let fee = decoder.decode::<u64>().unwrap_or(0);
 
         info!(
-            "Parsed snapshots: mark({} delegators), set({} delegators), go({} delegators), fee={}",
-            mark.snapshot_stake.0.len(),
-            set.snapshot_stake.0.len(),
-            go.snapshot_stake.0.len(),
-            fee
+            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
         );
 
-        Ok(ParsedSnapshotsContainer { mark, set, go, fee })
+        // Create raw snapshots container with VMap data directly
+        let raw_snapshots = RawSnapshotsContainer {
+            mark: parsed_snapshots[0].snapshot_stake.clone(),
+            set: parsed_snapshots[1].snapshot_stake.clone(),
+            go: parsed_snapshots[2].snapshot_stake.clone(),
+            fee,
+        };
+
+        info!("    Raw snapshots container created with VMap data");
+
+        // Return only the raw snapshots - no more API compatibility needed
+        Ok(raw_snapshots)
     }
 }
 

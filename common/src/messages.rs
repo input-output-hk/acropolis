@@ -23,7 +23,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::{AccountState, BootstrapSnapshots};
+use crate::snapshot::{AccountState, RawSnapshotsContainer};
 use crate::Pots;
 use std::collections::HashMap;
 
@@ -426,7 +426,7 @@ pub struct AccountsBootstrapMessage {
 
     /// Pre-processed bootstrap snapshots (Mark, Set, Go)
     /// Contains per-SPO delegator lists ready for accounts_state to use
-    pub bootstrap_snapshots: Option<BootstrapSnapshots>,
+    pub bootstrap_snapshots: Option<RawSnapshotsContainer>,
 }
 
 #[allow(clippy::large_enum_variant)]

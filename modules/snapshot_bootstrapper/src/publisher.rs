@@ -202,7 +202,7 @@ impl AccountsCallback for SnapshotPublisher {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.bootstrap_snapshots.is_some(),
+            data.snapshots.is_some(),
         );
 
         // Convert the parsed data to the message type
@@ -213,7 +213,7 @@ impl AccountsCallback for SnapshotPublisher {
             retiring_pools: data.retiring_pools,
             dreps: data.dreps,
             pots: data.pots,
-            bootstrap_snapshots: data.bootstrap_snapshots,
+            bootstrap_snapshots: data.snapshots,
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(

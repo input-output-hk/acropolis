@@ -11,7 +11,6 @@ use acropolis_common::snapshot::{
     ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
     SnapshotsCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
-use acropolis_common::PoolRegistration;
 use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::env;
@@ -127,7 +126,7 @@ impl AccountsCallback for CountingCallbacks {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.bootstrap_snapshots.is_some()
+            data.snapshots.is_some()
         );
 
         // Keep first 10 for summary
