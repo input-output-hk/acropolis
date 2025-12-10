@@ -8,8 +8,8 @@ use std::array::TryFromSliceError;
 use thiserror::Error;
 
 use crate::{
-    protocol_params::Nonce, rational_number::RationalNumber, Address, Era, GenesisKeyhash,
-    Lovelace, NetworkId, PoolId, Slot, StakeAddress, UTxOIdentifier, Value, VrfKeyHash,
+    protocol_params::Nonce, rational_number::RationalNumber, Address, GenesisKeyhash, Lovelace,
+    NetworkId, PoolId, Slot, StakeAddress, UTxOIdentifier, Value, VrfKeyHash,
 };
 
 /// Validation error
@@ -35,12 +35,6 @@ pub enum ValidationError {
 
     #[error("CBOR Decoding error")]
     CborDecodeError(usize, String),
-
-    #[error("Malformed transaction")]
-    MalformedTransaction(u16, String),
-
-    #[error("Doubly spent UTXO: {0}")]
-    DoubleSpendUTXO(String),
 }
 
 /// Validation status
@@ -61,14 +55,40 @@ pub enum TransactionValidationError {
     CborDecodeError(String),
 
     /// **Cause**: Transaction is not in correct form.
-    #[error("Malformed Transaction: era={era}, reason={reason}")]
-    MalformedTransaction { era: Era, reason: String },
+    #[error("Malformed Transaction: {0}")]
+    MalformedTransaction(String),
 
-    /// **Cause**: UTxO rules failure
+    /// **Cause**: Phase 1 Validation Error
+    #[error("Phase 1 Validation Failed: {0}")]
+    Phase1ValidationError(#[from] Phase1ValidationError),
+
+    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    #[error("{0}")]
+    Other(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum Phase1ValidationError {
+    /// **Cause:** The UTXO has expired (Shelley only)
+    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
+    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+
+    /// **Cause:** The fee is too small.
+    #[error("Fee is too small: supplied={supplied}, required={required}")]
+    FeeTooSmallUTxO {
+        supplied: Lovelace,
+        required: Lovelace,
+    },
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** UTxO rules failure
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
-    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    /// **Cause:** Other errors (e.g. missing required field)
     #[error("{0}")]
     Other(String),
 }
@@ -81,21 +101,20 @@ pub enum TransactionValidationError {
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
-    /// ------------ Shelley Era Errors ------------
-    /// **Cause:** The UTXO has expired
-    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
-    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+    /// **Cause:** Malformed output
+    #[error("Malformed output at {output_index}: {reason}")]
+    MalformedOutput { output_index: usize, reason: String },
+
+    /// **Cause:** Malformed withdrawal
+    #[error("Malformed withdrawal at {withdrawal_index}: {reason}")]
+    MalformedWithdrawal {
+        withdrawal_index: usize,
+        reason: String,
+    },
 
     /// **Cause:** The input set is empty. (genesis transactions are exceptions)
     #[error("Input Set Empty UTXO")]
     InputSetEmptyUTxO,
-
-    /// **Cause:** The fee is too small.
-    #[error("Fee is too small: supplied={supplied}, required={required}")]
-    FeeTooSmallUTxO {
-        supplied: Lovelace,
-        required: Lovelace,
-    },
 
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
     #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
@@ -140,14 +159,6 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
-
-    /// **Cause:** The transaction size is too big.
-    #[error("Max tx size: supplied={supplied}, max={max}")]
-    MaxTxSizeUTxO { supplied: u32, max: u32 },
-
-    /// **Cause:** Malformed UTxO
-    #[error("Malformed UTxO: era={era}, reason={reason}")]
-    MalformedUTxO { era: Era, reason: String },
 }
 
 /// Reference

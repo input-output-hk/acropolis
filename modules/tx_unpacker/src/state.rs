@@ -1,4 +1,4 @@
-use crate::{utxo_registry::UTxORegistry, validations};
+use crate::validations;
 use acropolis_common::{
     messages::ProtocolParamsMessage, protocol_params::ProtocolParams,
     validation::TransactionValidationError, BlockInfo, Era,
@@ -25,7 +25,6 @@ impl State {
         &self,
         block_info: &BlockInfo,
         raw_tx: &[u8],
-        utxo_registry: &UTxORegistry,
     ) -> Result<(), TransactionValidationError> {
         match block_info.era {
             Era::Shelley => {
@@ -34,12 +33,7 @@ impl State {
                         "Shelley params are not set".to_string(),
                     ));
                 };
-                validations::validate_shelley_tx(
-                    raw_tx,
-                    shelley_params,
-                    block_info.slot,
-                    |tx_ref| utxo_registry.lookup_by_hash(tx_ref),
-                )
+                validations::validate_shelley_tx(raw_tx, shelley_params, block_info.slot)
             }
             _ => Ok(()),
         }

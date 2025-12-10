@@ -22,6 +22,7 @@ use tracing::{debug, error, info, info_span};
 
 use crate::state::State;
 mod state;
+mod validations;
 mod tx_validation_publisher;
 use tx_validation_publisher::TxValidationPublisher;
 
@@ -29,7 +30,6 @@ use tx_validation_publisher::TxValidationPublisher;
 mod test_utils;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
-const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.utxos";
 const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: &str = "cardano.protocol.parameters";
 
 const CIP25_METADATA_LABEL: u64 = 721;
@@ -128,8 +128,8 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
     
-                                    let (inputs, outputs, tx_total_output, errors) =
-                                        acropolis_codec::map_transaction_inputs_outputs(tx_index, &tx);
+                                    let (inputs, outputs, tx_total_output, error) =
+                                        acropolis_codec::map_transaction_inputs_outputs( &tx);
                                     let certs = tx.certs();
                                     let tx_withdrawals = tx.withdrawals_sorted_set();
                                     let mut props = None;
@@ -143,14 +143,9 @@ impl TxUnpacker {
                                                inputs.len(), outputs.len(), certs.len(), total_output);
                                     }
     
-                                    if !errors.is_empty() {
+                                    if let Some(error) = error {
                                         error!(
-                                            "Errors decoding transaction {tx_hash}: {}",
-                                            errors
-                                                .iter()
-                                                .map(|e| e.to_string())
-                                                .collect::<Vec<String>>()
-                                                .join(", ")
+                                            "Errors decoding transaction {tx_hash}: {error}"
                                         );
                                     }
     
@@ -327,6 +322,12 @@ impl TxUnpacker {
                         }
                     });
                     
+                    if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
+                        tx_validation_publisher
+                            .publish_tx_validation(block, tx_errors)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                    }
 
                     // Publish messages in parallel
                     let mut futures = Vec::new();
