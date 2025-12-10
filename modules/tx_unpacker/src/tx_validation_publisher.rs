@@ -31,10 +31,13 @@ impl TxValidationPublisher {
             ValidationStatus::Go
         } else {
             error!(
-                "Tx validation failed: block={}, tx_index={}, error={}",
+                "Tx validation failed: block={}, bad_transactions={}",
                 block.number,
-                tx_errors[0].0,
-                tx_errors[0].1.clone(),
+                tx_errors
+                    .iter()
+                    .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
+                    .collect::<Vec<_>>()
+                    .join("; "),
             );
             ValidationStatus::NoGo(ValidationError::BadTransactions {
                 bad_transactions: tx_errors,
