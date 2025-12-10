@@ -22,8 +22,8 @@ use tracing::{debug, error, info, info_span};
 
 use crate::state::State;
 mod state;
-mod validations;
 mod tx_validation_publisher;
+mod validations;
 use tx_validation_publisher::TxValidationPublisher;
 
 #[cfg(test)]
@@ -111,7 +111,7 @@ impl TxUnpacker {
                     span.in_scope(|| {
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
-    
+
                             // Validate transaction
                             if tx_validation_publisher.is_some() {
                                 if let Err(e) =
@@ -120,35 +120,35 @@ impl TxUnpacker {
                                     tx_errors.push((tx_index, e));
                                 }
                             }
-    
+
                             // Parse the tx
                             match MultiEraTx::decode(raw_tx) {
                                 Ok(tx) => {
                                     let tx_hash: TxHash =
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
-    
+
                                     let (inputs, outputs, tx_total_output, error) =
                                         acropolis_codec::map_transaction_inputs_outputs( &tx);
                                     let certs = tx.certs();
                                     let tx_withdrawals = tx.withdrawals_sorted_set();
                                     let mut props = None;
                                     let mut votes = None;
-    
+
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
-    
+
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
                                                inputs.len(), outputs.len(), certs.len(), total_output);
                                     }
-    
+
                                     if let Some(error) = error {
                                         error!(
                                             "Errors decoding transaction {tx_hash}: {error}"
                                         );
                                     }
-    
+
                                     if publish_utxo_deltas_topic.is_some() {
                                         // Group deltas by tx
                                         utxo_deltas.push(TxUTxODeltas {
@@ -157,11 +157,11 @@ impl TxUnpacker {
                                             outputs,
                                         });
                                     }
-    
+
                                     if publish_asset_deltas_topic.is_some() {
                                         let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> =
                                             Vec::new();
-    
+
                                         // Mint deltas
                                         for policy_group in tx.mints().iter() {
                                             if let Some((policy_id, deltas)) =
@@ -170,7 +170,7 @@ impl TxUnpacker {
                                                 tx_deltas.push((policy_id, deltas));
                                             }
                                         }
-    
+
                                         if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL)
                                         {
                                             let mut metadata_raw = Vec::new();
@@ -183,12 +183,12 @@ impl TxUnpacker {
                                                 }
                                             }
                                         }
-    
+
                                         if !tx_deltas.is_empty() {
                                             asset_deltas.push((tx_identifier, tx_deltas));
                                         }
                                     }
-    
+
                                     if publish_certificates_topic.is_some() {
                                         for (cert_index, cert) in certs.iter().enumerate() {
                                             match acropolis_codec::map_certificate(
@@ -207,7 +207,7 @@ impl TxUnpacker {
                                             }
                                         }
                                     }
-    
+
                                     if publish_withdrawals_topic.is_some() {
                                         for (key, value) in tx_withdrawals {
                                             match StakeAddress::from_binary(key) {
@@ -222,7 +222,7 @@ impl TxUnpacker {
                                             }
                                         }
                                     }
-    
+
                                     if publish_governance_procedures_topic.is_some() {
                                         //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                         if block.era >= Era::Shelley && block.era < Era::Babbage {
@@ -269,18 +269,18 @@ impl TxUnpacker {
                                             }
                                         }
                                     }
-    
+
                                     if let Some(conway) = tx.as_conway() {
                                         if let Some(ref v) = conway.transaction_body.voting_procedures {
                                             votes = Some(v);
                                         }
-    
+
                                         if let Some(ref p) = conway.transaction_body.proposal_procedures
                                         {
                                             props = Some(p);
                                         }
                                     }
-    
+
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
@@ -299,7 +299,7 @@ impl TxUnpacker {
                                                     }
                                             }
                                         }
-    
+
                                         if let Some(pallas_vp) = votes {
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match acropolis_codec::map_all_governance_voting_procedures(pallas_vp) {
@@ -308,20 +308,20 @@ impl TxUnpacker {
                                                 }
                                         }
                                     }
-    
+
                                     // Capture the fees
                                     if let Some(fee) = tx.fee() {
                                         total_fees += fee;
                                     }
                                 }
-    
+
                                 Err(e) => {
                                     error!("Can't decode transaction in slot {}: {e}", block.slot)
                                 }
                             }
                         }
                     });
-                    
+
                     if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
                         tx_validation_publisher
                             .publish_tx_validation(block, tx_errors)
