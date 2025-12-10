@@ -143,9 +143,9 @@ impl RawSnapshot {
 
         Snapshot::from_raw(
             epoch,
-            &stake_map,
-            &delegation_map,
-            &pool_params_map,
+            stake_map,
+            delegation_map,
+            pool_params_map,
             block_counts,
             pots,
             network,

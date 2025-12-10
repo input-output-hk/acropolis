@@ -99,49 +99,51 @@ pub struct State {
 }
 
 impl State {
-    /// Bootstrap state from snapshot data
-    pub fn bootstrap(&mut self, mut bootstrap_msg: AccountsBootstrapMessage) {
+    /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
+    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) {
+        let num_accounts = bootstrap_msg.accounts.len();
+        let num_pools = bootstrap_msg.pools.len();
+        let num_retiring = bootstrap_msg.retiring_pools.len();
+        let num_dreps = bootstrap_msg.dreps.len();
+
         info!(
             "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
-            bootstrap_msg.epoch,
-            bootstrap_msg.accounts.len(),
-            bootstrap_msg.pools.len(),
-            bootstrap_msg.retiring_pools.len(),
-            bootstrap_msg.dreps.len()
+            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_dreps
         );
 
         // Load stake addresses
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        for account in &bootstrap_msg.accounts {
-            stake_addresses.insert(account.stake_address.clone(), account.address_state.clone());
+        {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            for account in bootstrap_msg.accounts {
+                stake_addresses.insert(account.stake_address, account.address_state);
+            }
         }
-
-        drop(stake_addresses);
-        info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
+        info!("Loaded {} stake addresses", num_accounts);
 
         // Load pools
-        for pool_reg in &bootstrap_msg.pools {
-            self.spos.insert(pool_reg.operator, pool_reg.clone());
+        for pool_reg in bootstrap_msg.pools {
+            let operator = pool_reg.operator;
+            self.spos.insert(operator, pool_reg);
         }
         info!("Loaded {} pools", self.spos.len());
 
         // Load retiring pools
-        self.retiring_spos = bootstrap_msg.retiring_pools.clone();
+        self.retiring_spos = bootstrap_msg.retiring_pools;
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
         // Load DReps
-        self.dreps = bootstrap_msg.dreps.clone();
+        self.dreps = bootstrap_msg.dreps;
         info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
-        self.pots = bootstrap_msg.pots.clone();
+        self.pots = bootstrap_msg.pots;
         info!(
             "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
         // Load mark/set/go snapshots if available
-        if let Some(snapshots) = bootstrap_msg.bootstrap_snapshots.take() {
+        if let Some(snapshots) = bootstrap_msg.bootstrap_snapshots {
             self.epoch_snapshots = EpochSnapshots {
                 mark: Arc::new(snapshots.mark),
                 set: Arc::new(snapshots.set),
@@ -165,7 +167,7 @@ impl State {
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",
             bootstrap_msg.epoch,
-            bootstrap_msg.accounts.len(),
+            num_accounts,
             self.spos.len(),
             self.dreps.len(),
             self.pots.reserves,

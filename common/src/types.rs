@@ -4,6 +4,7 @@
 
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
+use crate::stake_addresses::StakeAddressMap;
 use crate::{
     address::{Address, ShelleyAddress, StakeAddress},
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
@@ -2472,10 +2473,6 @@ impl AddressTotals {
     }
 }
 
-// ================================================================================================
-// Stake Snapshots - Used for rewards calculations
-// ================================================================================================
-
 /// SPO data captured in a stake snapshot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotSPO {
@@ -2539,7 +2536,7 @@ impl Snapshot {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
-        stake_addresses: &crate::stake_addresses::StakeAddressMap,
+        stake_addresses: &StakeAddressMap,
         spos: &imbl::OrdMap<PoolId, PoolRegistration>,
         spo_block_counts: &HashMap<PoolId, usize>,
         pots: &Pots,
@@ -2641,11 +2638,12 @@ impl Snapshot {
     }
 
     /// Create a new snapshot from raw CBOR-parsed data (used during bootstrap parsing)
+    /// Takes ownership of the maps to avoid cloning large data structures.
     pub fn from_raw(
         epoch: u64,
-        stake_map: &HashMap<crate::StakeCredential, i64>,
-        delegation_map: &HashMap<crate::StakeCredential, PoolId>,
-        pool_params_map: &HashMap<PoolId, PoolRegistration>,
+        stake_map: HashMap<StakeCredential, i64>,
+        delegation_map: HashMap<StakeCredential, PoolId>,
+        pool_params_map: HashMap<PoolId, PoolRegistration>,
         block_counts: &HashMap<PoolId, usize>,
         pots: Pots,
         network: NetworkId,
@@ -2656,18 +2654,18 @@ impl Snapshot {
         let mut stake_by_pool: HashMap<PoolId, Lovelace> = HashMap::new();
 
         for (credential, pool_id) in delegation_map {
-            if let Some(&stake) = stake_map.get(credential) {
+            if let Some(&stake) = stake_map.get(&credential) {
                 let stake_lovelace = stake.max(0) as Lovelace;
                 if stake_lovelace > 0 {
                     let stake_address = StakeAddress {
                         network: network.clone(),
-                        credential: credential.clone(),
+                        credential,
                     };
                     delegations_by_pool
-                        .entry(*pool_id)
+                        .entry(pool_id)
                         .or_default()
                         .push((stake_address, stake_lovelace));
-                    *stake_by_pool.entry(*pool_id).or_default() += stake_lovelace;
+                    *stake_by_pool.entry(pool_id).or_default() += stake_lovelace;
                 }
             }
         }
@@ -2675,21 +2673,21 @@ impl Snapshot {
         // Second pass: build SPO entries
         let mut spos = HashMap::new();
         for (pool_id, pool_reg) in pool_params_map {
-            let delegators = delegations_by_pool.remove(pool_id).unwrap_or_default();
-            let total_stake = stake_by_pool.get(pool_id).copied().unwrap_or(0);
-            let blocks_produced = block_counts.get(pool_id).copied().unwrap_or(0);
+            let delegators = delegations_by_pool.remove(&pool_id).unwrap_or_default();
+            let total_stake = stake_by_pool.get(&pool_id).copied().unwrap_or(0);
+            let blocks_produced = block_counts.get(&pool_id).copied().unwrap_or(0);
 
             spos.insert(
-                *pool_id,
+                pool_id,
                 SnapshotSPO {
                     delegators,
                     total_stake,
                     pledge: pool_reg.pledge,
                     fixed_cost: pool_reg.cost,
-                    margin: pool_reg.margin.clone(),
+                    margin: pool_reg.margin,
                     blocks_produced,
-                    pool_owners: pool_reg.pool_owners.clone(),
-                    reward_account: pool_reg.reward_account.clone(),
+                    pool_owners: pool_reg.pool_owners,
+                    reward_account: pool_reg.reward_account,
                     two_previous_reward_account_is_registered: true,
                 },
             );
