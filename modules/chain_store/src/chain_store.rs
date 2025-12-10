@@ -18,10 +18,10 @@ use acropolis_common::{
     },
     queries::{
         blocks::{
-            BlockHashes, BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey,
-            BlockTransaction, BlockTransactions, BlockTransactionsCBOR, BlocksStateQuery,
-            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
-            DEFAULT_BLOCKS_QUERY_TOPIC,
+            BlockHashAndTxIndex, BlockHashes, BlockInfo, BlockInvolvedAddress,
+            BlockInvolvedAddresses, BlockKey, BlockTransaction, BlockTransactions,
+            BlockTransactionsCBOR, BlocksStateQuery, BlocksStateQueryResponse, NextBlocks,
+            PreviousBlocks, TransactionHashes, DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         misc::Order,
     },
@@ -426,7 +426,33 @@ impl ChainStore {
                 let mut block_hashes_and_indexes = Vec::with_capacity(tx_hashes.len());
 
                 for tx_hash in tx_hashes {
-                    // TODO!  Look up TxHash to get block hash, and index of Tx in block
+                    match store.get_tx_block_ref_by_hash(tx_hash.as_inner()) {
+                        Ok(Some(tx_block_ref)) => {
+                            let Ok(block_hash) =
+                                BlockHash::try_from(tx_block_ref.block_hash.as_slice())
+                            else {
+                                return Ok(BlocksStateQueryResponse::Error(
+                                    QueryError::internal_error(
+                                        "Failed to instantiate BlockHash from record".to_string(),
+                                    ),
+                                ));
+                            };
+                            block_hashes_and_indexes.push(BlockHashAndTxIndex {
+                                block_hash,
+                                tx_index: tx_block_ref.index as u16,
+                            })
+                        }
+                        Ok(None) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("TxHash {} not found", tx_hash),
+                            )))
+                        }
+                        Err(e) => {
+                            return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                                format!("Failed to lookup tx hash {}: {e}", tx_hash),
+                            )))
+                        }
+                    }
                 }
 
                 Ok(
