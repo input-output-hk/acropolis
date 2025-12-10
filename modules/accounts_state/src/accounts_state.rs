@@ -107,28 +107,17 @@ impl AccountsState {
         // Wait for bootstrap data on snapshot topic
         loop {
             let (_, message) = snapshot_subscription.read().await?;
+            let message =
+                Arc::try_unwrap(message).expect("unexpected additional reference to message");
 
-            match message.as_ref() {
+            match message {
                 Message::Snapshot(SnapshotMessage::Startup) => {
                     info!("Received snapshot startup signal, awaiting bootstrap data...");
                 }
                 Message::Snapshot(SnapshotMessage::Bootstrap(
-                    SnapshotStateMessage::AccountsState(_),
+                    SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
                     info!("Received AccountsState bootstrap message");
-                    let accounts_data = match Arc::try_unwrap(message) {
-                        Ok(Message::Snapshot(SnapshotMessage::Bootstrap(
-                            SnapshotStateMessage::AccountsState(data),
-                        ))) => data,
-                        Err(arc_msg) => match arc_msg.as_ref() {
-                            Message::Snapshot(SnapshotMessage::Bootstrap(
-                                SnapshotStateMessage::AccountsState(data),
-                            )) => data.clone(),
-                            _ => unreachable!(),
-                        },
-                        _ => unreachable!(),
-                    };
-
                     let epoch = accounts_data.epoch;
                     let mut state = history.lock().await.get_or_init_with(State::default);
                     Self::handle_bootstrap(&mut state, accounts_data);

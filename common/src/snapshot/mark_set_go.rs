@@ -77,34 +77,20 @@ impl RawSnapshot {
         ctx: &mut SnapshotContext,
         snapshot_name: &str,
     ) -> Result<RawSnapshot> {
-        info!("        {snapshot_name} snapshot - checking data type...");
-
+        info!("Parsing snapshot {}", snapshot_name);
         match decoder.datatype().context("Failed to read snapshot datatype")? {
             minicbor::data::Type::Array => {
-                info!("        {snapshot_name} snapshot is an array");
                 decoder.array().context("Failed to parse snapshot array")?;
-
-                info!("        {snapshot_name} snapshot - checking first element type...");
                 match decoder.datatype().context("Failed to read first element datatype")? {
                     minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                        info!(
-                            "        {snapshot_name} snapshot - first element is a map, parsing as stake"
-                        );
                         let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
 
-                        info!("        {snapshot_name} snapshot - parsing snapshot_delegations...");
                         let delegations: VMap<StakeCredential, PoolId> =
                             decoder.decode().context("Failed to parse snapshot_delegations")?;
 
-                        info!(
-                            "        {snapshot_name} snapshot - parsing snapshot_pool_registration..."
-                        );
                         let pools: VMap<PoolId, SnapshotPoolRegistration> = decoder
                             .decode_with(ctx)
                             .context("Failed to parse snapshot_pool_registration")?;
-
-                        info!("        {snapshot_name} snapshot - parse completed successfully.");
-
                         Ok(RawSnapshot {
                             snapshot_stake,
                             snapshot_delegations: delegations,
@@ -113,14 +99,9 @@ impl RawSnapshot {
                             ),
                         })
                     }
-                    other_type => {
-                        info!(
-                            "        {snapshot_name} snapshot - first element is {other_type:?}, skipping entire array"
-                        );
-                        Err(Error::msg(
-                            "Unexpected first element type in snapshot array",
-                        ))
-                    }
+                    other_type => Err(Error::msg(format!(
+                        "Unexpected first element type in snapshot array: {other_type:?}"
+                    ))),
                 }
             }
             other_type => Err(Error::msg(format!(
