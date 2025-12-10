@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     protocol_params::Nonce, rational_number::RationalNumber, Address, Era, GenesisKeyhash,
-    Lovelace, NetworkId, PoolId, Slot, StakeAddress, TxOutRef, Value, VrfKeyHash,
+    Lovelace, NetworkId, PoolId, Slot, StakeAddress, UTxOIdentifier, Value, VrfKeyHash,
 };
 
 /// Validation error
@@ -100,7 +100,7 @@ pub enum UTxOValidationError {
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
     #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
     BadInputsUTxO {
-        bad_input: TxOutRef,
+        bad_input: UTxOIdentifier,
         bad_input_index: usize,
     },
 

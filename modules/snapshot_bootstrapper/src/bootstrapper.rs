@@ -91,36 +91,43 @@ impl SnapshotBootstrapper {
     ) -> Result<(), BootstrapError> {
         Self::wait_for_genesis(bootstrapped_sub).await?;
 
-        let data = BootstrapContext::load(&cfg)?;
-        info!("Loaded bootstrap data for epoch {}", data.block_info.epoch);
-        info!("  Snapshot: {}", data.snapshot.url);
+        let bootstrap_ctx = BootstrapContext::load(&cfg)?;
         info!(
-            "  Block: slot={}, height={}",
-            data.block_info.slot, data.block_info.number
+            "Loaded bootstrap data for epoch {}",
+            bootstrap_ctx.block_info.epoch
+        );
+        info!("  Snapshot: {}", bootstrap_ctx.snapshot.url);
+        info!(
+            "  Block: slot={}, number={}",
+            bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
         );
 
         // Download
-        let downloader = SnapshotDownloader::new(data.network_dir(), &cfg.download)?;
-        downloader.download(&data.snapshot).await?;
+        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
+        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         // Publish
         let mut publisher = SnapshotPublisher::new(
             context,
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
-            data.context(),
+            bootstrap_ctx.context(),
         );
 
         publisher.publish_start().await?;
 
-        info!("Parsing snapshot: {}", data.snapshot_path().display());
+        info!(
+            "Parsing snapshot: {}",
+            bootstrap_ctx.snapshot_path().display()
+        );
         let start = Instant::now();
-        let parser =
-            StreamingSnapshotParser::new(data.snapshot_path().to_string_lossy().into_owned());
+        let parser = StreamingSnapshotParser::new(
+            bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
+        );
         parser.parse(&mut publisher).map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
-        publisher.publish_completion(data.block_info).await?;
+        publisher.publish_completion(bootstrap_ctx.block_info).await?;
 
         info!("Snapshot bootstrap completed");
         Ok(())

@@ -61,6 +61,9 @@ run:
 fmt:
 	$(CARGO) fmt --all
 
+check:
+	$(CARGO) fmt --all -- --check
+
 clippy:
 	$(CARGO) clippy --workspace -- -D warnings
 

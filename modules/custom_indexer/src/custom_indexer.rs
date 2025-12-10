@@ -247,13 +247,6 @@ async fn process_tx_responses<F: futures::Future<Output = IndexResponse> + Send>
             Ok(IndexResult::Success { entry }) => {
                 new_tips.insert(name, entry);
             }
-            Ok(IndexResult::DecodeError { entry, reason }) => {
-                error!(
-                    "Failed to decode tx at slot {} for index '{}': {}",
-                    block_slot, name, reason
-                );
-                new_tips.insert(name, entry);
-            }
             Ok(IndexResult::HandleError { entry, reason }) => {
                 error!(
                     "Failed to handle tx at slot {} for index '{}': {}",

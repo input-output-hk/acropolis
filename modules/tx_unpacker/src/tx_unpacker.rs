@@ -1,10 +1,12 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
+use std::sync::Arc;
+
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
-        TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
+        StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
     *,
@@ -13,18 +15,15 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
-use pallas::codec::minicbor;
+use pallas::codec::minicbor::encode;
 use pallas::ledger::{traverse, traverse::MultiEraTx};
-use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span};
+
+use crate::state::State;
 mod state;
-mod utxo_registry;
-mod validations;
-use crate::{
-    state::State, tx_validation_publisher::TxValidationPublisher, utxo_registry::UTxORegistry,
-};
 mod tx_validation_publisher;
+use tx_validation_publisher::TxValidationPublisher;
 
 #[cfg(test)]
 mod test_utils;
@@ -50,7 +49,6 @@ impl TxUnpacker {
         context: Arc<Context<Message>>,
         network_id: NetworkId,
         history: Arc<Mutex<StateHistory<State>>>,
-        mut utxo_registry: UTxORegistry,
         // publishers
         publish_utxo_deltas_topic: Option<String>,
         publish_asset_deltas_topic: Option<String>,
@@ -60,30 +58,17 @@ impl TxUnpacker {
         publish_block_txs_topic: Option<String>,
         tx_validation_publisher: Option<TxValidationPublisher>,
         // subscribers
-        mut genesis_sub: Box<dyn Subscription<Message>>,
         mut txs_sub: Box<dyn Subscription<Message>>,
         mut protocol_params_sub: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        // Initialize TxRegistry with genesis utxos
-        let (_, message) = genesis_sub.read().await.expect("failed to read genesis utxos");
-        match message.as_ref() {
-            Message::Cardano((_block, CardanoMessage::GenesisUTxOs(genesis_msg))) => {
-                utxo_registry.bootstrap_from_genesis_utxos(&genesis_msg.utxos);
-                info!(
-                    "Seeded registry with {} genesis utxos",
-                    genesis_msg.utxos.len()
-                );
-            }
-            other => panic!("expected GenesisUTxOs, got {:?}", other),
-        }
-
         loop {
             let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
 
             let Ok((_, message)) = txs_sub.read().await else {
-                return Err(anyhow::anyhow!("failed to read txs"));
+                return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
+
             let new_epoch = match message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
@@ -108,17 +93,6 @@ impl TxUnpacker {
                         debug!("Received {} txs for slot {}", txs_msg.txs.len(), block.slot);
                     }
 
-                    // handle rollback or advance registry to the next block
-                    let block_number = block.number as u32;
-                    if block.status == BlockStatus::RolledBack {
-                        if let Err(e) = utxo_registry.rollback_before(block_number) {
-                            error!("rollback_before({}) failed: {}", block_number, e);
-                        }
-                        utxo_registry.next_block();
-                        state = history.lock().await.get_rolled_back_state(block.number);
-                        current_block = Some(block.clone());
-                    }
-
                     let mut utxo_deltas = Vec::new();
                     let mut asset_deltas = Vec::new();
                     let mut cip25_metadata_updates = Vec::new();
@@ -130,114 +104,82 @@ impl TxUnpacker {
                     let mut total_output: u128 = 0;
                     let mut total_fees: u64 = 0;
                     let total_txs = txs_msg.txs.len() as u64;
+                    let block_number = block.number as u32;
 
                     let mut tx_errors = Vec::new();
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
                     span.in_scope(|| {
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
-
+    
                             // Validate transaction
                             if tx_validation_publisher.is_some() {
-                                if let Err(e) = state.validate_transaction(block, raw_tx, &utxo_registry) {
+                                if let Err(e) =
+                                    state.validate_transaction(block, raw_tx)
+                                {
                                     tx_errors.push((tx_index, e));
                                 }
                             }
-
+    
                             // Parse the tx
                             match MultiEraTx::decode(raw_tx) {
                                 Ok(tx) => {
-                                    let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
+                                    let tx_hash: TxHash =
+                                        tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
-
-                                    let inputs = tx.consumes();
-                                    let outputs = tx.produces();
+    
+                                    let (inputs, outputs, tx_total_output, errors) =
+                                        acropolis_codec::map_transaction_inputs_outputs(tx_index, &tx);
                                     let certs = tx.certs();
                                     let tx_withdrawals = tx.withdrawals_sorted_set();
                                     let mut props = None;
                                     let mut votes = None;
-
+    
+                                    // sum up total output lovelace for a block
+                                    total_output += tx_total_output;
+    
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                        debug!("Decoded tx with {} inputs, {} outputs, {} certs",
-                                           inputs.len(), outputs.len(), certs.len());
+                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
+                                               inputs.len(), outputs.len(), certs.len(), total_output);
                                     }
-
+    
+                                    if !errors.is_empty() {
+                                        error!(
+                                            "Errors decoding transaction {tx_hash}: {}",
+                                            errors
+                                                .iter()
+                                                .map(|e| e.to_string())
+                                                .collect::<Vec<String>>()
+                                                .join(", ")
+                                        );
+                                    }
+    
                                     if publish_utxo_deltas_topic.is_some() {
                                         // Group deltas by tx
-                                        let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
-
-                                        // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
-                                        for input in inputs {
-                                            let oref = input.output_ref();
-                                            let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-                                            match utxo_registry.consume(&tx_ref) {
-                                                Ok(tx_identifier) => {
-                                                    tx_utxo_deltas.inputs.push(
-                                                        UTxOIdentifier::new(
-                                                            tx_identifier.block_number(),
-                                                            tx_identifier.tx_index(),
-                                                            tx_ref.output_index,
-                                                        ),
-                                                  );
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to consume input {}: {e}", tx_ref.output_index);
-                                                }
-                                            }
-                                        }
-
-                                        // Add outputs to UTxORegistry and push TxOutputs to delta
-                                        for (index, output) in outputs {
-                                            match utxo_registry.add(
-                                                block_number,
-                                                tx_index,
-                                                TxOutRef {
-                                                    tx_hash,
-                                                    output_index: index as u16,
-                                                },
-                                            ) {
-                                                Ok(utxo_id) => {
-                                                    match output.address() {
-                                                        Ok(pallas_address) => match acropolis_codec::map_address(&pallas_address) {
-                                                            Ok(address) => {
-                                                                tx_utxo_deltas.outputs.push(TxOutput {
-                                                                    utxo_identifier: utxo_id,
-                                                                    address,
-                                                                    value: acropolis_codec::map_value(&output.value()),
-                                                                    datum: acropolis_codec::map_datum(&output.datum()),
-                                                                    reference_script: acropolis_codec::map_reference_script(&output.script_ref())
-                                                                });
-
-                                                                // catch all output lovelaces
-                                                                total_output += output.value().coin() as u128;
-                                                            }
-                                                            Err(e) => error!("Output {index} in tx ignored: {e}"),
-                                                        },
-                                                        Err(e) => error!("Can't parse output {index} in tx: {e}"),
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to insert output into registry: {e}");
-                                                }
-                                            }
-                                        }
-                                        utxo_deltas.push(tx_utxo_deltas);
+                                        utxo_deltas.push(TxUTxODeltas {
+                                            tx_identifier,
+                                            inputs,
+                                            outputs,
+                                        });
                                     }
-
+    
                                     if publish_asset_deltas_topic.is_some() {
-                                        let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> = Vec::new();
-
+                                        let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> =
+                                            Vec::new();
+    
                                         // Mint deltas
                                         for policy_group in tx.mints().iter() {
-                                            if let Some((policy_id, deltas)) = acropolis_codec::map_mint_burn(policy_group) {
+                                            if let Some((policy_id, deltas)) =
+                                                acropolis_codec::map_mint_burn(policy_group)
+                                            {
                                                 tx_deltas.push((policy_id, deltas));
                                             }
                                         }
-
-                                        if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL) {
+    
+                                        if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL)
+                                        {
                                             let mut metadata_raw = Vec::new();
-                                            match minicbor::encode(metadata, &mut metadata_raw) {
+                                            match encode(metadata, &mut metadata_raw) {
                                                 Ok(()) => {
                                                     cip25_metadata_updates.push(metadata_raw);
                                                 }
@@ -246,18 +188,23 @@ impl TxUnpacker {
                                                 }
                                             }
                                         }
-
+    
                                         if !tx_deltas.is_empty() {
                                             asset_deltas.push((tx_identifier, tx_deltas));
                                         }
                                     }
-
+    
                                     if publish_certificates_topic.is_some() {
-                                        for ( cert_index, cert) in certs.iter().enumerate() {
-                                            match acropolis_codec::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
+                                        for (cert_index, cert) in certs.iter().enumerate() {
+                                            match acropolis_codec::map_certificate(
+                                                cert,
+                                                tx_identifier,
+                                                cert_index,
+                                                network_id.clone(),
+                                            ) {
                                                 Ok(tx_cert) => {
                                                     certificates.push(tx_cert);
-                                                },
+                                                }
                                                 Err(_e) => {
                                                     // TODO error unexpected
                                                     //error!("{e}");
@@ -265,104 +212,121 @@ impl TxUnpacker {
                                             }
                                         }
                                     }
-
+    
                                     if publish_withdrawals_topic.is_some() {
                                         for (key, value) in tx_withdrawals {
                                             match StakeAddress::from_binary(key) {
                                                 Ok(stake_address) => {
                                                     withdrawals.push(Withdrawal {
-                                                            address: stake_address,
-                                                            value,
-                                                            tx_identifier
-                                                        });
-                                                    }
+                                                        address: stake_address,
+                                                        value,
+                                                        tx_identifier,
+                                                    });
+                                                }
                                                 Err(e) => error!("Bad stake address: {e:#}"),
                                             }
                                         }
                                     }
-
+    
                                     if publish_governance_procedures_topic.is_some() {
                                         //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
                                         if block.era >= Era::Shelley && block.era < Era::Babbage {
-                                            if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, raw_tx) {
+                                            if let Ok(alonzo) = MultiEraTx::decode_for_era(
+                                                traverse::Era::Alonzo,
+                                                raw_tx,
+                                            ) {
                                                 if let Some(update) = alonzo.update() {
                                                     if let Some(alonzo_update) = update.as_alonzo() {
-                                                        match acropolis_codec::map_alonzo_update(alonzo_update) {
-                                                            Ok(proposals) => alonzo_babbage_update_proposals.push(proposals),
-                                                            Err(e) => error!("Cannot decode alonzo update: {e}"),
+                                                        match acropolis_codec::map_alonzo_update(
+                                                            alonzo_update,
+                                                        ) {
+                                                            Ok(proposals) => {
+                                                                alonzo_babbage_update_proposals
+                                                                    .push(proposals)
+                                                            }
+                                                            Err(e) => error!(
+                                                                "Cannot decode alonzo update: {e}"
+                                                            ),
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                        else if block.era >= Era::Babbage && block.era < Era::Conway{
-                                            if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, raw_tx) {
+                                        } else if block.era >= Era::Babbage && block.era < Era::Conway {
+                                            if let Ok(babbage) = MultiEraTx::decode_for_era(
+                                                traverse::Era::Babbage,
+                                                raw_tx,
+                                            ) {
                                                 if let Some(update) = babbage.update() {
                                                     if let Some(babbage_update) = update.as_babbage() {
-                                                        match acropolis_codec::map_babbage_update(babbage_update) {
-                                                            Ok(proposals) => alonzo_babbage_update_proposals.push(proposals),
-                                                            Err(e) => error!("Cannot decode babbage update: {e}"),
+                                                        match acropolis_codec::map_babbage_update(
+                                                            babbage_update,
+                                                        ) {
+                                                            Ok(proposals) => {
+                                                                alonzo_babbage_update_proposals
+                                                                    .push(proposals)
+                                                            }
+                                                            Err(e) => error!(
+                                                                "Cannot decode babbage update: {e}"
+                                                            ),
                                                         }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-
+    
                                     if let Some(conway) = tx.as_conway() {
                                         if let Some(ref v) = conway.transaction_body.voting_procedures {
                                             votes = Some(v);
                                         }
-
-                                        if let Some(ref p) = conway.transaction_body.proposal_procedures {
+    
+                                        if let Some(ref p) = conway.transaction_body.proposal_procedures
+                                        {
                                             props = Some(p);
                                         }
                                     }
-
-
+    
                                     if publish_governance_procedures_topic.is_some() {
                                         if let Some(pp) = props {
                                             // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                            let mut proc_id = GovActionId { transaction_id: tx_hash, action_index: 0 };
-                                            for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
+                                            let mut proc_id = GovActionId {
+                                                transaction_id: tx_hash,
+                                                action_index: 0,
+                                            };
+                                            for (action_index, pallas_governance_proposals) in
+                                                pp.iter().enumerate()
+                                            {
                                                 match proc_id.set_action_index(action_index)
-                                                    .and_then (|proc_id| acropolis_codec::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
-                                                {
-                                                    Ok(g) => proposal_procedures.push(g),
-                                                    Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
-                                                }
+                                                        .and_then (|proc_id| acropolis_codec::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
+                                                    {
+                                                        Ok(g) => proposal_procedures.push(g),
+                                                        Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
+                                                    }
                                             }
                                         }
-
+    
                                         if let Some(pallas_vp) = votes {
                                             // Nonempty set -- governance_message.voting_procedures will not be empty
                                             match acropolis_codec::map_all_governance_voting_procedures(pallas_vp) {
-                                                Ok(vp) => voting_procedures.push((tx_hash, vp)),
-                                                Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
-                                            }
+                                                    Ok(vp) => voting_procedures.push((tx_hash, vp)),
+                                                    Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
+                                                }
                                         }
                                     }
-
+    
                                     // Capture the fees
                                     if let Some(fee) = tx.fee() {
                                         total_fees += fee;
                                     }
-                                },
-
-                                Err(e) => error!("Can't decode transaction in slot {}: {e}",
-                                                 block.slot)
+                                }
+    
+                                Err(e) => {
+                                    error!("Can't decode transaction in slot {}: {e}", block.slot)
+                                }
                             }
                         }
                     });
-
-                    if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
-                        tx_validation_publisher
-                            .publish_tx_validation(block, tx_errors)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
-                    }
-
-                    utxo_registry.next_block();
+                    
 
                     // Publish messages in parallel
                     let mut futures = Vec::new();
@@ -431,6 +395,42 @@ impl TxUnpacker {
                         ));
 
                         futures.push(context.message_bus.publish(topic, Arc::new(msg)));
+                    }
+
+                    join_all(futures)
+                        .await
+                        .into_iter()
+                        .filter_map(Result::err)
+                        .for_each(|e| error!("Failed to publish: {e}"));
+                }
+
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    let mut futures = Vec::new();
+                    if let Some(ref topic) = publish_utxo_deltas_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
+                    }
+
+                    if let Some(ref topic) = publish_asset_deltas_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
+                    }
+
+                    if let Some(ref topic) = publish_withdrawals_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
+                    }
+
+                    if let Some(ref topic) = publish_certificates_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
+                    }
+
+                    if let Some(ref topic) = publish_governance_procedures_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
+                    }
+
+                    if let Some(ref topic) = publish_block_txs_topic {
+                        futures.push(context.message_bus.publish(topic, message.clone()));
                     }
 
                     join_all(futures)
@@ -509,11 +509,6 @@ impl TxUnpacker {
         };
 
         // Subscribers
-        let genesis_utxos_subscribe_topic = config
-            .get_string("genesis-utxos-subscribe-topic")
-            .unwrap_or(DEFAULT_GENESIS_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{genesis_utxos_subscribe_topic}'");
-
         let transactions_subscribe_topic = config
             .get_string("subscribe-topic")
             .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
@@ -524,7 +519,6 @@ impl TxUnpacker {
             .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{protocol_params_subscribe_topic}'");
 
-        let genesis_sub = context.subscribe(&genesis_utxos_subscribe_topic).await?;
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
         let protocol_params_sub = context.subscribe(&protocol_params_subscribe_topic).await?;
 
@@ -537,16 +531,12 @@ impl TxUnpacker {
             StateHistoryStore::default_block_store(),
         )));
 
-        // Initialize UTxORegistry
-        let utxo_registry = UTxORegistry::default();
-
         let context_run = context.clone();
         context.run(async move {
             Self::run(
                 context_run,
                 network_id,
                 history,
-                utxo_registry,
                 publish_utxo_deltas_topic,
                 publish_asset_deltas_topic,
                 publish_withdrawals_topic,
@@ -554,7 +544,6 @@ impl TxUnpacker {
                 publish_governance_procedures_topic,
                 publish_block_txs_topic,
                 tx_validation_publisher,
-                genesis_sub,
                 txs_sub,
                 protocol_params_sub,
             )

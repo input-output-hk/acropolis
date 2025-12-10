@@ -163,28 +163,46 @@ impl VotingRegistrationState {
                     d_th = max(d_th, &d.pp_governance_group);
                 }
 
-                VoteResult::new(c.threshold, *d_th, *p_th)
+                VoteResult::new(c.threshold.clone(), d_th.clone(), p_th.clone())
             }
-            GovernanceAction::HardForkInitiation(_) => {
-                VoteResult::new(c.threshold, d.hard_fork_initiation, p.hard_fork_initiation)
-            }
-            GovernanceAction::TreasuryWithdrawals(_) => {
-                VoteResult::new(c.threshold, d.treasury_withdrawal, *zero)
-            }
-            GovernanceAction::NoConfidence(_) => {
-                VoteResult::new(*zero, d.motion_no_confidence, p.motion_no_confidence)
-            }
+            GovernanceAction::HardForkInitiation(_) => VoteResult::new(
+                c.threshold.clone(),
+                d.hard_fork_initiation.clone(),
+                p.hard_fork_initiation.clone(),
+            ),
+            GovernanceAction::TreasuryWithdrawals(_) => VoteResult::new(
+                c.threshold.clone(),
+                d.treasury_withdrawal.clone(),
+                zero.clone(),
+            ),
+            GovernanceAction::NoConfidence(_) => VoteResult::new(
+                zero.clone(),
+                d.motion_no_confidence.clone(),
+                p.motion_no_confidence.clone(),
+            ),
             GovernanceAction::UpdateCommittee(_) => {
                 if thresholds.committee.is_empty() {
-                    VoteResult::new(*zero, d.committee_no_confidence, p.committee_no_confidence)
+                    VoteResult::new(
+                        zero.clone(),
+                        d.committee_no_confidence.clone(),
+                        p.committee_no_confidence.clone(),
+                    )
                 } else {
-                    VoteResult::new(*zero, d.committee_normal, p.committee_normal)
+                    VoteResult::new(
+                        zero.clone(),
+                        d.committee_normal.clone(),
+                        p.committee_normal.clone(),
+                    )
                 }
             }
-            GovernanceAction::NewConstitution(_) => {
-                VoteResult::new(c.threshold, d.update_constitution, *zero)
+            GovernanceAction::NewConstitution(_) => VoteResult::new(
+                c.threshold.clone(),
+                d.update_constitution.clone(),
+                zero.clone(),
+            ),
+            GovernanceAction::Information => {
+                VoteResult::new(zero.clone(), one.clone(), one.clone())
             }
-            GovernanceAction::Information => VoteResult::new(*zero, *one, *one),
         }
     }
 

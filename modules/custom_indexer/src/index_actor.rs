@@ -3,8 +3,6 @@ use std::sync::Arc;
 use acropolis_common::{BlockInfo, Point};
 use tokio::sync::{mpsc, oneshot};
 
-use pallas::ledger::traverse::MultiEraTx;
-
 use crate::{cursor_store::CursorEntry, IndexWrapper};
 
 pub enum IndexCommand {
@@ -22,7 +20,6 @@ pub enum IndexCommand {
 #[derive(Debug)]
 pub enum IndexResult {
     Success { entry: CursorEntry },
-    DecodeError { entry: CursorEntry, reason: String },
     HandleError { entry: CursorEntry, reason: String },
     Reset { entry: CursorEntry },
     Halted,
@@ -71,20 +68,7 @@ async fn handle_apply_txs(
 
     // Decode the transactions and call handle_onchain_tx for each, halting if decode or the handler return an error
     for raw in txs {
-        let decoded = match MultiEraTx::decode(raw.as_ref()) {
-            Ok(tx) => tx,
-            Err(e) => {
-                wrapper.halted = true;
-                return IndexResult::DecodeError {
-                    entry: CursorEntry {
-                        tip: wrapper.tip.clone(),
-                        halted: true,
-                    },
-                    reason: e.to_string(),
-                };
-            }
-        };
-        if let Err(e) = wrapper.index.handle_onchain_tx(&block, &decoded).await {
+        if let Err(e) = wrapper.index.handle_onchain_tx_bytes(&block, &raw).await {
             wrapper.halted = true;
             return IndexResult::HandleError {
                 entry: CursorEntry {
@@ -302,24 +286,6 @@ mod tests {
                 assert!(reason.contains("handle error response"));
             }
             other => panic!("Expected HandleError, got {:?}", other),
-        }
-    }
-
-    #[tokio::test]
-    async fn apply_txs_decode_error_sets_halt() {
-        let mock = MockIndex {
-            on_tx: None,
-            ..Default::default()
-        };
-
-        let (_indexer, sender) = setup_indexer(mock).await;
-
-        match send_apply(&sender, test_block(1), vec![Arc::from([0u8; 1].as_slice())]).await {
-            IndexResult::DecodeError { entry, reason } => {
-                assert!(entry.halted);
-                assert!(!reason.is_empty());
-            }
-            other => panic!("Expected DecodeError, got {:?}", other),
         }
     }
 

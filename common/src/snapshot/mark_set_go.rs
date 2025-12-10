@@ -2,15 +2,21 @@
 // Mark, Set, Go Snapshots Support
 // ================================================================================================
 
-use anyhow::{Context, Result};
-use log::info;
+use anyhow::{Context, Error, Result};
+use log::{error, info};
 
 use minicbor::Decoder;
 use serde::Serialize;
 
+use types::Ratio;
+
 pub use crate::hash::Hash;
+use crate::snapshot::pool_params::PoolParams;
+use crate::snapshot::streaming_snapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
+use crate::PoolId;
 pub use crate::StakeCredential;
+use crate::{address::StakeAddress, types, NetworkId, PoolRegistration};
 
 /// VMap<K, V> representation for CBOR Map types
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -77,11 +83,10 @@ pub trait SnapshotsCallback {
 pub struct Snapshot {
     /// snapshot_stake: stake distribution map (credential -> lovelace amount)
     pub snapshot_stake: VMap<StakeCredential, i64>,
-    // snapshot_delegations: delegation map (credential -> stake pool key hash)
-    // pub snapshot_delegations: VMap<Credential, StakePool>,
-
-    // snapshot_pool_params: pool parameters map (stake pool key hash -> pool params)
-    //  snapshot_pool_params: VMap<Vec<u8>, Vec<u8>>,
+    // snapshot_delegations: vmap<credential, key_hash<stake_pool>>,)
+    pub snapshot_delegations: VMap<StakeCredential, PoolId>,
+    // snapshot_pool_params: vmap<key_hash<stake_pool>, pool_params>,
+    pub snapshot_pool_params: VMap<PoolId, PoolRegistration>,
 }
 
 impl Snapshot {
@@ -91,40 +96,6 @@ impl Snapshot {
 
         // Check what type we have - could be array, map, or simple value
         match decoder.datatype().context("Failed to read snapshot datatype")? {
-            minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                info!(
-                    "        {snapshot_name} snapshot is a map - treating as stake distribution directly"
-                );
-                // Try VMap first, then fallback to simple map
-                match decoder.decode::<VMap<StakeCredential, i64>>() {
-                    Ok(snapshot_stake) => {
-                        info!(
-                            "        {} snapshot - successfully decoded {} stake entries with VMap",
-                            snapshot_name,
-                            snapshot_stake.0.len()
-                        );
-                        Ok(Snapshot { snapshot_stake })
-                    }
-                    Err(vmap_error) => {
-                        info!(
-                            "        {snapshot_name} snapshot - VMap decode failed: {vmap_error}"
-                        );
-                        info!(
-                            "        {snapshot_name} snapshot - trying simple BTreeMap<bytes, i64>"
-                        );
-
-                        // Reset decoder and try simple map format
-                        // Note: We can't reset the decoder, so we need to handle this differently
-                        // For now, return an empty snapshot to continue processing
-                        info!(
-                            "        {snapshot_name} snapshot - using empty fallback due to format mismatch"
-                        );
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
-                    }
-                }
-            }
             minicbor::data::Type::Array => {
                 info!("        {snapshot_name} snapshot is an array");
                 decoder.array().context("Failed to parse snapshot array")?;
@@ -140,104 +111,171 @@ impl Snapshot {
                         let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
 
                         // Skip delegations (second element)
-                        decoder.skip().context("Failed to skip snapshot_delegations")?;
+                        info!("        {snapshot_name} snapshot - parsing snapshot_delegations...");
 
-                        // Skip pool_params (third element)
-                        decoder.skip().context("Failed to skip snapshot_pool_params")?;
+                        let delegations: VMap<StakeCredential, PoolId> =
+                            decoder.decode().context("Failed to parse snapshot_delegations")?;
 
-                        Ok(Snapshot { snapshot_stake })
+                        info!(
+                            "        {snapshot_name} snapshot - parsing snapshot_pool_registration..."
+                        );
+                        // pool_registration (third element)
+                        let pools: VMap<PoolId, PoolParams> = decoder
+                            .decode()
+                            .context("Failed to parse snapshot_pool_registration")?;
+                        let registration = VMap(
+                            pools
+                                .0
+                                .into_iter()
+                                .map(|(pool_id, params)| {
+                                    // Convert RewardAccount (Vec<u8>) to StakeAddress (arbitralily chosen over ScripHash)
+                                    let reward_account =
+                                        StakeAddress::from_binary(&params.reward_account.0)
+                                            .unwrap_or_else(|_|
+                                                {
+                                                    error!("Failed to parse reward account for pool {pool_id}, using default");
+                                                    StakeAddress::default()
+                                                }
+                                            );
+
+                                    // Convert Set<AddrKeyhash> to Vec<StakeAddress>
+                                    let pool_owners: Vec<StakeAddress> = params
+                                        .owners
+                                        .0
+                                        .into_iter()
+                                        .map(|keyhash| {
+                                            StakeAddress::new(
+                                                StakeCredential::AddrKeyHash(keyhash),
+                                                NetworkId::Mainnet, // TODO: Make network configurable or get it from parameters
+                                            )
+                                        })
+                                        .collect();
+
+                                    // Convert Vec<streaming_snapshot::Relay> to Vec<types::Relay>
+                                    let relays: Vec<types::Relay> = params
+                                        .relays
+                                        .into_iter()
+                                        .map(|relay| match relay {
+                                            streaming_snapshot::Relay::SingleHostAddr(
+                                                port,
+                                                ipv4,
+                                                ipv6,
+                                            ) => {
+                                                let port_opt = match port {
+                                                    streaming_snapshot::Nullable::Some(p) => {
+                                                        Some(p as u16)
+                                                    }
+                                                    _ => None,
+                                                };
+                                                let ipv4_opt = match ipv4 {
+                                                    streaming_snapshot::Nullable::Some(ip)
+                                                        if ip.0.len() == 4 =>
+                                                    {
+                                                        Some(std::net::Ipv4Addr::new(
+                                                            ip.0[0], ip.0[1], ip.0[2], ip.0[3],
+                                                        ))
+                                                    }
+                                                    _ => None,
+                                                };
+                                                let ipv6_opt = match ipv6 {
+                                                    streaming_snapshot::Nullable::Some(ip)
+                                                        if ip.0.len() == 16 =>
+                                                    {
+                                                        let b = &ip.0;
+                                                        Some(std::net::Ipv6Addr::from([
+                                                            b[0], b[1], b[2], b[3], b[4], b[5],
+                                                            b[6], b[7], b[8], b[9], b[10], b[11],
+                                                            b[12], b[13], b[14], b[15],
+                                                        ]))
+                                                    }
+                                                    _ => None,
+                                                };
+                                                types::Relay::SingleHostAddr(
+                                                    types::SingleHostAddr {
+                                                        port: port_opt,
+                                                        ipv4: ipv4_opt,
+                                                        ipv6: ipv6_opt,
+                                                    },
+                                                )
+                                            }
+                                            streaming_snapshot::Relay::SingleHostName(
+                                                port,
+                                                hostname,
+                                            ) => {
+                                                let port_opt = match port {
+                                                    streaming_snapshot::Nullable::Some(p) => {
+                                                        Some(p as u16)
+                                                    }
+                                                    _ => None,
+                                                };
+                                                types::Relay::SingleHostName(
+                                                    types::SingleHostName {
+                                                        port: port_opt,
+                                                        dns_name: hostname,
+                                                    },
+                                                )
+                                            }
+                                            streaming_snapshot::Relay::MultiHostName(hostname) => {
+                                                types::Relay::MultiHostName(types::MultiHostName {
+                                                    dns_name: hostname,
+                                                })
+                                            }
+                                        })
+                                        .collect();
+
+                                    // Convert Nullable<PoolMetadata> to Option<PoolMetadata>
+                                    let pool_metadata = match params.metadata {
+                                        streaming_snapshot::Nullable::Some(meta) => {
+                                            Some(types::PoolMetadata {
+                                                url: meta.url,
+                                                hash: meta.hash.to_vec(),
+                                            })
+                                        }
+                                        _ => None,
+                                    };
+
+                                    (
+                                        pool_id,
+                                        PoolRegistration {
+                                            operator: params.id,
+                                            vrf_key_hash: params.vrf,
+                                            pledge: params.pledge,
+                                            cost: params.cost,
+                                            margin: Ratio {
+                                                numerator: params.margin.numerator,
+                                                denominator: params.margin.denominator,
+                                            },
+                                            reward_account,
+                                            pool_owners,
+                                            relays,
+                                            pool_metadata,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        );
+
+                        info!("        {snapshot_name} snapshot - parse completed successfully.");
+
+                        Ok(Snapshot {
+                            snapshot_stake,
+                            snapshot_delegations: delegations,
+                            snapshot_pool_params: registration,
+                        })
                     }
                     other_type => {
                         info!(
                             "        {snapshot_name} snapshot - first element is {other_type:?}, skipping entire array"
                         );
-                        // We don't know how many elements are in this array, so just skip the first element
-                        // and let the array parsing naturally complete
-                        decoder.skip().context("Failed to skip first element")?;
-
-                        // Try to skip remaining elements, but don't fail if there aren't exactly 3
-                        loop {
-                            match decoder.datatype() {
-                                Ok(minicbor::data::Type::Break) => {
-                                    // End of indefinite array
-                                    break;
-                                }
-                                Ok(_) => {
-                                    // More elements to skip
-                                    decoder.skip().ok(); // Don't fail on individual skips
-                                }
-                                Err(_) => {
-                                    // End of definite array or other error - break
-                                    break;
-                                }
-                            }
-                        }
-
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
+                        Err(Error::msg(
+                            "Unexpected first element type in snapshot array",
+                        ))
                     }
                 }
             }
-            minicbor::data::Type::U32
-            | minicbor::data::Type::U64
-            | minicbor::data::Type::U8
-            | minicbor::data::Type::U16 => {
-                let value = decoder.u64().context("Failed to parse snapshot value")?;
-                info!("        {snapshot_name} snapshot is a simple value: {value}");
-
-                // Return empty snapshot for simple values
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
-            minicbor::data::Type::Break => {
-                info!(
-                    "        {snapshot_name} snapshot is a Break token - indicates end of indefinite structure"
-                );
-                // Don't consume the break token, let the parent structure handle it
-                // Return empty snapshot
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
-            minicbor::data::Type::Tag => {
-                info!(
-                    "        {snapshot_name} snapshot starts with a CBOR tag, trying to skip tag and parse content"
-                );
-                let _tag = decoder.tag().context("Failed to read CBOR tag")?;
-                info!(
-                    "        {snapshot_name} snapshot - found tag {_tag}, checking tagged content..."
-                );
-
-                // After consuming tag, try to parse the tagged content
-                match decoder.datatype().context("Failed to read tagged content datatype")? {
-                    minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                        let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
-                        Ok(Snapshot { snapshot_stake })
-                    }
-                    other_tagged_type => {
-                        info!(
-                            "        {snapshot_name} snapshot - tagged content is {other_tagged_type:?}, skipping"
-                        );
-                        decoder.skip().ok(); // Don't fail on skip
-                        Ok(Snapshot {
-                            snapshot_stake: VMap(Vec::new()),
-                        })
-                    }
-                }
-            }
-            other_type => {
-                info!(
-                    "        {snapshot_name} snapshot has unexpected type: {other_type:?}, skipping..."
-                );
-                decoder.skip().ok(); // Don't fail on skip
-
-                // Return empty snapshot
-                Ok(Snapshot {
-                    snapshot_stake: VMap(Vec::new()),
-                })
-            }
+            other_type => Err(Error::msg(format!(
+                "Unexpected snapshot data type: {other_type:?}"
+            ))),
         }
     }
 }

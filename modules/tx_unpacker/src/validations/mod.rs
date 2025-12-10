@@ -1,5 +1,6 @@
 use acropolis_common::{
-    protocol_params::ShelleyParams, validation::TransactionValidationError, TxIdentifier, TxOutRef,
+    protocol_params::ShelleyParams, validation::TransactionValidationError, TxIdentifier,
+    UTxOIdentifier,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{self, MultiEraTx};
@@ -12,7 +13,7 @@ pub fn validate_shelley_tx<F>(
     lookup_by_hash: F,
 ) -> Result<(), TransactionValidationError>
 where
-    F: Fn(TxOutRef) -> Result<TxIdentifier>,
+    F: Fn(UTxOIdentifier) -> Result<TxIdentifier>,
 {
     let tx = MultiEraTx::decode_for_era(traverse::Era::Shelley, raw_tx)
         .map_err(|e| TransactionValidationError::CborDecodeError(e.to_string()))?;
