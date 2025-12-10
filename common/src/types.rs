@@ -2650,27 +2650,33 @@ impl Snapshot {
         pots: Pots,
         network: NetworkId,
     ) -> Self {
-        let mut spos = HashMap::new();
+        // First pass: group delegations by pool (O(n) instead of O(n*m))
+        let mut delegations_by_pool: HashMap<PoolId, Vec<(StakeAddress, Lovelace)>> =
+            HashMap::new();
+        let mut stake_by_pool: HashMap<PoolId, Lovelace> = HashMap::new();
 
-        for (pool_id, pool_reg) in pool_params_map {
-            let mut delegators: Vec<(StakeAddress, Lovelace)> = Vec::new();
-            let mut total_stake: Lovelace = 0;
-
-            // Find all credentials delegating to this pool
-            for (credential, delegated_pool) in delegation_map {
-                if delegated_pool == pool_id {
-                    if let Some(&stake) = stake_map.get(credential) {
-                        let stake_address = StakeAddress {
-                            network: network.clone(),
-                            credential: credential.clone(),
-                        };
-                        let stake_lovelace = stake.max(0) as Lovelace;
-                        delegators.push((stake_address, stake_lovelace));
-                        total_stake += stake_lovelace;
-                    }
+        for (credential, pool_id) in delegation_map {
+            if let Some(&stake) = stake_map.get(credential) {
+                let stake_lovelace = stake.max(0) as Lovelace;
+                if stake_lovelace > 0 {
+                    let stake_address = StakeAddress {
+                        network: network.clone(),
+                        credential: credential.clone(),
+                    };
+                    delegations_by_pool
+                        .entry(*pool_id)
+                        .or_default()
+                        .push((stake_address, stake_lovelace));
+                    *stake_by_pool.entry(*pool_id).or_default() += stake_lovelace;
                 }
             }
+        }
 
+        // Second pass: build SPO entries
+        let mut spos = HashMap::new();
+        for (pool_id, pool_reg) in pool_params_map {
+            let delegators = delegations_by_pool.remove(pool_id).unwrap_or_default();
+            let total_stake = stake_by_pool.get(pool_id).copied().unwrap_or(0);
             let blocks_produced = block_counts.get(pool_id).copied().unwrap_or(0);
 
             spos.insert(

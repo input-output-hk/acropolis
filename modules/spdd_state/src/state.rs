@@ -40,7 +40,6 @@ impl State {
         }
 
         self.spdd_history.commit(epoch, next);
-        info!("SPDD snapshot applied for epoch {}", epoch);
     }
 
     #[allow(dead_code)]

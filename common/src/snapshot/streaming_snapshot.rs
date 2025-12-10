@@ -34,7 +34,10 @@ pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-use crate::{Constitution, DRepCredential, EpochBootstrapData, PoolId, PoolMetadata, Relay};
+use crate::{
+    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
+    PoolMetadata, Pots, Relay, SnapshotsContainer,
+};
 pub use crate::{
     Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
     StakeAddress, StakeCredential,
@@ -607,13 +610,13 @@ pub struct SnapshotMetadata {
     /// Epoch number
     pub epoch: u64,
     /// Pot balances
-    pub pot_balances: crate::Pots,
+    pub pot_balances: Pots,
     /// Total number of UTXOs (for progress tracking)
     pub utxo_count: Option<u64>,
     /// Block production statistics for previous epoch
-    pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    pub blocks_previous_epoch: Vec<PoolBlockProduction>,
     /// Block production statistics for current epoch
-    pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    pub blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -650,11 +653,11 @@ pub struct AccountsBootstrapData {
     /// Pool IDs that are retiring
     pub retiring_pools: Vec<PoolId>,
     /// All registered DReps with their deposits (credential, deposit amount)
-    pub dreps: Vec<(crate::DRepCredential, u64)>,
+    pub dreps: Vec<(DRepCredential, u64)>,
     /// Treasury, reserves, and deposits
-    pub pots: crate::Pots,
+    pub pots: Pots,
     /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation
-    pub snapshots: Option<crate::SnapshotsContainer>,
+    pub snapshots: Option<SnapshotsContainer>,
 }
 
 /// Callback invoked with accounts bootstrap data
@@ -716,8 +719,8 @@ struct ParsedMetadata {
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
     utxo_position: u64,
 }
 
@@ -729,8 +732,8 @@ struct ParsedMetadataWithoutUtxoPosition {
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -984,10 +987,10 @@ impl StreamingSnapshotParser {
                     // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                     let delegated_drep = match &account.drep {
                         StrictMaybe::Just(drep) => Some(match drep {
-                            DRep::Key(hash) => crate::DRepChoice::Key(*hash),
-                            DRep::Script(hash) => crate::DRepChoice::Script(*hash),
-                            DRep::Abstain => crate::DRepChoice::Abstain,
-                            DRep::NoConfidence => crate::DRepChoice::NoConfidence,
+                            DRep::Key(hash) => DRepChoice::Key(*hash),
+                            DRep::Script(hash) => DRepChoice::Script(*hash),
+                            DRep::Abstain => DRepChoice::Abstain,
+                            DRep::NoConfidence => DRepChoice::NoConfidence,
                         }),
                         StrictMaybe::Nothing => None,
                     };
@@ -1221,7 +1224,7 @@ impl StreamingSnapshotParser {
             blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
 
         // Build pots for snapshot conversion
-        let pots = crate::Pots {
+        let pots = Pots {
             reserves,
             treasury,
             deposits,
@@ -1263,7 +1266,7 @@ impl StreamingSnapshotParser {
             pools: pool_registrations,
             retiring_pools,
             dreps: drep_deposits,
-            pots: crate::Pots {
+            pots: Pots {
                 reserves,
                 treasury,
                 deposits,
@@ -1285,7 +1288,7 @@ impl StreamingSnapshotParser {
         let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
-            pot_balances: crate::Pots {
+            pot_balances: Pots {
                 reserves,
                 treasury,
                 deposits,
@@ -1494,9 +1497,7 @@ impl StreamingSnapshotParser {
     fn parse_single_block_production_entry(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<crate::types::PoolBlockProduction> {
-        use crate::types::PoolBlockProduction;
-
+    ) -> Result<PoolBlockProduction> {
         // Parse the pool ID (key) - stored as bytes (28 bytes for pool ID)
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
@@ -1518,7 +1519,7 @@ impl StreamingSnapshotParser {
     fn parse_blocks_with_epoch(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<Vec<crate::types::PoolBlockProduction>> {
+    ) -> Result<Vec<PoolBlockProduction>> {
         // Blocks are typically encoded as an array or map
         match decoder.datatype().context("Failed to read blocks datatype")? {
             Type::Array | Type::ArrayIndef => {
@@ -2068,7 +2069,7 @@ impl SnapshotCallbacks for CollectingCallbacks {
 }
 
 impl SnapshotsCallback for CollectingCallbacks {
-    fn on_snapshots(&mut self, snapshots: crate::SnapshotsContainer) -> Result<()> {
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
             "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
@@ -2092,7 +2093,7 @@ mod tests {
         callbacks
             .on_metadata(SnapshotMetadata {
                 epoch: 507,
-                pot_balances: crate::Pots {
+                pot_balances: Pots {
                     reserves: 1000000,
                     treasury: 2000000,
                     deposits: 500000,

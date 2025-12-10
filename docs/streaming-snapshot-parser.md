@@ -29,7 +29,7 @@ pub trait PoolCallback {
     fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()>;
 }
 
-pub trait AccountsCallback {
+pub trait StakeCallback {
     fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()>;
 }
 
@@ -41,7 +41,7 @@ pub trait ProposalCallback {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()>;
 }
 
-pub trait SnapshotCallbacks: UtxoCallback + PoolCallback + AccountsCallback + DRepCallback + ProposalCallback {
+pub trait SnapshotCallbacks: UtxoCallback + PoolCallback + StakeCallback + DRepCallback + ProposalCallback {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()>;
     fn on_complete(&mut self) -> Result<()>;
 }

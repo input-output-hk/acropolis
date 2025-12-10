@@ -11,7 +11,9 @@ use std::collections::HashMap;
 
 pub use crate::hash::Hash;
 use crate::snapshot::streaming_snapshot::SnapshotContext;
-use crate::{NetworkId, PoolId, PoolRegistration, Snapshot, SnapshotsContainer, StakeCredential};
+use crate::{
+    NetworkId, PoolId, PoolRegistration, Pots, Snapshot, SnapshotsContainer, StakeCredential,
+};
 
 // Re-export SnapshotPoolRegistration for CBOR decoding
 use crate::snapshot::streaming_snapshot::SnapshotPoolRegistration;
@@ -133,7 +135,7 @@ impl RawSnapshot {
         self,
         epoch: u64,
         block_counts: &HashMap<PoolId, usize>,
-        pots: crate::Pots,
+        pots: Pots,
         network: NetworkId,
     ) -> Snapshot {
         let stake_map: HashMap<_, _> = self.snapshot_stake.0.into_iter().collect();
@@ -180,7 +182,7 @@ impl RawSnapshotsContainer {
         epoch: u64,
         blocks_previous_epoch: &HashMap<PoolId, usize>,
         blocks_current_epoch: &HashMap<PoolId, usize>,
-        pots: crate::Pots,
+        pots: Pots,
         network: NetworkId,
     ) -> SnapshotsContainer {
         let empty_blocks = HashMap::new();
@@ -189,13 +191,13 @@ impl RawSnapshotsContainer {
             mark: self.mark.into_snapshot(
                 epoch.saturating_sub(2),
                 &empty_blocks,
-                crate::Pots::default(),
+                Pots::default(),
                 network.clone(),
             ),
             set: self.set.into_snapshot(
                 epoch.saturating_sub(1),
                 blocks_previous_epoch,
-                crate::Pots::default(),
+                Pots::default(),
                 network.clone(),
             ),
             go: self.go.into_snapshot(epoch, blocks_current_epoch, pots, network),

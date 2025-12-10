@@ -73,7 +73,6 @@ impl SPDDState {
                     };
                     match message.as_ref() {
                         Message::Cardano((_, CardanoMessage::SPOStakeDistribution(msg))) => {
-                            info!("Received SPDD snapshot for epoch {}", msg.epoch);
                             let span = info_span!("spdd_state.handle", epoch = msg.epoch);
                             async {
                                 let mut guard = state_handler.lock().await;
