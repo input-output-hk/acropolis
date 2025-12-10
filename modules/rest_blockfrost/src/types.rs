@@ -9,8 +9,8 @@ use acropolis_common::{
     rest_helper::ToCheckedF64,
     serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, Datum, KeyHash, PolicyAsset,
-    PoolEpochState, PoolId, PoolUpdateAction, ReferenceScript, Relay, TxHash, UTXOValue,
-    UTxOIdentifier, ValueMap, Vote, VrfKeyHash,
+    PoolEpochState, PoolId, PoolUpdateAction, ReferenceScript, Relay, TxHash, UTXOValue, ValueMap,
+    Vote, VrfKeyHash,
 };
 use anyhow::Result;
 use blake2::{Blake2b512, Digest};
@@ -941,10 +941,11 @@ pub struct UTxOREST {
 impl UTxOREST {
     pub fn new(
         address: String,
-        utxo_id: &UTxOIdentifier,
         entry: &UTXOValue,
         tx_hash: &[u8],
         block_hash: &[u8],
+        tx_index: u16,
+        output_index: u16,
     ) -> Self {
         let (data_hash, inline_datum) = match &entry.datum {
             Some(Datum::Hash(h)) => (Some(hex::encode(h)), None),
@@ -967,8 +968,8 @@ impl UTxOREST {
         Self {
             address,
             tx_hash: hex::encode(tx_hash),
-            tx_index: utxo_id.tx_index(),
-            output_index: utxo_id.output_index(),
+            tx_index,
+            output_index,
             amount: entry.value.clone().into(),
             block: hex::encode(block_hash),
             data_hash,

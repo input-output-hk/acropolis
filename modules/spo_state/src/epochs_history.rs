@@ -52,7 +52,7 @@ impl EpochState {
             epoch: self.epoch,
             blocks_minted: self.blocks_minted.unwrap_or(0),
             active_stake: self.active_stake.unwrap_or(0),
-            active_size: self.active_size.unwrap_or(RationalNumber::from(0)),
+            active_size: self.active_size.clone().unwrap_or(RationalNumber::ZERO),
             delegators_count: self.delegators_count.unwrap_or(0),
             pool_reward: self.pool_reward.unwrap_or(0),
             spo_reward: self.spo_reward.unwrap_or(0),

@@ -854,13 +854,7 @@ impl TxIdentifier {
     }
 }
 
-impl From<UTxOIdentifier> for TxIdentifier {
-    fn from(id: UTxOIdentifier) -> Self {
-        Self::new(id.block_number(), id.tx_index())
-    }
-}
-
-// Compact UTxO identifier (block_number, tx_index, output_index)
+// Full UTXO identifier as used in the outside world, with TX hash and output index
 #[derive(
     Debug,
     Clone,
@@ -873,63 +867,31 @@ impl From<UTxOIdentifier> for TxIdentifier {
     minicbor::Encode,
     minicbor::Decode,
 )]
-pub struct UTxOIdentifier(#[n(0)] [u8; 8]);
-
-impl UTxOIdentifier {
-    pub fn new(block_number: u32, tx_index: u16, output_index: u16) -> Self {
-        let mut buf = [0u8; 8];
-        buf[..4].copy_from_slice(&block_number.to_be_bytes());
-        buf[4..6].copy_from_slice(&tx_index.to_be_bytes());
-        buf[6..].copy_from_slice(&output_index.to_be_bytes());
-        Self(buf)
-    }
-
-    pub fn block_number(&self) -> u32 {
-        u32::from_be_bytes(self.0[..4].try_into().unwrap())
-    }
-
-    pub fn tx_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[4..6].try_into().unwrap())
-    }
-
-    pub fn output_index(&self) -> u16 {
-        u16::from_be_bytes(self.0[6..8].try_into().unwrap())
-    }
-
-    pub fn to_bytes(&self) -> [u8; 8] {
-        self.0
-    }
-}
-
-impl fmt::Display for UTxOIdentifier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}:{}:{}",
-            self.block_number(),
-            self.tx_index(),
-            self.output_index()
-        )
-    }
-}
-
-/// Full TxOutRef stored in UTxORegistry for UTxOIdentifier lookups
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct TxOutRef {
+pub struct UTxOIdentifier {
+    #[n(0)]
     pub tx_hash: TxHash,
+
+    #[n(1)]
     pub output_index: u16,
 }
 
-impl TxOutRef {
+impl UTxOIdentifier {
     pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
-        TxOutRef {
+        UTxOIdentifier {
             tx_hash,
             output_index,
         }
     }
+
+    pub fn to_bytes(&self) -> [u8; 34] {
+        let mut buf = [0u8; 34];
+        buf[..32].copy_from_slice(self.tx_hash.as_inner());
+        buf[32..34].copy_from_slice(&self.output_index.to_be_bytes());
+        buf
+    }
 }
 
-impl Display for TxOutRef {
+impl Display for UTxOIdentifier {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{}", self.tx_hash, self.output_index)
     }
@@ -1000,7 +962,7 @@ impl Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Origin => write!(f, "origin"),
-            Self::Specific { hash, slot } => write!(f, "{}@{}", hash, slot),
+            Self::Specific { hash, slot } => write!(f, "{hash}@{slot}"),
         }
     }
 }
@@ -1566,6 +1528,34 @@ pub struct Anchor {
     pub data_hash: DataHash,
 }
 
+impl<'b, C> minicbor::Decode<'b, C> for Anchor {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+
+        // URL can be either bytes or text string (snapshot format uses bytes)
+        let url = match d.datatype()? {
+            minicbor::data::Type::Bytes => {
+                let url_bytes = d.bytes()?;
+                String::from_utf8_lossy(url_bytes).to_string()
+            }
+            minicbor::data::Type::String => d.str()?.to_string(),
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "Expected bytes or string for Anchor URL",
+                ))
+            }
+        };
+
+        // data_hash is encoded as direct bytes, not an array
+        let data_hash = d.bytes()?.to_vec();
+
+        Ok(Self { url, data_hash })
+    }
+}
+
 pub type DRepCredential = Credential;
 
 /// DRep Registration = reg_drep_cert
@@ -1625,9 +1615,13 @@ pub struct ResignCommitteeCold {
 
 /// Governance actions data structures
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy, minicbor::Decode,
+)]
 pub struct ExUnits {
+    #[n(0)]
     pub mem: u64,
+    #[n(1)]
     pub steps: u64,
 }
 
@@ -1635,6 +1629,30 @@ pub struct ExUnits {
 pub struct ExUnitPrices {
     pub mem_price: RationalNumber,
     pub step_price: RationalNumber,
+}
+
+impl<'a, C> minicbor::Decode<'a, C> for ExUnitPrices {
+    fn decode(
+        d: &mut minicbor::Decoder<'a>,
+        _ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        // Decode mem_price as [numerator, denominator] array
+        d.array()?;
+        let mem_num: u64 = d.decode()?;
+        let mem_den: u64 = d.decode()?;
+        let mem_price = RationalNumber::from(mem_num, mem_den);
+
+        // Decode step_price as [numerator, denominator] array
+        d.array()?;
+        let step_num: u64 = d.decode()?;
+        let step_den: u64 = d.decode()?;
+        let step_price = RationalNumber::from(step_num, step_den);
+
+        Ok(ExUnitPrices {
+            mem_price,
+            step_price,
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -1699,8 +1717,8 @@ impl Display for GovActionId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct CostModel(Vec<i64>);
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+pub struct CostModel(#[n(0)] Vec<i64>);
 
 impl CostModel {
     pub fn new(m: Vec<i64>) -> Self {
@@ -1719,26 +1737,41 @@ pub struct CostModels {
     pub plutus_v3: Option<CostModel>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct PoolVotingThresholds {
+    #[n(0)]
     pub motion_no_confidence: RationalNumber,
+    #[n(1)]
     pub committee_normal: RationalNumber,
+    #[n(2)]
     pub committee_no_confidence: RationalNumber,
+    #[n(3)]
     pub hard_fork_initiation: RationalNumber,
+    #[n(4)]
     pub security_voting_threshold: RationalNumber,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct DRepVotingThresholds {
+    #[n(0)]
     pub motion_no_confidence: RationalNumber,
+    #[n(1)]
     pub committee_normal: RationalNumber,
+    #[n(2)]
     pub committee_no_confidence: RationalNumber,
+    #[n(3)]
     pub update_constitution: RationalNumber,
+    #[n(4)]
     pub hard_fork_initiation: RationalNumber,
+    #[n(5)]
     pub pp_network_group: RationalNumber,
+    #[n(6)]
     pub pp_economic_group: RationalNumber,
+    #[n(7)]
     pub pp_technical_group: RationalNumber,
+    #[n(8)]
     pub pp_governance_group: RationalNumber,
+    #[n(9)]
     pub treasury_withdrawal: RationalNumber,
 }
 
@@ -2025,6 +2058,47 @@ pub struct AlonzoBabbageUpdateProposal {
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Constitution {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?; // Constitution array
+
+        // In snapshot format, Anchor fields are flattened (not wrapped in array)
+        // Try to detect: if next element is bytes/string, it's flattened
+        // If next element is array, it's wrapped
+        let is_flattened = matches!(
+            d.datatype()?,
+            minicbor::data::Type::Bytes | minicbor::data::Type::String
+        );
+
+        let anchor = if is_flattened {
+            // Flattened format: [url, data_hash, guardrail_script]
+            let url = match d.datatype()? {
+                minicbor::data::Type::Bytes => {
+                    let url_bytes = d.bytes()?;
+                    String::from_utf8_lossy(url_bytes).to_string()
+                }
+                minicbor::data::Type::String => d.str()?.to_string(),
+                _ => {
+                    return Err(minicbor::decode::Error::message(
+                        "Expected bytes or string for Anchor URL",
+                    ))
+                }
+            };
+            let data_hash: Vec<u8> = d.bytes()?.to_vec();
+            Anchor { url, data_hash }
+        } else {
+            // Wrapped format: [[url, data_hash], guardrail_script]
+            d.decode_with(ctx)?
+        };
+
+        let guardrail_script: Option<ScriptHash> = d.decode_with(ctx)?;
+        Ok(Self {
+            anchor,
+            guardrail_script,
+        })
+    }
 }
 
 #[serde_as]
@@ -2567,6 +2641,24 @@ mod tests {
     }
 
     #[test]
+    fn test_utxo_identifier_to_bytes() -> Result<()> {
+        let tx_hash = TxHash::try_from(
+            hex::decode("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                .unwrap(),
+        )
+        .unwrap();
+        let output_index = 42;
+        let utxo = UTxOIdentifier::new(tx_hash, output_index);
+        let bytes = utxo.to_bytes();
+        assert_eq!(
+            hex::encode(bytes),
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f002a"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn governance_serialization_test() -> Result<()> {
         let gov_action_id = GovActionId::default();
 
@@ -2605,7 +2697,7 @@ mod tests {
                     make_committee_credential(false, 87),
                     1234,
                 )]),
-                terms: RationalNumber::from(1),
+                terms: RationalNumber::ONE,
             },
         });
 

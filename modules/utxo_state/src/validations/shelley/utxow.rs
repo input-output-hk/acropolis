@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
     validation::UTxOWValidationError, AddrKeyhash, GenesisDelegates, KeyHash, NativeScript,
-    ScriptHash, ShelleyAddressPaymentPart, TxHash, TxOutRef, UTXOValue, VKeyWitness,
+    ScriptHash, ShelleyAddressPaymentPart, TxHash, UTXOValue, UTxOIdentifier, VKeyWitness,
 };
 use anyhow::Result;
 use pallas::ledger::primitives::alonzo;
@@ -132,14 +132,14 @@ pub fn get_vkey_script_needed<F>(
     lookup_utxo: F,
 ) -> (HashSet<KeyHash>, HashSet<ScriptHash>)
 where
-    F: Fn(TxOutRef) -> Result<Option<UTXOValue>>,
+    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
 {
     let mut vkey_hashes = HashSet::new();
     let mut script_hashes = HashSet::new();
 
     // for each UTxO, extract the needed vkey and script hashes
-    for input in transaction_body.inputs.iter() {
-        let tx_out_ref = TxOutRef::new(tx_hash, input.index as u16);
+    for utxo in transaction_body.inputs.iter() {
+        let tx_out_ref = UTxOIdentifier::new(tx_hash, utxo.index as u16);
         if let Ok(Some(utxo)) = lookup_utxo(tx_out_ref) {
             // NOTE:
             // Need to check inputs from byron bootstrap addresses
@@ -322,7 +322,7 @@ pub fn validate_withnesses<F>(
     lookup_utxo: F,
 ) -> Result<(), Box<UTxOWValidationError>>
 where
-    F: Fn(TxOutRef) -> Result<Option<UTXOValue>>,
+    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
 {
     let transaction_body = &tx.transaction_body;
     // Extract required vkey and script hashes

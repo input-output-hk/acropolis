@@ -201,7 +201,7 @@ mod tests {
             .unwrap(),
         );
         let active_slots_coeff = RationalNumber::new(1, 20);
-        let decentralisation_param = RationalNumber::from(1);
+        let decentralisation_param = RationalNumber::ONE;
 
         let block_header_4490511: Vec<u8> =
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
