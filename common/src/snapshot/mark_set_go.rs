@@ -9,13 +9,11 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::epoch_snapshot::{EpochSnapshot, SnapshotsContainer};
 pub use crate::hash::Hash;
 use crate::snapshot::streaming_snapshot::SnapshotContext;
-use crate::{
-    EpochSnapshot, NetworkId, PoolId, PoolRegistration, Pots, SnapshotsContainer, StakeCredential,
-};
-
 use crate::snapshot::streaming_snapshot::SnapshotPoolRegistration;
+use crate::{NetworkId, PoolId, PoolRegistration, Pots, StakeCredential};
 
 /// VMap<K, V> representation for CBOR Map types
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

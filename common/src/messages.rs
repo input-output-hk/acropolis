@@ -25,7 +25,6 @@ use crate::queries::{
 };
 use crate::snapshot::AccountState;
 use crate::Pots;
-use crate::SnapshotsContainer;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -33,6 +32,7 @@ use crate::types::*;
 use crate::validation::ValidationStatus;
 
 // Caryatid core messages which we re-export
+use crate::epoch_snapshot::SnapshotsContainer;
 pub use caryatid_module_clock::messages::ClockTickMessage;
 pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 

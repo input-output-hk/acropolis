@@ -1,8 +1,9 @@
 //! Acropolis AccountsState: rewards calculations
 
+use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, EpochSnapshot, Lovelace,
-    PoolId, RewardType, SPORewards, SnapshotSPO, StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
+    SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};

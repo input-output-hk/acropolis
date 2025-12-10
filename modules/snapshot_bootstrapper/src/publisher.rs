@@ -1,7 +1,7 @@
+use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
-use acropolis_common::SnapshotsContainer;
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,

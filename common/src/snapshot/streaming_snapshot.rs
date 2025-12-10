@@ -30,13 +30,14 @@ use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
+use crate::epoch_snapshot::SnapshotsContainer;
 pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
     Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
-    PoolMetadata, Pots, Relay, SnapshotsContainer,
+    PoolMetadata, Pots, Relay,
 };
 pub use crate::{
     Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
@@ -66,10 +67,7 @@ pub enum StakeCredential {
 */
 
 impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
-    fn decode(
-        d: &mut minicbor::Decoder<'b>,
-        _ctx: &mut C,
-    ) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
@@ -242,7 +240,7 @@ pub enum DRep {
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for DRep {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
@@ -303,7 +301,7 @@ pub struct Account {
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for Account {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         Ok(Account {
             rewards_and_deposit: d.decode_with(ctx)?,
@@ -364,15 +362,15 @@ where
             vrf_key_hash: d.decode_with(ctx)?,
             pledge: d.decode_with(ctx)?,
             cost: d.decode_with(ctx)?,
-            margin: (SnapshotRatio::decode(d, ctx)?).0,
-            reward_account: (SnapshotStakeAddress::decode(d, ctx)?).0,
-            pool_owners: (SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?)
+            margin: SnapshotRatio::decode(d, ctx)?.0,
+            reward_account: SnapshotStakeAddress::decode(d, ctx)?.0,
+            pool_owners: SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
                 .0
                 .into_iter()
                 .map(|a| a.0)
                 .collect(),
-            relays: (Vec::<SnapshotRelay>::decode(d, ctx)?).into_iter().map(|r| r.0).collect(),
-            pool_metadata: (SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?).0.map(|m| m.0),
+            relays: Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect(),
+            pool_metadata: SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0),
         }))
     }
 }
@@ -437,7 +435,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
         match tag {
             0 => {
                 // SingleHostAddr
-                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
                 let ipv4 = Option::<Ipv4Addr>::decode(d, ctx)?;
                 let ipv6 = Option::<Ipv6Addr>::decode(d, ctx)?;
                 Ok(Self(Relay::SingleHostAddr(SingleHostAddr {
@@ -448,7 +446,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
             }
             1 => {
                 // SingleHostName
-                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
                 let dns_name = d.str()?.to_string();
                 Ok(Self(Relay::SingleHostName(SingleHostName {
                     port,
@@ -471,7 +469,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let url = d.str()?.to_string();
-        let hash = (Hash::<32>::decode(d, ctx)?).to_vec();
+        let hash = Hash::<32>::decode(d, ctx)?.to_vec();
         Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }

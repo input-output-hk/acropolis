@@ -2,6 +2,7 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
@@ -11,7 +12,7 @@ use acropolis_common::snapshot::{
     ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
     StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
-use acropolis_common::{NetworkId, PoolRegistration, SnapshotsContainer};
+use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;

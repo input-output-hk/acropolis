@@ -2,8 +2,8 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
+use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::EpochSnapshot;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
