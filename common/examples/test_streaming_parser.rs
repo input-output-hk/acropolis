@@ -11,7 +11,7 @@ use acropolis_common::snapshot::{
     RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, StakeCallback,
     StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
-use acropolis_common::PoolRegistration;
+use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
@@ -508,7 +508,7 @@ fn main() {
     println!("Starting parse...");
     let start = Instant::now();
 
-    match parser.parse(&mut callbacks) {
+    match parser.parse(&mut callbacks, NetworkId::Mainnet) {
         Ok(()) => {
             let duration = start.elapsed();
             println!("Parse completed successfully in {duration:.2?}");
