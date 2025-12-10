@@ -16,14 +16,10 @@ pub mod mark_set_go;
 mod parser;
 pub mod protocol_parameters;
 pub mod streaming_snapshot;
-
-// Re-export error types
 pub use error::SnapshotError;
 
-// Re-export parser functions
 pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
 
-// Re-export streaming snapshot APIs
 pub use streaming_snapshot::{
     AccountState, AccountsBootstrapData, AccountsCallback, Anchor, DRepCallback, DRepInfo,
     EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
@@ -31,7 +27,6 @@ pub use streaming_snapshot::{
     UtxoEntry,
 };
 
-// Re-export snapshot types
 pub use mark_set_go::{
     BootstrapSnapshot, BootstrapSnapshotSPO, BootstrapSnapshots, RawSnapshotsContainer,
     SnapshotsCallback, VMap,

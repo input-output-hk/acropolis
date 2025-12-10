@@ -4,7 +4,6 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -18,6 +17,7 @@ use acropolis_common::{
     InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
     PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
+pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -33,9 +33,6 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 // We need this because of a Shelley-era bug where stake deregistrations were still counted
 // up to the point of start of the calculation, rather than point of snapshot
 const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
-
-// Re-export Pots from common
-pub use acropolis_common::Pots;
 
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
@@ -119,8 +116,6 @@ pub struct State {
 
 impl State {
     /// Bootstrap state from snapshot data
-    /// All data arrives pre-processed and ready to use directly
-    /// Takes ownership of bootstrap_msg to avoid cloning large snapshot data
     pub fn bootstrap(&mut self, mut bootstrap_msg: AccountsBootstrapMessage) {
         info!(
             "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
@@ -131,7 +126,7 @@ impl State {
             bootstrap_msg.dreps.len()
         );
 
-        // 1. Load stake addresses - data is already parsed
+        // Load stake addresses
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         for account in &bootstrap_msg.accounts {
             stake_addresses.insert(account.stake_address.clone(), account.address_state.clone());
@@ -140,30 +135,29 @@ impl State {
         drop(stake_addresses);
         info!("Loaded {} stake addresses", bootstrap_msg.accounts.len());
 
-        // 2. Load pools - data is already in PoolRegistration format
+        // Load pools
         for pool_reg in &bootstrap_msg.pools {
             self.spos.insert(pool_reg.operator, pool_reg.clone());
         }
         info!("Loaded {} pools", self.spos.len());
 
-        // 3. Load retiring pools - list is already prepared
+        // Load retiring pools
         self.retiring_spos = bootstrap_msg.retiring_pools.clone();
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
-        // 4. Load DReps - data is already in (DRepCredential, deposit) format
+        // Load DReps
         self.dreps = bootstrap_msg.dreps.clone();
         info!("Loaded {} DReps", self.dreps.len());
 
-        // 5. Load pots - direct assignment
+        // Load pots
         self.pots = bootstrap_msg.pots.clone();
         info!(
             "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // 6. Load mark/set/go snapshots if available
+        // Load mark/set/go snapshots if available
         if let Some(bs) = bootstrap_msg.bootstrap_snapshots.take() {
-            // Convert pre-processed snapshots to internal format
             let mark_snapshot = Snapshot::from_bootstrap(bs.mark, &self.pots);
             let set_snapshot = Snapshot::from_bootstrap(bs.set, &self.pots);
             let go_snapshot = Snapshot::from_bootstrap(bs.go, &self.pots);
@@ -199,39 +193,6 @@ impl State {
             self.pots.treasury,
             self.pots.deposits,
         );
-
-        // Log sample stake addresses for verification via REST API
-        // Note: utxo_value is not populated from snapshot (would require UTxO aggregation)
-        let stake_addresses = self.stake_addresses.lock().unwrap();
-
-        let total = stake_addresses.len();
-        let with_delegation =
-            stake_addresses.iter().filter(|(_, s)| s.delegated_spo.is_some()).count();
-        let with_rewards = stake_addresses.iter().filter(|(_, s)| s.rewards > 0).count();
-
-        info!(
-            "Stake address stats: total={}, with_delegation={}, with_rewards={}",
-            total, with_delegation, with_rewards
-        );
-
-        // Show accounts with delegations
-        let sample_accounts: Vec<_> = stake_addresses
-            .iter()
-            .filter(|(_, state)| state.delegated_spo.is_some())
-            .take(5)
-            .collect();
-
-        if !sample_accounts.is_empty() {
-            info!("Sample stake addresses for REST API verification:");
-            for (addr, state) in sample_accounts {
-                info!(
-                    "  {} -> rewards={}, delegated_to={:?}",
-                    addr.to_string().unwrap(),
-                    state.rewards,
-                    state.delegated_spo
-                );
-            }
-        }
     }
 
     /// Get the stake address state for a give stake key

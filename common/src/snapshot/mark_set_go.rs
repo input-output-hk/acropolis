@@ -1,6 +1,4 @@
-// ================================================================================================
-// Mark, Set, Go Snapshots Support
-// ================================================================================================
+//! Mark, Set, Go Snapshots Support
 
 use anyhow::{Context, Error, Result};
 use log::info;
@@ -74,11 +72,8 @@ pub trait SnapshotsCallback {
 /// ]
 /// stake = vmap<credential, compactform_coin>
 /// credential = [0, addr_keyhash // 1, script_hash]
-/// xxx
-
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    /// snapshot_stake: stake distribution map (credential -> lovelace amount)
     pub snapshot_stake: VMap<StakeCredential, i64>,
     // snapshot_delegations: vmap<credential, key_hash<stake_pool>>,)
     pub snapshot_delegations: VMap<StakeCredential, PoolId>,
@@ -98,40 +93,21 @@ impl Snapshot {
         snapshot_name: &str,
         network: NetworkId,
     ) -> Result<Snapshot> {
-        info!("        {snapshot_name} snapshot - checking data type...");
-
-        // Check what type we have - could be array, map, or simple value
         match decoder.datatype().context("Failed to read snapshot datatype")? {
             minicbor::data::Type::Array => {
-                info!("        {snapshot_name} snapshot is an array");
                 decoder.array().context("Failed to parse snapshot array")?;
 
-                // Check what the first element type is
-                info!("        {snapshot_name} snapshot - checking first element type...");
                 match decoder.datatype().context("Failed to read first element datatype")? {
                     minicbor::data::Type::Map | minicbor::data::Type::MapIndef => {
-                        info!(
-                            "        {snapshot_name} snapshot - first element is a map, parsing as stake"
-                        );
-                        // First element is snapshot_stake
                         let snapshot_stake: VMap<StakeCredential, i64> = decoder.decode()?;
-
-                        // Parse delegations (second element)
-                        info!("        {snapshot_name} snapshot - parsing snapshot_delegations...");
                         let delegations: VMap<StakeCredential, PoolId> =
                             decoder.decode().context("Failed to parse snapshot_delegations")?;
 
-                        // Parse pool_params (third element) using SnapshotPoolRegistration
-                        info!("        {snapshot_name} snapshot - parsing snapshot_pool_params...");
-
-                        // Create context for network-aware decoding
                         let mut ctx = SnapshotContext::new(network);
-
-                        // Parse pool params map with context
                         let pool_params = parse_pool_params_map(decoder, &mut ctx)
                             .context("Failed to parse snapshot_pool_params")?;
 
-                        info!("        {snapshot_name} snapshot - parse completed successfully.");
+                        info!("Parsed {snapshot_name} snapshot successfully");
 
                         Ok(Snapshot {
                             snapshot_stake,
@@ -139,26 +115,17 @@ impl Snapshot {
                             snapshot_pool_params: pool_params,
                         })
                     }
-                    other_type => {
-                        info!(
-                            "        {snapshot_name} snapshot - first element is {other_type:?}, skipping entire array"
-                        );
-                        Err(Error::msg(
-                            "Unexpected first element type in snapshot array",
-                        ))
-                    }
+                    other_type => Err(Error::msg(format!(
+                        "{snapshot_name} snapshot: unexpected first element type: {other_type:?}"
+                    ))),
                 }
             }
             other_type => Err(Error::msg(format!(
-                "Unexpected snapshot data type: {other_type:?}"
+                "{snapshot_name} snapshot: unexpected data type: {other_type:?}"
             ))),
         }
     }
 }
-
-// ================================================================================================
-// Bootstrap Snapshot Types (for message passing to accounts_state)
-// ================================================================================================
 
 /// SPO data for a bootstrap stake snapshot - serializable version for message passing
 #[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
@@ -337,7 +304,7 @@ impl BootstrapSnapshots {
     }
 }
 
-/// Parse pool params map using SnapshotPoolRegistration for clean decoding
+/// Parse pool params map using SnapshotPoolRegistration
 fn parse_pool_params_map(
     decoder: &mut Decoder,
     ctx: &mut SnapshotContext,

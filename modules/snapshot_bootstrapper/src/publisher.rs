@@ -163,31 +163,9 @@ impl UtxoCallback for SnapshotPublisher {
 
 impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: SPOState) -> Result<()> {
-        info!(
-            "Received pools (current: {}, future: {}, retiring: {})",
-            pools.pools.len(),
-            pools.updates.len(),
-            pools.retiring.len()
-        );
+        info!("Received {} pools", pools.pools.len());
         self.pools.extend(&pools);
-
-        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::SPOState(pools),
-        )));
-
-        // Clone what we need for the async task
-        let context = self.context.clone();
-        let snapshot_topic = self.snapshot_topic.clone();
-
-        // Block until the SPO bootstrap message is published, for consistency with other callbacks
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                context
-                    .publish(&snapshot_topic, message)
-                    .await
-                    .unwrap_or_else(|e| tracing::error!("Failed to publish SPO bootstrap: {}", e));
-            })
-        });
+        // TODO: Accumulate pool data if needed or send in chunks to PoolState processor
         Ok(())
     }
 }
