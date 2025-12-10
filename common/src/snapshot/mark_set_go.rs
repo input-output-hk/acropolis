@@ -12,7 +12,7 @@ pub use crate::hash::Hash;
 use crate::snapshot::streaming_snapshot::{SnapshotContext, SnapshotPoolRegistration};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::StakeCredential;
-use crate::{NetworkId, PoolId, PoolRegistration};
+use crate::{PoolId, PoolRegistration};
 
 /// VMap<K, V> representation for CBOR Map types
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -87,7 +87,11 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Parse a single snapshot (Mark, Set, or Go)
-    pub fn parse_single_snapshot(decoder: &mut Decoder, snapshot_name: &str) -> Result<Snapshot> {
+    pub fn parse_single_snapshot(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        snapshot_name: &str,
+    ) -> Result<Snapshot> {
         info!("        {snapshot_name} snapshot - checking data type...");
 
         // Check what type we have - could be array, map, or simple value
@@ -116,13 +120,9 @@ impl Snapshot {
                             "        {snapshot_name} snapshot - parsing snapshot_pool_registration..."
                         );
 
-                        let mut ctx = SnapshotContext {
-                            // TODO: make this configurable (currently is mainnet)
-                            network: NetworkId::Mainnet,
-                        };
                         // pool_registration (third element)
                         let pools: VMap<PoolId, SnapshotPoolRegistration> = decoder
-                            .decode_with(&mut ctx)
+                            .decode_with(ctx)
                             .context("Failed to parse snapshot_pool_registration")?;
 
                         info!("        {snapshot_name} snapshot - parse completed successfully.");
