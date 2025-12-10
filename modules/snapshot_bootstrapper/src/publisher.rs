@@ -1,6 +1,7 @@
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::{AccountsCallback, RawSnapshotsContainer, SnapshotsCallback};
+use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
+use acropolis_common::SnapshotsContainer;
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
@@ -307,29 +308,23 @@ impl EpochCallback for SnapshotPublisher {
 }
 
 impl SnapshotsCallback for SnapshotPublisher {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
-        // Calculate total stakes and delegator counts from VMap data
-        let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
-        let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
-        let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
-
-        info!("Raw Snapshots Data:");
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
+        info!("Snapshots Data:");
         info!(
-            "  Mark snapshot: {} delegators, {} total stake (ADA)",
-            snapshots.mark.0.len(),
-            mark_total as f64 / 1_000_000.0
+            "  Mark snapshot (epoch {}): {} SPOs",
+            snapshots.mark.epoch,
+            snapshots.mark.spos.len()
         );
         info!(
-            "  Set snapshot: {} delegators, {} total stake (ADA)",
-            snapshots.set.0.len(),
-            set_total as f64 / 1_000_000.0
+            "  Set snapshot (epoch {}): {} SPOs",
+            snapshots.set.epoch,
+            snapshots.set.spos.len()
         );
         info!(
-            "  Go snapshot: {} delegators, {} total stake (ADA)",
-            snapshots.go.0.len(),
-            go_total as f64 / 1_000_000.0
+            "  Go snapshot (epoch {}): {} SPOs",
+            snapshots.go.epoch,
+            snapshots.go.spos.len()
         );
-        info!("  Fee: {} ADA", snapshots.fee as f64 / 1_000_000.0);
 
         Ok(())
     }

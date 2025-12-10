@@ -23,8 +23,9 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::{AccountState, RawSnapshotsContainer};
+use crate::snapshot::AccountState;
 use crate::Pots;
+use crate::SnapshotsContainer;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -424,9 +425,9 @@ pub struct AccountsBootstrapMessage {
     /// Pot balances (treasury, reserves, deposits)
     pub pots: Pots,
 
-    /// Pre-processed bootstrap snapshots (Mark, Set, Go)
-    /// Contains per-SPO delegator lists ready for accounts_state to use
-    pub bootstrap_snapshots: Option<RawSnapshotsContainer>,
+    /// Fully processed bootstrap snapshots (Mark, Set, Go)
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state
+    pub bootstrap_snapshots: Option<SnapshotsContainer>,
 }
 
 #[allow(clippy::large_enum_variant)]

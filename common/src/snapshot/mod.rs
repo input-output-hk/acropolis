@@ -26,4 +26,4 @@ pub use streaming_snapshot::{
     SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 
-pub use mark_set_go::{RawSnapshotsContainer, SnapshotsCallback, VMap};
+pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};

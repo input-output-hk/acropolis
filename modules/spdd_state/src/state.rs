@@ -1,5 +1,4 @@
 use acropolis_common::{
-    snapshot::streaming_snapshot::cbor::decode::info,
     state_history::{StateHistory, StateHistoryStore},
     DelegatedStake, PoolId,
 };

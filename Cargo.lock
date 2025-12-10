@@ -45,6 +45,7 @@ dependencies = [
  "env_logger",
  "futures",
  "hex",
+ "imbl",
  "log",
  "memmap2",
  "minicbor 0.25.1",

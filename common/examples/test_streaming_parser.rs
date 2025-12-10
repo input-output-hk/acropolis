@@ -402,67 +402,26 @@ impl SnapshotCallbacks for CountingCallbacks {
 }
 
 impl SnapshotsCallback for CountingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
-        eprintln!("Raw Snapshots Data:");
+    fn on_snapshots(&mut self, snapshots: acropolis_common::SnapshotsContainer) -> Result<()> {
+        eprintln!("Snapshots Data:");
         eprintln!();
 
-        // Calculate total stakes and delegator counts from VMap data
-        let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
-        let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
-        let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
-
-        eprintln!("Mark Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.mark.0.len());
+        eprintln!("Mark Snapshot (epoch {}):", snapshots.mark.epoch);
+        eprintln!("  SPOs: {}", snapshots.mark.spos.len());
+        let mark_total: u64 = snapshots.mark.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", mark_total as f64 / 1_000_000.0);
-        if !snapshots.mark.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.mark.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Set Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.set.0.len());
+        eprintln!("Set Snapshot (epoch {}):", snapshots.set.epoch);
+        eprintln!("  SPOs: {}", snapshots.set.spos.len());
+        let set_total: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", set_total as f64 / 1_000_000.0);
-        if !snapshots.set.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.set.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Go Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.go.0.len());
+        eprintln!("Go Snapshot (epoch {}):", snapshots.go.epoch);
+        eprintln!("  SPOs: {}", snapshots.go.spos.len());
+        let go_total: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
-        if !snapshots.go.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.go.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
-        eprintln!();
-
-        eprintln!("Fee: {:.2} ADA", snapshots.fee as f64 / 1_000_000.0);
         eprintln!();
 
         Ok(())

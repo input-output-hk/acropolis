@@ -653,8 +653,8 @@ pub struct AccountsBootstrapData {
     pub dreps: Vec<(crate::DRepCredential, u64)>,
     /// Treasury, reserves, and deposits
     pub pots: crate::Pots,
-    /// Pre-processed bootstrap snapshots (mark/set/go) for rewards calculation
-    pub snapshots: Option<RawSnapshotsContainer>,
+    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation
+    pub snapshots: Option<crate::SnapshotsContainer>,
 }
 
 /// Callback invoked with accounts bootstrap data
@@ -810,7 +810,9 @@ impl StreamingSnapshotParser {
         let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
 
-        let mut ctx = SnapshotContext { network };
+        let mut ctx = SnapshotContext {
+            network: network.clone(),
+        };
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
@@ -1212,11 +1214,32 @@ impl StreamingSnapshotParser {
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
+        // Convert block production data to HashMap<PoolId, usize> for snapshot processing
+        let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+        let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+
+        // Build pots for snapshot conversion
+        let pots = crate::Pots {
+            reserves,
+            treasury,
+            deposits,
+        };
+
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("    Successfully parsed mark/set/go snapshots!");
-                callbacks.on_snapshots(raw_snapshots.clone())?;
-                Some(raw_snapshots)
+                // Convert raw snapshots to processed SnapshotsContainer
+                let processed = raw_snapshots.into_snapshots_container(
+                    epoch,
+                    &blocks_prev_map,
+                    &blocks_curr_map,
+                    pots.clone(),
+                    network.clone(),
+                );
+                callbacks.on_snapshots(processed.clone())?;
+                Some(processed)
             }
             Err(e) => {
                 info!("    Failed to parse snapshots: {}", e);
@@ -1920,27 +1943,21 @@ impl StreamingSnapshotParser {
 
         info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
 
-        // Parse each snapshot using snapshot.rs functions
-        let mut parsed_snapshots = Vec::new();
-
+        // Parse each snapshot using RawSnapshot::parse
         // Parse Mark snapshot [0]
         info!("    Parsing Mark snapshot...");
-        let mark_snapshot =
-            super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Mark")
-                .context("Failed to parse Mark snapshot")?;
-        parsed_snapshots.push(mark_snapshot);
+        let mark_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Mark")
+            .context("Failed to parse Mark snapshot")?;
 
         // Parse Set snapshot [1]
         info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Set")
+        let set_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Set")
             .context("Failed to parse Set snapshot")?;
-        parsed_snapshots.push(set_snapshot);
 
         // Parse Go snapshot [2]
         info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Go")
+        let go_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Go")
             .context("Failed to parse Go snapshot")?;
-        parsed_snapshots.push(go_snapshot);
 
         let fee = decoder.decode::<u64>().unwrap_or(0);
 
@@ -1948,11 +1965,11 @@ impl StreamingSnapshotParser {
             "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
         );
 
-        // Create raw snapshots container with VMap data directly
+        // Create raw snapshots container with full snapshot data
         let raw_snapshots = RawSnapshotsContainer {
-            mark: parsed_snapshots[0].snapshot_stake.clone(),
-            set: parsed_snapshots[1].snapshot_stake.clone(),
-            go: parsed_snapshots[2].snapshot_stake.clone(),
+            mark: mark_snapshot,
+            set: set_snapshot,
+            go: go_snapshot,
             fee,
         };
 
@@ -2051,13 +2068,13 @@ impl SnapshotCallbacks for CollectingCallbacks {
 }
 
 impl SnapshotsCallback for CollectingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
+    fn on_snapshots(&mut self, snapshots: crate::SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
-            "CollectingCallbacks: Received raw snapshots data with {} mark, {} set, {} go entries",
-            snapshots.mark.0.len(),
-            snapshots.set.0.len(),
-            snapshots.go.0.len()
+            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
+            snapshots.mark.spos.len(),
+            snapshots.set.spos.len(),
+            snapshots.go.spos.len()
         );
         Ok(())
     }

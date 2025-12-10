@@ -1,9 +1,9 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
-use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::Snapshot;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -15,7 +15,8 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    PoolRegistration, Pot, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
+    StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
@@ -54,23 +55,6 @@ impl EpochSnapshots {
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
     }
-}
-
-/// Registration change kind
-#[derive(Debug, Clone)]
-pub enum RegistrationChangeKind {
-    Registered,
-    Deregistered,
-}
-
-/// Registration change on a stake address
-#[derive(Debug, Clone)]
-pub struct RegistrationChange {
-    /// Stake address (full address, not just hash)
-    pub address: StakeAddress,
-
-    /// Change type
-    pub kind: RegistrationChangeKind,
 }
 
 /// Overall state - stored per block
@@ -157,15 +141,11 @@ impl State {
         );
 
         // Load mark/set/go snapshots if available
-        if let Some(bs) = bootstrap_msg.bootstrap_snapshots.take() {
-            let mark_snapshot = Snapshot::from_bootstrap(bs.mark, &self.pots);
-            let set_snapshot = Snapshot::from_bootstrap(bs.set, &self.pots);
-            let go_snapshot = Snapshot::from_bootstrap(bs.go, &self.pots);
-
+        if let Some(snapshots) = bootstrap_msg.bootstrap_snapshots.take() {
             self.epoch_snapshots = EpochSnapshots {
-                mark: Arc::new(mark_snapshot),
-                set: Arc::new(set_snapshot),
-                go: Arc::new(go_snapshot),
+                mark: Arc::new(snapshots.mark),
+                set: Arc::new(snapshots.set),
+                go: Arc::new(snapshots.go),
             };
 
             info!(

@@ -24,6 +24,7 @@ bs58 = "0.5"
 chrono = { workspace = true }
 crc = "3"
 hex = { workspace = true }
+imbl = "5.0.0"
 log = "0.4"
 memmap2 = "0.9"
 num-rational = { version = "0.4.2", features = ["serde"] }
