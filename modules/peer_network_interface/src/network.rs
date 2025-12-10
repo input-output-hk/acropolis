@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
     BlockSink,
-    chain_state::ChainState,
+    chain_state::{ChainEvent, ChainState},
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
 use acropolis_common::BlockHash;
@@ -55,6 +55,7 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
+    sync_point: Option<Point>,
 }
 
 impl NetworkManager {
@@ -73,6 +74,7 @@ impl NetworkManager {
             events_sender,
             block_sink,
             published_blocks: 0,
+            sync_point: None,
         }
     }
 
@@ -88,7 +90,7 @@ impl NetworkManager {
         match event {
             NetworkEvent::PeerUpdate { peer, event } => {
                 self.handle_peer_update(peer, event);
-                self.publish_blocks().await?;
+                self.publish_events().await?;
             }
             NetworkEvent::SyncPointUpdate { point } => {
                 self.chain = ChainState::new();
@@ -100,6 +102,12 @@ impl NetworkManager {
                 if let Point::Specific(slot, _) = point {
                     let (epoch, _) = self.block_sink.genesis_values.slot_to_epoch(slot);
                     self.block_sink.last_epoch = Some(epoch);
+                }
+
+                if let Some((&peer_id, _)) = self.peers.iter().next() {
+                    self.set_preferred_upstream(peer_id);
+                } else {
+                    warn!("Sync requested but no upstream peers available");
                 }
 
                 self.sync_to_point(point);
@@ -121,6 +129,8 @@ impl NetworkManager {
         let points = self.chain.choose_points_for_find_intersect();
         if !points.is_empty() {
             peer.find_intersect(points);
+        } else if let Some(sync_point) = self.sync_point.as_ref() {
+            peer.find_intersect(vec![sync_point.clone()]);
         }
         self.peers.insert(id, peer);
         if self.chain.preferred_upstream.is_none() {
@@ -153,6 +163,7 @@ impl NetworkManager {
         for peer in self.peers.values() {
             peer.find_intersect(vec![point.clone()]);
         }
+        self.sync_point = Some(point);
     }
 
     // Implementation note: this method is deliberately synchronous/non-blocking.
@@ -161,7 +172,8 @@ impl NetworkManager {
     // is full and this method is blocked on writing to it, the queue can never drain.
     fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) {
         match event {
-            PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header)) => {
+            PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header, tip)) => {
+                self.chain.handle_tip(peer, tip);
                 let slot = header.slot;
                 let hash = header.hash;
                 let request_body_from = self.chain.handle_roll_forward(peer, header);
@@ -170,10 +182,12 @@ impl NetworkManager {
                     self.request_block(slot, hash, request_body_from);
                 }
             }
-            PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point)) => {
+            PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
+                self.chain.handle_tip(peer, tip);
                 self.chain.handle_roll_backward(peer, point);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
+                self.chain.handle_tip(peer, tip.clone());
                 // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
                 // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
                 if let Some(peer) = self.peers.get(&peer) {
@@ -197,13 +211,12 @@ impl NetworkManager {
             return;
         };
         warn!("disconnected from {}", peer.conn.address);
-        let was_preferred = self.chain.preferred_upstream.is_some_and(|i| i == id);
-        if was_preferred {
+        self.chain.handle_disconnect(id);
+        if self.chain.preferred_upstream.is_none() {
             if let Some(new_preferred) = self.peers.keys().next().copied() {
                 self.set_preferred_upstream(new_preferred);
             } else {
                 warn!("no upstream peers!");
-                self.clear_preferred_upstream();
             }
         }
         for (requested_hash, requested_slot) in peer.reqs {
@@ -237,18 +250,22 @@ impl NetworkManager {
         self.chain.handle_new_preferred_upstream(id);
     }
 
-    fn clear_preferred_upstream(&mut self) {
-        self.chain.clear_preferred_upstream();
-    }
-
-    async fn publish_blocks(&mut self) -> Result<()> {
-        while let Some((header, body, rolled_back)) = self.chain.next_unpublished_block() {
-            self.block_sink.announce(header, body, rolled_back).await?;
-            self.published_blocks += 1;
-            if self.published_blocks.is_multiple_of(100) {
-                info!("Published block {}", header.number);
+    async fn publish_events(&mut self) -> Result<()> {
+        while let Some(event) = self.chain.next_unpublished_event() {
+            let tip = self.chain.preferred_upstream_tip();
+            match event {
+                ChainEvent::RollForward { header, body } => {
+                    self.block_sink.announce_roll_forward(header, body, tip).await?;
+                    self.published_blocks += 1;
+                    if self.published_blocks.is_multiple_of(100) {
+                        info!("Published block {}", header.number);
+                    }
+                }
+                ChainEvent::RollBackward { header } => {
+                    self.block_sink.announce_roll_backward(header, tip).await?;
+                }
             }
-            self.chain.handle_block_published();
+            self.chain.handle_event_published();
         }
         Ok(())
     }

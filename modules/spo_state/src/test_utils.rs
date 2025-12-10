@@ -2,7 +2,7 @@ use acropolis_common::{
     messages::{
         EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage, TxCertificatesMessage,
     },
-    BlockHash, BlockInfo, BlockStatus, Era, TxCertificateWithPos,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, TxCertificateWithPos,
 };
 
 use crate::store_config::StoreConfig;
@@ -62,6 +62,7 @@ pub fn save_blocks_store_config() -> StoreConfig {
 pub fn new_block(epoch: u64) -> BlockInfo {
     BlockInfo {
         status: BlockStatus::Immutable,
+        intent: BlockIntent::Apply,
         slot: 0,
         number: 10 * epoch,
         hash: BlockHash::default(),
@@ -69,6 +70,7 @@ pub fn new_block(epoch: u64) -> BlockInfo {
         epoch_slot: 0,
         new_epoch: true,
         timestamp: epoch,
+        tip_slot: None,
         era: Era::Byron,
     }
 }

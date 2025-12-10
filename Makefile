@@ -61,6 +61,9 @@ run:
 fmt:
 	$(CARGO) fmt --all
 
+check:
+	$(CARGO) fmt --all -- --check
+
 clippy:
 	$(CARGO) clippy --workspace -- -D warnings
 
@@ -77,12 +80,13 @@ snap-test-streaming: $(SNAPSHOT)
 	@echo "=================================="
 	@echo "Snapshot: $(SNAPSHOT)"
 	@echo "Size: $$(du -h $(SNAPSHOT) | cut -f1)"
+	@echo "Log Level: $(LOG_LEVEL)"
 	@echo ""
 	@test -f "$(SNAPSHOT)" || (echo "Error: Snapshot file not found: $(SNAPSHOT)"; exit 1)
 	@echo "This will parse the entire snapshot and collect all data with callbacks..."
 	@echo "Expected time: ~1-3 minutes for 2.4GB snapshot with 11M UTXOs"
 	@echo ""
-	@$(CARGO) run --release --example test_streaming_parser -- "$(SNAPSHOT)"
+	RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --example test_streaming_parser -- "$(SNAPSHOT)"
 
 # Pattern rule: generate .json manifest from .cbor snapshot
 # Usage: make tests/fixtures/my-snapshot.json

@@ -159,6 +159,7 @@ pub fn validate_praos_vrf_proof(
 /// We are using Pallas Math Library
 ///
 pub fn validate_vrf_leader_value(
+    pool_id: &PoolId,
     leader_vrf_output: &[u8],
     leader_relative_stake: &RationalNumber,
     active_slot_coeff: &RationalNumber,
@@ -166,7 +167,7 @@ pub fn validate_vrf_leader_value(
     let certified_leader_vrf = &FixedDecimal::from(leader_vrf_output);
     let output_size_bits = leader_vrf_output.len() * 8;
     let cert_nat_max = FixedDecimal::from(UBig::ONE << output_size_bits);
-    let leader_relative_stake = FixedDecimal::from(UBig::from(*leader_relative_stake.numer()))
+    let leader_relative_stake_de = FixedDecimal::from(UBig::from(*leader_relative_stake.numer()))
         / FixedDecimal::from(UBig::from(*leader_relative_stake.denom()));
     let active_slot_coeff = FixedDecimal::from(UBig::from(*active_slot_coeff.numer()))
         / FixedDecimal::from(UBig::from(*active_slot_coeff.denom()));
@@ -174,12 +175,16 @@ pub fn validate_vrf_leader_value(
     let denominator = &cert_nat_max - certified_leader_vrf;
     let recip_q = &cert_nat_max / &denominator;
     let c = (&FixedDecimal::from(1u64) - &active_slot_coeff).ln();
-    let x = -(leader_relative_stake * c);
+    let x = -(leader_relative_stake_de * c);
     let ordering = x.exp_cmp(1000, 3, &recip_q);
     match ordering.estimation {
         ExpOrdering::LT => Ok(()),
         ExpOrdering::GT | ExpOrdering::UNKNOWN => {
-            Err(VrfLeaderValueTooBigError::VrfLeaderValueTooBig)
+            Err(VrfLeaderValueTooBigError::VrfLeaderValueTooBig {
+                pool_id: *pool_id,
+                active_stake: *leader_relative_stake.numer(),
+                relative_stake: leader_relative_stake.clone(),
+            })
         }
     }
 }

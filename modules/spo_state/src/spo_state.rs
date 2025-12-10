@@ -559,8 +559,8 @@ impl SPOState {
                                     .unwrap_or(0),
                                 active_size: epoch_state
                                     .as_ref()
-                                    .and_then(|state| state.active_size)
-                                    .unwrap_or(RationalNumber::from(0)),
+                                    .and_then(|state| state.active_size.clone())
+                                    .unwrap_or(RationalNumber::ZERO),
                             })
                         } else {
                             PoolsStateQueryResponse::Error(QueryError::storage_disabled(

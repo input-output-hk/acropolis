@@ -1,7 +1,5 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
-
-use acropolis_codec::*;
 use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
@@ -20,8 +18,10 @@ use pallas::ledger::primitives::KeyValuePairs;
 use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
 use tracing::{debug, error, info, info_span, Instrument};
 
-mod utxo_registry;
-use crate::utxo_registry::UTxORegistry;
+#[cfg(test)]
+mod test_utils;
+#[cfg(test)]
+mod validations;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
 const DEFAULT_GENESIS_SUBSCRIBE_TOPIC: &str = "cardano.genesis.utxos";
@@ -113,24 +113,10 @@ impl TxUnpacker {
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
-        // Initialize UTxORegistry
-        let mut utxo_registry = UTxORegistry::default();
-
-        // Subscribe to genesis and txs topics
-        let mut genesis_sub = context.subscribe(&genesis_utxos_subscribe_topic).await?;
+        // Subscribe to txs topics
         let mut txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
 
         context.clone().run(async move {
-            // Initialize TxRegistry with genesis utxos
-            let (_, message) = genesis_sub.read().await
-                .expect("failed to read genesis utxos");
-            match message.as_ref() {
-                Message::Cardano((_block, CardanoMessage::GenesisUTxOs(genesis_msg))) => {
-                    utxo_registry.bootstrap_from_genesis_utxos(&genesis_msg.utxos);
-                    info!("Seeded registry with {} genesis utxos", genesis_msg.utxos.len());
-                }
-                other => panic!("expected GenesisUTxOs, got {:?}", other),
-            }
             loop {
                 let Ok((_, message)) = txs_sub.read().await else { return; };
                 match message.as_ref() {
@@ -154,15 +140,7 @@ impl TxUnpacker {
                             let mut total_output: u128 = 0;
                             let mut total_fees: u64 = 0;
                             let total_txs = txs_msg.txs.len() as u64;
-
-                            // handle rollback or advance registry to the next block
                             let block_number = block.number as u32;
-                            if block.status == BlockStatus::RolledBack {
-                                if let Err(e) = utxo_registry.rollback_before(block_number) {
-                                    error!("rollback_before({}) failed: {}", block_number, e);
-                                }
-                                utxo_registry.next_block();
-                            }
 
                             for (tx_index , raw_tx) in txs_msg.txs.iter().enumerate() {
                                 let tx_index = tx_index as u16;
@@ -173,79 +151,27 @@ impl TxUnpacker {
                                         let tx_hash: TxHash = tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                         let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                        let inputs = tx.consumes();
-                                        let outputs = tx.produces();
+                                        let (inputs, outputs, tx_total_output, errors) = acropolis_codec::map_transaction_inputs_outputs(tx_index, &tx);
                                         let certs = tx.certs();
                                         let tx_withdrawals = tx.withdrawals_sorted_set();
                                         let mut props = None;
                                         let mut votes = None;
 
+                                        // sum up total output lovelace for a block
+                                        total_output += tx_total_output;
+
                                         if tracing::enabled!(tracing::Level::DEBUG) {
-                                            debug!("Decoded tx with {} inputs, {} outputs, {} certs",
-                                               inputs.len(), outputs.len(), certs.len());
+                                            debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
+                                               inputs.len(), outputs.len(), certs.len(), total_output);
+                                        }
+
+                                        if !errors.is_empty() {
+                                            error!("Errors decoding transaction {tx_hash}: {}", errors.iter().map(|e| e.to_string()).collect::<Vec<String>>().join(", "));
                                         }
 
                                         if publish_utxo_deltas_topic.is_some() {
                                             // Group deltas by tx
-                                            let mut tx_utxo_deltas  = TxUTxODeltas {tx_identifier, inputs: Vec::new(), outputs: Vec::new()};
-
-                                            // Remove inputs from UTxORegistry and push to UTxOIdentifiers to delta
-                                            for input in inputs {
-                                                let oref = input.output_ref();
-                                                let tx_ref = TxOutRef::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-                                                match utxo_registry.consume(&tx_ref) {
-                                                    Ok(tx_identifier) => {
-                                                        tx_utxo_deltas.inputs.push(
-                                                            UTxOIdentifier::new(
-                                                                tx_identifier.block_number(),
-                                                                tx_identifier.tx_index(),
-                                                                tx_ref.output_index,
-                                                            ),
-                                                      );
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to consume input {}: {e}", tx_ref.output_index);
-                                                    }
-                                                }
-                                            }
-
-                                            // Add outputs to UTxORegistry and push TxOutputs to delta
-                                            for (index, output) in outputs {
-                                                match utxo_registry.add(
-                                                    block_number,
-                                                    tx_index,
-                                                    TxOutRef {
-                                                        tx_hash,
-                                                        output_index: index as u16,
-                                                    },
-                                                ) {
-                                                    Ok(utxo_id) => {
-                                                        match output.address() {
-                                                            Ok(pallas_address) => match map_parameters::map_address(&pallas_address) {
-                                                                Ok(address) => {
-                                                                    tx_utxo_deltas.outputs.push(TxOutput {
-                                                                        utxo_identifier: utxo_id,
-                                                                        address,
-                                                                        value: map_parameters::map_value(&output.value()),
-                                                                        datum: map_parameters::map_datum(&output.datum()),
-                                                                        reference_script: map_parameters::map_reference_script(&output.script_ref())
-                                                                    });
-
-                                                                    // catch all output lovelaces
-                                                                    total_output += output.value().coin() as u128;
-                                                                }
-                                                                Err(e) => error!("Output {index} in tx ignored: {e}"),
-                                                            },
-                                                            Err(e) => error!("Can't parse output {index} in tx: {e}"),
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error!("Failed to insert output into registry: {e}");
-                                                    }
-                                                }
-                                            }
-                                            utxo_deltas.push(tx_utxo_deltas);
+                                            utxo_deltas.push(TxUTxODeltas {tx_identifier, inputs, outputs});
                                         }
 
                                         if publish_asset_deltas_topic.is_some() {
@@ -253,7 +179,7 @@ impl TxUnpacker {
 
                                             // Mint deltas
                                             for policy_group in tx.mints().iter() {
-                                                if let Some((policy_id, deltas)) = map_parameters::map_mint_burn(policy_group) {
+                                                if let Some((policy_id, deltas)) = acropolis_codec::map_mint_burn(policy_group) {
                                                     tx_deltas.push((policy_id, deltas));
                                                 }
                                             }
@@ -277,7 +203,7 @@ impl TxUnpacker {
 
                                         if publish_certificates_topic.is_some() {
                                             for ( cert_index, cert) in certs.iter().enumerate() {
-                                                match map_parameters::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
+                                                match acropolis_codec::map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
                                                     Ok(tx_cert) => {
                                                         certificates.push(tx_cert);
                                                     },
@@ -314,7 +240,7 @@ impl TxUnpacker {
                                                                 &mut alonzo_babbage_update_proposals,
                                                                 &alonzo_update.proposed_protocol_parameter_updates,
                                                                 alonzo_update.epoch,
-                                                                map_parameters::map_alonzo_protocol_param_update
+                                                                acropolis_codec::map_alonzo_protocol_param_update
                                                             );
                                                         }
                                                     }
@@ -328,7 +254,7 @@ impl TxUnpacker {
                                                                 &mut alonzo_babbage_update_proposals,
                                                                 &babbage_update.proposed_protocol_parameter_updates,
                                                                 babbage_update.epoch,
-                                                                map_parameters::map_babbage_protocol_param_update
+                                                                acropolis_codec::map_babbage_protocol_param_update
                                                             );
                                                         }
                                                     }
@@ -353,7 +279,7 @@ impl TxUnpacker {
                                                 let mut proc_id = GovActionId { transaction_id: tx_hash, action_index: 0 };
                                                 for (action_index, pallas_governance_proposals) in pp.iter().enumerate() {
                                                     match proc_id.set_action_index(action_index)
-                                                        .and_then (|proc_id| map_parameters::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
+                                                        .and_then (|proc_id| acropolis_codec::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
                                                     {
                                                         Ok(g) => proposal_procedures.push(g),
                                                         Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
@@ -363,7 +289,7 @@ impl TxUnpacker {
 
                                             if let Some(pallas_vp) = votes {
                                                 // Nonempty set -- governance_message.voting_procedures will not be empty
-                                                match map_parameters::map_all_governance_voting_procedures(pallas_vp) {
+                                                match acropolis_codec::map_all_governance_voting_procedures(pallas_vp) {
                                                     Ok(vp) => voting_procedures.push((tx_hash, vp)),
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
@@ -380,8 +306,6 @@ impl TxUnpacker {
                                                      block.slot)
                                 }
                             }
-
-                            utxo_registry.next_block();
 
                             // Publish messages in parallel
                             let mut futures = Vec::new();

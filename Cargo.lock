@@ -42,8 +42,10 @@ dependencies = [
  "crc",
  "cryptoxide 0.5.1",
  "dashmap",
+ "env_logger",
  "futures",
  "hex",
+ "log",
  "memmap2",
  "minicbor 0.25.1",
  "num-rational",
@@ -195,6 +197,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_custom_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "bincode 1.3.3",
+ "caryatid_sdk",
+ "config",
+ "fjall",
+ "futures",
+ "hex",
+ "pallas 0.33.0",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_drdd_state"
 version = "0.1.0"
 dependencies = [
@@ -305,18 +326,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_module_indexer"
-version = "0.1.0"
-dependencies = [
- "acropolis_common",
- "anyhow",
- "caryatid_sdk",
- "config",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "acropolis_module_mithril_snapshot_fetcher"
 version = "0.1.0"
 dependencies = [
@@ -400,7 +409,8 @@ dependencies = [
  "config",
  "flate2",
  "futures-util",
- "hex",
+ "minicbor 0.25.1",
+ "pallas-traverse 0.33.0",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
@@ -488,6 +498,9 @@ dependencies = [
  "futures",
  "hex",
  "pallas 0.33.0",
+ "serde",
+ "serde_json",
+ "test-case",
  "tracing",
 ]
 
@@ -512,16 +525,22 @@ dependencies = [
 name = "acropolis_process_indexer"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "acropolis_module_block_unpacker",
+ "acropolis_module_custom_indexer",
  "acropolis_module_genesis_bootstrapper",
- "acropolis_module_indexer",
  "acropolis_module_peer_network_interface",
  "anyhow",
+ "bincode 1.3.3",
  "caryatid_process",
+ "caryatid_sdk",
  "clap 4.5.51",
  "config",
+ "fjall",
+ "pallas 0.33.0",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
@@ -1211,6 +1230,15 @@ checksum = "5845e3504cf59b9588fff324710f27ee519515b8a8a9f1207042da9a9e64f819"
 dependencies = [
  "doc-comment",
  "paste",
+]
+
+[[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2398,6 +2426,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_logger"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+dependencies = [
+ "humantime",
+ "is-terminal",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3020,6 +3061,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "humantime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
+
+[[package]]
 name = "hyper"
 version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3381,6 +3428,17 @@ checksum = "4f867b9d1d896b67beb18518eda36fdb77a32ea590de864f1325b294a6d14397"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi 0.5.2",
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3760,7 +3818,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bech32 0.11.0",
- "bincode",
+ "bincode 2.0.1",
  "blake2 0.10.6",
  "chrono",
  "ciborium",
@@ -6261,6 +6319,48 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "termcolor"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
+name = "test-case"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2550dd13afcd286853192af8601920d959b14c401fcece38071d53bf0768a8"
+dependencies = [
+ "test-case-macros",
+]
+
+[[package]]
+name = "test-case-core"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adcb7fd841cd518e279be3d5a3eb0636409487998a4aff22f3de87b81e88384f"
+dependencies = [
+ "cfg-if",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.109",
+]
+
+[[package]]
+name = "test-case-macros"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c89e72a01ed4c579669add59014b9a524d609c0c88c6a585ce37485879f6ffb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.109",
+ "test-case-core",
 ]
 
 [[package]]

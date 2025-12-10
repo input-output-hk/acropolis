@@ -5,9 +5,7 @@ use std::sync::Arc;
 use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{
-        EpochActivityMessage, ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage,
-    },
+    messages::{ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage},
     protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::VrfValidationError,
@@ -57,13 +55,13 @@ impl State {
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
         if let Some(shelley_params) = msg.params.shelley.as_ref() {
             self.decentralisation_param =
-                Some(shelley_params.protocol_params.decentralisation_param);
-            self.active_slots_coeff = Some(shelley_params.active_slots_coeff);
+                Some(shelley_params.protocol_params.decentralisation_param.clone());
+            self.active_slots_coeff = Some(shelley_params.active_slots_coeff.clone());
         }
     }
 
-    pub fn handle_epoch_activity(&mut self, msg: &EpochActivityMessage) {
-        self.epoch_nonce = msg.nonce.clone();
+    pub fn handle_epoch_nonce(&mut self, active_nonce: &Option<Nonce>) {
+        self.epoch_nonce = active_nonce.clone();
     }
 
     pub fn handle_new_snapshot(
@@ -97,12 +95,12 @@ impl State {
             }
         };
 
-        let Some(decentralisation_param) = self.decentralisation_param else {
+        let Some(decentralisation_param) = self.decentralisation_param.clone() else {
             return Err(Box::new(VrfValidationError::Other(
                 "Decentralisation Param is not set".to_string(),
             )));
         };
-        let Some(active_slots_coeff) = self.active_slots_coeff else {
+        let Some(active_slots_coeff) = self.active_slots_coeff.clone() else {
             return Err(Box::new(VrfValidationError::Other(
                 "Active Slots Coeff is not set".to_string(),
             )));

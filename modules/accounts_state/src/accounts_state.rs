@@ -9,7 +9,6 @@ use acropolis_common::{
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
-use bigdecimal::Zero;
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -36,7 +35,7 @@ use acropolis_common::queries::accounts::{
 use acropolis_common::queries::errors::QueryError;
 use verifier::Verifier;
 
-use crate::spo_distribution_store::SPDDStore;
+use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
 mod spo_distribution_store;
 
 // Subscriptions
@@ -56,6 +55,7 @@ const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
+const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
 
 /// Accounts State module
 #[module(
@@ -163,6 +163,23 @@ impl AccountsState {
                     None => None,
                 };
 
+                // Publish SPDD message before anything else and store spdd history if enabled
+                if let Some(block_info) = current_block.as_ref() {
+                    let spdd = state.generate_spdd();
+                    if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
+                        error!("Error publishing SPO stake distribution: {e:#}")
+                    }
+
+                    // if we store spdd history
+                    let spdd_state = state.dump_spdd_state();
+                    if let Some(mut spdd_store) = spdd_store_guard {
+                        // active stakes taken at beginning of epoch i is for epoch + 1
+                        if let Err(e) = spdd_store.store_spdd(block_info.epoch + 1, spdd_state) {
+                            error!("Error storing SPDD state: {e:#}")
+                        }
+                    }
+                }
+
                 // Handle DRep (if configured)
                 if let Some(ref mut subscription) = drep_state_subscription {
                     let (_, message) = subscription.read_ignoring_rollbacks().await?;
@@ -202,22 +219,6 @@ impl AccountsState {
                                 .handle_spo_state(spo_msg)
                                 .inspect_err(|e| error!("SPOState handling error: {e:#}"))
                                 .ok();
-
-                            let spdd = state.generate_spdd();
-                            if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
-                                error!("Error publishing SPO stake distribution: {e:#}")
-                            }
-
-                            // if we store spdd history
-                            let spdd_state = state.dump_spdd_state();
-                            if let Some(mut spdd_store) = spdd_store_guard {
-                                // active stakes taken at beginning of epoch i is for epoch + 1
-                                if let Err(e) =
-                                    spdd_store.store_spdd(block_info.epoch + 1, spdd_state)
-                                {
-                                    error!("Error storing SPDD state: {e:#}")
-                                }
-                            }
                         }
                         .instrument(span)
                         .await;
@@ -442,24 +443,18 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
 
+        // SPDD configs
         let spdd_db_path =
             config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
-
-        // Convert to absolute path if relative
-        let spdd_db_path = if std::path::Path::new(&spdd_db_path).is_absolute() {
-            spdd_db_path
-        } else {
-            let current_dir = std::env::current_dir()
-                .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
-            current_dir.join(&spdd_db_path).to_string_lossy().to_string()
-        };
-
-        // Get SPDD retention epochs configuration
+        info!("SPDD database path: {spdd_db_path}");
         let spdd_retention_epochs = config
             .get_int(DEFAULT_SPDD_RETENTION_EPOCHS.0)
             .unwrap_or(DEFAULT_SPDD_RETENTION_EPOCHS.1 as i64)
             .max(0) as u64;
         info!("SPDD retention epochs: {:?}", spdd_retention_epochs);
+        let spdd_clear_on_start =
+            config.get_bool(DEFAULT_SPDD_CLEAR_ON_START.0).unwrap_or(DEFAULT_SPDD_CLEAR_ON_START.1);
+        info!("SPDD clear on start: {spdd_clear_on_start}");
 
         // Query topics
         let accounts_query_topic = config
@@ -489,11 +484,13 @@ impl AccountsState {
         let history_tick = history.clone();
 
         // Spdd store
-        let spdd_store = if !spdd_retention_epochs.is_zero() {
-            Some(Arc::new(Mutex::new(SPDDStore::load(
-                std::path::Path::new(&spdd_db_path),
-                spdd_retention_epochs,
-            )?)))
+        let spdd_store_config = SPDDStoreConfig {
+            path: spdd_db_path,
+            retention_epochs: spdd_retention_epochs,
+            clear_on_start: spdd_clear_on_start,
+        };
+        let spdd_store = if spdd_store_config.is_enabled() {
+            Some(Arc::new(Mutex::new(SPDDStore::new(&spdd_store_config)?)))
         } else {
             None
         };

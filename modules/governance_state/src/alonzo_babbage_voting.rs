@@ -121,7 +121,7 @@ mod tests {
     use crate::alonzo_babbage_voting::AlonzoBabbageVoting;
     use acropolis_common::{
         rational_number::rational_number_from_f32, AlonzoBabbageUpdateProposal,
-        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockStatus, GenesisKeyhash,
+        AlonzoBabbageVotingOutcome, BlockHash, BlockInfo, BlockIntent, BlockStatus, GenesisKeyhash,
         ProtocolParamUpdate,
     };
     use anyhow::Result;
@@ -157,6 +157,7 @@ mod tests {
             let mut proposal = Vec::new();
             let blk = BlockInfo {
                 status: BlockStatus::Immutable,
+                intent: BlockIntent::Apply,
                 slot,
                 number: slot,
                 epoch,
@@ -164,6 +165,7 @@ mod tests {
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
+                tip_slot: None,
                 hash: BlockHash::default(),
             };
 
@@ -282,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_decentralisation_updates() -> Result<()> {
-        let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant)?;
+        let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant.clone())?;
 
         assert_eq!(DECENTRALISATION.len(), dcu.len());
         for (decent, param) in DECENTRALISATION.iter().zip(dcu) {

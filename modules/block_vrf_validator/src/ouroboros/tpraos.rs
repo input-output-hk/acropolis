@@ -97,6 +97,7 @@ pub fn validate_vrf_tpraos<'a>(
                 }),
                 Box::new(move || {
                     validate_vrf_leader_value(
+                        &pool_id,
                         &leader_vrf_cert.0.to_vec()[..],
                         &relative_stake,
                         &active_slots_coeff,
@@ -183,7 +184,7 @@ mod tests {
         protocol_params::NonceHash,
         serialization::Bech32Conversion,
         validation::{VrfLeaderValueTooBigError, WrongLeaderVrfKeyError},
-        BlockHash, BlockStatus, Era,
+        BlockHash, BlockIntent, BlockStatus, Era,
     };
 
     use super::*;
@@ -200,12 +201,13 @@ mod tests {
             .unwrap(),
         );
         let active_slots_coeff = RationalNumber::new(1, 20);
-        let decentralisation_param = RationalNumber::from(1);
+        let decentralisation_param = RationalNumber::ONE;
 
         let block_header_4490511: Vec<u8> =
             hex::decode(include_str!("./data/4490511.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Validate,
             slot: 4492800,
             hash: BlockHash::try_from(
                 hex::decode("aa83acbf5904c0edfe4d79b3689d3d00fcfc553cf360fd2229b98d464c28e9de")
@@ -217,6 +219,7 @@ mod tests {
             epoch: 208,
             epoch_slot: 0,
             new_epoch: true,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -258,6 +261,7 @@ mod tests {
             hex::decode(include_str!("./data/4556956.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 5824849,
             hash: BlockHash::try_from(
                 hex::decode("1038b2c76a23ea7d89cbd84d7744c97560eb3412661beed6959d748e24ff8229")
@@ -269,6 +273,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 36049,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -316,6 +321,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -327,6 +333,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -374,6 +381,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -385,6 +393,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -433,6 +442,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -444,6 +454,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -501,6 +512,7 @@ mod tests {
             hex::decode(include_str!("./data/4576496.cbor")).unwrap();
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
             slot: 6220749,
             hash: BlockHash::try_from(
                 hex::decode("d78e446b6540612e161ebdda32ee1715ef0f9fc68e890c7e3aae167b0354f998")
@@ -512,6 +524,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            tip_slot: None,
             era: Era::Shelley,
         };
         let block_header =
@@ -543,7 +556,11 @@ mod tests {
         assert_eq!(
             result.unwrap_err(),
             Box::new(VrfValidationError::VrfLeaderValueTooBig(
-                VrfLeaderValueTooBigError::VrfLeaderValueTooBig
+                VrfLeaderValueTooBigError::VrfLeaderValueTooBig {
+                    pool_id,
+                    active_stake: 75284250207,
+                    relative_stake: RationalNumber::new(75284250207, 10177811974823000),
+                }
             ))
         );
     }

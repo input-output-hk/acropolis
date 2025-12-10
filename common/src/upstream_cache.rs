@@ -167,13 +167,14 @@ impl Storage for FileStorage {
 #[cfg(test)]
 mod test {
     use crate::upstream_cache::{Storage, UpstreamCacheImpl, UpstreamCacheRecord};
-    use crate::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockStatus, Era};
+    use crate::{messages::RawBlockMessage, BlockHash, BlockInfo, BlockIntent, BlockStatus, Era};
     use anyhow::Result;
     use std::{collections::HashMap, sync::Arc};
 
     fn blk(n: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Volatile,
+            intent: BlockIntent::Apply,
             slot: n,
             number: n,
             hash: BlockHash::default(),
@@ -182,6 +183,7 @@ mod test {
             new_epoch: false,
             timestamp: n,
             era: Era::default(),
+            tip_slot: None,
         }
     }
 

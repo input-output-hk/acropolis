@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use config::Config;
 use fjall::{Batch, Keyspace, Partition};
 
-use crate::stores::{Block, ExtraBlockData, Tx};
+use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
     keyspace: Keyspace,
@@ -74,7 +74,7 @@ impl super::Store for FjallStore {
         let mut batch = self.keyspace.batch();
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
-            let block_ref = BlockReference {
+            let block_ref = TxBlockReference {
                 block_hash: info.hash.to_vec(),
                 index,
             };
@@ -125,6 +125,10 @@ impl super::Store for FjallStore {
             block,
             index: block_ref.index as u64,
         }))
+    }
+
+    fn get_tx_block_ref_by_hash(&self, hash: &[u8]) -> Result<Option<TxBlockReference>> {
+        self.txs.get_by_hash(hash)
     }
 }
 
@@ -264,25 +268,17 @@ impl FjallTXStore {
         Ok(Self { txs })
     }
 
-    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: BlockReference) {
+    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: TxBlockReference) {
         let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 
-    fn get_by_hash(&self, hash: &[u8]) -> Result<Option<BlockReference>> {
+    fn get_by_hash(&self, hash: &[u8]) -> Result<Option<TxBlockReference>> {
         let Some(block_ref) = self.txs.get(hash)? else {
             return Ok(None);
         };
         Ok(minicbor::decode(&block_ref)?)
     }
-}
-
-#[derive(minicbor::Decode, minicbor::Encode)]
-struct BlockReference {
-    #[n(0)]
-    block_hash: Vec<u8>,
-    #[n(1)]
-    index: usize,
 }
 
 #[cfg(test)]
@@ -316,6 +312,7 @@ mod tests {
         let timestamp = block.wallclock(&genesis);
         BlockInfo {
             status: acropolis_common::BlockStatus::Immutable,
+            intent: acropolis_common::BlockIntent::Apply,
             slot: block.slot(),
             number: block.number(),
             hash: BlockHash::from(*block.hash()),
@@ -323,6 +320,7 @@ mod tests {
             epoch_slot,
             new_epoch: false,
             timestamp,
+            tip_slot: None,
             era: acropolis_common::Era::Conway,
         }
     }

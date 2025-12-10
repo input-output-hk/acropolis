@@ -21,6 +21,17 @@ pub struct ProtocolParams {
     pub conway: Option<ConwayParams>,
 }
 
+impl ProtocolParams {
+    /// Calculate Transaction's Mininum required fee for shelley Era
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Tx.hs#L254
+    pub fn shelley_min_fee(&self, tx_bytes: u32) -> Result<u64> {
+        self.shelley
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Shelley params are not set"))
+            .map(|shelley_params| shelley_params.min_fee(tx_bytes))
+    }
+}
+
 //
 // Byron protocol parameters
 //
@@ -134,6 +145,13 @@ pub struct ShelleyParams {
     pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
 }
 
+impl ShelleyParams {
+    pub fn min_fee(&self, tx_bytes: u32) -> u64 {
+        (tx_bytes as u64 * self.protocol_params.minfee_a as u64)
+            + (self.protocol_params.minfee_b as u64)
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,7 +195,7 @@ impl PraosParams {
 
 impl From<&ShelleyParams> for PraosParams {
     fn from(params: &ShelleyParams) -> Self {
-        let active_slots_coeff = params.active_slots_coeff;
+        let active_slots_coeff = &params.active_slots_coeff;
         let security_param = params.security_param;
         let stability_window =
             (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 3;
@@ -186,7 +204,7 @@ impl From<&ShelleyParams> for PraosParams {
 
         Self {
             security_param,
-            active_slots_coeff,
+            active_slots_coeff: active_slots_coeff.clone(),
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
