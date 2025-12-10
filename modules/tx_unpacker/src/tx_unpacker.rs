@@ -13,10 +13,9 @@ use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
-use pallas::codec::minicbor::encode;
-use pallas::ledger::primitives::KeyValuePairs;
-use pallas::ledger::{primitives, traverse, traverse::MultiEraTx};
-use std::{clone::Clone, fmt::Debug, sync::Arc};
+use pallas::codec::minicbor;
+use pallas::ledger::{traverse, traverse::MultiEraTx};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span};
 mod state;
@@ -238,7 +237,7 @@ impl TxUnpacker {
 
                                         if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL) {
                                             let mut metadata_raw = Vec::new();
-                                            match encode(metadata, &mut metadata_raw) {
+                                            match minicbor::encode(metadata, &mut metadata_raw) {
                                                 Ok(()) => {
                                                     cip25_metadata_updates.push(metadata_raw);
                                                 }
@@ -288,12 +287,10 @@ impl TxUnpacker {
                                             if let Ok(alonzo) = MultiEraTx::decode_for_era(traverse::Era::Alonzo, raw_tx) {
                                                 if let Some(update) = alonzo.update() {
                                                     if let Some(alonzo_update) = update.as_alonzo() {
-                                                        Self::decode_updates(
-                                                            &mut alonzo_babbage_update_proposals,
-                                                            &alonzo_update.proposed_protocol_parameter_updates,
-                                                            alonzo_update.epoch,
-                                                            acropolis_codec::map_alonzo_protocol_param_update
-                                                        );
+                                                        match acropolis_codec::map_alonzo_update(alonzo_update) {
+                                                            Ok(proposals) => alonzo_babbage_update_proposals.push(proposals),
+                                                            Err(e) => error!("Cannot decode alonzo update: {e}"),
+                                                        }
                                                     }
                                                 }
                                             }
@@ -302,12 +299,10 @@ impl TxUnpacker {
                                             if let Ok(babbage) = MultiEraTx::decode_for_era(traverse::Era::Babbage, raw_tx) {
                                                 if let Some(update) = babbage.update() {
                                                     if let Some(babbage_update) = update.as_babbage() {
-                                                        Self::decode_updates(
-                                                            &mut alonzo_babbage_update_proposals,
-                                                            &babbage_update.proposed_protocol_parameter_updates,
-                                                            babbage_update.epoch,
-                                                            acropolis_codec::map_babbage_protocol_param_update
-                                                        );
+                                                        match acropolis_codec::map_babbage_update(babbage_update) {
+                                                            Ok(proposals) => alonzo_babbage_update_proposals.push(proposals),
+                                                            Err(e) => error!("Cannot decode babbage update: {e}"),
+                                                        }
                                                     }
                                                 }
                                             }
@@ -469,35 +464,6 @@ impl TxUnpacker {
                 history.lock().await.commit(block_info.number, state);
             }
         }
-    }
-
-    fn decode_updates<EraSpecificUpdateProposals: Clone + Debug>(
-        dest: &mut Vec<AlonzoBabbageUpdateProposal>,
-        proposals: &KeyValuePairs<primitives::Bytes, EraSpecificUpdateProposals>,
-        epoch: u64,
-        map: impl Fn(&EraSpecificUpdateProposals) -> Result<Box<ProtocolParamUpdate>>,
-    ) {
-        let mut update = AlonzoBabbageUpdateProposal {
-            proposals: Vec::new(),
-            enactment_epoch: epoch,
-        };
-
-        for (hash_bytes, vote) in proposals.iter() {
-            let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
-                Ok(h) => h,
-                Err(e) => {
-                    error!("Invalid genesis keyhash in protocol parameter update: {e}");
-                    continue;
-                }
-            };
-
-            match map(vote) {
-                Ok(upd) => update.proposals.push((hash, upd)),
-                Err(e) => error!("Cannot convert protocol param update {vote:?}: {e}"),
-            }
-        }
-
-        dest.push(update);
     }
 
     /// Main init function
