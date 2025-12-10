@@ -54,8 +54,10 @@ const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+/// Topic signaling that the snapshot bootstrap is complete
 const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: (&str, &str) =
     ("snapshot-completion-topic", "cardano.snapshot.complete");
 

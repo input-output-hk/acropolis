@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub use crate::hash::Hash;
 use crate::snapshot::streaming_snapshot::SnapshotContext;
 use crate::{
-    NetworkId, PoolId, PoolRegistration, Pots, Snapshot, SnapshotsContainer, StakeCredential,
+    EpochSnapshot, NetworkId, PoolId, PoolRegistration, Pots, SnapshotsContainer, StakeCredential,
 };
 
 use crate::snapshot::streaming_snapshot::SnapshotPoolRegistration;
@@ -110,19 +110,19 @@ impl RawSnapshot {
         }
     }
 
-    /// Convert this raw snapshot to a processed Snapshot
+    /// Convert this raw snapshot to a processed EpochSnapshot
     pub fn into_snapshot(
         self,
         epoch: u64,
         block_counts: &HashMap<PoolId, usize>,
         pots: Pots,
         network: NetworkId,
-    ) -> Snapshot {
+    ) -> EpochSnapshot {
         let stake_map: HashMap<_, _> = self.snapshot_stake.0.into_iter().collect();
         let delegation_map: HashMap<_, _> = self.snapshot_delegations.0.into_iter().collect();
         let pool_params_map: HashMap<_, _> = self.snapshot_pool_params.0.into_iter().collect();
 
-        Snapshot::from_raw(
+        EpochSnapshot::from_raw(
             epoch,
             stake_map,
             delegation_map,

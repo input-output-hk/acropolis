@@ -1,8 +1,8 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
-    SPORewards, Snapshot, SnapshotSPO, StakeAddress,
+    protocol_params::ShelleyParams, rational_number::RationalNumber, EpochSnapshot, Lovelace,
+    PoolId, RewardType, SPORewards, SnapshotSPO, StakeAddress,
 };
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
@@ -51,8 +51,8 @@ pub struct RewardsResult {
 /// Note immutable - only state change allowed is to push a new snapshot
 pub fn calculate_rewards(
     epoch: u64,
-    performance: Arc<Snapshot>,
-    staking: Arc<Snapshot>,
+    performance: Arc<EpochSnapshot>,
+    staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
     registrations: &HashSet<StakeAddress>,
@@ -237,7 +237,7 @@ fn calculate_spo_rewards(
     relative_pool_saturation_size: &BigDecimal,
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
-    staking: Arc<Snapshot>,
+    staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {

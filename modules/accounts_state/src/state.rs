@@ -3,7 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::Snapshot;
+use acropolis_common::EpochSnapshot;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -39,18 +39,18 @@ const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
-    pub mark: Arc<Snapshot>,
+    pub mark: Arc<EpochSnapshot>,
 
     /// Previous snapshot (epoch i-1)
-    pub set: Arc<Snapshot>,
+    pub set: Arc<EpochSnapshot>,
 
     /// One before that (epoch i-2)
-    pub go: Arc<Snapshot>,
+    pub go: Arc<EpochSnapshot>,
 }
 
 impl EpochSnapshots {
     /// Push a new snapshot
-    pub fn push(&mut self, latest: Snapshot) {
+    pub fn push(&mut self, latest: EpochSnapshot) {
         self.go = self.set.clone();
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
@@ -350,7 +350,7 @@ impl State {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Capture a new snapshot for the end of the previous epoch and push it to state
-        let snapshot = Snapshot::new(
+        let snapshot = EpochSnapshot::new(
             epoch - 1,
             &self.stake_addresses.lock().unwrap(),
             &self.spos,

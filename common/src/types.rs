@@ -2510,10 +2510,12 @@ fn default_false() -> bool {
     false
 }
 
-/// Snapshot of stake distribution taken at the end of a particular epoch.
-/// Used for rewards calculations following the mark/set/go pattern.
+/// Captures the state of an epoch at a moment in time (typically at epoch end):
+/// stake distribution, blocks produced, pots, and registration changes.
+/// Used for rewards calculations. The mark/set/go pattern refers to the timing
+/// of when these snapshots are taken, not what they contain.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Snapshot {
+pub struct EpochSnapshot {
     /// Epoch this snapshot is for (the one that has just ended)
     pub epoch: u64,
 
@@ -2531,7 +2533,7 @@ pub struct Snapshot {
     pub registration_changes: Vec<RegistrationChange>,
 }
 
-impl Snapshot {
+impl EpochSnapshot {
     /// Create a new snapshot from current stake address state (used at epoch boundary)
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -2542,16 +2544,16 @@ impl Snapshot {
         pots: &Pots,
         blocks: usize,
         registration_changes: Vec<RegistrationChange>,
-        two_previous_snapshot: std::sync::Arc<Snapshot>,
+        two_previous_snapshot: std::sync::Arc<EpochSnapshot>,
     ) -> Self {
         use tracing::{debug, info};
 
-        let mut snapshot = Snapshot {
+        let mut snapshot = EpochSnapshot {
             epoch,
             pots: pots.clone(),
             blocks,
             registration_changes,
-            ..Snapshot::default()
+            ..EpochSnapshot::default()
         };
 
         // Add all SPOs - some may only have stake, some may only produce blocks (their
@@ -2693,7 +2695,7 @@ impl Snapshot {
             );
         }
 
-        Snapshot {
+        EpochSnapshot {
             epoch,
             spos,
             blocks: 0,
@@ -2731,13 +2733,13 @@ impl Snapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
     /// Mark snapshot (epoch - 2)
-    pub mark: Snapshot,
+    pub mark: EpochSnapshot,
 
     /// Set snapshot (epoch - 1)
-    pub set: Snapshot,
+    pub set: EpochSnapshot,
 
     /// Go snapshot (current epoch)
-    pub go: Snapshot,
+    pub go: EpochSnapshot,
 }
 
 #[cfg(test)]
