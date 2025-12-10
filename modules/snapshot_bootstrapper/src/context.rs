@@ -78,8 +78,9 @@ impl BootstrapContext {
             hash: *hash,
             epoch: target_epoch,
             epoch_slot,
-            new_epoch: true,
+            new_epoch: false,
             timestamp: genesis.slot_to_timestamp(slot),
+            tip_slot: None,
             era: Era::Conway, // TODO: Make dynamic with era history
         };
 

@@ -70,6 +70,7 @@ pub fn new_block(epoch: u64) -> BlockInfo {
         epoch_slot: 0,
         new_epoch: true,
         timestamp: epoch,
+        tip_slot: None,
         era: Era::Byron,
     }
 }

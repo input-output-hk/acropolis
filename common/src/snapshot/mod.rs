@@ -10,9 +10,11 @@
 //! - Error types (`error.rs`)
 
 // Submodules
+mod decode;
 mod error;
 pub mod mark_set_go;
 mod parser;
+pub mod protocol_parameters;
 pub mod streaming_snapshot;
 
 // Re-export error types

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
@@ -106,6 +106,7 @@ pub struct ChainState {
     published_blocks: VecDeque<SpecificPoint>,
     unpublished_blocks: VecDeque<SpecificPoint>,
     rolled_back_to: Option<Header>,
+    tips: HashMap<PeerId, Point>,
     waiting_for_first_message: bool,
 }
 
@@ -218,6 +219,21 @@ impl ChainState {
         self.switch_head_to_peer(id);
     }
 
+    pub fn handle_tip(&mut self, id: PeerId, tip: Point) {
+        self.tips.insert(id, tip);
+    }
+
+    pub fn preferred_upstream_tip(&self) -> Option<&Point> {
+        self.tips.get(&self.preferred_upstream?)
+    }
+
+    pub fn handle_disconnect(&mut self, id: PeerId) {
+        self.tips.remove(&id);
+        if self.preferred_upstream == Some(id) {
+            self.preferred_upstream = None;
+        }
+    }
+
     fn switch_head_to_peer(&mut self, id: PeerId) {
         self.waiting_for_first_message = false;
 
@@ -275,10 +291,6 @@ impl ChainState {
                 self.unpublished_blocks.push_back(SpecificPoint { slot: *slot, hash });
             }
         }
-    }
-
-    pub fn clear_preferred_upstream(&mut self) {
-        self.preferred_upstream = None;
     }
 
     pub fn next_unpublished_event(&self) -> Option<ChainEvent<'_>> {
@@ -862,6 +874,66 @@ mod tests {
         assert_eq!(state.next_unpublished_event(), None);
 
         // They roll forward to the next point
+        assert_eq!(state.handle_roll_forward(p2, h3.clone()), vec![p2]);
+        state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h3,
+                body: b3.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+    }
+
+    #[test]
+    fn should_not_drop_messages_when_switching_to_new_chain() {
+        let mut state = ChainState::new();
+        let p1 = PeerId(0);
+        state.handle_new_preferred_upstream(p1);
+
+        // Our initial preferred upstream is broken somehow.
+        // We're not getting any messages from it, but it's not disconnecting.
+        let (h1, b1) = make_block(10, "first block");
+        let (h2, b2) = make_block(11, "second block");
+        let (h3, b3) = make_block(12, "third block");
+
+        // Meanwhile, another upstream is sending us blocks.
+        let p2 = PeerId(1);
+
+        assert_eq!(state.handle_roll_forward(p2, h1.clone()), vec![p2]);
+        state.handle_body_fetched(h1.slot, h1.hash, b1.clone());
+        assert_eq!(state.next_unpublished_event(), None);
+
+        assert_eq!(state.handle_roll_forward(p2, h2.clone()), vec![p2]);
+        state.handle_body_fetched(h2.slot, h2.hash, b2.clone());
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // The initial preferred upstream finally gives up completely.
+        // We switch over to one we know is wokring.
+        state.handle_new_preferred_upstream(p2);
+
+        // Immediately, we publish both blocks which it sent.
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h1,
+                body: b1.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(
+            state.next_unpublished_event(),
+            Some(ChainEvent::RollForward {
+                header: &h2,
+                body: b2.as_slice(),
+            }),
+        );
+        state.handle_event_published();
+        assert_eq!(state.next_unpublished_event(), None);
+
+        // And when it sends another, we publish that as well.
         assert_eq!(state.handle_roll_forward(p2, h3.clone()), vec![p2]);
         state.handle_body_fetched(h3.slot, h3.hash, b3.clone());
         assert_eq!(
