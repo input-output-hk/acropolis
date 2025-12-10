@@ -157,7 +157,10 @@ impl AccountsState {
                     "Unexpected message on completion topic: {:?}",
                     std::any::type_name_of_val(other)
                 );
-                Ok(None)
+                Err(anyhow::anyhow!(format!(
+                    "Unexpected message on completion topic: {:?}",
+                    other
+                )))
             }
         }
     }

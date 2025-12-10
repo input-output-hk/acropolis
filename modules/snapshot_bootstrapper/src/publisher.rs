@@ -224,6 +224,27 @@ impl AccountsCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
+        // IMPORTANT: We use block_in_place + block_on to ensure each publish completes
+        // before the callback returns. This guarantees message ordering.
+        //
+        // The StreamingSnapshotParser::parse() call is synchronous - callbacks like
+        // on_accounts() and on_epoch() are invoked during parsing. If we spawned async
+        // tasks here (fire-and-forget), they would race against publish_completion()
+        // which runs immediately after parse() returns:
+        //
+        //   parse() starts
+        //   on_accounts() spawns publish task, returns immediately
+        //   on_epoch() spawns publish task, returns immediately
+        //   parse() returns
+        //   publish_completion().await  <-- could complete before spawned tasks!
+        //
+        // Since state modules (accounts_state, epochs_state, spo_state, etc.) subscribe
+        // to both cardano.snapshot and cardano.snapshot.complete, they could receive
+        // the completion signal before bootstrap data arrives, causing initialization
+        // failures.
+        //
+        // By blocking here, we ensure all bootstrap messages are published before
+        // parse() returns, and thus before publish_completion() is called.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 context.publish(&snapshot_topic, msg).await.unwrap_or_else(|e| {
@@ -295,6 +316,7 @@ impl EpochCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
+        // See comment in AccountsCallback::on_accounts for why we block here.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
