@@ -77,7 +77,7 @@ impl TxUnpacker {
                     }
                     current_block = Some(block_info.clone());
 
-                    // new_epoch?
+                    // new_epoch? first_epoch?
                     block_info.new_epoch
                 }
 
@@ -106,20 +106,10 @@ impl TxUnpacker {
                     let total_txs = txs_msg.txs.len() as u64;
                     let block_number = block.number as u32;
 
-                    let mut tx_errors = Vec::new();
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
                     span.in_scope(|| {
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
-
-                            // Validate transaction
-                            if tx_validation_publisher.is_some() {
-                                if let Err(e) =
-                                    state.validate_transaction(block, raw_tx)
-                                {
-                                    tx_errors.push((tx_index, e));
-                                }
-                            }
 
                             // Parse the tx
                             match MultiEraTx::decode(raw_tx) {
@@ -322,13 +312,6 @@ impl TxUnpacker {
                         }
                     });
 
-                    if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
-                        tx_validation_publisher
-                            .publish_tx_validation(block, tx_errors)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
-                    }
-
                     // Publish messages in parallel
                     let mut futures = Vec::new();
                     if let Some(ref topic) = publish_utxo_deltas_topic {
@@ -457,6 +440,26 @@ impl TxUnpacker {
                     span.in_scope(|| {
                         state.handle_protocol_params(params);
                     });
+                }
+            }
+
+            if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
+                if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                    message.as_ref()
+                {
+                    let mut tx_errors = Vec::new();
+                    for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+                        let tx_index = tx_index as u16;
+
+                        // Validate transaction
+                        if let Err(e) = state.validate_transaction(block, raw_tx) {
+                            tx_errors.push((tx_index, e));
+                        }
+                    }
+                    tx_validation_publisher
+                        .publish_tx_validation(block, tx_errors)
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                 }
             }
 
