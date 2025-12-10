@@ -14,6 +14,7 @@ pub trait Store: Send + Sync {
     fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>>;
     fn get_latest_block(&self) -> Result<Option<Block>>;
     fn get_tx_by_hash(&self, hash: &[u8]) -> Result<Option<Tx>>;
+    fn get_tx_block_ref_by_hash(&self, hash: &[u8]) -> Result<Option<TxBlockReference>>;
 }
 
 #[derive(Debug, PartialEq, Eq, minicbor::Decode, minicbor::Encode)]
@@ -32,6 +33,14 @@ pub struct ExtraBlockData {
     pub epoch_slot: u64,
     #[n(2)]
     pub timestamp: u64,
+}
+
+#[derive(minicbor::Decode, minicbor::Encode)]
+pub struct TxBlockReference {
+    #[n(0)]
+    pub block_hash: Vec<u8>,
+    #[n(1)]
+    pub index: usize,
 }
 
 pub struct Tx {

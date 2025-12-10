@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     protocol_params::ShelleyParams, validation::UTxOValidationError, Address, Era, Lovelace,
-    NetworkId, TxIdentifier, TxOutRef,
+    NetworkId, TxIdentifier, UTxOIdentifier,
 };
 use anyhow::Result;
 use pallas::{
@@ -50,7 +50,7 @@ pub fn validate_shelley_tx<F>(
     lookup_by_hash: F,
 ) -> UTxOValidationResult
 where
-    F: Fn(TxOutRef) -> Result<TxIdentifier>,
+    F: Fn(UTxOIdentifier) -> Result<TxIdentifier>,
 {
     let network_id = shelley_params.network_id.clone();
     let tx_size = tx.size() as u32;
@@ -139,10 +139,10 @@ pub fn validate_bad_inputs_utxo<F>(
     lookup_by_hash: F,
 ) -> UTxOValidationResult
 where
-    F: Fn(TxOutRef) -> Result<TxIdentifier>,
+    F: Fn(UTxOIdentifier) -> Result<TxIdentifier>,
 {
     for (index, input) in transaction_body.inputs.iter().enumerate() {
-        let tx_ref = TxOutRef::new((*input.transaction_id).into(), input.index as u16);
+        let tx_ref = UTxOIdentifier::new((*input.transaction_id).into(), input.index as u16);
         if lookup_by_hash(tx_ref).is_err() {
             return Err(Box::new(UTxOValidationError::BadInputsUTxO {
                 bad_input: tx_ref,
@@ -313,7 +313,7 @@ mod tests {
     )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "bad_inputs_utxo") =>
         matches Err(UTxOValidationError::BadInputsUTxO { bad_input, bad_input_index })
-        if bad_input == TxOutRef::new(TxHash::from_str("d93625fb30376a1eaf90e6232296b0a31b7e63fac2af01381ffe58a574aae537").unwrap(), 1) && bad_input_index == 0;
+        if bad_input == UTxOIdentifier::new(TxHash::from_str("d93625fb30376a1eaf90e6232296b0a31b7e63fac2af01381ffe58a574aae537").unwrap(), 1) && bad_input_index == 0;
         "bad_inputs_utxo"
     )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "wrong_network") =>
@@ -345,7 +345,7 @@ mod tests {
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(traverse::Era::Shelley, &raw_tx).unwrap();
 
-        let lookup_by_hash = |tx_ref: TxOutRef| -> Result<TxIdentifier> {
+        let lookup_by_hash = |tx_ref: UTxOIdentifier| -> Result<TxIdentifier> {
             ctx.utxos.get(&tx_ref).copied().ok_or_else(|| {
                 anyhow::anyhow!(
                     "TxHash not found or already spent: {:?}",
