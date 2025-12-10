@@ -1,5 +1,6 @@
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
+use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::{AccountsCallback, RawSnapshotsContainer, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -9,8 +10,9 @@ use acropolis_common::{
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback,
-        SnapshotCallbacks, SnapshotMetadata, UtxoCallback, UtxoEntry,
+        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal,
+        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
+        SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
     BlockInfo, EpochBootstrapData,
 };
@@ -246,6 +248,23 @@ impl ProposalCallback for SnapshotPublisher {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
         info!("Received {} proposals", proposals.len());
         self.proposals.extend(proposals);
+        Ok(())
+    }
+}
+
+impl GovernanceProtocolParametersCallback for SnapshotPublisher {
+    fn on_gs_protocol_parameters(
+        &mut self,
+        _gs_previous_params: ProtocolParameters,
+        _gs_current_params: ProtocolParameters,
+        _gs_future_params: ProtocolParameters,
+    ) -> Result<()> {
+        info!("Received governance protocol parameters (current, previous, future)");
+        // TODO: Publish protocol parameters to appropriate message bus topics
+        // This could involve publishing messages for:
+        // - CurrentProtocolParameters → ParametersState processor
+        // - PreviousProtocolParameters → ParametersState processor
+        // - FutureProtocolParameters → ParametersState processor
         Ok(())
     }
 }

@@ -81,9 +81,9 @@ pub struct Snapshot {
     /// snapshot_stake: stake distribution map (credential -> lovelace amount)
     pub snapshot_stake: VMap<StakeCredential, i64>,
     // snapshot_delegations: vmap<credential, key_hash<stake_pool>>,)
-    pub snapshot_delegations: VMap<StakeCredential, Hash<28>>,
+    pub snapshot_delegations: VMap<StakeCredential, PoolId>,
     // snapshot_pool_params: vmap<key_hash<stake_pool>, pool_params>,
-    pub snapshot_pool_params: VMap<Hash<28>, PoolRegistration>,
+    pub snapshot_pool_params: VMap<PoolId, PoolRegistration>,
 }
 
 impl Snapshot {
@@ -118,7 +118,7 @@ impl Snapshot {
 
                         // Parse delegations (second element)
                         info!("        {snapshot_name} snapshot - parsing snapshot_delegations...");
-                        let delegations: VMap<StakeCredential, Hash<28>> =
+                        let delegations: VMap<StakeCredential, PoolId> =
                             decoder.decode().context("Failed to parse snapshot_delegations")?;
 
                         // Parse pool_params (third element) using SnapshotPoolRegistration
@@ -341,14 +341,14 @@ impl BootstrapSnapshots {
 fn parse_pool_params_map(
     decoder: &mut Decoder,
     ctx: &mut SnapshotContext,
-) -> Result<VMap<Hash<28>, PoolRegistration>, minicbor::decode::Error> {
+) -> Result<VMap<PoolId, PoolRegistration>, minicbor::decode::Error> {
     let map_len = decoder.map()?;
     let mut pairs = Vec::new();
 
     match map_len {
         Some(len) => {
             for _ in 0..len {
-                let key: Hash<28> = decoder.decode_with(ctx)?;
+                let key: PoolId = decoder.decode_with(ctx)?;
                 let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
                 pairs.push((key, value.0));
             }
@@ -356,13 +356,12 @@ fn parse_pool_params_map(
         None => {
             // Indefinite-length map
             while decoder.datatype()? != minicbor::data::Type::Break {
-                let key: Hash<28> = decoder.decode_with(ctx)?;
+                let key: PoolId = decoder.decode_with(ctx)?;
                 let value: SnapshotPoolRegistration = decoder.decode_with(ctx)?;
                 pairs.push((key, value.0));
             }
             decoder.skip()?; // Skip the break
         }
     }
-
     Ok(VMap(pairs))
 }
