@@ -45,6 +45,7 @@ pub use crate::{
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+use super::reward_snapshot::PulsingRewardUpdate;
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -180,7 +181,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// Set type (encoded as array, sometimes with CBOR tag 258)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotSet<T>(pub Vec<T>);
 
 impl<T> SnapshotSet<T> {
@@ -687,6 +688,12 @@ pub trait GovernanceProtocolParametersCallback {
     ) -> Result<()>;
 }
 
+/// Callback invoked with pulsing reward update data
+pub trait PulsingRewardUpdateCallback {
+    /// Called once with the pulsing reward update (if present in snapshot)
+    fn on_pulsing_reward_update(&mut self, update: Option<PulsingRewardUpdate>) -> Result<()>;
+}
+
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
     UtxoCallback
@@ -696,6 +703,7 @@ pub trait SnapshotCallbacks:
     + GovernanceProtocolParametersCallback
     + ProposalCallback
     + SnapshotsCallback
+    + PulsingRewardUpdateCallback
     + EpochCallback
 {
     /// Called before streaming begins with metadata
@@ -1211,9 +1219,42 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
+
+        // Skip EpochState[3] (NonMyopic)
+        remainder_decoder.skip().context("Failed to skip EpochState NonMyopic")?;
+
+        // Parse NewEpochState[4]: strict_maybe<pulsing_rew_update>
+        // strict_maybe is encoded as [] for Nothing or [value] for Just
+        let pulsing_rew_update = Self::parse_pulsing_rew_update(&mut remainder_decoder)
+            .context("Failed to parse pulsing_rew_update")?;
+
+        match &pulsing_rew_update {
+            Some(PulsingRewardUpdate::Pulsing { snapshot }) => {
+                info!(
+                    "    Parsed pulsing reward snapshot: fees={}, r={}, delta_r1={}, delta_t1={}",
+                    snapshot.fees, snapshot.r, snapshot.delta_r1, snapshot.delta_t1
+                );
+            }
+            Some(PulsingRewardUpdate::Complete { update }) => {
+                info!(
+                    "    Parsed complete reward update: delta_treasury={}, delta_reserves={}",
+                    update.delta_treasury, update.delta_reserves
+                );
+            }
+            None => {
+                info!("    No pulsing reward update present (strict_maybe is Nothing)");
+            }
+        }
+
+        // Invoke callback with the parsed pulsing reward update
+        callbacks.on_pulsing_reward_update(pulsing_rew_update)?;
+
+        // Skip NewEpochState[5] (pool_distr) and [6] (stashed_avvm_addresses)
+        remainder_decoder.skip().context("Failed to skip pool_distr")?;
+        remainder_decoder.skip().context("Failed to skip stashed_avvm_addresses")?;
 
         // Convert block production data to HashMap<PoolId, usize> for snapshot processing
         let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
@@ -1915,6 +1956,41 @@ impl StreamingSnapshotParser {
         }
     }
 
+    /// Parse strict_maybe<pulsing_rew_update> from NewEpochState[4]
+    ///
+    /// strict_maybe is encoded as:
+    /// - [] for Nothing
+    /// - [value] for Just(value)
+    fn parse_pulsing_rew_update(decoder: &mut Decoder) -> Result<Option<PulsingRewardUpdate>> {
+        let len =
+            decoder.array().context("Failed to parse strict_maybe array for pulsing_rew_update")?;
+
+        match len {
+            Some(0) => {
+                // Nothing - empty array
+                Ok(None)
+            }
+            Some(1) | None => {
+                // Just(value) - array with one element
+                let update: PulsingRewardUpdate =
+                    decoder.decode().context("Failed to decode pulsing_rew_update")?;
+
+                // Handle indefinite array break if needed
+                if len.is_none() {
+                    if decoder.datatype()? == Type::Break {
+                        decoder.skip()?;
+                    }
+                }
+
+                Ok(Some(update))
+            }
+            Some(n) => Err(anyhow!(
+                "Invalid strict_maybe array length for pulsing_rew_update: expected 0 or 1, got {}",
+                n
+            )),
+        }
+    }
+
     /// Parse snapshots using hybrid approach with memory-based parsing
     /// Uses snapshot.rs functions to parse mark/set/go snapshots from buffer
     /// We expect the following structure:
@@ -1994,6 +2070,7 @@ pub struct CollectingCallbacks {
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
+    pub pulsing_reward_update: Option<PulsingRewardUpdate>,
     pub gs_protocol_previous_parameters: Option<ProtocolParameters>,
     pub gs_protocol_current_parameters: Option<ProtocolParameters>,
     pub gs_protocol_future_parameters: Option<ProtocolParameters>,
@@ -2075,6 +2152,13 @@ impl SnapshotsCallback for CollectingCallbacks {
             snapshots.set.spos.len(),
             snapshots.go.spos.len()
         );
+        Ok(())
+    }
+}
+
+impl PulsingRewardUpdateCallback for CollectingCallbacks {
+    fn on_pulsing_reward_update(&mut self, update: Option<PulsingRewardUpdate>) -> Result<()> {
+        self.pulsing_reward_update = update;
         Ok(())
     }
 }

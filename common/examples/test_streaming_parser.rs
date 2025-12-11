@@ -5,12 +5,13 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::reward_snapshot::PulsingRewardUpdate;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
-    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
-    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    ProposalCallback, PulsingRewardUpdateCallback, SnapshotCallbacks, SnapshotMetadata,
+    SnapshotsCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
@@ -425,6 +426,42 @@ impl SnapshotsCallback for CountingCallbacks {
         eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
         eprintln!();
 
+        Ok(())
+    }
+}
+
+impl PulsingRewardUpdateCallback for CountingCallbacks {
+    fn on_pulsing_reward_update(&mut self, update: Option<PulsingRewardUpdate>) -> Result<()> {
+        eprintln!("Pulsing Reward Update:");
+        match &update {
+            Some(PulsingRewardUpdate::Pulsing { snapshot }) => {
+                eprintln!("  State: Pulsing (in progress)");
+                eprintln!("  Fees: {} lovelace", snapshot.fees);
+                eprintln!(
+                    "  Protocol Version: {}.{}",
+                    snapshot.protocol_version.major, snapshot.protocol_version.minor
+                );
+                eprintln!("  R (total rewards): {} lovelace", snapshot.r);
+                eprintln!("  Delta R1: {} lovelace", snapshot.delta_r1);
+                eprintln!("  Delta T1: {} lovelace", snapshot.delta_t1);
+                eprintln!(
+                    "  Pool likelihoods: {} entries",
+                    snapshot.likelihoods.0.len()
+                );
+                eprintln!("  Leader rewards: {} entries", snapshot.leaders.0.len());
+            }
+            Some(PulsingRewardUpdate::Complete { update }) => {
+                eprintln!("  State: Complete");
+                eprintln!("  Delta Treasury: {}", update.delta_treasury);
+                eprintln!("  Delta Reserves: {}", update.delta_reserves);
+                eprintln!("  Delta Fees: {}", update.delta_fees);
+                eprintln!("  Rewards: {} entries", update.rewards.0.len());
+            }
+            None => {
+                eprintln!("  State: None (no pulsing reward update)");
+            }
+        }
+        eprintln!();
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::reward_snapshot::PulsingRewardUpdate;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -12,8 +13,8 @@ use acropolis_common::{
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal,
-        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
-        SnapshotMetadata, UtxoCallback, UtxoEntry,
+        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback,
+        PulsingRewardUpdateCallback, SnapshotCallbacks, SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
     BlockInfo, EpochBootstrapData,
 };
@@ -325,6 +326,37 @@ impl EpochCallback for SnapshotPublisher {
             })
         });
 
+        Ok(())
+    }
+}
+
+impl PulsingRewardUpdateCallback for SnapshotPublisher {
+    fn on_pulsing_reward_update(&mut self, update: Option<PulsingRewardUpdate>) -> Result<()> {
+        match &update {
+            Some(PulsingRewardUpdate::Pulsing { snapshot }) => {
+                info!(
+                    "Received pulsing reward snapshot: fees={}, r={}, delta_r1={}, delta_t1={}, {} pool likelihoods, {} leader entries",
+                    snapshot.fees,
+                    snapshot.r,
+                    snapshot.delta_r1,
+                    snapshot.delta_t1,
+                    snapshot.likelihoods.0.len(),
+                    snapshot.leaders.0.len()
+                );
+            }
+            Some(PulsingRewardUpdate::Complete { update }) => {
+                info!(
+                    "Received complete reward update: delta_treasury={}, delta_reserves={}, {} reward entries",
+                    update.delta_treasury,
+                    update.delta_reserves,
+                    update.rewards.0.len()
+                );
+            }
+            None => {
+                info!("No pulsing reward update present in snapshot");
+            }
+        }
+        // TODO: Publish reward update to appropriate message bus topic if needed
         Ok(())
     }
 }
