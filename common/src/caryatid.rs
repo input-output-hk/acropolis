@@ -70,3 +70,20 @@ impl RollbackAwarePublisher<Message> {
         }
     }
 }
+
+#[macro_export]
+macro_rules! declare_cardano_reader {
+    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
+        async fn $name(s: &mut Box<dyn Subscription<Message>>) -> Result<(BlockInfo, $msg_type)> {
+            match s.read_ignoring_rollbacks().await?.1.as_ref() {
+                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
+                    Ok((blk.clone(), body.clone()))
+                }
+                msg => Err(anyhow!(
+                    "Unexpected message {msg:?} for {} topic",
+                    stringify!($msg_constructor)
+                )),
+            }
+        }
+    };
+}

@@ -1,5 +1,7 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::protocol_params::ConwayParams;
+use acropolis_common::validation::ValidationOutcomes;
+use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
     AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
@@ -91,31 +93,34 @@ impl ConwayVoting {
         &mut self,
         epoch: u64,
         proc: &ProposalProcedure,
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
+        let mut outcomes = ValidationOutcomes::new();
         self.action_proposal_count += 1;
         let prev = self.proposals.insert(proc.gov_action_id.clone(), (epoch, proc.clone()));
         if let Some(prev) = prev {
-            return Err(anyhow!(
+            outcomes.push_anyhow(anyhow!(
                 "Governance procedure {} already exists! New: {:?}, old: {:?}",
                 proc.gov_action_id,
                 (epoch, proc),
                 prev
             ));
+            return Ok(outcomes);
         }
 
         let prev = self.action_status.insert(
             proc.gov_action_id.clone(),
             ActionStatus::new(epoch, self.get_conway_params()?.gov_action_lifetime as u64),
         );
+
         if let Some(prev) = prev {
-            return Err(anyhow!(
+            outcomes.push_anyhow(anyhow!(
                 "Governance procedure {} action status already exists! Old: {:?}",
                 proc.gov_action_id,
                 prev
             ));
         }
 
-        Ok(())
+        Ok(outcomes)
     }
 
     /// Update votes memory cache
@@ -125,42 +130,52 @@ impl ConwayVoting {
         voter: &Voter,
         transaction: &TxHash,
         voter_votes: &SingleVoterVotes,
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
         self.votes_count += voter_votes.voting_procedures.len();
+        let mut outcomes = ValidationOutcomes::new();
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
             let votes = self.votes.entry(action_id.clone()).or_default();
 
             match self.action_status.get(action_id) {
                 None => {
-                    error!(
-                        "Governance vote by {} for non-registered {}. Ignored.",
-                        voter, action_id
-                    );
-                    continue;
+                    outcomes.push(ValidationError::BadGovernance(
+                        GovernanceValidationError::GovActionsDoNotExist {
+                            action_id: vec![action_id.clone()],
+                        },
+                    ));
                 }
-                Some(vs) if !vs.is_active(current_epoch) => {
-                    error!(
-                        "Governance vote by {} for inactive {}. Active at {:?}. Ignored.",
-                        voter, action_id, vs.voting_epochs
-                    );
-                    continue;
-                }
-                Some(_) => (),
-            }
 
-            if let Some((prev_trans, prev_vote)) =
-                votes.insert(voter.clone(), (*transaction, procedure.clone()))
-            {
-                // Re-voting is allowed; new vote must be treated as the proper one,
-                // older is to be discarded.
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("Governance vote by {} for {} already registered! New: {:?}, old: {:?} from {}",
-                        voter, action_id, procedure, prev_vote, prev_trans.encode_hex::<String>()
-                    );
+                Some(vs) if !vs.is_active(current_epoch) => {
+                    outcomes.push(ValidationError::BadGovernance(
+                        GovernanceValidationError::VotingOnExpiredGovAction(vec![(
+                            voter.clone(),
+                            action_id.clone(),
+                        )]),
+                    ));
+                }
+
+                Some(_) => {
+                    if let Some((prev_trans, prev_vote)) =
+                        votes.insert(voter.clone(), (*transaction, procedure.clone()))
+                    {
+                        // Re-voting is allowed; new vote must be treated as the proper one,
+                        // older is to be discarded.
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(
+                                "Governance vote by {} for {} already registered! \
+                                New: {:?}, old: {:?} from {}",
+                                voter,
+                                action_id,
+                                procedure,
+                                prev_vote,
+                                prev_trans.encode_hex::<String>()
+                            );
+                        }
+                    }
                 }
             }
         }
-        Ok(())
+        Ok(outcomes)
     }
 
     /// Checks whether action_id can be considered finally accepted
@@ -201,11 +216,9 @@ impl ConwayVoting {
     }
 
     /// Should be called when voting is over
-    fn end_voting(&mut self, action_id: &GovActionId) -> Result<()> {
+    fn end_voting(&mut self, action_id: &GovActionId) {
         self.votes.remove(action_id);
         self.proposals.remove(action_id);
-
-        Ok(())
     }
 
     /// Returns actual cast votes. Specific rules (how to treat registered, but not voted
@@ -345,7 +358,7 @@ impl ConwayVoting {
             self.is_finally_accepted(new_epoch, voting_state, action_id, drep_stake, spo_stake)?;
         let expired = self.is_expired(new_epoch, action_id)?;
         if outcome.accepted || expired {
-            self.end_voting(action_id)?;
+            self.end_voting(action_id);
             info!(
                 "New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
                 outcome.accepted
@@ -455,13 +468,9 @@ impl ConwayVoting {
                 action_id,
                 drep_stake,
                 spo_stake,
-            ) {
-                Err(e) => {
-                    error!("Error processing governance {action_id}: {e}");
-                    continue;
-                }
-                Ok(None) => continue,
-                Ok(Some(out)) if out.accepted => {
+            )? {
+                None => continue,
+                Some(out) if out.accepted => {
                     let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
 
                     if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
@@ -475,7 +484,7 @@ impl ConwayVoting {
                         action_to_perform,
                     }
                 }
-                Ok(Some(out)) => GovernanceOutcome {
+                Some(out) => GovernanceOutcome {
                     voting: out,
                     action_to_perform: GovernanceOutcomeVariant::NoAction,
                 },

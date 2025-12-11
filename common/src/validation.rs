@@ -3,18 +3,32 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use std::array::TryFromSliceError;
-
-use thiserror::Error;
-
 use crate::{
-    protocol_params::Nonce, rational_number::RationalNumber, Address, GenesisKeyhash, Lovelace,
-    NetworkId, PoolId, Slot, StakeAddress, UTxOIdentifier, Value, VrfKeyHash,
+    messages::{CardanoMessage::BlockValidation, Message},
+    protocol_params::{Nonce, ProtocolVersion},
+    rational_number::RationalNumber,
+    Address, BlockInfo, CommitteeCredential, GenesisKeyhash, GovActionId, KeyHash, Lovelace,
+    NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier, Value,
+    Voter, VrfKeyHash,
 };
+use anyhow::bail;
+use caryatid_sdk::Context;
+use std::{
+    array::TryFromSliceError,
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+};
+use thiserror::Error;
+use tracing::error;
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
 pub enum ValidationError {
+    // Either a very peculiar and uncommon error, or a temporary substitution,
+    // which is to be later replaced with specific error.
+    #[error("Unclassified validation error: {0}")]
+    Unclassified(String),
+
     #[error("VRF failure: {0}")]
     BadVRF(#[from] VrfValidationError),
 
@@ -35,9 +49,13 @@ pub enum ValidationError {
 
     #[error("CBOR Decoding error")]
     CborDecodeError(usize, String),
+
+    #[error("Governance failure: {0}")]
+    BadGovernance(#[from] GovernanceValidationError),
 }
 
 /// Validation status
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ValidationStatus {
     /// All good
@@ -125,8 +143,8 @@ pub enum UTxOValidationError {
 
     /// **Cause:** Some of transaction outputs are on a different network than the expected one.
     #[error(
-        "Wrong network: expected={expected}, wrong_address={}, output_index={output_index}", 
-        wrong_address.to_string().unwrap_or("Invalid address".to_string()), 
+        "Wrong network: expected={expected}, wrong_address={}, output_index={output_index}",
+        wrong_address.to_string().unwrap_or("Invalid address".to_string()),
     )]
     WrongNetwork {
         expected: NetworkId,
@@ -159,6 +177,69 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
+}
+
+/*
+<<<<<<< HEAD
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** Malformed UTxO
+    #[error("Malformed UTxO: era={era}, reason={reason}")]
+    MalformedUTxO { era: Era, reason: String },
+}
+
+/// Validation error
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
+pub enum ValidationError {
+    #[error("Uncategorized validation error: {0}")]
+    Unclassified(String),
+
+    #[error("Governance failure: {0}")]
+    BadGovernance(#[from] GovernanceValidationError),
+
+    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
+    BadTransaction {
+        tx_index: u16,
+        error: TransactionValidationError,
+    },
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+
+    #[error("Malformed transaction")]
+    MalformedTransaction(u16, String),
+
+    #[error("Doubly spent UTXO: {0}")]
+    DoubleSpendUTXO(String),
+}
+
+/// Validation status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum ValidationStatus {
+    /// All good
+    Go,
+
+    /// Error
+    NoGo(ValidationError),
+=======
+>>>>>>> 3044df25822506dcc35c03367d554e40c4ef7bf4
+}
+     */
+
+impl ValidationStatus {
+    pub fn is_go(&self) -> bool {
+        matches!(self, ValidationStatus::Go)
+    }
+
+    pub fn compose(&mut self, status: ValidationStatus) {
+        if self.is_go() {
+            *self = status;
+        }
+    }
 }
 
 /// Reference
@@ -459,4 +540,222 @@ pub enum OperationalCertificateError {
     /// **Cause:** No counter found for this key hash (not a stake pool or genesis delegate)
     #[error("No Counter For Key Hash OCert: Pool ID={}", hex::encode(pool_id))]
     NoCounterForKeyHashOcert { pool_id: PoolId },
+}
+
+/// Partial formalization of validation outcome errors, relation between entities
+/// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum MismatchRelation {
+    Eq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    Subset,
+}
+
+impl Display for MismatchRelation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            MismatchRelation::Eq => "=",
+            MismatchRelation::Lt => "<",
+            MismatchRelation::Gt => ">",
+            MismatchRelation::LtEq => "<=",
+            MismatchRelation::GtEq => ">=",
+            MismatchRelation::Subset => " in ",
+        };
+        write!(f, "{}", str)
+    }
+}
+
+/// Partial formalization of validation outcome errors: what's wrong with relation of two entities
+/// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct Mismatch<T: Debug + Display> {
+    supplied: T,
+    expected: T,
+    expected_rel: MismatchRelation,
+}
+
+impl<T: Debug + Display> Display for Mismatch<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Supplied: {}, expected: {} {}",
+            self.supplied, self.expected_rel, self.expected
+        )
+    }
+}
+
+/// See Haskell node, "GOV" rule in Conway epoch, data ConwayGovPredFailure era
+/// also, "PPUP" rule in Shelley epoch, data ShelleyPpupPredFailure era
+#[derive(Error, Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+#[allow(clippy::large_enum_variant)]
+pub enum GovernanceValidationError {
+    #[error("Governance action from protocol {0} is not allowed in current protocol version")]
+    WrongProtocolForGovernance(ProtocolVersion),
+
+    /// An update was proposed by a key hash that is not one of the genesis keys.
+    /// `mismatchSupplied` ~ key hashes which were a part of the update.
+    /// `mismatchExpected` ~ key hashes of the genesis keys.
+    #[error("Parameter update from non-genesis key hash")]
+    NonGenesisUpdatePPUP(Mismatch<KeyHash>),
+
+    /// | An update was proposed for the wrong epoch.
+    /// The first 'EpochNo' is the current epoch.
+    /// The second 'EpochNo' is the epoch listed in the update.
+    /// The last parameter indicates if the update was intended
+    /// for the current (true) or the next epoch (false).
+    #[error("Parameter update for wrong epoch: current {0}, requested {1}, requested epoch is current {2}")]
+    PPUpdateWrongEpoch(u64, u64, bool),
+
+    /// | An update was proposed which contains an invalid protocol version.
+    /// New protocol versions must either increase the major
+    /// number by exactly one and set the minor version to zero,
+    /// or keep the major version the same and increase the minor
+    /// version by exactly one.
+    #[error("Protocol update contains impossible new protocol version {0}")]
+    PVCannotFollowPPUP(ProtocolVersion),
+
+    #[error("Governance actions {action_id:?} do not exist")]
+    GovActionsDoNotExist { action_id: Vec<GovActionId> },
+
+    #[error("Malformed conway proposal {action:?}")]
+    MalformedConwayProposal { action: ProposalProcedure }, // TODO: add parameter (GovAction era)
+
+    #[error("Proposal procedure network id mismatch: {reward_account:?} and {network:?}")]
+    ProposalProcedureNetworkIdMismatch {
+        reward_account: StakeAddress,
+        network: NetworkId,
+    },
+
+    #[error("Treasury withdrawals network id mismatch: {reward_accounts:?} and {network:?}")]
+    TreasuryWithdrawalsNetworkIdMismatch {
+        reward_accounts: Vec<StakeAddress>,
+        network: NetworkId,
+    },
+
+    #[error("Proposal deposit mismatch: {0}")]
+    ProposalDepositIncorrect(Mismatch<Lovelace>),
+
+    // Some governance actions are not allowed to be voted on by certain types of
+    // Voters. This failure lists all governance action ids with their respective voters
+    // that are not allowed to vote on those governance actions.
+    #[error("Voters are not allowed for the actions: {0:?}")]
+    DisallowedVoters(Vec<(Voter, GovActionId)>),
+
+    // Credentials that are mentioned as members to be both removed and added
+    #[error("Committee members both removed and added: {0:?}")]
+    ConflictingCommitteeUpdate(Vec<CommitteeCredential>),
+
+    // Members for which the expiration epoch has already been reached
+    #[error("Committee members already expired: {0:?}")]
+    ExpirationEpochTooSmall(Vec<(CommitteeCredential, u64)>),
+
+    #[error("InvalidPrevGovActionId: {0}")]
+    InvalidPrevGovActionId(GovActionId),
+
+    #[error("Voting on expired governance action {0:?}")]
+    VotingOnExpiredGovAction(Vec<(Voter, GovActionId)>),
+
+    //The PrevGovActionId of the HardForkInitiation that fails
+    // Its protocol version and the protocal version of the previous
+    // gov-action pointed to by the proposal
+    #[error("Hard fork initiation {purpose:?} mismatches protocol version: {version_mismatch}")]
+    ProposalCantFollow {
+        purpose: (),
+        version_mismatch: Mismatch<ProtocolVersion>,
+    },
+    //  (StrictMaybe (GovPurposeId 'HardForkPurpose era))
+    //  (Mismatch 'RelGT ProtVer)
+    #[error("Invalid policy hash: proposed {proposed:?}, current {current:?}")]
+    InvalidPolicyHash {
+        proposed: Option<ScriptHash>,
+        current: Option<ScriptHash>,
+    },
+
+    #[error("Conway bootstrap era does not allow proposal {0:?}")]
+    DisallowedProposalDuringBootstrap(ProposalProcedure),
+
+    #[error("Conway bootstrap era does not allow votes {0:?}")]
+    DisallowedVotesDuringBootstrap(Vec<(Voter, GovActionId)>),
+
+    // Predicate failure for votes by entities that are not present in the ledger state
+    #[error("Voters do not present in ledger state: {0:?}")]
+    VotersDoNotExist(Vec<Voter>),
+
+    // Treasury withdrawals that sum up to zero are not allowed
+    #[error("Zero treausury withdrawals in {0}")]
+    ZeroTreasuryWithdrawals(GovActionId),
+
+    // Proposals that have an invalid reward account for returns of the deposit
+    #[error("Return account {0} for the proposal does not exist")]
+    ProposalReturnAccountDoesNotExist(StakeAddress),
+
+    // Treasury withdrawal proposals to an invalid reward account
+    #[error("Treasury withdrawal return account {0} does not exist")]
+    TreasuryWithdrawalReturnAccountsDoNotExist(StakeAddress),
+}
+
+// Utils for easier validation routines development
+
+#[derive(Default, Clone)]
+pub struct ValidationOutcomes {
+    outcomes: Vec<ValidationError>,
+}
+
+impl ValidationOutcomes {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn merge(&mut self, with: &mut ValidationOutcomes) {
+        self.outcomes.append(&mut with.outcomes);
+    }
+
+    pub fn push(&mut self, outcome: ValidationError) {
+        self.outcomes.push(outcome);
+    }
+
+    pub fn push_anyhow(&mut self, error: anyhow::Error) {
+        self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
+    }
+
+    pub async fn publish(
+        &mut self,
+        context: &Arc<Context<Message>>,
+        topic_field: &str,
+        block: &BlockInfo,
+    ) -> anyhow::Result<()> {
+        if block.intent.do_validation() {
+            let status = if let Some(result) = self.outcomes.first() {
+                // TODO: add multiple responses / decide that they're not necessary
+                ValidationStatus::NoGo(result.clone())
+            } else {
+                ValidationStatus::Go
+            };
+
+            let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
+
+            context.message_bus.publish(topic_field, outcome_msg).await?;
+        } else if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
+        }
+        self.outcomes.clear();
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn as_result(&self) -> anyhow::Result<()> {
+        if self.outcomes.is_empty() {
+            return Ok(());
+        }
+
+        let res = self.outcomes.iter().map(|e| format!("{}; ", e)).collect::<String>();
+
+        bail!("Validation failed: {}", res)
+    }
 }
