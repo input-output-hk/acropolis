@@ -332,7 +332,7 @@ impl Verifier {
 
         let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
         if outcome {
-            info!("Verification of SPDD, end of epoch {epoch}: OK, total stake {total}");
+            info!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
         } else {
             error!("Verification of SPDD, end of epoch {epoch}: Failed");
         }
