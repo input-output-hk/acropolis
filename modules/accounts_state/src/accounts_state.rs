@@ -164,6 +164,7 @@ impl AccountsState {
                 // Publish SPDD message before anything else and store spdd history if enabled
                 if let Some(block_info) = current_block.as_ref() {
                     let spdd = state.generate_spdd();
+                    verifier.verify_spdd(block_info, &spdd);
                     if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
                         error!("Error publishing SPO stake distribution: {e:#}")
                     }
@@ -465,7 +466,12 @@ impl AccountsState {
 
         if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
             info!("Verifying rewards against '{verify_rewards_files}'");
-            verifier.read_rewards(&verify_rewards_files);
+            verifier.set_rewards_template(&verify_rewards_files);
+        }
+
+        if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
+            info!("Verifying rewards against '{verify_spdd_files}'");
+            verifier.set_spdd_template(&verify_spdd_files);
         }
 
         // History

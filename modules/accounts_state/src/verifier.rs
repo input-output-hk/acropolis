@@ -1,18 +1,18 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
-use crate::rewards::{RewardDetail, RewardsResult};
-use crate::state::Pots;
-use acropolis_common::{PoolId, RewardType, StakeAddress};
+use crate::{rewards::{RewardDetail, RewardsResult}, state::Pots};
+use acropolis_common::{BlockInfo, DelegatedStake, Lovelace, PoolId, RewardType, StakeAddress};
 use hex::FromHex;
-use itertools::EitherOrBoth::{Both, Left, Right};
-use itertools::Itertools;
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use itertools::{EitherOrBoth::{Both, Left, Right}, Itertools};
+use std::{cmp::Ordering, collections::BTreeMap, fs::File};
 use tracing::{debug, error, info, warn};
 
 /// Verifier
 pub struct Verifier {
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
+
+    /// Template (with {} for epoch) for SPDD files
+    spdd_file_template: Option<String>,
 
     /// Template (with {} for epoch) for rewards files
     rewards_file_template: Option<String>,
@@ -23,7 +23,24 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             epoch_pots: BTreeMap::new(),
+            spdd_file_template: None,
             rewards_file_template: None,
+        }
+    }
+
+    fn get_reader(&self, template: &Option<String>, epoch: u64)
+        -> Option<(String, csv::Reader<File>)>
+    {
+        let Some(template) = template else {
+            return None;
+        };
+
+        let path = template.replace("{}", &epoch.to_string());
+
+        // Silently return None if there's no file for it
+        match csv::Reader::from_path(&path) {
+            Ok(filename) => Some((path, filename)),
+            Err(_e) => None
         }
     }
 
@@ -60,8 +77,12 @@ impl Verifier {
 
     /// Read in rewards files
     // Actually just stores the template and reads them on demand
-    pub fn read_rewards(&mut self, path: &str) {
+    pub fn set_rewards_template(&mut self, path: &str) {
         self.rewards_file_template = Some(path.to_string());
+    }
+
+    pub fn set_spdd_template(&mut self, path: &str) {
+        self.spdd_file_template = Some(path.to_string());
     }
 
     /// Verify an epoch, logging any errors
@@ -121,15 +142,7 @@ impl Verifier {
     /// Verify rewards, logging any errors
     pub fn verify_rewards(&self, rewards: &RewardsResult) {
         let epoch = rewards.epoch;
-        if let Some(template) = &self.rewards_file_template {
-            let path = template.replace("{}", &epoch.to_string());
-
-            // Silently return if there's no file for it
-            let mut reader = match csv::Reader::from_path(&path) {
-                Ok(reader) => reader,
-                _ => return,
-            };
-
+        if let Some((path, mut reader)) = self.get_reader(&self.rewards_file_template, epoch) {
             // Expect CSV header: spo,address,type,amount
             let mut expected_rewards: BTreeMap<PoolId, Vec<RewardDetail>> = BTreeMap::new();
             for result in reader.deserialize() {
@@ -140,6 +153,7 @@ impl Verifier {
                         continue;
                     }
                 };
+
 
                 let Some(spo) =
                     Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
@@ -268,5 +282,185 @@ impl Verifier {
                 error!(errors, epoch, "Rewards verification:");
             }
         }
+    }
+
+    fn read_spdd(&self, epoch: u64) -> Option<BTreeMap<PoolId, Lovelace>> {
+        let mut ethalon_spdd: BTreeMap<PoolId, Lovelace> = BTreeMap::new();
+
+        let Some((path, mut reader)) = self.get_reader(&self.spdd_file_template, epoch) else {
+            return None;
+        };
+
+        for result in reader.deserialize() {
+            let (spo, amount): (String, Lovelace) = match result {
+                Ok(row) => row,
+                Err(err) => {
+                    error!("Bad row in {path}: {err} - skipping");
+                    continue;
+                }
+            };
+
+            let Some(spo) =
+                Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
+            else {
+                error!("Bad hex/SPO in {path} for SPO: {spo} - skipping");
+                continue;
+            };
+
+            if let Some(old) = ethalon_spdd.insert(spo, amount) {
+                error!("Double entry in {path} for {spo}: replacing {amount} with {old}");
+                continue;
+            }
+        }
+
+        Some(ethalon_spdd)
+    }
+
+    pub fn verify_spdd(&self, blk: &BlockInfo, spdd: &BTreeMap<PoolId, DelegatedStake>) {
+        let epoch = blk.epoch-1;
+        let Some(ethalon) = self.read_spdd(epoch) else {
+            // No ethalon, no verification -- silently exiting.
+            return;
+        };
+
+        let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &ethalon);
+        if outcome {
+            info!("Verification of SPDD, end of epoch {epoch}: OK, total stake {total}");
+        }
+        else {
+            error!("Verification of SPDD failed, end of epoch {epoch}");
+        }
+    }
+
+    pub fn verify_spdd_impl(
+        epoch: u64,
+        spdd: &BTreeMap<PoolId, DelegatedStake>,
+        ethalon: &BTreeMap<PoolId, Lovelace>
+    ) -> (bool, Lovelace, usize, usize, usize) {
+        let mut different = Vec::new();
+        let mut extra = Vec::new();
+        let mut missing = Vec::new();
+
+        // Compare the SPDD table by checking three properties:
+        // 1. All values from Computed SPDD, which present in Ethalon, are equal
+        // 2. There are no non-zero values from Computed SPDD, which are absent in Ethalon.
+
+        let mut total_computed = 0;
+        for (pool, computed_stake) in spdd.iter() {
+            total_computed += computed_stake.live;
+            if let Some(eth_stake) = ethalon.get(pool) {
+                if *eth_stake != computed_stake.live {
+                    different.push((pool.clone(), eth_stake, computed_stake.live));
+                }
+            }
+            else if computed_stake.live != 0 {
+                extra.push((pool.clone(), computed_stake.live));
+            }
+        }
+
+        // 2. All non-zero values from Ethalon must present in Computed SPDD.
+
+        let mut total_ethalon = 0;
+        for (pool, eth_stake) in ethalon.iter() {
+            total_ethalon += eth_stake;
+            if *eth_stake != 0 && spdd.get(pool).is_none() {
+                missing.push((pool.clone(), eth_stake));
+            }
+        }
+
+        // Check whether we have everything correct
+
+        if total_computed == total_ethalon
+            && different.is_empty()
+            && extra.is_empty()
+            && missing.is_empty()
+        {
+            return (true, total_computed, 0, 0, 0);
+        }
+
+        // There are some errors, print them
+
+        if total_computed != total_ethalon {
+            error!(
+                "SPDD verification epoch {epoch} total active stake difference: \
+                ethalon {total_ethalon} != computed {total_computed}"
+            );
+        }
+
+        if !different.is_empty() {
+            let message = different.iter().map(
+                |(p,e,s)| format!("{p}: eth {e} != comp {s}; ")
+            ).collect::<String>();
+            error!("SPDD verificiation epoch {epoch} stake difference: {}", message);
+        }
+
+        if !extra.is_empty() {
+            let message = extra.iter().map(
+                |(p,s)| format!("{p} (comp {s}); ")
+            ).collect::<String>();
+            error!("SPDD verification epoch {epoch}, extra pools in SPDD: {}", message);
+        }
+
+        if !missing.is_empty() {
+            let message = missing.iter().map(
+                |(p,e)| format!("{p} (eth {e}); ")
+            ).collect::<String>();
+            error!("SPDD verification epoch {epoch}, missing pools from SPDD: {}", message);
+        }
+
+        (false, total_computed, different.len(), extra.len(), missing.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verify_spdd() {
+        let test_cases: [(Option<Lovelace>, Option<Lovelace>); 10] = [
+            // Comparing with None
+            (Some(0), None), (Some(1), None), (None, Some(0)), (None, Some(1)),
+
+            // Comparing with Zero
+            (Some(0), Some(0)), (Some(0), Some(10)), (Some(10), Some(0)),
+
+            // Comparing Non-zero and Non-zero
+            (Some(2), Some(2)), (Some(2), Some(3)), (Some(3), Some(2))
+        ];
+
+        let mut spdd = BTreeMap::new();
+        let mut ethalon = BTreeMap::new();
+
+        for (idx, (cmp, eth)) in test_cases.iter().enumerate() {
+            let poolid = PoolId::from([idx as u8; 28]);
+
+            if let Some(cmp) = cmp {
+                spdd.insert(poolid.clone(), DelegatedStake {
+                    active: *cmp,
+                    active_delegators_count: 1,
+                    live: *cmp,
+                });
+            }
+
+            if let Some(eth) = eth {
+                ethalon.insert(poolid.clone(), *eth);
+            }
+        }
+
+        assert_eq!(Verifier::verify_spdd_impl(0, &spdd, &ethalon), (false, 18, 4, 1, 1));
+    }
+
+    #[test]
+    fn test_read_spdd() {
+        let mut verifier = Verifier::new();
+        verifier.spdd_file_template = Some("./test-data/spdd-test.{}.csv".to_string());
+        //verifier.spdd_file_template = Some("./test-data/spdd.mainnet.{}.csv".to_string());
+        let res = verifier.read_spdd(99999);
+        let eth = BTreeMap::from([
+            (PoolId::from([1;28]), 1000),
+            (PoolId::from([0xee;28]), 1111),
+        ]);
+        assert_eq!(res, Some(eth))
     }
 }
