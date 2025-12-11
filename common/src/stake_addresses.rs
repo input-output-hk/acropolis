@@ -412,6 +412,7 @@ impl StakeAddressMap {
         if let Some(sas) = self.get_mut(stake_address) {
             if sas.registered {
                 sas.registered = false;
+                sas.delegated_spo = None;
                 true
             } else {
                 error!(

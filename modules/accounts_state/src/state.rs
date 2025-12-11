@@ -835,6 +835,7 @@ impl State {
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        debug!("Delegation of {} to {}", stake_address, spo);
         stake_addresses.record_stake_delegation(stake_address, spo);
     }
 
