@@ -162,8 +162,6 @@ impl AccountsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
-        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        completion_subscription: Option<Box<dyn Subscription<Message>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -176,6 +174,8 @@ impl AccountsState {
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
+        completion_subscription: Option<Box<dyn Subscription<Message>>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         verifier: &Verifier,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
@@ -858,8 +858,6 @@ impl AccountsState {
             Self::run(
                 history,
                 spdd_store,
-                snapshot_subscription,
-                completion_subscription,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
@@ -872,6 +870,8 @@ impl AccountsState {
                 stake_subscription,
                 drep_state_subscription,
                 parameters_subscription,
+                completion_subscription,
+                snapshot_subscription,
                 &verifier,
             )
             .await
