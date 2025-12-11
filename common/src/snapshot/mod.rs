@@ -10,10 +10,11 @@
 //! - Error types (`error.rs`)
 
 // Submodules
+mod decode;
 mod error;
 pub mod mark_set_go;
 mod parser;
-pub mod pool_params;
+pub mod protocol_parameters;
 pub mod streaming_snapshot;
 
 // Re-export error types
@@ -25,9 +26,9 @@ pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrit
 // Re-export streaming snapshot APIs
 pub use streaming_snapshot::{
     AccountState, Anchor, CollectingCallbacks, DRepCallback, DRepInfo, EpochCallback,
-    GovernanceProposal, PoolCallback, PoolInfo, PoolMetadata, PotBalances, ProposalCallback, Relay,
-    SnapshotCallbacks, SnapshotMetadata, StakeAddressState, StakeCallback, StreamingSnapshotParser,
-    UtxoCallback, UtxoEntry,
+    GovernanceProposal, PoolCallback, PotBalances, ProposalCallback, Relay, SnapshotCallbacks,
+    SnapshotMetadata, StakeAddressState, StakeCallback, StreamingSnapshotParser, UtxoCallback,
+    UtxoEntry,
 };
 
 // Re-export snapshot types

@@ -9,7 +9,7 @@ use acropolis_common::{
         UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutRef, TxOutput, TxUTxODeltas,
+    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -142,6 +142,7 @@ impl GenesisBootstrapper {
                     new_epoch: false,
                     timestamp: byron_genesis.start_time,
                     era: Era::Byron,
+                    tip_slot: None,
                 };
 
                 let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
@@ -152,12 +153,12 @@ impl GenesisBootstrapper {
                 let mut total_allocated: u64 = 0;
                 for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
                     let tx_identifier = TxIdentifier::new(0, tx_index as u16);
-                    let tx_ref = TxOutRef::new(TxHash::from(**hash), 0);
+                    let utxo_identifier = UTxOIdentifier::new(TxHash::from(**hash), 0);
 
-                    gen_utxo_identifiers.push((tx_ref, tx_identifier));
+                    gen_utxo_identifiers.push((utxo_identifier, tx_identifier));
 
                     let tx_output = TxOutput {
-                        utxo_identifier: UTxOIdentifier::new(0, tx_index as u16, 0),
+                        utxo_identifier,
                         address: Address::Byron(ByronAddress {
                             payload: address.payload.to_vec(),
                         }),

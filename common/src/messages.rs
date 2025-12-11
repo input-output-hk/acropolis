@@ -73,7 +73,7 @@ pub struct GenesisCompleteMessage {
 // Genesis tx hashes used to seed TxRegistry
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenesisUTxOsMessage {
-    pub utxos: Vec<(TxOutRef, TxIdentifier)>,
+    pub utxos: Vec<(UTxOIdentifier, TxIdentifier)>,
 }
 
 /// Message encapsulating multiple UTXO deltas, in order

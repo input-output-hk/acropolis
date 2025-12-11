@@ -552,8 +552,8 @@ impl SPOState {
                                     .unwrap_or(0),
                                 active_size: epoch_state
                                     .as_ref()
-                                    .and_then(|state| state.active_size)
-                                    .unwrap_or(RationalNumber::from(0)),
+                                    .and_then(|state| state.active_size.clone())
+                                    .unwrap_or(RationalNumber::ZERO),
                             })
                         } else {
                             PoolsStateQueryResponse::Error(QueryError::storage_disabled(
@@ -733,40 +733,54 @@ impl SPOState {
             let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context_snapshot = context.clone();
             let history = history_snapshot.clone();
+            enum SnapshotState {
+                Preparing,
+                Started,
+            }
+            let mut snapshot_state = SnapshotState::Preparing;
             context.run(async move {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
 
-                let mut guard = history.lock().await;
-                match message.as_ref() {
-                    Message::Snapshot(SnapshotMessage::Bootstrap(
-                        SnapshotStateMessage::SPOState(spo_state),
-                    )) => {
-                        guard.clear();
-                        guard.commit_forced(spo_state.clone().into());
-                    }
-                    Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
-                        block_height,
-                    })) => {
-                        info!("inspecting state at block height {}", block_height);
-                        let maybe_spo_state =
-                            guard.get_by_index_reverse(*block_height).map(LedgerSPOState::from);
-
-                        if let Some(spo_state) = maybe_spo_state {
-                            context_snapshot
-                                .message_bus
-                                .publish(
-                                    &snapshot_topic,
-                                    Arc::new(Message::Snapshot(SnapshotMessage::Dump(
-                                        SnapshotStateMessage::SPOState(spo_state),
-                                    ))),
-                                )
-                                .await
-                                .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
+                    let mut guard = history.lock().await;
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            match snapshot_state {
+                                SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
+                                _ => error!("Snapshot Startup message received but we have already left preparing state"),
+                            }
                         }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::SPOState(spo_state),
+                        )) => {
+                            guard.clear();
+                            guard.commit_forced(spo_state.clone().into());
+                        }
+                        Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
+                            block_height,
+                        })) => {
+                            info!("inspecting state at block height {}", block_height);
+                            let maybe_spo_state =
+                                guard.get_by_index_reverse(*block_height).map(LedgerSPOState::from);
+
+                            if let Some(spo_state) = maybe_spo_state {
+                                context_snapshot
+                                    .message_bus
+                                    .publish(
+                                        &snapshot_topic,
+                                        Arc::new(Message::Snapshot(SnapshotMessage::Dump(
+                                            SnapshotStateMessage::SPOState(spo_state),
+                                        ))),
+                                    )
+                                    .await
+                                    .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
+                            }
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => ()
                     }
-                    _ => error!("Unexpected message type: {message:?}"),
                 }
             });
         }

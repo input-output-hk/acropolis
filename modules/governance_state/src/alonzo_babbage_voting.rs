@@ -165,6 +165,7 @@ mod tests {
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
+                tip_slot: None,
                 hash: BlockHash::default(),
             };
 
@@ -283,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_decentralisation_updates() -> Result<()> {
-        let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant)?;
+        let dcu = extract_mainnet_parameter(|p| p.decentralisation_constant.clone())?;
 
         assert_eq!(DECENTRALISATION.len(), dcu.len());
         for (decent, param) in DECENTRALISATION.iter().zip(dcu) {

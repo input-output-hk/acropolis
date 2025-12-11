@@ -70,8 +70,8 @@ pub enum PeerEvent {
 
 #[derive(Debug)]
 pub enum PeerChainSyncEvent {
-    RollForward(Header),
-    RollBackward(Point),
+    RollForward(Header, Point),
+    RollBackward(Point, Point),
     IntersectNotFound(Point),
 }
 
@@ -184,19 +184,19 @@ impl PeerConnectionWorker {
         msg: chainsync::NextResponse<chainsync::HeaderContent>,
     ) -> Result<Option<ParsedChainsyncMessage>> {
         match msg {
-            chainsync::NextResponse::RollForward(header, _) => {
+            chainsync::NextResponse::RollForward(header, tip) => {
                 let Some(parsed) = self.parse_header(header)? else {
                     return Ok(None);
                 };
                 let point = Point::Specific(parsed.slot, parsed.hash.to_vec());
                 Ok(Some(ParsedChainsyncMessage {
                     point,
-                    event: PeerChainSyncEvent::RollForward(parsed),
+                    event: PeerChainSyncEvent::RollForward(parsed, tip.0),
                 }))
             }
-            chainsync::NextResponse::RollBackward(point, _) => Ok(Some(ParsedChainsyncMessage {
+            chainsync::NextResponse::RollBackward(point, tip) => Ok(Some(ParsedChainsyncMessage {
                 point: point.clone(),
-                event: PeerChainSyncEvent::RollBackward(point),
+                event: PeerChainSyncEvent::RollBackward(point, tip.0),
             })),
             chainsync::NextResponse::Await => Ok(None),
         }

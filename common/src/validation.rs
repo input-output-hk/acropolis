@@ -11,7 +11,8 @@ use crate::{
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
     Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId,
-    ProposalProcedure, ScriptHash, Slot, StakeAddress, TxOutRef, Value, Voter, VrfKeyHash,
+    ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
+    Value, Voter, VrfKeyHash,
 };
 
 /// Transaction Validation Error
@@ -61,7 +62,7 @@ pub enum UTxOValidationError {
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
     #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
     BadInputsUTxO {
-        bad_input: TxOutRef,
+        bad_input: UTxOIdentifier,
         bad_input_index: usize,
     },
 

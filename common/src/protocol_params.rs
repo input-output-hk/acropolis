@@ -196,7 +196,7 @@ impl PraosParams {
 
 impl From<&ShelleyParams> for PraosParams {
     fn from(params: &ShelleyParams) -> Self {
-        let active_slots_coeff = params.active_slots_coeff;
+        let active_slots_coeff = &params.active_slots_coeff;
         let security_param = params.security_param;
         let stability_window =
             (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 3;
@@ -205,7 +205,7 @@ impl From<&ShelleyParams> for PraosParams {
 
         Self {
             security_param,
-            active_slots_coeff,
+            active_slots_coeff: active_slots_coeff.clone(),
             epoch_length: params.epoch_length,
             max_kes_evolutions: params.max_kes_evolutions,
             max_lovelace_supply: params.max_lovelace_supply,
