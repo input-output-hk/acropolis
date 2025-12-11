@@ -206,12 +206,14 @@ impl EpochSnapshot {
             }
         }
 
-        // Second pass: build SPO entries
+        // Second pass: build SPO entries and sum total blocks
         let mut spos = HashMap::new();
+        let mut total_blocks: usize = 0;
         for (pool_id, pool_reg) in pool_params_map {
             let delegators = delegations_by_pool.remove(&pool_id).unwrap_or_default();
             let total_stake = stake_by_pool.get(&pool_id).copied().unwrap_or(0);
             let blocks_produced = block_counts.get(&pool_id).copied().unwrap_or(0);
+            total_blocks += blocks_produced;
 
             spos.insert(
                 pool_id,
@@ -232,7 +234,7 @@ impl EpochSnapshot {
         EpochSnapshot {
             epoch,
             spos,
-            blocks: 0,
+            blocks: total_blocks,
             pots,
             registration_changes: Vec::new(),
         }
@@ -284,6 +286,10 @@ impl Display for SnapshotsContainer {
 
 impl Display for EpochSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "EpochSnapshot {{ epoch: {}, blocks: {}, pots: {:?} }}", self.epoch, self.blocks, self.pots)
+        writeln!(
+            f,
+            "EpochSnapshot {{ epoch: {}, blocks: {}, pots: {:?} }}",
+            self.epoch, self.blocks, self.pots
+        )
     }
 }
