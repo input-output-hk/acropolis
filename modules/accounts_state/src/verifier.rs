@@ -392,15 +392,15 @@ impl Verifier {
             );
         }
 
-        for (p,e,s) in different.iter() {
+        for (p, e, s) in different.iter() {
             error!("SPDD verification epoch {epoch}, {p}: ref {e} != comp {s}");
         }
 
-        for (p,s) in extra.iter() {
+        for (p, s) in extra.iter() {
             error!("SPDD verification epoch {epoch}, {p}: No ref, comp {s}");
         }
 
-        for (p,e) in missing.iter() {
+        for (p, e) in missing.iter() {
             error!("SPDD verification epoch {epoch}, {p}: ref {e}, No comp");
         }
 
