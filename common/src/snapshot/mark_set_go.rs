@@ -154,9 +154,14 @@ impl RawSnapshotsContainer {
     /// - Go (epoch): Uses blocks_current_epoch
     ///
     /// Pots assignment:
-    /// - Mark snapshot gets the current epoch's pots because rewards calculation uses
-    ///   the stake distribution from E-2 (mark) with the pots from E (current).
-    /// - Set and Go use default pots as they're not used for rewards calculation.
+    /// - Go (current epoch) gets the current pots for consistency
+    /// - Mark and Set use default pots
+    ///
+    /// Note: The pots assignment on bootstrapped snapshots doesn't actually affect rewards
+    /// calculation. When rewards are calculated, `performance = mark` is used - but by that
+    /// time, a fresh snapshot created during `enter_epoch` will have become the new mark,
+    /// and these bootstrapped snapshots will have shifted to set/go positions (or been
+    /// discarded). The fresh snapshot captures the correct pots at creation time.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
@@ -171,7 +176,7 @@ impl RawSnapshotsContainer {
             mark: self.mark.into_snapshot(
                 epoch.saturating_sub(2),
                 &empty_blocks,
-                pots,
+                Pots::default(),
                 network.clone(),
             ),
             set: self.set.into_snapshot(
@@ -180,7 +185,7 @@ impl RawSnapshotsContainer {
                 Pots::default(),
                 network.clone(),
             ),
-            go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
+            go: self.go.into_snapshot(epoch, blocks_current_epoch, pots, network),
         }
     }
 }
