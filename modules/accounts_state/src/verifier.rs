@@ -291,6 +291,7 @@ impl Verifier {
         }
     }
 
+    #[allow(clippy::question_mark)]
     fn read_spdd(&self, epoch: u64) -> Option<BTreeMap<PoolId, Lovelace>> {
         let mut ethalon_spdd: BTreeMap<PoolId, Lovelace> = BTreeMap::new();
 
@@ -355,10 +356,10 @@ impl Verifier {
             total_computed += computed_stake.live;
             if let Some(eth_stake) = ethalon.get(pool) {
                 if *eth_stake != computed_stake.live {
-                    different.push((pool.clone(), eth_stake, computed_stake.live));
+                    different.push((pool, eth_stake, computed_stake.live));
                 }
             } else if computed_stake.live != 0 {
-                extra.push((pool.clone(), computed_stake.live));
+                extra.push((pool, computed_stake.live));
             }
         }
 
@@ -368,7 +369,7 @@ impl Verifier {
         for (pool, eth_stake) in ethalon.iter() {
             total_ethalon += eth_stake;
             if *eth_stake != 0 && spdd.get(pool).is_none() {
-                missing.push((pool.clone(), eth_stake));
+                missing.push((pool, eth_stake));
             }
         }
 
