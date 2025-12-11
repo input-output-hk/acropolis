@@ -1248,6 +1248,10 @@ impl StreamingSnapshotParser {
                     "    Parsed complete reward update: delta_treasury={}, delta_reserves={}",
                     update.delta_treasury, update.delta_reserves
                 );
+                info!(
+                    "    Reserves from account_state: {}, reward_update.delta_reserves: {}",
+                    reserves, update.delta_reserves
+                );
             }
             None => {
                 info!("    No pulsing reward update present (strict_maybe is Nothing)");
