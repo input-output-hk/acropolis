@@ -231,7 +231,7 @@ impl ParametersUpdater {
                 );
             }
         }
-        c.threshold = cu.terms;
+        c.threshold = cu.terms.clone();
     }
 
     fn apply_alonzo_babbage_outcome_elem(&mut self, u: &AlonzoBabbageVotingOutcome) -> Result<()> {
