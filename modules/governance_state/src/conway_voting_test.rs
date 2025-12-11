@@ -293,14 +293,16 @@ mod tests {
                     for (voter, voteproc) in votes {
                         let procs =
                             HashMap::from_iter([(record.action_id.clone(), voteproc.clone())]);
-                        conway_voting.insert_voting_procedure(
-                            epoch,
-                            voter,
-                            &TxHash::default(),
-                            &SingleVoterVotes {
-                                voting_procedures: procs,
-                            },
-                        )?
+                        conway_voting
+                            .insert_voting_procedure(
+                                epoch,
+                                voter,
+                                &TxHash::default(),
+                                &SingleVoterVotes {
+                                    voting_procedures: procs,
+                                },
+                            )?
+                            .as_result()?
                     }
                 }
 

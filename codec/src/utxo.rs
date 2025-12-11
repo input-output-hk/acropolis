@@ -1,5 +1,5 @@
 use crate::address::map_address;
-use acropolis_common::{validation::ValidationError, *};
+use acropolis_common::{validation::TransactionValidationError, *};
 use pallas_primitives::conway;
 use pallas_traverse::{MultiEraInput, MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
 
@@ -104,24 +104,30 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
 
 /// Parse transaction inputs and outputs, and return the parsed inputs, outputs, total output lovelace, and errors
 pub fn map_transaction_inputs_outputs(
-    tx_index: u16,
     tx: &MultiEraTx,
 ) -> (
     Vec<UTxOIdentifier>,
     Vec<TxOutput>,
     u128,
-    Vec<ValidationError>,
+    Option<TransactionValidationError>,
 ) {
     let mut parsed_inputs = Vec::new();
     let mut parsed_outputs = Vec::new();
     let mut errors = Vec::new();
 
     let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
-        errors.push(ValidationError::MalformedTransaction(
-            tx_index,
-            format!("Tx has incorrect hash length ({:?})", tx.hash().to_vec()),
+        errors.push(format!(
+            "Tx has incorrect hash length ({:?})",
+            tx.hash().to_vec()
         ));
-        return (parsed_inputs, parsed_outputs, 0, errors);
+        return (
+            parsed_inputs,
+            parsed_outputs,
+            0,
+            Some(TransactionValidationError::MalformedTransaction(
+                errors.join("; "),
+            )),
+        );
     };
 
     let inputs = tx.consumes();
@@ -153,18 +159,25 @@ pub fn map_transaction_inputs_outputs(
                     total_output += output.value().coin() as u128;
                 }
                 Err(e) => {
-                    errors.push(ValidationError::MalformedTransaction(
-                        tx_index,
-                        format!("Output {index} has been ignored: {e}"),
-                    ));
+                    errors.push(format!("Output {index} has been ignored: {e}"));
                 }
             },
-            Err(e) => errors.push(ValidationError::MalformedTransaction(
-                tx_index,
-                format!("Can't parse output {index} in tx: {e}"),
-            )),
+            Err(e) => {
+                errors.push(format!("Output {index} has been ignored: {e}"));
+            }
         }
     }
 
-    (parsed_inputs, parsed_outputs, total_output, errors)
+    (
+        parsed_inputs,
+        parsed_outputs,
+        total_output,
+        if errors.is_empty() {
+            None
+        } else {
+            Some(TransactionValidationError::MalformedTransaction(
+                errors.join("; "),
+            ))
+        },
+    )
 }
