@@ -17,7 +17,7 @@ pub struct Verifier {
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
 
-    /// Template (with {} for epoch) for SPDD files
+    /// Template (with {} for epoch) for SPDD reference data files
     spdd_file_template: Option<String>,
 
     /// Template (with {} for epoch) for rewards files
@@ -293,7 +293,7 @@ impl Verifier {
 
     #[allow(clippy::question_mark)]
     fn read_spdd(&self, epoch: u64) -> Option<BTreeMap<PoolId, Lovelace>> {
-        let mut ethalon_spdd: BTreeMap<PoolId, Lovelace> = BTreeMap::new();
+        let mut reference_spdd: BTreeMap<PoolId, Lovelace> = BTreeMap::new();
 
         let Some((path, mut reader)) = self.get_reader(&self.spdd_file_template, epoch) else {
             return None;
@@ -314,68 +314,68 @@ impl Verifier {
                 continue;
             };
 
-            if let Some(old) = ethalon_spdd.insert(spo, amount) {
+            if let Some(old) = reference_spdd.insert(spo, amount) {
                 error!("Double entry in {path} for {spo}: replacing {amount} with {old}");
                 continue;
             }
         }
 
-        Some(ethalon_spdd)
+        Some(reference_spdd)
     }
 
     pub fn verify_spdd(&self, blk: &BlockInfo, spdd: &BTreeMap<PoolId, DelegatedStake>) {
         let epoch = blk.epoch - 1;
-        let Some(ethalon) = self.read_spdd(epoch) else {
-            // No ethalon, no verification -- silently exiting.
+        let Some(reference) = self.read_spdd(epoch) else {
+            // No reference = no verification; silently exiting.
             return;
         };
 
-        let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &ethalon);
+        let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
         if outcome {
             info!("Verification of SPDD, end of epoch {epoch}: OK, total stake {total}");
         } else {
-            error!("Verification of SPDD failed, end of epoch {epoch}");
+            error!("Verification of SPDD, end of epoch {epoch}: Failed");
         }
     }
 
     pub fn verify_spdd_impl(
         epoch: u64,
         spdd: &BTreeMap<PoolId, DelegatedStake>,
-        ethalon: &BTreeMap<PoolId, Lovelace>,
+        reference: &BTreeMap<PoolId, Lovelace>,
     ) -> (bool, Lovelace, usize, usize, usize) {
         let mut different = Vec::new();
         let mut extra = Vec::new();
         let mut missing = Vec::new();
 
         // Compare the SPDD table by checking three properties:
-        // 1. All values from Computed SPDD, which present in Ethalon, are equal
-        // 2. There are no non-zero values from Computed SPDD, which are absent in Ethalon.
+        // 1. All values from Computed SPDD, which present in Reference, are equal
+        // 2. There are no non-zero values from Computed SPDD, which are absent in Reference.
 
         let mut total_computed = 0;
         for (pool, computed_stake) in spdd.iter() {
             total_computed += computed_stake.live;
-            if let Some(eth_stake) = ethalon.get(pool) {
-                if *eth_stake != computed_stake.live {
-                    different.push((pool, eth_stake, computed_stake.live));
+            if let Some(ref_stake) = reference.get(pool) {
+                if *ref_stake != computed_stake.live {
+                    different.push((pool, ref_stake, computed_stake.live));
                 }
             } else if computed_stake.live != 0 {
                 extra.push((pool, computed_stake.live));
             }
         }
 
-        // 2. All non-zero values from Ethalon must present in Computed SPDD.
+        // 3. All non-zero values from Reference must present in Computed SPDD.
 
-        let mut total_ethalon = 0;
-        for (pool, eth_stake) in ethalon.iter() {
-            total_ethalon += eth_stake;
-            if *eth_stake != 0 && spdd.get(pool).is_none() {
-                missing.push((pool, eth_stake));
+        let mut total_reference = 0;
+        for (pool, ref_stake) in reference.iter() {
+            total_reference += ref_stake;
+            if *ref_stake != 0 && spdd.get(pool).is_none() {
+                missing.push((pool, ref_stake));
             }
         }
 
         // Check whether we have everything correct
 
-        if total_computed == total_ethalon
+        if total_computed == total_reference
             && different.is_empty()
             && extra.is_empty()
             && missing.is_empty()
@@ -385,40 +385,23 @@ impl Verifier {
 
         // There are some errors, print them
 
-        if total_computed != total_ethalon {
+        if total_computed != total_reference {
             error!(
                 "SPDD verification epoch {epoch} total active stake difference: \
-                ethalon {total_ethalon} != computed {total_computed}"
+                reference {total_reference} != computed {total_computed}"
             );
         }
 
-        if !different.is_empty() {
-            let message = different
-                .iter()
-                .map(|(p, e, s)| format!("{p}: eth {e} != comp {s}; "))
-                .collect::<String>();
-            error!(
-                "SPDD verificiation epoch {epoch} stake difference: {}",
-                message
-            );
+        for (p,e,s) in different.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: ref {e} != comp {s}");
         }
 
-        if !extra.is_empty() {
-            let message =
-                extra.iter().map(|(p, s)| format!("{p} (comp {s}); ")).collect::<String>();
-            error!(
-                "SPDD verification epoch {epoch}, extra pools in SPDD: {}",
-                message
-            );
+        for (p,s) in extra.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: No ref, comp {s}");
         }
 
-        if !missing.is_empty() {
-            let message =
-                missing.iter().map(|(p, e)| format!("{p} (eth {e}); ")).collect::<String>();
-            error!(
-                "SPDD verification epoch {epoch}, missing pools from SPDD: {}",
-                message
-            );
+        for (p,e) in missing.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: ref {e}, No comp");
         }
 
         (
@@ -454,9 +437,9 @@ mod tests {
         ];
 
         let mut spdd = BTreeMap::new();
-        let mut ethalon = BTreeMap::new();
+        let mut reference = BTreeMap::new();
 
-        for (idx, (cmp, eth)) in test_cases.iter().enumerate() {
+        for (idx, (cmp, refr)) in test_cases.iter().enumerate() {
             let poolid = PoolId::from([idx as u8; 28]);
 
             if let Some(cmp) = cmp {
@@ -470,13 +453,13 @@ mod tests {
                 );
             }
 
-            if let Some(eth) = eth {
-                ethalon.insert(poolid, *eth);
+            if let Some(refr) = refr {
+                reference.insert(poolid, *refr);
             }
         }
 
         assert_eq!(
-            Verifier::verify_spdd_impl(0, &spdd, &ethalon),
+            Verifier::verify_spdd_impl(0, &spdd, &reference),
             (false, 18, 4, 1, 1)
         );
     }
@@ -485,12 +468,11 @@ mod tests {
     fn test_read_spdd() {
         let mut verifier = Verifier::new();
         verifier.spdd_file_template = Some("./test-data/spdd-test.{}.csv".to_string());
-        //verifier.spdd_file_template = Some("./test-data/spdd.mainnet.{}.csv".to_string());
         let res = verifier.read_spdd(99999);
-        let eth = BTreeMap::from([
+        let refr = BTreeMap::from([
             (PoolId::from([1; 28]), 1000),
             (PoolId::from([0xee; 28]), 1111),
         ]);
-        assert_eq!(res, Some(eth))
+        assert_eq!(res, Some(refr))
     }
 }
