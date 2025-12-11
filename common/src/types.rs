@@ -695,7 +695,7 @@ declare_hash_type_with_bech32!(PoolId, 28, "pool");
 
 declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
 declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
-declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepKeyHash, 28, "drep");
 declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
@@ -827,6 +827,36 @@ impl Display for Point {
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
+
+/// Global 'pot' account state (treasury, reserves, deposits)
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Pots {
+    /// Unallocated reserves
+    pub reserves: Lovelace,
+
+    /// Treasury
+    pub treasury: Lovelace,
+
+    /// Deposits
+    pub deposits: Lovelace,
+}
+
+/// Registration change kind for stake addresses
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RegistrationChangeKind {
+    Registered,
+    Deregistered,
+}
+
+/// Registration change on a stake address during an epoch
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegistrationChange {
+    /// Stake address
+    pub address: StakeAddress,
+
+    /// Change type
+    pub kind: RegistrationChangeKind,
+}
 
 /// Rational number = numerator / denominator
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
@@ -2069,7 +2099,7 @@ impl GovernanceAction {
 pub enum Voter {
     ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
     ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
-    DRepKey(DrepKeyHash),
+    DRepKey(DRepKeyHash),
     DRepScript(DRepScriptHash),
     StakePoolKey(PoolId),
 }

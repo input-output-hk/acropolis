@@ -465,7 +465,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_read_spdd() {
         let mut verifier = Verifier::new();
         verifier.spdd_file_template = Some("./test-data/spdd-test.{}.csv".to_string());
