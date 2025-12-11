@@ -461,7 +461,7 @@ mod tests {
 
             if let Some(cmp) = cmp {
                 spdd.insert(
-                    poolid.clone(),
+                    poolid,
                     DelegatedStake {
                         active: *cmp,
                         active_delegators_count: 1,
@@ -471,7 +471,7 @@ mod tests {
             }
 
             if let Some(eth) = eth {
-                ethalon.insert(poolid.clone(), *eth);
+                ethalon.insert(poolid, *eth);
             }
         }
 
