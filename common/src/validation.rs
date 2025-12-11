@@ -3,19 +3,23 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use std::{array::TryFromSliceError, fmt::{Debug, Display, Formatter}, sync::Arc};
-use thiserror::Error;
-use caryatid_sdk::Context;
-use tracing::error;
-use anyhow::bail;
 use crate::{
+    messages::{CardanoMessage::BlockValidation, Message},
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
-    Address, BlockInfo, CommitteeCredential, GenesisKeyhash, GovActionId, KeyHash,
-    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress,
-    UTxOIdentifier, Value, Voter, VrfKeyHash,
-    messages::{CardanoMessage::BlockValidation, Message},
+    Address, BlockInfo, CommitteeCredential, GenesisKeyhash, GovActionId, KeyHash, Lovelace,
+    NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier, Value,
+    Voter, VrfKeyHash,
 };
+use anyhow::bail;
+use caryatid_sdk::Context;
+use std::{
+    array::TryFromSliceError,
+    fmt::{Debug, Display, Formatter},
+    sync::Arc,
+};
+use thiserror::Error;
+use tracing::error;
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -574,8 +578,10 @@ pub struct Mismatch<T: Debug + Display> {
 
 impl<T: Debug + Display> Display for Mismatch<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Supplied: {}, expected: {} {}",
-               self.supplied, self.expected_rel, self.expected
+        write!(
+            f,
+            "Supplied: {}, expected: {} {}",
+            self.supplied, self.expected_rel, self.expected
         )
     }
 }

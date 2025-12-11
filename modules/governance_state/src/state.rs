@@ -4,6 +4,7 @@ use crate::{
     alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
 };
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
     messages::{
@@ -20,7 +21,6 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
-use acropolis_common::validation::ValidationOutcomes;
 
 pub struct State {
     publisher: RollbackAwarePublisher<Message>,
@@ -116,9 +116,7 @@ impl State {
             {
                 let mut outcomes = ValidationOutcomes::new();
                 outcomes.push(ValidationError::BadGovernance(
-                    GovernanceValidationError::WrongProtocolForGovernance(
-                        ProtocolVersion::chang()
-                    )
+                    GovernanceValidationError::WrongProtocolForGovernance(ProtocolVersion::chang()),
                 ));
                 return Ok(outcomes);
             }

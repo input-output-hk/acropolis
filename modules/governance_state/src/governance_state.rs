@@ -1,6 +1,7 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
     declare_cardano_reader,
@@ -22,7 +23,6 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-use acropolis_common::validation::ValidationOutcomes;
 
 mod alonzo_babbage_voting;
 mod conway_voting;
