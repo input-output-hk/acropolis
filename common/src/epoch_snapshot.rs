@@ -5,6 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Display;
 
 /// SPO data captured in a stake snapshot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -273,4 +274,16 @@ pub struct SnapshotsContainer {
 
     /// Go snapshot (current epoch)
     pub go: EpochSnapshot,
+}
+
+impl Display for SnapshotsContainer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Mark: {}, Set: {}, Go: {}", self.mark, self.set, self.go)
+    }
+}
+
+impl Display for EpochSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "EpochSnapshot {{ epoch: {}, blocks: {}, pots: {:?} }}", self.epoch, self.blocks, self.pots)
+    }
 }

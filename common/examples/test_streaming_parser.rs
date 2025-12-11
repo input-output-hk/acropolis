@@ -128,7 +128,7 @@ impl AccountsCallback for CountingCallbacks {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some()
+            data.snapshots
         );
 
         // Keep first 10 for summary
