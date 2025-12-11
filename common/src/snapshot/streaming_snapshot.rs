@@ -655,8 +655,9 @@ pub struct AccountsBootstrapData {
     pub dreps: Vec<(DRepCredential, u64)>,
     /// Treasury, reserves, and deposits
     pub pots: Pots,
-    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation
-    pub snapshots: Option<SnapshotsContainer>,
+    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation.
+    /// Empty (default) for pre-Shelley eras.
+    pub snapshots: SnapshotsContainer,
 }
 
 /// Callback invoked with accounts bootstrap data
@@ -1237,6 +1238,10 @@ impl StreamingSnapshotParser {
                     "    Parsed pulsing reward snapshot: fees={}, r={}, delta_r1={}, delta_t1={}",
                     snapshot.fees, snapshot.r, snapshot.delta_r1, snapshot.delta_t1
                 );
+                info!(
+                    "    Reserves comparison: account_state.reserves={}, reward_snapshot.r={}, diff={}",
+                    reserves, snapshot.r, reserves as i64 - snapshot.r as i64
+                );
             }
             Some(PulsingRewardUpdate::Complete { update }) => {
                 info!(
@@ -1281,12 +1286,12 @@ impl StreamingSnapshotParser {
                     network.clone(),
                 );
                 callbacks.on_snapshots(processed.clone())?;
-                Some(processed)
+                processed
             }
             Err(e) => {
                 info!("    Failed to parse snapshots: {}", e);
-                info!("    Continuing with empty snapshots...");
-                None
+                info!("    Using empty snapshots (pre-Shelley or parse error)...");
+                SnapshotsContainer::default()
             }
         };
 

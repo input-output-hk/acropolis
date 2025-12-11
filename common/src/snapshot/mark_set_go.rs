@@ -149,12 +149,14 @@ impl RawSnapshotsContainer {
     /// Convert raw snapshots to processed SnapshotsContainer
     ///
     /// Block count assignments:
-    /// - Mark (epoch-2): No block data available, all pools get 0 blocks
+    /// - Mark (epoch-2): No block data available during bootstrap, all pools get 0 blocks
     /// - Set (epoch-1): Uses blocks_previous_epoch
     /// - Go (epoch): Uses blocks_current_epoch
     ///
-    /// Note: Pots are passed for the current epoch. For mark/set snapshots,
-    /// we don't have historical pots data during bootstrap, so they use default values.
+    /// Pots assignment:
+    /// - Mark snapshot gets the current epoch's pots because rewards calculation uses
+    ///   the stake distribution from E-2 (mark) with the pots from E (current).
+    /// - Set and Go use default pots as they're not used for rewards calculation.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
@@ -169,7 +171,7 @@ impl RawSnapshotsContainer {
             mark: self.mark.into_snapshot(
                 epoch.saturating_sub(2),
                 &empty_blocks,
-                Pots::default(),
+                pots,
                 network.clone(),
             ),
             set: self.set.into_snapshot(
@@ -178,7 +180,7 @@ impl RawSnapshotsContainer {
                 Pots::default(),
                 network.clone(),
             ),
-            go: self.go.into_snapshot(epoch, blocks_current_epoch, pots, network),
+            go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
         }
     }
 }

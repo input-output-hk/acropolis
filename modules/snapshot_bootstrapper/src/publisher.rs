@@ -204,7 +204,7 @@ impl AccountsCallback for SnapshotPublisher {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some(),
+            !data.snapshots.mark.spos.is_empty(),
         );
 
         // Convert the parsed data to the message type
@@ -404,6 +404,11 @@ impl SnapshotsCallback for SnapshotPublisher {
 
 impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
+        let total_blocks_previous: u32 =
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+        let total_blocks_current: u32 =
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+
         info!("Snapshot metadata for epoch {}", metadata.epoch);
         info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
@@ -412,14 +417,8 @@ impl SnapshotCallbacks for SnapshotPublisher {
             metadata.pot_balances.reserves,
             metadata.pot_balances.deposits
         );
-        info!(
-            "  - Previous epoch blocks: {}",
-            metadata.blocks_previous_epoch.len()
-        );
-        info!(
-            "  - Current epoch blocks: {}",
-            metadata.blocks_current_epoch.len()
-        );
+        info!("  - Previous epoch blocks: {}", total_blocks_previous);
+        info!("  - Current epoch blocks: {}", total_blocks_current);
 
         self.metadata = Some(metadata);
         Ok(())

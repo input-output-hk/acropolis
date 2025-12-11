@@ -263,7 +263,7 @@ impl EpochSnapshot {
 }
 
 /// Container for the three snapshots used in rewards calculation (mark, set, go)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
     /// Mark snapshot (epoch - 2)
     pub mark: EpochSnapshot,

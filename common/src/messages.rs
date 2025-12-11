@@ -426,8 +426,9 @@ pub struct AccountsBootstrapMessage {
     pub pots: Pots,
 
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
-    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state
-    pub bootstrap_snapshots: Option<SnapshotsContainer>,
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
+    /// Empty (default) for pre-Shelley eras.
+    pub bootstrap_snapshots: SnapshotsContainer,
 }
 
 #[allow(clippy::large_enum_variant)]
