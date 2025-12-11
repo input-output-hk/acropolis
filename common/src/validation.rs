@@ -8,7 +8,57 @@ use thiserror::Error;
 use caryatid_sdk::Context;
 use tracing::error;
 use anyhow::bail;
-use crate::{protocol_params::{Nonce, ProtocolVersion}, rational_number::RationalNumber, Address, BlockInfo, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier, Value, Voter, VrfKeyHash, messages::{CardanoMessage::BlockValidation, Message}, KeyHash};
+use crate::{
+    protocol_params::{Nonce, ProtocolVersion},
+    rational_number::RationalNumber,
+    Address, BlockInfo, CommitteeCredential, GenesisKeyhash, GovActionId, KeyHash,
+    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress,
+    UTxOIdentifier, Value, Voter, VrfKeyHash,
+    messages::{CardanoMessage::BlockValidation, Message},
+};
+
+/// Validation error
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
+pub enum ValidationError {
+    // Either a very peculiar and uncommon error, or a temporary substitution,
+    // which is to be later replaced with specific error.
+    #[error("Unclassified validation error: {0}")]
+    Unclassified(String),
+
+    #[error("VRF failure: {0}")]
+    BadVRF(#[from] VrfValidationError),
+
+    #[error("KES failure: {0}")]
+    BadKES(#[from] KesValidationError),
+
+    #[error(
+        "Invalid Transactions: {}", 
+        bad_transactions
+            .iter()
+            .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )]
+    BadTransactions {
+        bad_transactions: Vec<(u16, TransactionValidationError)>,
+    },
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+
+    #[error("Governance failure: {0}")]
+    BadGovernance(#[from] GovernanceValidationError),
+}
+
+/// Validation status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ValidationStatus {
+    /// All good
+    Go,
+
+    /// Error
+    NoGo(ValidationError),
+}
 
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
@@ -18,14 +68,40 @@ pub enum TransactionValidationError {
     CborDecodeError(String),
 
     /// **Cause**: Transaction is not in correct form.
-    #[error("Malformed Transaction: era={era}, reason={reason}")]
-    MalformedTransaction { era: Era, reason: String },
+    #[error("Malformed Transaction: {0}")]
+    MalformedTransaction(String),
 
-    /// **Cause**: UTxO rules failure
+    /// **Cause**: Phase 1 Validation Error
+    #[error("Phase 1 Validation Failed: {0}")]
+    Phase1ValidationError(#[from] Phase1ValidationError),
+
+    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    #[error("{0}")]
+    Other(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum Phase1ValidationError {
+    /// **Cause:** The UTXO has expired (Shelley only)
+    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
+    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+
+    /// **Cause:** The fee is too small.
+    #[error("Fee is too small: supplied={supplied}, required={required}")]
+    FeeTooSmallUTxO {
+        supplied: Lovelace,
+        required: Lovelace,
+    },
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** UTxO rules failure
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
-    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    /// **Cause:** Other errors (e.g. missing required field)
     #[error("{0}")]
     Other(String),
 }
@@ -38,21 +114,20 @@ pub enum TransactionValidationError {
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
-    /// ------------ Shelley Era Errors ------------
-    /// **Cause:** The UTXO has expired
-    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
-    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+    /// **Cause:** Malformed output
+    #[error("Malformed output at {output_index}: {reason}")]
+    MalformedOutput { output_index: usize, reason: String },
+
+    /// **Cause:** Malformed withdrawal
+    #[error("Malformed withdrawal at {withdrawal_index}: {reason}")]
+    MalformedWithdrawal {
+        withdrawal_index: usize,
+        reason: String,
+    },
 
     /// **Cause:** The input set is empty. (genesis transactions are exceptions)
     #[error("Input Set Empty UTXO")]
     InputSetEmptyUTxO,
-
-    /// **Cause:** The fee is too small.
-    #[error("Fee is too small: supplied={supplied}, required={required}")]
-    FeeTooSmallUTxO {
-        supplied: Lovelace,
-        required: Lovelace,
-    },
 
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
     #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
@@ -63,8 +138,8 @@ pub enum UTxOValidationError {
 
     /// **Cause:** Some of transaction outputs are on a different network than the expected one.
     #[error(
-        "Wrong network: expected={expected}, wrong_address={}, output_index={output_index}", 
-        wrong_address.to_string().unwrap_or("Invalid address".to_string()), 
+        "Wrong network: expected={expected}, wrong_address={}, output_index={output_index}",
+        wrong_address.to_string().unwrap_or("Invalid address".to_string()),
     )]
     WrongNetwork {
         expected: NetworkId,
@@ -97,6 +172,10 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
+}
+
+/*
+<<<<<<< HEAD
 
     /// **Cause:** The transaction size is too big.
     #[error("Max tx size: supplied={supplied}, max={max}")]
@@ -112,12 +191,6 @@ pub enum UTxOValidationError {
 pub enum ValidationError {
     #[error("Uncategorized validation error: {0}")]
     Unclassified(String),
-
-    #[error("VRF failure: {0}")]
-    BadVRF(#[from] VrfValidationError),
-
-    #[error("KES failure: {0}")]
-    BadKES(#[from] KesValidationError),
 
     #[error("Governance failure: {0}")]
     BadGovernance(#[from] GovernanceValidationError),
@@ -147,7 +220,10 @@ pub enum ValidationStatus {
 
     /// Error
     NoGo(ValidationError),
+=======
+>>>>>>> 3044df25822506dcc35c03367d554e40c4ef7bf4
 }
+     */
 
 impl ValidationStatus {
     pub fn is_go(&self) -> bool {
