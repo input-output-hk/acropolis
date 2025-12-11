@@ -2,13 +2,14 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
-    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, ProposalCallback,
-    RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, StakeCallback,
+    AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
+    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
     StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 use acropolis_common::{NetworkId, PoolRegistration};
@@ -97,18 +98,21 @@ impl PoolCallback for CountingCallbacks {
     }
 }
 
-impl StakeCallback for CountingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.account_count = accounts.len();
-        if !accounts.is_empty() {
-            eprintln!("Parsed {} stake accounts", accounts.len());
+impl AccountsCallback for CountingCallbacks {
+    fn on_accounts(
+        &mut self,
+        data: acropolis_common::snapshot::AccountsBootstrapData,
+    ) -> Result<()> {
+        self.account_count = data.accounts.len();
+        if !data.accounts.is_empty() {
+            eprintln!("Parsed {} stake accounts", data.accounts.len());
 
             // Show first 10 accounts
-            for (i, account) in accounts.iter().take(10).enumerate() {
+            for (i, account) in data.accounts.iter().take(10).enumerate() {
                 eprintln!(
                     "  Account #{}: {} (utxo: {}, rewards: {}, pool: {:?}, drep: {:?})",
                     i + 1,
-                    &account.stake_address[..32],
+                    &account.stake_address.to_string().unwrap(),
                     account.address_state.utxo_value,
                     account.address_state.rewards,
                     account.address_state.delegated_spo.as_ref().map(|s| &s[..16]),
@@ -117,8 +121,17 @@ impl StakeCallback for CountingCallbacks {
             }
         }
 
+        eprintln!(
+            "AccountsBootstrapData: epoch={}, pools={}, retiring={}, dreps={}, snapshots={}",
+            data.epoch,
+            data.pools.len(),
+            data.retiring_pools.len(),
+            data.dreps.len(),
+            data.snapshots.is_some()
+        );
+
         // Keep first 10 for summary
-        self.sample_accounts = accounts.into_iter().take(10).collect();
+        self.sample_accounts = data.accounts.into_iter().take(10).collect();
         Ok(())
     }
 }
@@ -134,7 +147,7 @@ impl DRepCallback for CountingCallbacks {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {}) - {}",
                     i + 1,
-                    drep.drep_id,
+                    drep.drep_id.to_drep_bech32().unwrap(),
                     drep.deposit,
                     anchor.url
                 );
@@ -142,7 +155,7 @@ impl DRepCallback for CountingCallbacks {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {})",
                     i + 1,
-                    drep.drep_id,
+                    drep.drep_id.to_drep_bech32().unwrap(),
                     drep.deposit
                 );
             }
@@ -336,30 +349,6 @@ impl SnapshotCallbacks for CountingCallbacks {
             total_blocks_current
         );
 
-        // Show snapshots info if available
-        if let Some(snapshots_info) = &metadata.snapshots {
-            eprintln!("  Snapshots Info:");
-            eprintln!(
-                "    Mark snapshot: {} sections",
-                snapshots_info.mark.sections_count
-            );
-            eprintln!(
-                "    Set snapshot: {} sections",
-                snapshots_info.set.sections_count
-            );
-            eprintln!(
-                "    Go snapshot: {} sections",
-                snapshots_info.go.sections_count
-            );
-            eprintln!(
-                "    Fee value: {} lovelace ({} ADA)",
-                snapshots_info.fee,
-                snapshots_info.fee as f64 / 1_000_000.0
-            );
-        } else {
-            eprintln!("  No snapshots data available");
-        }
-
         // Show top block producers if any
         if !metadata.blocks_previous_epoch.is_empty() {
             eprintln!("  Previous epoch top producers (first 3):");
@@ -414,67 +403,26 @@ impl SnapshotCallbacks for CountingCallbacks {
 }
 
 impl SnapshotsCallback for CountingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
-        eprintln!("Raw Snapshots Data:");
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
+        eprintln!("Snapshots Data:");
         eprintln!();
 
-        // Calculate total stakes and delegator counts from VMap data
-        let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
-        let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
-        let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
-
-        eprintln!("Mark Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.mark.0.len());
+        eprintln!("Mark Snapshot (epoch {}):", snapshots.mark.epoch);
+        eprintln!("  SPOs: {}", snapshots.mark.spos.len());
+        let mark_total: u64 = snapshots.mark.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", mark_total as f64 / 1_000_000.0);
-        if !snapshots.mark.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.mark.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Set Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.set.0.len());
+        eprintln!("Set Snapshot (epoch {}):", snapshots.set.epoch);
+        eprintln!("  SPOs: {}", snapshots.set.spos.len());
+        let set_total: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", set_total as f64 / 1_000_000.0);
-        if !snapshots.set.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.set.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Go Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.go.0.len());
+        eprintln!("Go Snapshot (epoch {}):", snapshots.go.epoch);
+        eprintln!("  SPOs: {}", snapshots.go.spos.len());
+        let go_total: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
-        if !snapshots.go.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.go.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
-        eprintln!();
-
-        eprintln!("Fee: {:.2} ADA", snapshots.fee as f64 / 1_000_000.0);
         eprintln!();
 
         Ok(())
@@ -539,18 +487,6 @@ fn main() {
                     total_blocks_current
                 );
 
-                // Show snapshots info summary
-                if let Some(snapshots_info) = &metadata.snapshots {
-                    println!("  Snapshots Summary:");
-                    println!(
-                        "    Mark: {} sections, Set: {} sections, Go: {} sections, Fee: {} ADA",
-                        snapshots_info.mark.sections_count,
-                        snapshots_info.set.sections_count,
-                        snapshots_info.go.sections_count,
-                        snapshots_info.fee as f64 / 1_000_000.0
-                    );
-                }
-
                 println!();
             }
 
@@ -601,7 +537,7 @@ fn main() {
                     println!(
                         "  {}: {} (utxo: {}, rewards: {})",
                         i + 1,
-                        &account.stake_address[..32],
+                        &account.stake_address.to_string().unwrap(),
                         account.address_state.utxo_value,
                         account.address_state.rewards
                     );
@@ -616,7 +552,7 @@ fn main() {
                     print!(
                         "  {}: {} (deposit: {} lovelace)",
                         i + 1,
-                        drep.drep_id,
+                        drep.drep_id.to_drep_bech32().unwrap(),
                         drep.deposit
                     );
                     if let Some(anchor) = &drep.anchor {

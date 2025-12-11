@@ -8,6 +8,7 @@ pub mod cip19;
 pub mod commands;
 pub mod configuration;
 pub mod crypto;
+pub mod epoch_snapshot;
 pub mod genesis_values;
 pub mod hash;
 pub mod ledger_state;

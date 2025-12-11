@@ -1,7 +1,8 @@
 //! Acropolis AccountsState: monetary (reserves, treasury) calculations
 
-use crate::state::Pots;
-use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace};
+use acropolis_common::{
+    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, Pots,
+};
 use anyhow::{anyhow, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive};
 use tracing::info;
