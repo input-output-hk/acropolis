@@ -1985,10 +1985,8 @@ impl StreamingSnapshotParser {
                     decoder.decode().context("Failed to decode pulsing_rew_update")?;
 
                 // Handle indefinite array break if needed
-                if len.is_none() {
-                    if decoder.datatype()? == Type::Break {
-                        decoder.skip()?;
-                    }
+                if len.is_none() && decoder.datatype()? == Type::Break {
+                    decoder.skip()?;
                 }
 
                 Ok(Some(update))
