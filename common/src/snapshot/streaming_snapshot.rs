@@ -27,12 +27,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
 pub use crate::hash::Hash;
+use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-pub use crate::StakeCredential;
+pub use crate::{
+    Constitution, EpochBootstrapData, Lovelace, MultiHostName, NetworkId, PoolId, PoolMetadata,
+    PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
+};
 
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
@@ -42,7 +47,6 @@ use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 // -----------------------------------------------------------------------------
 
 pub type Epoch = u64;
-pub type Lovelace = u64;
 
 /*
  * This was replaced with the StakeCredential defined in types.rs, but the implementation here is much
@@ -176,27 +180,27 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 
 /// Set type (encoded as array, sometimes with CBOR tag 258)
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Set<T>(pub Vec<T>);
+pub struct SnapshotSet<T>(pub Vec<T>);
 
-impl<T> Set<T> {
+impl<T> SnapshotSet<T> {
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.0.iter()
     }
 }
 
-impl<T> From<Vec<T>> for Set<T> {
+impl<T> From<Vec<T>> for SnapshotSet<T> {
     fn from(vec: Vec<T>) -> Self {
-        Set(vec)
+        SnapshotSet(vec)
     }
 }
 
-impl<T> From<Set<T>> for Vec<T> {
-    fn from(set: Set<T>) -> Self {
+impl<T> From<SnapshotSet<T>> for Vec<T> {
+    fn from(set: SnapshotSet<T>) -> Self {
         set.0
     }
 }
 
-impl<'b, C, T> minicbor::Decode<'b, C> for Set<T>
+impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotSet<T>
 where
     T: minicbor::Decode<'b, C>,
 {
@@ -207,11 +211,11 @@ where
         }
 
         let vec: Vec<T> = d.decode_with(ctx)?;
-        Ok(Set(vec))
+        Ok(SnapshotSet(vec))
     }
 }
 
-impl<C, T> minicbor::Encode<C> for Set<T>
+impl<C, T> minicbor::Encode<C> for SnapshotSet<T>
 where
     T: minicbor::Encode<C>,
 {
@@ -290,7 +294,7 @@ impl<C> minicbor::Encode<C> for DRep {
 #[derive(Debug)]
 pub struct Account {
     pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
-    pub pointers: Set<(u64, u64, u64)>,
+    pub pointers: SnapshotSet<(u64, u64, u64)>,
     pub pool: StrictMaybe<PoolId>,
     pub drep: StrictMaybe<DRep>,
 }
@@ -308,48 +312,71 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 }
 
 // -----------------------------------------------------------------------------
-// Type aliases for pool_params compatibility
+// Type decoders for snapshot compatibility
 // -----------------------------------------------------------------------------
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::{Constitution, EpochBootstrapData, PoolId};
-/// Alias minicbor as cbor for pool_params module
-pub use minicbor as cbor;
 
-/// Coin amount (Lovelace)
-pub type Coin = u64;
+pub struct SnapshotContext {
+    pub network: NetworkId,
+}
 
-/// Reward account (stake address bytes) - wrapper to handle CBOR bytes encoding
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RewardAccount(pub Vec<u8>);
-
-impl<'b, C> minicbor::Decode<'b, C> for RewardAccount {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let bytes = d.bytes()?;
-        Ok(RewardAccount(bytes.to_vec()))
+impl AsRef<SnapshotContext> for SnapshotContext {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
-impl<C> minicbor::Encode<C> for RewardAccount {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
+struct SnapshotOption<T>(pub Option<T>);
+
+impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
+where
+    T: minicbor::Decode<'b, C>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        match d.datatype()? {
+            Type::Null | Type::Undefined => {
+                d.skip()?;
+                Ok(SnapshotOption(None))
+            }
+            _ => {
+                let t = T::decode(d, ctx)?;
+                Ok(SnapshotOption(Some(t)))
+            }
+        }
     }
 }
 
-/// Unit interval (rational number for pool margin)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnitInterval {
-    pub numerator: u64,
-    pub denominator: u64,
+pub struct SnapshotPoolRegistration(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistration
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let _len = d.array()?;
+        Ok(Self(PoolRegistration {
+            operator: d.decode_with(ctx)?,
+            vrf_key_hash: d.decode_with(ctx)?,
+            pledge: d.decode_with(ctx)?,
+            cost: d.decode_with(ctx)?,
+            margin: (SnapshotRatio::decode(d, ctx)?).0,
+            reward_account: (SnapshotStakeAddress::decode(d, ctx)?).0,
+            pool_owners: (SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?)
+                .0
+                .into_iter()
+                .map(|a| a.0)
+                .collect(),
+            relays: (Vec::<SnapshotRelay>::decode(d, ctx)?).into_iter().map(|r| r.0).collect(),
+            pool_metadata: (SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?).0.map(|m| m.0),
+        }))
+    }
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for UnitInterval {
+struct SnapshotRatio(pub Ratio);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         // UnitInterval might be tagged (tag 30 for rational)
         if matches!(d.datatype()?, Type::Tag) {
@@ -358,130 +385,48 @@ impl<'b, C> minicbor::Decode<'b, C> for UnitInterval {
         d.array()?;
         let numerator = d.u64()?;
         let denominator = d.u64()?;
-        Ok(UnitInterval {
+        Ok(Self(Ratio {
             numerator,
             denominator,
-        })
-    }
-}
-
-impl<C> minicbor::Encode<C> for UnitInterval {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.tag(minicbor::data::Tag::new(30))?;
-        e.array(2)?;
-        e.u64(self.numerator)?;
-        e.u64(self.denominator)?;
-        Ok(())
-    }
-}
-
-/// Nullable type (like Maybe but with explicit null vs undefined)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Nullable<T> {
-    Undefined,
-    Null,
-    Some(T),
-}
-
-impl<'b, C, T> minicbor::Decode<'b, C> for Nullable<T>
-where
-    T: minicbor::Decode<'b, C>,
-{
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        match d.datatype()? {
-            Type::Null => {
-                d.skip()?;
-                Ok(Nullable::Null)
-            }
-            Type::Undefined => {
-                d.skip()?;
-                Ok(Nullable::Undefined)
-            }
-            _ => {
-                let value = T::decode(d, ctx)?;
-                Ok(Nullable::Some(value))
-            }
-        }
-    }
-}
-
-impl<C, T> minicbor::Encode<C> for Nullable<T>
-where
-    T: minicbor::Encode<C>,
-{
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        match self {
-            Nullable::Undefined => e.undefined()?.ok(),
-            Nullable::Null => e.null()?.ok(),
-            Nullable::Some(v) => v.encode(e, ctx),
-        }
+        }))
     }
 }
 
 // Network types for pool relays
-pub type Port = u32;
+pub type SnapshotPort = u32;
 
-/// IPv4 address (4 bytes, encoded as CBOR bytes)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IPv4(pub Vec<u8>);
+struct SnapshotStakeAddress(pub StakeAddress);
 
-impl<'b, C> minicbor::Decode<'b, C> for IPv4 {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.bytes()?;
-        Ok(IPv4(bytes.to_vec()))
+        let bytes = bytes.to_vec();
+        Ok(Self(StakeAddress::from_binary(&bytes).map_err(|e| {
+            minicbor::decode::Error::message(e.to_string())
+        })?))
     }
 }
 
-impl<C> minicbor::Encode<C> for IPv4 {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
-    }
-}
+struct SnapshotStakeAddressFromCred(pub StakeAddress);
 
-/// IPv6 address (16 bytes, encoded as CBOR bytes)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IPv6(pub Vec<u8>);
-
-impl<'b, C> minicbor::Decode<'b, C> for IPv6 {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.bytes()?;
-        Ok(IPv6(bytes.to_vec()))
+        let bytes = Hash::<28>::try_from(bytes)
+            .map_err(|e| minicbor::decode::Error::message(e.to_string()))?;
+        Ok(Self(StakeAddress::new(
+            StakeCredential::AddrKeyHash(bytes),
+            ctx.as_ref().network.clone(),
+        )))
     }
 }
 
-impl<C> minicbor::Encode<C> for IPv6 {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
-    }
-}
+struct SnapshotRelay(pub Relay);
 
-/// Pool relay types (for CBOR encoding/decoding)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Relay {
-    SingleHostAddr(Nullable<Port>, Nullable<IPv4>, Nullable<IPv6>),
-    SingleHostName(Nullable<Port>, String),
-    MultiHostName(String),
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for Relay {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let tag = d.u32()?;
@@ -489,85 +434,42 @@ impl<'b, C> minicbor::Decode<'b, C> for Relay {
         match tag {
             0 => {
                 // SingleHostAddr
-                let port = Nullable::<Port>::decode(d, ctx)?;
-                let ipv4 = Nullable::<IPv4>::decode(d, ctx)?;
-                let ipv6 = Nullable::<IPv6>::decode(d, ctx)?;
-                Ok(Relay::SingleHostAddr(port, ipv4, ipv6))
+                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let ipv4 = Option::<Ipv4Addr>::decode(d, ctx)?;
+                let ipv6 = Option::<Ipv6Addr>::decode(d, ctx)?;
+                Ok(Self(Relay::SingleHostAddr(SingleHostAddr {
+                    port,
+                    ipv4,
+                    ipv6,
+                })))
             }
             1 => {
                 // SingleHostName
-                let port = Nullable::<Port>::decode(d, ctx)?;
-                let hostname = d.str()?.to_string();
-                Ok(Relay::SingleHostName(port, hostname))
+                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let dns_name = d.str()?.to_string();
+                Ok(Self(Relay::SingleHostName(SingleHostName {
+                    port,
+                    dns_name,
+                })))
             }
             2 => {
                 // MultiHostName
-                let hostname = d.str()?.to_string();
-                Ok(Relay::MultiHostName(hostname))
+                let dns_name = d.str()?.to_string();
+                Ok(Self(Relay::MultiHostName(MultiHostName { dns_name })))
             }
             _ => Err(minicbor::decode::Error::message("Invalid relay tag")),
         }
     }
 }
 
-impl<C> minicbor::Encode<C> for Relay {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        match self {
-            Relay::SingleHostAddr(port, ipv4, ipv6) => {
-                e.array(4)?;
-                e.u32(0)?;
-                port.encode(e, ctx)?;
-                ipv4.encode(e, ctx)?;
-                ipv6.encode(e, ctx)?;
-                Ok(())
-            }
-            Relay::SingleHostName(port, hostname) => {
-                e.array(3)?;
-                e.u32(1)?;
-                port.encode(e, ctx)?;
-                e.str(hostname)?;
-                Ok(())
-            }
-            Relay::MultiHostName(hostname) => {
-                e.array(2)?;
-                e.u32(2)?;
-                e.str(hostname)?;
-                Ok(())
-            }
-        }
-    }
-}
+struct SnapshotPoolMetadata(pub PoolMetadata);
 
-/// Pool metadata (for CBOR encoding/decoding)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PoolMetadata {
-    pub url: String,
-    pub hash: Hash<32>,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for PoolMetadata {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let url = d.str()?.to_string();
-        let hash = Hash::<32>::decode(d, ctx)?;
-        Ok(PoolMetadata { url, hash })
-    }
-}
-
-impl<C> minicbor::Encode<C> for PoolMetadata {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.array(2)?;
-        e.str(&self.url)?;
-        self.hash.encode(e, ctx)?;
-        Ok(())
+        let hash = (Hash::<32>::decode(d, ctx)?).to_vec();
+        Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }
 
@@ -581,7 +483,7 @@ pub struct DRepState {
     pub expiry: Epoch,
     pub anchor: StrictMaybe<Anchor>,
     pub deposit: Lovelace,
-    pub delegators: Set<StakeCredential>,
+    pub delegators: SnapshotSet<StakeCredential>,
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for DRepState {
@@ -600,7 +502,7 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
         if matches!(d.datatype()?, Type::Tag) {
             d.tag()?; // skip the tag
         }
-        let delegators = Set::<StakeCredential>::decode(d, ctx)?;
+        let delegators = SnapshotSet::<StakeCredential>::decode(d, ctx)?;
 
         Ok(DRepState {
             expiry,
@@ -661,58 +563,6 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
 // -----------------------------------------------------------------------------
 // Data Structures (based on OpenAPI schema)
 // -----------------------------------------------------------------------------
-
-/// Stake pool information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolInfo {
-    /// Bech32-encoded pool ID
-    pub pool_id: String,
-    /// Hex-encoded VRF key hash
-    pub vrf_key_hash: String,
-    /// Pledge amount in Lovelace
-    pub pledge: u64,
-    /// Fixed cost in Lovelace
-    pub cost: u64,
-    /// Pool margin (0.0 to 1.0)
-    pub margin: f64,
-    /// Bech32-encoded reward account
-    pub reward_account: String,
-    /// List of pool owner stake addresses
-    pub pool_owners: Vec<String>,
-    /// Pool relay information
-    pub relays: Vec<ApiRelay>,
-    /// Pool metadata (URL and hash)
-    pub pool_metadata: Option<ApiPoolMetadata>,
-    /// Optional retirement epoch
-    pub retirement_epoch: Option<u64>,
-}
-
-/// Pool relay information (for API/JSON output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub enum ApiRelay {
-    SingleHostAddr {
-        port: Option<u16>,
-        ipv4: Option<String>,
-        ipv6: Option<String>,
-    },
-    SingleHostName {
-        port: Option<u16>,
-        dns_name: String,
-    },
-    MultiHostName {
-        dns_name: String,
-    },
-}
-
-/// Pool metadata anchor (for API/JSON output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiPoolMetadata {
-    /// IPFS or HTTP(S) URL
-    pub url: String,
-    /// Hex-encoded hash
-    pub hash: String,
-}
 
 /// DRep information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -796,7 +646,7 @@ pub trait EpochCallback {
 /// Callback invoked with bulk stake pool data
 pub trait PoolCallback {
     /// Called once with all pool data
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()>;
+    fn on_pools(&mut self, spo_state: SPOState) -> Result<()>;
 }
 
 /// Callback invoked with bulk stake account data
@@ -855,7 +705,7 @@ struct ParsedMetadata {
     epoch: u64,
     treasury: u64,
     reserves: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
     blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
@@ -868,7 +718,7 @@ struct ParsedMetadataWithoutUtxoPosition {
     epoch: u64,
     treasury: u64,
     reserves: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
     blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
@@ -948,9 +798,11 @@ impl StreamingSnapshotParser {
     ///   5: StakeDistr,
     /// ]
     /// ```
-    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C) -> Result<()> {
+    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C, network: NetworkId) -> Result<()> {
         let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
+
+        let mut ctx = SnapshotContext { network };
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
@@ -1078,8 +930,8 @@ impl StreamingSnapshotParser {
                 Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
             // Parse PState [3][1][0][1] for pools
-            let pools =
-                Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
+            let pools = Self::parse_pstate(&mut decoder, &mut ctx)
+                .context("Failed to parse PState for pools")?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
             // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
@@ -1357,7 +1209,7 @@ impl StreamingSnapshotParser {
 
         // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
         let snapshots_result =
-            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, epoch);
+            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
         match &snapshots_result {
             Ok(raw_snapshots) => {
@@ -1833,7 +1685,7 @@ impl StreamingSnapshotParser {
 
     /// Parse PState to extract stake pools
     /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
-    pub fn parse_pstate(decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
+    pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
         // Parse PState array
         let pstate_len = decoder
             .array()
@@ -1852,17 +1704,17 @@ impl StreamingSnapshotParser {
             decoder.tag()?; // skip tag if present
         }
 
-        let mut pools_map = BTreeMap::new();
+        let mut pools = BTreeMap::new();
         match decoder.map()? {
             Some(pool_count) => {
                 // Definite-length map
                 for i in 0..pool_count {
-                    let pool_id: Hash<28> =
-                        decoder.decode().context(format!("Failed to decode pool ID #{i}"))?;
-                    let params: super::pool_params::PoolParams = decoder
-                        .decode()
-                        .context(format!("Failed to decode pool params for pool #{i}"))?;
-                    pools_map.insert(pool_id, params);
+                    let pool_id: PoolId =
+                        decoder.decode().context(format!("Failed to decode pool id #{i}"))?;
+                    let pool: SnapshotPoolRegistration = decoder
+                        .decode_with(ctx)
+                        .context(format!("Failed to decode pool for pool #{i}"))?;
+                    pools.insert(pool_id, pool.0);
                 }
             }
             None => {
@@ -1875,13 +1727,13 @@ impl StreamingSnapshotParser {
                             break;
                         }
                         _ => {
-                            let pool_id: Hash<28> = decoder
+                            let pool_id: PoolId = decoder
                                 .decode()
-                                .context(format!("Failed to decode pool ID #{count}"))?;
-                            let params: super::pool_params::PoolParams = decoder.decode().context(
-                                format!("Failed to decode pool params for pool #{count}"),
-                            )?;
-                            pools_map.insert(pool_id, params);
+                                .context(format!("Failed to decode pool id #{count}"))?;
+                            let pool: SnapshotPoolRegistration = decoder
+                                .decode_with(ctx)
+                                .context(format!("Failed to decode pool for pool #{count}"))?;
+                            pools.insert(pool_id, pool.0);
                             count += 1;
                         }
                     }
@@ -1893,103 +1745,25 @@ impl StreamingSnapshotParser {
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let _pools_updates: BTreeMap<Hash<28>, super::pool_params::PoolParams> =
-            decoder.decode()?;
+        let updates: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder.decode_with(ctx)?;
+        let updates = updates.into_iter().map(|(id, pool)| (id, pool.0)).collect();
 
         // Parse retiring map [2]: PoolId -> Epoch
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let pools_retirements: BTreeMap<Hash<28>, Epoch> = decoder.decode()?;
-
-        // Convert to PoolInfo for API compatibility
-        let pools = pools_map
-            .into_iter()
-            .map(|(pool_id, params)| {
-                // Convert relay types from ledger format to API format
-                let relays: Vec<ApiRelay> = params
-                    .relays
-                    .iter()
-                    .map(|relay| match relay {
-                        Relay::SingleHostAddr(port, ipv4, ipv6) => {
-                            let port_opt = match port {
-                                Nullable::Some(p) => u16::try_from(*p).ok(),
-                                _ => None,
-                            };
-                            let ipv4_opt = match ipv4 {
-                                Nullable::Some(bytes) if bytes.0.len() == 4 => Some(format!(
-                                    "{}.{}.{}.{}",
-                                    bytes.0[0], bytes.0[1], bytes.0[2], bytes.0[3]
-                                )),
-                                _ => None,
-                            };
-                            let ipv6_opt = match ipv6 {
-                                Nullable::Some(bytes) if bytes.0.len() == 16 => {
-                                    // Convert big-endian byte array to IPv6 string
-                                    let b = &bytes.0;
-                                    let addr = std::net::Ipv6Addr::from([
-                                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
-                                        b[10], b[11], b[12], b[13], b[14], b[15],
-                                    ]);
-                                    Some(addr.to_string())
-                                }
-                                _ => None,
-                            };
-                            ApiRelay::SingleHostAddr {
-                                port: port_opt,
-                                ipv4: ipv4_opt,
-                                ipv6: ipv6_opt,
-                            }
-                        }
-                        Relay::SingleHostName(port, hostname) => {
-                            let port_opt = match port {
-                                Nullable::Some(p) => Some(*p as u16),
-                                _ => None,
-                            };
-                            ApiRelay::SingleHostName {
-                                port: port_opt,
-                                dns_name: hostname.clone(),
-                            }
-                        }
-                        Relay::MultiHostName(hostname) => ApiRelay::MultiHostName {
-                            dns_name: hostname.clone(),
-                        },
-                    })
-                    .collect();
-
-                // Convert metadata from ledger format to API format
-                let pool_metadata = match &params.metadata {
-                    Nullable::Some(meta) => Some(ApiPoolMetadata {
-                        url: meta.url.clone(),
-                        hash: meta.hash.to_string(),
-                    }),
-                    _ => None,
-                };
-
-                // Look up retirement epoch
-                let retirement_epoch = pools_retirements.get(&pool_id).copied();
-
-                PoolInfo {
-                    pool_id: pool_id.to_string(),
-                    vrf_key_hash: params.vrf.to_string(),
-                    pledge: params.pledge,
-                    cost: params.cost,
-                    margin: (params.margin.numerator as f64) / (params.margin.denominator as f64),
-                    reward_account: hex::encode(&params.reward_account.0),
-                    pool_owners: params.owners.iter().map(|h| h.to_string()).collect(),
-                    relays,
-                    pool_metadata,
-                    retirement_epoch,
-                }
-            })
-            .collect();
+        let retiring: BTreeMap<PoolId, Epoch> = decoder.decode()?;
 
         // Skip any remaining PState elements (like deposits)
         for i in 3..pstate_len {
             decoder.skip().context(format!("Failed to skip PState[{i}]"))?;
         }
 
-        Ok(pools)
+        Ok(SPOState {
+            pools,
+            updates,
+            retiring,
+        })
     }
 
     /// Stream UTXOs with per-entry callback
@@ -2133,6 +1907,7 @@ impl StreamingSnapshotParser {
     /// Epoch State / Snapshots / Fee
     fn parse_snapshots_with_hybrid_approach(
         decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
         _epoch: u64,
     ) -> Result<RawSnapshotsContainer> {
         info!("    Starting snapshots parsing...");
@@ -2157,19 +1932,20 @@ impl StreamingSnapshotParser {
 
         // Parse Mark snapshot [0]
         info!("    Parsing Mark snapshot...");
-        let mark_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
-            .context("Failed to parse Mark snapshot")?;
+        let mark_snapshot =
+            super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Mark")
+                .context("Failed to parse Mark snapshot")?;
         parsed_snapshots.push(mark_snapshot);
 
         // Parse Set snapshot [1]
         info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
+        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Set")
             .context("Failed to parse Set snapshot")?;
         parsed_snapshots.push(set_snapshot);
 
         // Parse Go snapshot [2]
         info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
+        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Go")
             .context("Failed to parse Go snapshot")?;
         parsed_snapshots.push(go_snapshot);
 
@@ -2236,7 +2012,7 @@ pub struct SnapshotsInfo {
 pub struct CollectingCallbacks {
     pub metadata: Option<SnapshotMetadata>,
     pub utxos: Vec<UtxoEntry>,
-    pub pools: Vec<PoolInfo>,
+    pub pools: SPOState,
     pub accounts: Vec<AccountState>,
     pub dreps: Vec<DRepInfo>,
     pub proposals: Vec<GovernanceProposal>,
@@ -2262,7 +2038,7 @@ impl EpochCallback for CollectingCallbacks {
 }
 
 impl PoolCallback for CollectingCallbacks {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
         self.pools = pools;
         Ok(())
     }

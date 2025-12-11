@@ -13,6 +13,41 @@ use crate::{
     UTxOIdentifier, VKeyWitness, Value, VrfKeyHash,
 };
 
+/// Validation status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ValidationStatus {
+    /// All good
+    Go,
+
+    /// Error
+    NoGo(ValidationError),
+}
+
+/// Validation error
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
+pub enum ValidationError {
+    #[error("VRF failure: {0}")]
+    BadVRF(#[from] VrfValidationError),
+
+    #[error("KES failure: {0}")]
+    BadKES(#[from] KesValidationError),
+
+    #[error(
+        "Invalid Transactions: {}", 
+        bad_transactions
+            .iter()
+            .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
+            .collect::<Vec<_>>()
+            .join("; ")
+    )]
+    BadTransactions {
+        bad_transactions: Vec<(u16, TransactionValidationError)>,
+    },
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError(usize, String),
+}
+
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum TransactionValidationError {
@@ -21,10 +56,36 @@ pub enum TransactionValidationError {
     CborDecodeError(String),
 
     /// **Cause**: Transaction is not in correct form.
-    #[error("Malformed Transaction: era={era}, reason={reason}")]
-    MalformedTransaction { era: Era, reason: String },
+    #[error("Malformed Transaction: {0}")]
+    MalformedTransaction(String),
 
-    /// **Cause**: UTxO rules failure
+    /// **Cause**: Phase 1 Validation Error
+    #[error("Phase 1 Validation Failed: {0}")]
+    Phase1ValidationError(#[from] Phase1ValidationError),
+
+    /// **Cause:** Other errors (e.g. Invalid shelley params)
+    #[error("{0}")]
+    Other(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum Phase1ValidationError {
+    /// **Cause:** The UTXO has expired (Shelley only)
+    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
+    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+
+    /// **Cause:** The fee is too small.
+    #[error("Fee is too small: supplied={supplied}, required={required}")]
+    FeeTooSmallUTxO {
+        supplied: Lovelace,
+        required: Lovelace,
+    },
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** UTxO rules failure
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
@@ -45,21 +106,20 @@ pub enum TransactionValidationError {
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
-    /// ------------ Shelley Era Errors ------------
-    /// **Cause:** The UTXO has expired
-    #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
-    ExpiredUTxO { ttl: Slot, current_slot: Slot },
+    /// **Cause:** Malformed output
+    #[error("Malformed output at {output_index}: {reason}")]
+    MalformedOutput { output_index: usize, reason: String },
+
+    /// **Cause:** Malformed withdrawal
+    #[error("Malformed withdrawal at {withdrawal_index}: {reason}")]
+    MalformedWithdrawal {
+        withdrawal_index: usize,
+        reason: String,
+    },
 
     /// **Cause:** The input set is empty. (genesis transactions are exceptions)
     #[error("Input Set Empty UTXO")]
     InputSetEmptyUTxO,
-
-    /// **Cause:** The fee is too small.
-    #[error("Fee is too small: supplied={supplied}, required={required}")]
-    FeeTooSmallUTxO {
-        supplied: Lovelace,
-        required: Lovelace,
-    },
 
     /// **Cause:** Some of transaction inputs are not in current UTxOs set.
     #[error("Bad inputs: bad_input={bad_input}, bad_input_index={bad_input_index}")]
@@ -192,41 +252,6 @@ pub enum UTxOWValidationError {
         "Malformed address: address={}, reason={reason}", address.to_string().unwrap_or("Invalid address".to_string())
     )]
     MalformedAddress { address: Address, reason: String },
-}
-
-/// Validation error
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
-pub enum ValidationError {
-    #[error("VRF failure: {0}")]
-    BadVRF(#[from] VrfValidationError),
-
-    #[error("KES failure: {0}")]
-    BadKES(#[from] KesValidationError),
-
-    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
-    BadTransaction {
-        tx_index: u16,
-        error: TransactionValidationError,
-    },
-
-    #[error("CBOR Decoding error")]
-    CborDecodeError(usize, String),
-
-    #[error("Malformed transaction")]
-    MalformedTransaction(u16, String),
-
-    #[error("Doubly spent UTXO: {0}")]
-    DoubleSpendUTXO(String),
-}
-
-/// Validation status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum ValidationStatus {
-    /// All good
-    Go,
-
-    /// Error
-    NoGo(ValidationError),
 }
 
 /// Reference

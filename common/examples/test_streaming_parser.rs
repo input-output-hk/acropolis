@@ -2,14 +2,16 @@
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
 
+use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
-    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
-    ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
-    SnapshotsCallback, StakeCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, ProposalCallback,
+    RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, StakeCallback,
+    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
+use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::env;
 use std::time::Instant;
@@ -24,11 +26,13 @@ struct CountingCallbacks {
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     pool_count: usize,
+    future_pool_count: usize,
+    retiring_pool_count: usize,
     account_count: usize,
     drep_count: usize,
     proposal_count: usize,
     sample_utxos: Vec<UtxoEntry>,
-    sample_pools: Vec<PoolInfo>,
+    sample_pools: Vec<PoolRegistration>,
     sample_accounts: Vec<AccountState>,
     sample_dreps: Vec<DRepInfo>,
     sample_proposals: Vec<GovernanceProposal>,
@@ -63,24 +67,32 @@ impl UtxoCallback for CountingCallbacks {
 }
 
 impl PoolCallback for CountingCallbacks {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
-        self.pool_count = pools.len();
-        eprintln!("Parsed {} stake pools", pools.len());
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
+        self.pool_count = pools.pools.len();
+        self.future_pool_count = pools.updates.len();
+        self.retiring_pool_count = pools.retiring.len();
+        eprintln!(
+            "Parsed {} stake pools (future: {}, retiring: {}))",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
 
-        // Show first 10 pools
-        for (i, pool) in pools.iter().take(10).enumerate() {
+        // Keep first 10 for summary
+        self.sample_pools = pools.pools.into_iter().take(10).map(|(_, v)| v).collect();
+
+        // Show sample pools
+        for (i, pool) in self.sample_pools.clone().iter().enumerate() {
             eprintln!(
-                "  Pool #{}: {} (pledge: {}, cost: {}, margin: {:.2}%)",
+                "  Pool #{}: {} (pledge: {}, cost: {}, margin: {:?})",
                 i + 1,
-                pool.pool_id,
+                pool.operator,
                 pool.pledge,
                 pool.cost,
-                pool.margin * 100.0
+                pool.margin
             );
         }
 
-        // Keep first 10 for summary
-        self.sample_pools = pools.into_iter().take(10).collect();
         Ok(())
     }
 }
@@ -496,7 +508,7 @@ fn main() {
     println!("Starting parse...");
     let start = Instant::now();
 
-    match parser.parse(&mut callbacks) {
+    match parser.parse(&mut callbacks, NetworkId::Mainnet) {
         Ok(()) => {
             let duration = start.elapsed();
             println!("Parse completed successfully in {duration:.2?}");
@@ -571,12 +583,12 @@ fn main() {
                 println!("Sample Pools (first 10):");
                 for (i, pool) in callbacks.sample_pools.iter().enumerate() {
                     println!(
-                        "  {}: {} (pledge: {}, cost: {}, margin: {:.2}%)",
+                        "  {}: {} (pledge: {}, cost: {}, margin: {:?})",
                         i + 1,
-                        pool.pool_id,
+                        pool.operator,
                         pool.pledge,
                         pool.cost,
-                        pool.margin * 100.0
+                        pool.margin
                     );
                 }
                 println!();

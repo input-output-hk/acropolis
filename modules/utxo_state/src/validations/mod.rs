@@ -1,6 +1,6 @@
 use acropolis_common::{
-    validation::TransactionValidationError, Era, GenesisDelegates, TxHash, UTXOValue,
-    UTxOIdentifier,
+    validation::{Phase1ValidationError, TransactionValidationError},
+    GenesisDelegates, TxHash, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
@@ -22,16 +22,16 @@ where
     let mtx = match tx {
         MultiEraTx::AlonzoCompatible(mtx, PallasEra::Shelley) => mtx,
         _ => {
-            return Err(TransactionValidationError::MalformedTransaction {
-                era: Era::Shelley,
-                reason: "Not a Shelley transaction".to_string(),
-            });
+            return Err(TransactionValidationError::MalformedTransaction(
+                "Not a Shelley transaction".to_string(),
+            ));
         }
     };
 
-    shelley::utxo::validate(&mtx, &lookup_utxo).map_err(|e| *e)?;
+    shelley::utxo::validate(&mtx, &lookup_utxo)
+        .map_err(|e| Phase1ValidationError::UTxOValidationError(*e))?;
     shelley::utxow::validate(&mtx, tx_hash, genesis_delegs, update_quorum, &lookup_utxo)
-        .map_err(|e| *e)?;
+        .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
 
     Ok(())
 }

@@ -124,7 +124,9 @@ impl SnapshotBootstrapper {
         let parser = StreamingSnapshotParser::new(
             bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
         );
-        parser.parse(&mut publisher).map_err(|e| BootstrapError::Parse(e.to_string()))?;
+        parser
+            .parse(&mut publisher, cfg.network.into())
+            .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
         publisher.publish_completion(bootstrap_ctx.block_info).await?;

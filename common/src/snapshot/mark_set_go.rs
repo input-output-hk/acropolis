@@ -3,20 +3,16 @@
 // ================================================================================================
 
 use anyhow::{Context, Error, Result};
-use log::{error, info};
+use log::info;
 
 use minicbor::Decoder;
 use serde::Serialize;
 
-use types::Ratio;
-
 pub use crate::hash::Hash;
-use crate::snapshot::pool_params::PoolParams;
-use crate::snapshot::streaming_snapshot;
+use crate::snapshot::streaming_snapshot::{SnapshotContext, SnapshotPoolRegistration};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-use crate::PoolId;
 pub use crate::StakeCredential;
-use crate::{address::StakeAddress, types, NetworkId, PoolRegistration};
+use crate::{PoolId, PoolRegistration};
 
 /// VMap<K, V> representation for CBOR Map types
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -91,7 +87,11 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Parse a single snapshot (Mark, Set, or Go)
-    pub fn parse_single_snapshot(decoder: &mut Decoder, snapshot_name: &str) -> Result<Snapshot> {
+    pub fn parse_single_snapshot(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        snapshot_name: &str,
+    ) -> Result<Snapshot> {
         info!("        {snapshot_name} snapshot - checking data type...");
 
         // Check what type we have - could be array, map, or simple value
@@ -119,148 +119,20 @@ impl Snapshot {
                         info!(
                             "        {snapshot_name} snapshot - parsing snapshot_pool_registration..."
                         );
+
                         // pool_registration (third element)
-                        let pools: VMap<PoolId, PoolParams> = decoder
-                            .decode()
+                        let pools: VMap<PoolId, SnapshotPoolRegistration> = decoder
+                            .decode_with(ctx)
                             .context("Failed to parse snapshot_pool_registration")?;
-                        let registration = VMap(
-                            pools
-                                .0
-                                .into_iter()
-                                .map(|(pool_id, params)| {
-                                    // Convert RewardAccount (Vec<u8>) to StakeAddress (arbitralily chosen over ScripHash)
-                                    let reward_account =
-                                        StakeAddress::from_binary(&params.reward_account.0)
-                                            .unwrap_or_else(|_|
-                                                {
-                                                    error!("Failed to parse reward account for pool {pool_id}, using default");
-                                                    StakeAddress::default()
-                                                }
-                                            );
-
-                                    // Convert Set<AddrKeyhash> to Vec<StakeAddress>
-                                    let pool_owners: Vec<StakeAddress> = params
-                                        .owners
-                                        .0
-                                        .into_iter()
-                                        .map(|keyhash| {
-                                            StakeAddress::new(
-                                                StakeCredential::AddrKeyHash(keyhash),
-                                                NetworkId::Mainnet, // TODO: Make network configurable or get it from parameters
-                                            )
-                                        })
-                                        .collect();
-
-                                    // Convert Vec<streaming_snapshot::Relay> to Vec<types::Relay>
-                                    let relays: Vec<types::Relay> = params
-                                        .relays
-                                        .into_iter()
-                                        .map(|relay| match relay {
-                                            streaming_snapshot::Relay::SingleHostAddr(
-                                                port,
-                                                ipv4,
-                                                ipv6,
-                                            ) => {
-                                                let port_opt = match port {
-                                                    streaming_snapshot::Nullable::Some(p) => {
-                                                        Some(p as u16)
-                                                    }
-                                                    _ => None,
-                                                };
-                                                let ipv4_opt = match ipv4 {
-                                                    streaming_snapshot::Nullable::Some(ip)
-                                                        if ip.0.len() == 4 =>
-                                                    {
-                                                        Some(std::net::Ipv4Addr::new(
-                                                            ip.0[0], ip.0[1], ip.0[2], ip.0[3],
-                                                        ))
-                                                    }
-                                                    _ => None,
-                                                };
-                                                let ipv6_opt = match ipv6 {
-                                                    streaming_snapshot::Nullable::Some(ip)
-                                                        if ip.0.len() == 16 =>
-                                                    {
-                                                        let b = &ip.0;
-                                                        Some(std::net::Ipv6Addr::from([
-                                                            b[0], b[1], b[2], b[3], b[4], b[5],
-                                                            b[6], b[7], b[8], b[9], b[10], b[11],
-                                                            b[12], b[13], b[14], b[15],
-                                                        ]))
-                                                    }
-                                                    _ => None,
-                                                };
-                                                types::Relay::SingleHostAddr(
-                                                    types::SingleHostAddr {
-                                                        port: port_opt,
-                                                        ipv4: ipv4_opt,
-                                                        ipv6: ipv6_opt,
-                                                    },
-                                                )
-                                            }
-                                            streaming_snapshot::Relay::SingleHostName(
-                                                port,
-                                                hostname,
-                                            ) => {
-                                                let port_opt = match port {
-                                                    streaming_snapshot::Nullable::Some(p) => {
-                                                        Some(p as u16)
-                                                    }
-                                                    _ => None,
-                                                };
-                                                types::Relay::SingleHostName(
-                                                    types::SingleHostName {
-                                                        port: port_opt,
-                                                        dns_name: hostname,
-                                                    },
-                                                )
-                                            }
-                                            streaming_snapshot::Relay::MultiHostName(hostname) => {
-                                                types::Relay::MultiHostName(types::MultiHostName {
-                                                    dns_name: hostname,
-                                                })
-                                            }
-                                        })
-                                        .collect();
-
-                                    // Convert Nullable<PoolMetadata> to Option<PoolMetadata>
-                                    let pool_metadata = match params.metadata {
-                                        streaming_snapshot::Nullable::Some(meta) => {
-                                            Some(types::PoolMetadata {
-                                                url: meta.url,
-                                                hash: meta.hash.to_vec(),
-                                            })
-                                        }
-                                        _ => None,
-                                    };
-
-                                    (
-                                        pool_id,
-                                        PoolRegistration {
-                                            operator: params.id,
-                                            vrf_key_hash: params.vrf,
-                                            pledge: params.pledge,
-                                            cost: params.cost,
-                                            margin: Ratio {
-                                                numerator: params.margin.numerator,
-                                                denominator: params.margin.denominator,
-                                            },
-                                            reward_account,
-                                            pool_owners,
-                                            relays,
-                                            pool_metadata,
-                                        },
-                                    )
-                                })
-                                .collect(),
-                        );
 
                         info!("        {snapshot_name} snapshot - parse completed successfully.");
 
                         Ok(Snapshot {
                             snapshot_stake,
                             snapshot_delegations: delegations,
-                            snapshot_pool_params: registration,
+                            snapshot_pool_params: VMap(
+                                pools.0.into_iter().map(|(k, v)| (k, v.0)).collect(),
+                            ),
                         })
                     }
                     other_type => {

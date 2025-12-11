@@ -148,6 +148,29 @@ pub fn map_alonzo_protocol_param_update(
     }))
 }
 
+pub fn map_alonzo_update(alonzo_update: &alonzo::Update) -> Result<AlonzoBabbageUpdateProposal> {
+    let mut update = AlonzoBabbageUpdateProposal {
+        proposals: Vec::new(),
+        enactment_epoch: alonzo_update.epoch,
+    };
+
+    for (hash_bytes, pp_update) in alonzo_update.proposed_protocol_parameter_updates.iter() {
+        let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
+            Ok(h) => h,
+            Err(e) => {
+                bail!("Invalid genesis keyhash in protocol parameter update: {e}");
+            }
+        };
+
+        match map_alonzo_protocol_param_update(pp_update) {
+            Ok(upd) => update.proposals.push((hash, upd)),
+            Err(e) => bail!("Cannot convert protocol param update {pp_update:?}: {e}"),
+        }
+    }
+
+    Ok(update)
+}
+
 fn map_babbage_cost_models(cost_models: &babbage::CostModels) -> CostModels {
     CostModels {
         plutus_v1: cost_models.plutus_v1.as_ref().map(|p| CostModel::new(p.clone())),
@@ -204,6 +227,29 @@ pub fn map_babbage_protocol_param_update(
         // Fields, specific for Alonzo-compatible (Alonzo, Babbage, Shelley)
         protocol_version: p.protocol_version.as_ref().map(map_protocol_version),
     }))
+}
+
+pub fn map_babbage_update(babbage_update: &babbage::Update) -> Result<AlonzoBabbageUpdateProposal> {
+    let mut update = AlonzoBabbageUpdateProposal {
+        proposals: Vec::new(),
+        enactment_epoch: babbage_update.epoch,
+    };
+
+    for (hash_bytes, pp_update) in babbage_update.proposed_protocol_parameter_updates.iter() {
+        let hash = match GenesisKeyhash::try_from(hash_bytes.as_ref()) {
+            Ok(h) => h,
+            Err(e) => {
+                bail!("Invalid genesis keyhash in protocol parameter update: {e}");
+            }
+        };
+
+        match map_babbage_protocol_param_update(pp_update) {
+            Ok(upd) => update.proposals.push((hash, upd)),
+            Err(e) => bail!("Cannot convert protocol param update {pp_update:?}: {e}"),
+        }
+    }
+
+    Ok(update)
 }
 
 fn map_conway_protocol_param_update(p: &conway::ProtocolParamUpdate) -> Box<ProtocolParamUpdate> {
