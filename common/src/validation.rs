@@ -28,6 +28,10 @@ pub enum TransactionValidationError {
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
+    /// **Cause:** UTxOW rules failure
+    #[error("{0}")]
+    UTxOWValidationError(#[from] UTxOWValidationError),
+
     /// **Cause:** Other errors (e.g. Invalid shelley params)
     #[error("{0}")]
     Other(String),

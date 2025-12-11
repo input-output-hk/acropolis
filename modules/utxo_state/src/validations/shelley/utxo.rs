@@ -27,3 +27,14 @@ where
     }
     Ok(())
 }
+
+pub fn validate<F>(tx: &alonzo::MintedTx, lookup_utxo: F) -> UTxOValidationResult
+where
+    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
+{
+    let transaction_body = &tx.transaction_body;
+
+    validate_bad_inputs_utxo(transaction_body, lookup_utxo)?;
+
+    Ok(())
+}

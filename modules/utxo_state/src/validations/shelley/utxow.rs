@@ -314,7 +314,7 @@ pub fn validate_mir_insufficient_genesis_sigs(
     Ok(())
 }
 
-pub fn validate_withnesses<F>(
+pub fn validate<F>(
     tx: &alonzo::MintedTx,
     tx_hash: TxHash,
     genesis_delegs: &GenesisDelegates,
