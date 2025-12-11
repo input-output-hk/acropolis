@@ -14,7 +14,6 @@ use acropolis_common::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
-    utils::ValidationOutcomes,
     BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
@@ -23,6 +22,7 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+use acropolis_common::validation::ValidationOutcomes;
 
 mod alonzo_babbage_voting;
 mod conway_voting;

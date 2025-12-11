@@ -1,7 +1,7 @@
 //! Acropolis Governance State: State storage
 
 use crate::{
-    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting, ValidationOutcomes,
+    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
     VotingRegistrationState,
 };
 use acropolis_common::{
@@ -20,6 +20,7 @@ use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
 use tracing::info;
+use acropolis_common::validation::ValidationOutcomes;
 
 pub struct State {
     publisher: RollbackAwarePublisher<Message>,
@@ -116,7 +117,7 @@ impl State {
                 let mut outcomes = ValidationOutcomes::new();
                 outcomes.push(ValidationError::BadGovernance(
                     GovernanceValidationError::WrongProtocolForGovernance(
-                        ProtocolVersion::conway()
+                        ProtocolVersion::chang()
                     )
                 ));
                 return Ok(outcomes);

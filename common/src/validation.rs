@@ -3,17 +3,12 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
-use std::array::TryFromSliceError;
-use std::fmt::{Debug, Display, Formatter};
+use std::{array::TryFromSliceError, fmt::{Debug, Display, Formatter}, sync::Arc};
 use thiserror::Error;
-
-use crate::{
-    protocol_params::{Nonce, ProtocolVersion},
-    rational_number::RationalNumber,
-    Address, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId,
-    ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
-    Value, Voter, VrfKeyHash,
-};
+use caryatid_sdk::Context;
+use tracing::error;
+use anyhow::bail;
+use crate::{protocol_params::{Nonce, ProtocolVersion}, rational_number::RationalNumber, Address, BlockInfo, CommitteeCredential, Era, GenesisKeyhash, GovActionId, Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier, Value, Voter, VrfKeyHash, messages::{CardanoMessage::BlockValidation, Message}, KeyHash};
 
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
@@ -470,23 +465,23 @@ pub enum OperationalCertificateError {
 /// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum MismatchRelation {
-    RelEq,
-    RelLt,
-    RelGt,
-    RelLtEq,
-    RelGtEq,
-    RelSubset,
+    Eq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    Subset,
 }
 
 impl Display for MismatchRelation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            MismatchRelation::RelEq => "=",
-            MismatchRelation::RelLt => "<",
-            MismatchRelation::RelGt => ">",
-            MismatchRelation::RelLtEq => "<=",
-            MismatchRelation::RelGtEq => ">=",
-            MismatchRelation::RelSubset => " in ",
+            MismatchRelation::Eq => "=",
+            MismatchRelation::Lt => "<",
+            MismatchRelation::Gt => ">",
+            MismatchRelation::LtEq => "<=",
+            MismatchRelation::GtEq => ">=",
+            MismatchRelation::Subset => " in ",
         };
         write!(f, "{}", str)
     }
@@ -495,17 +490,17 @@ impl Display for MismatchRelation {
 /// Partial formalization of validation outcome errors: what's wrong with relation of two entities
 /// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub enum Mismatch<T: Debug + Display> {
-    Supplied(T, MismatchRelation),
-    Expected(T, MismatchRelation),
+pub struct Mismatch<T: Debug + Display> {
+    supplied: T,
+    expected: T,
+    expected_rel: MismatchRelation,
 }
 
 impl<T: Debug + Display> Display for Mismatch<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Supplied(val, relation) => write!(f, "{relation} {val}"),
-            Self::Expected(val, relation) => write!(f, "not {relation} {val}"),
-        }
+        write!(f, "Supplied: {}, expected: {} {}",
+               self.supplied, self.expected_rel, self.expected
+        )
     }
 }
 
@@ -521,7 +516,7 @@ pub enum GovernanceValidationError {
     /// `mismatchSupplied` ~ key hashes which were a part of the update.
     /// `mismatchExpected` ~ key hashes of the genesis keys.
     #[error("Parameter update from non-genesis key hash")]
-    NonGenesisUpdatePPUP, //(Mismatch 'RelSubset (Set (KeyHash 'Genesis)))
+    NonGenesisUpdatePPUP(Mismatch<KeyHash>),
 
     /// | An update was proposed for the wrong epoch.
     /// The first 'EpochNo' is the current epoch.
@@ -617,4 +612,67 @@ pub enum GovernanceValidationError {
     // Treasury withdrawal proposals to an invalid reward account
     #[error("Treasury withdrawal return account {0} does not exist")]
     TreasuryWithdrawalReturnAccountsDoNotExist(StakeAddress),
+}
+
+// Utils for easier validation routines development
+
+#[derive(Default, Clone)]
+pub struct ValidationOutcomes {
+    outcomes: Vec<ValidationError>,
+}
+
+impl ValidationOutcomes {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn merge(&mut self, with: &mut ValidationOutcomes) {
+        self.outcomes.append(&mut with.outcomes);
+    }
+
+    pub fn push(&mut self, outcome: ValidationError) {
+        self.outcomes.push(outcome);
+    }
+
+    pub fn push_anyhow(&mut self, error: anyhow::Error) {
+        self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
+    }
+
+    pub async fn publish(
+        &mut self,
+        context: &Arc<Context<Message>>,
+        topic_field: &str,
+        block: &BlockInfo,
+    ) -> anyhow::Result<()> {
+        if block.intent.do_validation() {
+            let status = if let Some(result) = self.outcomes.first() {
+                // TODO: add multiple responses / decide that they're not necessary
+                ValidationStatus::NoGo(result.clone())
+            } else {
+                ValidationStatus::Go
+            };
+
+            let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
+
+            context.message_bus.publish(topic_field, outcome_msg).await?;
+        } else if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
+        }
+        self.outcomes.clear();
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn as_result(&self) -> anyhow::Result<()> {
+        if self.outcomes.is_empty() {
+            return Ok(());
+        }
+
+        let res = self.outcomes.iter().map(|e| format!("{}; ", e)).collect::<String>();
+
+        bail!("Validation failed: {}", res)
+    }
 }

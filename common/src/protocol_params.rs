@@ -267,7 +267,7 @@ impl ProtocolVersion {
         Self { major, minor }
     }
 
-    pub fn conway() -> Self {
+    pub fn chang() -> Self {
         Self { major: 9, minor: 0 }
     }
 

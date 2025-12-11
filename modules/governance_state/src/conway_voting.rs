@@ -1,6 +1,6 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::protocol_params::ConwayParams;
-use acropolis_common::utils::ValidationOutcomes;
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
     AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,

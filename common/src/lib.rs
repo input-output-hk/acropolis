@@ -27,7 +27,6 @@ pub mod stake_addresses;
 pub mod state_history;
 pub mod types;
 pub mod upstream_cache;
-pub mod utils;
 pub mod validation;
 
 // Flattened re-exports
