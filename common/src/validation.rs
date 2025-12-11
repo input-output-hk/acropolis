@@ -55,6 +55,7 @@ pub enum ValidationError {
 }
 
 /// Validation status
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ValidationStatus {
     /// All good
