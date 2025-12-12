@@ -294,6 +294,9 @@ pub struct TxUTxODeltas {
     pub script_hashes_needed: HashSet<ScriptHash>,
     // From witnesses
     pub vkey_hashes_provided: Vec<KeyHash>,
+    // NOTE:
+    // This includes only native scripts
+    // missing Plutus Scripts
     pub script_hashes_provided: Vec<ScriptHash>,
 }
 
@@ -608,13 +611,13 @@ impl NativeScript {
             }
             Self::InvalidBefore(val) => {
                 match low_bnd {
-                    Some(time) => *val >= time,
+                    Some(time) => *val <= time,
                     None => false, // as per mary-ledger.pdf, p.20
                 }
             }
             Self::InvalidHereafter(val) => {
                 match upp_bnd {
-                    Some(time) => *val <= time,
+                    Some(time) => *val >= time,
                     None => false, // as per mary-ledger.pdf, p.20
                 }
             }
