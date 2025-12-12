@@ -1,17 +1,24 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
-use crate::rewards::{RewardDetail, RewardsResult};
-use acropolis_common::{PoolId, Pots, RewardType, StakeAddress};
+use crate::{
+    rewards::{RewardDetail, RewardsResult},
+    state::Pots,
+};
+use acropolis_common::{BlockInfo, DelegatedStake, Lovelace, PoolId, RewardType, StakeAddress};
 use hex::FromHex;
-use itertools::EitherOrBoth::{Both, Left, Right};
-use itertools::Itertools;
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use itertools::{
+    EitherOrBoth::{Both, Left, Right},
+    Itertools,
+};
+use std::{cmp::Ordering, collections::BTreeMap, fs::File};
 use tracing::{debug, error, info, warn};
 
 /// Verifier
 pub struct Verifier {
     /// Map of pots values for every epoch
     epoch_pots: BTreeMap<u64, Pots>,
+
+    /// Template (with {} for epoch) for SPDD reference data files
+    spdd_file_template: Option<String>,
 
     /// Template (with {} for epoch) for rewards files
     rewards_file_template: Option<String>,
@@ -22,7 +29,26 @@ impl Verifier {
     pub fn new() -> Self {
         Self {
             epoch_pots: BTreeMap::new(),
+            spdd_file_template: None,
             rewards_file_template: None,
+        }
+    }
+
+    fn get_reader(
+        &self,
+        template: &Option<String>,
+        epoch: u64,
+    ) -> Option<(String, csv::Reader<File>)> {
+        let Some(template) = template else {
+            return None;
+        };
+
+        let path = template.replace("{}", &epoch.to_string());
+
+        // Silently return None if there's no file for it
+        match csv::Reader::from_path(&path) {
+            Ok(filename) => Some((path, filename)),
+            Err(_e) => None,
         }
     }
 
@@ -59,8 +85,12 @@ impl Verifier {
 
     /// Read in rewards files
     // Actually just stores the template and reads them on demand
-    pub fn read_rewards(&mut self, path: &str) {
+    pub fn set_rewards_template(&mut self, path: &str) {
         self.rewards_file_template = Some(path.to_string());
+    }
+
+    pub fn set_spdd_template(&mut self, path: &str) {
+        self.spdd_file_template = Some(path.to_string());
     }
 
     /// Verify an epoch, logging any errors
@@ -120,15 +150,7 @@ impl Verifier {
     /// Verify rewards, logging any errors
     pub fn verify_rewards(&self, rewards: &RewardsResult) {
         let epoch = rewards.epoch;
-        if let Some(template) = &self.rewards_file_template {
-            let path = template.replace("{}", &epoch.to_string());
-
-            // Silently return if there's no file for it
-            let mut reader = match csv::Reader::from_path(&path) {
-                Ok(reader) => reader,
-                _ => return,
-            };
-
+        if let Some((path, mut reader)) = self.get_reader(&self.rewards_file_template, epoch) {
             // Expect CSV header: spo,address,type,amount
             let mut expected_rewards: BTreeMap<PoolId, Vec<RewardDetail>> = BTreeMap::new();
             for result in reader.deserialize() {
@@ -267,5 +289,190 @@ impl Verifier {
                 error!(errors, epoch, "Rewards verification:");
             }
         }
+    }
+
+    #[allow(clippy::question_mark)]
+    fn read_spdd(&self, epoch: u64) -> Option<BTreeMap<PoolId, Lovelace>> {
+        let mut reference_spdd: BTreeMap<PoolId, Lovelace> = BTreeMap::new();
+
+        let Some((path, mut reader)) = self.get_reader(&self.spdd_file_template, epoch) else {
+            return None;
+        };
+
+        for result in reader.deserialize() {
+            let (spo, amount): (String, Lovelace) = match result {
+                Ok(row) => row,
+                Err(err) => {
+                    error!("Bad row in {path}: {err} - skipping");
+                    continue;
+                }
+            };
+
+            let Some(spo) = Vec::from_hex(&spo).ok().and_then(|bytes| PoolId::try_from(bytes).ok())
+            else {
+                error!("Bad hex/SPO in {path} for SPO: {spo} - skipping");
+                continue;
+            };
+
+            if let Some(old) = reference_spdd.insert(spo, amount) {
+                error!("Double entry in {path} for {spo}: replacing {amount} with {old}");
+                continue;
+            }
+        }
+
+        Some(reference_spdd)
+    }
+
+    pub fn verify_spdd(&self, blk: &BlockInfo, spdd: &BTreeMap<PoolId, DelegatedStake>) {
+        let epoch = blk.epoch - 1;
+        let Some(reference) = self.read_spdd(epoch) else {
+            // No reference = no verification; silently exiting.
+            return;
+        };
+
+        let (outcome, total, _, _, _) = Self::verify_spdd_impl(epoch, spdd, &reference);
+        if outcome {
+            info!("Verification of SPDD, end of epoch {epoch}: OK, total active stake {total}");
+        } else {
+            error!("Verification of SPDD, end of epoch {epoch}: Failed");
+        }
+    }
+
+    pub fn verify_spdd_impl(
+        epoch: u64,
+        spdd: &BTreeMap<PoolId, DelegatedStake>,
+        reference: &BTreeMap<PoolId, Lovelace>,
+    ) -> (bool, Lovelace, usize, usize, usize) {
+        let mut different = Vec::new();
+        let mut extra = Vec::new();
+        let mut missing = Vec::new();
+
+        // Compare the SPDD table by checking three properties:
+        // 1. All values from Computed SPDD, which present in Reference, are equal
+        // 2. There are no non-zero values from Computed SPDD, which are absent in Reference.
+
+        let mut total_computed = 0;
+        for (pool, computed_stake) in spdd.iter() {
+            total_computed += computed_stake.live;
+            if let Some(ref_stake) = reference.get(pool) {
+                if *ref_stake != computed_stake.live {
+                    different.push((pool, ref_stake, computed_stake.live));
+                }
+            } else if computed_stake.live != 0 {
+                extra.push((pool, computed_stake.live));
+            }
+        }
+
+        // 3. All non-zero values from Reference must present in Computed SPDD.
+
+        let mut total_reference = 0;
+        for (pool, ref_stake) in reference.iter() {
+            total_reference += ref_stake;
+            if *ref_stake != 0 && spdd.get(pool).is_none() {
+                missing.push((pool, ref_stake));
+            }
+        }
+
+        // Check whether we have everything correct
+
+        if total_computed == total_reference
+            && different.is_empty()
+            && extra.is_empty()
+            && missing.is_empty()
+        {
+            return (true, total_computed, 0, 0, 0);
+        }
+
+        // There are some errors, print them
+
+        if total_computed != total_reference {
+            error!(
+                "SPDD verification epoch {epoch} total active stake difference: \
+                reference {total_reference} != computed {total_computed}"
+            );
+        }
+
+        for (p, e, s) in different.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: ref {e} != comp {s}");
+        }
+
+        for (p, s) in extra.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: No ref, comp {s}");
+        }
+
+        for (p, e) in missing.iter() {
+            error!("SPDD verification epoch {epoch}, {p}: ref {e}, No comp");
+        }
+
+        (
+            false,
+            total_computed,
+            different.len(),
+            extra.len(),
+            missing.len(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verify_spdd() {
+        let test_cases: [(Option<Lovelace>, Option<Lovelace>); 10] = [
+            // Comparing with None
+            (Some(0), None),
+            (Some(1), None),
+            (None, Some(0)),
+            (None, Some(1)),
+            // Comparing with Zero
+            (Some(0), Some(0)),
+            (Some(0), Some(10)),
+            (Some(10), Some(0)),
+            // Comparing Non-zero and Non-zero
+            (Some(2), Some(2)),
+            (Some(2), Some(3)),
+            (Some(3), Some(2)),
+        ];
+
+        let mut spdd = BTreeMap::new();
+        let mut reference = BTreeMap::new();
+
+        for (idx, (cmp, refr)) in test_cases.iter().enumerate() {
+            let poolid = PoolId::from([idx as u8; 28]);
+
+            if let Some(cmp) = cmp {
+                spdd.insert(
+                    poolid,
+                    DelegatedStake {
+                        active: *cmp,
+                        active_delegators_count: 1,
+                        live: *cmp,
+                    },
+                );
+            }
+
+            if let Some(refr) = refr {
+                reference.insert(poolid, *refr);
+            }
+        }
+
+        assert_eq!(
+            Verifier::verify_spdd_impl(0, &spdd, &reference),
+            (false, 18, 4, 1, 1)
+        );
+    }
+
+    #[test]
+    fn test_read_spdd() {
+        let mut verifier = Verifier::new();
+        verifier.spdd_file_template = Some("./test-data/spdd-test.{}.csv".to_string());
+        let res = verifier.read_spdd(99999);
+        let refr = BTreeMap::from([
+            (PoolId::from([1; 28]), 1000),
+            (PoolId::from([0xee; 28]), 1111),
+        ]);
+        assert_eq!(res, Some(refr))
     }
 }
