@@ -1,8 +1,22 @@
-use acropolis_common::Point;
-use pallas_traverse::MultiEraBlock;
+use acropolis_common::{Era, Point};
+use pallas_traverse::{Era as PallasEra, MultiEraBlock};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+/// Convert a Pallas Era to our common Era type.
+pub fn era_from_pallas(pallas_era: PallasEra) -> Era {
+    match pallas_era {
+        PallasEra::Byron => Era::Byron,
+        PallasEra::Shelley => Era::Shelley,
+        PallasEra::Allegra => Era::Allegra,
+        PallasEra::Mary => Era::Mary,
+        PallasEra::Alonzo => Era::Alonzo,
+        PallasEra::Babbage => Era::Babbage,
+        PallasEra::Conway => Era::Conway,
+        era => panic!("Unknown Pallas era: {era:?}"),
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum BlockContextError {
@@ -20,6 +34,7 @@ pub enum BlockContextError {
 pub struct BlockContext {
     pub point: Point,
     pub block_number: u64,
+    pub era: Era,
 }
 
 impl BlockContext {
@@ -41,6 +56,7 @@ impl BlockContext {
         Ok(Self {
             point: point.clone(),
             block_number: block.number(),
+            era: era_from_pallas(block.era()),
         })
     }
 }

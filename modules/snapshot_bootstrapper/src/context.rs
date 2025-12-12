@@ -4,7 +4,7 @@ use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
 use acropolis_common::{
     genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
-    Era, Point,
+    Point,
 };
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -82,7 +82,7 @@ impl BootstrapContext {
             new_epoch: false,
             timestamp: genesis.slot_to_timestamp(slot),
             tip_slot: None,
-            era: Era::Conway, // TODO: Make dynamic with era history
+            era: block_ctx.era,
         };
 
         Ok(Self {
