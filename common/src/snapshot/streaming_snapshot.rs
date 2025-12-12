@@ -36,10 +36,10 @@ use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
-    Address, Constitution, DRepChoice, DRepCredential, EpochBootstrapData, Lovelace, MultiHostName,
-    NativeAssets, NetworkId, PoolBlockProduction, PoolId, PoolMetadata, PoolRegistration, Pots,
-    Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential, TxHash, UTXOValue,
-    UTxOIdentifier, Value,
+    Address, ByronAddress, Constitution, DRepChoice, DRepCredential, EpochBootstrapData, Lovelace,
+    MultiHostName, NativeAssets, NetworkId, PoolBlockProduction, PoolId, PoolMetadata,
+    PoolRegistration, Pots, Ratio, Relay, ShelleyAddress, SingleHostAddr, SingleHostName,
+    StakeAddress, StakeCredential, TxHash, UTXOValue, UTxOIdentifier, Value,
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
@@ -506,13 +506,49 @@ struct SnapshotAddress(pub Address);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotAddress {
     fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let Ok(_address_bytes) = d.bytes() else {
+        let Ok(bytes) = d.bytes() else {
             return Err(minicbor::decode::Error::message(
                 "Failed to read address bytes",
             ));
         };
-        // TODO: Turn address bytes into one of the possible address types
-        Ok(Self(Address::None))
+        if bytes.is_empty() {
+            return Err(minicbor::decode::Error::message("Empty utxo address"));
+        }
+        match bytes[0] {
+            // Looks like CBOR, so should be Byron
+            0x82 => {
+                let mut dec = minicbor::Decoder::new(bytes);
+                let Ok(byron) = ByronAddress::from_cbor(&mut dec) else {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to read Byron address",
+                    ));
+                };
+                Ok(Self(Address::Byron(byron)))
+            }
+            // Everything else should be Shelley
+            _ => {
+                match (bytes[0] >> 4) & 0x0F {
+                    // Stake addresses
+                    0b1110 | 0b1111 => {
+                        let Ok(stake) = StakeAddress::from_binary(bytes) else {
+                            return Err(minicbor::decode::Error::message(
+                                "Failed to read stake address",
+                            ));
+                        };
+                        Ok(Self(Address::Stake(stake)))
+                    }
+                    // Other Shelley addresses
+                    _ => {
+                        let Ok(shelley) = ShelleyAddress::from_bytes_key(bytes) else {
+                            return Err(minicbor::decode::Error::message(
+                                "Failed to read Shelley address",
+                            ));
+                        };
+                        Ok(Self(Address::Shelley(shelley)))
+                    }
+                }
+            }
+        }
     }
 }
 
