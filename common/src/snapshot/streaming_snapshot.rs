@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -533,6 +533,39 @@ pub struct UtxoEntry {
     pub datum: Option<String>,
     /// Optional script reference (hex-encoded CBOR)
     pub script_ref: Option<String>,
+}
+
+impl UtxoEntry {
+    /// Extract the stake credential from the UTXO's address, if present.
+    ///
+    /// Returns `Some(StakeCredential)` for Shelley base addresses that have
+    /// a stake credential embedded. Returns `None` for:
+    /// - Byron addresses
+    /// - Enterprise addresses (no stake part)
+    /// - Pointer addresses (would need chain state to resolve)
+    /// - Invalid/malformed addresses
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        use crate::address::{ShelleyAddress, ShelleyAddressDelegationPart};
+
+        let address_bytes = hex::decode(&self.address).ok()?;
+
+        // Try to parse as a Shelley address
+        let shelley_addr = ShelleyAddress::from_bytes_key(&address_bytes).ok()?;
+
+        // Extract stake credential from the delegation part
+        match shelley_addr.delegation {
+            ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                Some(StakeCredential::AddrKeyHash(hash))
+            }
+            ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                Some(StakeCredential::ScriptHash(hash))
+            }
+            // Pointer addresses would need chain state to resolve
+            ShelleyAddressDelegationPart::Pointer(_) => None,
+            // Enterprise addresses have no stake credential
+            ShelleyAddressDelegationPart::None => None,
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1055,8 +1088,9 @@ impl StreamingSnapshotParser {
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        let (utxo_count, bytes_consumed_from_file) = Self::stream_utxos(&mut utxo_file, callbacks)
-            .context("Failed to stream UTXOs with true streaming")?;
+        let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
+            Self::stream_utxos(&mut utxo_file, callbacks)
+                .context("Failed to stream UTXOs with true streaming")?;
 
         // After UTXOs, parse deposits from UTxOState[1]
         // Reset our file pointer to a position after UTXOs
@@ -1257,10 +1291,68 @@ impl StreamingSnapshotParser {
         let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
 
+        // Merge UTXO values into accounts
+        // The accounts Vec has stake_address.credential, and stake_utxo_values is keyed by StakeCredential
+        let mut accounts_matched = 0usize;
+        let mut total_utxo_value_matched: u64 = 0;
+        let accounts_with_utxo_values: Vec<AccountState> = accounts
+            .into_iter()
+            .map(|mut account| {
+                if let Some(&utxo_value) = stake_utxo_values.get(&account.stake_address.credential)
+                {
+                    account.address_state.utxo_value = utxo_value;
+                    accounts_matched += 1;
+                    total_utxo_value_matched += utxo_value;
+                }
+                account
+            })
+            .collect();
+
+        // Calculate total UTXO value from all stake credentials (including those not in accounts)
+        let total_utxo_value_all: u64 = stake_utxo_values.values().sum();
+        let unmatched_credentials = stake_utxo_values.len() - accounts_matched;
+        let unmatched_value = total_utxo_value_all - total_utxo_value_matched;
+
+        info!("UTXO stake accounting summary:");
+        info!(
+            "  Stake credentials with UTXOs: {}",
+            stake_utxo_values.len()
+        );
+        info!(
+            "  Total UTXO value: {} ADA",
+            total_utxo_value_all / 1_000_000
+        );
+        info!(
+            "  Accounts with UTXO values: {}/{} ({:.1}%)",
+            accounts_matched,
+            accounts_with_utxo_values.len(),
+            if accounts_with_utxo_values.is_empty() {
+                0.0
+            } else {
+                (accounts_matched as f64 / accounts_with_utxo_values.len() as f64) * 100.0
+            }
+        );
+        info!(
+            "  Matched UTXO value: {} ADA ({:.1}%)",
+            total_utxo_value_matched / 1_000_000,
+            if total_utxo_value_all == 0 {
+                0.0
+            } else {
+                (total_utxo_value_matched as f64 / total_utxo_value_all as f64) * 100.0
+            }
+        );
+        if unmatched_credentials > 0 {
+            info!(
+                "  Unmatched stake credentials: {} ({} ADA) - UTXOs at addresses not registered as stake accounts",
+                unmatched_credentials,
+                unmatched_value / 1_000_000
+            );
+        }
+
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
             epoch,
-            accounts,
+            accounts: accounts_with_utxo_values,
             pools: pool_registrations,
             retiring_pools,
             dreps: drep_deposits,
@@ -1304,7 +1396,15 @@ impl StreamingSnapshotParser {
     }
 
     /// STREAMING: Process UTXOs with chunked buffering and incremental parsing
-    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<(u64, u64)> {
+    ///
+    /// Returns a tuple of:
+    /// - UTXO count
+    /// - Bytes consumed from file
+    /// - Map of stake credentials to accumulated UTXO values
+    fn stream_utxos<C: UtxoCallback>(
+        file: &mut File,
+        callbacks: &mut C,
+    ) -> Result<(u64, u64, HashMap<StakeCredential, u64>)> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
 
@@ -1316,6 +1416,9 @@ impl StreamingSnapshotParser {
         let mut utxo_count = 0u64;
         let mut total_bytes_processed = 0usize;
         let mut total_bytes_read_from_file = 0u64;
+
+        // Accumulate UTXO values by stake credential for SPDD generation
+        let mut stake_values: HashMap<StakeCredential, u64> = HashMap::new();
 
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
@@ -1380,6 +1483,11 @@ impl StreamingSnapshotParser {
                         let entry_size = bytes_consumed - position_before;
                         max_single_entry_size = max_single_entry_size.max(entry_size);
 
+                        // Accumulate UTXO value by stake credential for SPDD
+                        if let Some(stake_cred) = utxo.extract_stake_credential() {
+                            *stake_values.entry(stake_cred).or_insert(0) += utxo.value;
+                        }
+
                         // Emit the UTXO
                         callbacks.on_utxo(utxo)?;
                         utxo_count += 1;
@@ -1390,11 +1498,13 @@ impl StreamingSnapshotParser {
                         // Progress reporting - less frequent for better performance
                         if utxo_count.is_multiple_of(1000000) {
                             let buffer_usage = buffer.len();
+                            let stake_value_total: u64 = stake_values.values().sum();
                             info!(
-                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
+                                "Streamed {} UTXOs: {} stake credentials, {} ADA staked, buffer: {} MB",
                                 utxo_count,
+                                stake_values.len(),
+                                stake_value_total / 1_000_000,
                                 buffer_usage / 1024 / 1024,
-                                max_single_entry_size
                             );
                         }
 
@@ -1448,17 +1558,20 @@ impl StreamingSnapshotParser {
             }
         }
 
-        info!("Streaming results:");
+        let stake_value_total: u64 = stake_values.values().sum();
+        info!("UTXO streaming complete:");
         info!("  UTXOs processed: {}", utxo_count);
+        info!("  Stake credentials found: {}", stake_values.len());
         info!(
-            "  Total data streamed: {:.2} MB",
-            total_bytes_processed as f64 / 1024.0 / 1024.0
+            "  Total staked value: {} ADA",
+            stake_value_total / 1_000_000
         );
         info!(
-            "  Peak buffer usage: {} MB",
-            PARSE_BUFFER_SIZE / 1024 / 1024
+            "  Data streamed: {:.2} MB, peak buffer: {} MB, largest entry: {} bytes",
+            total_bytes_processed as f64 / 1024.0 / 1024.0,
+            PARSE_BUFFER_SIZE / 1024 / 1024,
+            max_single_entry_size
         );
-        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
         // After successfully parsing all UTXOs, we need to consume the break token
         // that ends the indefinite-length UTXO map if present
@@ -1487,7 +1600,7 @@ impl StreamingSnapshotParser {
         // This is the total bytes processed minus any remaining buffer content
         let bytes_consumed_from_file = total_bytes_read_from_file - buffer.len() as u64;
 
-        Ok((utxo_count, bytes_consumed_from_file))
+        Ok((utxo_count, bytes_consumed_from_file, stake_values))
     }
 
     /// Parse a single block production entry from a map (producer pool ID -> block count)
@@ -2082,6 +2195,120 @@ impl SnapshotsCallback for CollectingCallbacks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_stake_credential_base_address_key_hash() {
+        // Base address with payment key hash and stake key hash (type 0)
+        // Header: 0x01 = mainnet (0x01) | addr_type 0 (key/key)
+        // Format: [header:1][payment_hash:28][stake_hash:28] = 57 bytes
+        let mut address_bytes = vec![0x01]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xBB; 28]); // stake key hash
+
+        let utxo = UtxoEntry {
+            tx_hash: "test".to_string(),
+            output_index: 0,
+            address: hex::encode(&address_bytes),
+            value: 1000000,
+            datum: None,
+            script_ref: None,
+        };
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::AddrKeyHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xBB; 28]);
+            }
+            _ => panic!("Expected AddrKeyHash"),
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_base_address_script_hash() {
+        // Base address with payment key hash and stake script hash (type 2)
+        // Header: 0x21 = mainnet (0x01) | addr_type 2 (key/script)
+        let mut address_bytes = vec![0x21]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xCC; 28]); // stake script hash
+
+        let utxo = UtxoEntry {
+            tx_hash: "test".to_string(),
+            output_index: 0,
+            address: hex::encode(&address_bytes),
+            value: 1000000,
+            datum: None,
+            script_ref: None,
+        };
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::ScriptHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xCC; 28]);
+            }
+            _ => panic!("Expected ScriptHash"),
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_enterprise_address() {
+        // Enterprise address (no stake part) - type 6
+        // Header: 0x61 = mainnet (0x01) | addr_type 6 (key/none)
+        let mut address_bytes = vec![0x61]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash only
+
+        let utxo = UtxoEntry {
+            tx_hash: "test".to_string(),
+            output_index: 0,
+            address: hex::encode(&address_bytes),
+            value: 1000000,
+            datum: None,
+            script_ref: None,
+        };
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(
+            stake_cred.is_none(),
+            "Enterprise addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_byron_address() {
+        // Byron address - high bit set in header
+        let address_bytes = vec![0x82, 0xD8, 0x18]; // Byron CBOR prefix
+
+        let utxo = UtxoEntry {
+            tx_hash: "test".to_string(),
+            output_index: 0,
+            address: hex::encode(&address_bytes),
+            value: 1000000,
+            datum: None,
+            script_ref: None,
+        };
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(
+            stake_cred.is_none(),
+            "Byron addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_invalid_address() {
+        let utxo = UtxoEntry {
+            tx_hash: "test".to_string(),
+            output_index: 0,
+            address: "not_valid_hex".to_string(),
+            value: 1000000,
+            datum: None,
+            script_ref: None,
+        };
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_none(), "Invalid addresses should return None");
+    }
 
     #[test]
     fn test_collecting_callbacks() {

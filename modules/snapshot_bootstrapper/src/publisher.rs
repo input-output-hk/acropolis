@@ -181,10 +181,13 @@ impl PoolCallback for SnapshotPublisher {
         let snapshot_topic = self.snapshot_topic.clone();
 
         // Spawn async publish task since this callback is synchronous
-        tokio::spawn(async move {
-            if let Err(e) = context.publish(&snapshot_topic, message).await {
-                tracing::error!("Failed to publish SPO bootstrap: {}", e);
-            }
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context
+                    .publish(&snapshot_topic, message)
+                    .await
+                    .unwrap_or_else(|e| tracing::error!("Failed to publish SPO message: {}", e));
+            })
         });
 
         Ok(())
