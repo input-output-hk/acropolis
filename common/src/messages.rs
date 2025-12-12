@@ -430,12 +430,21 @@ pub struct AccountsBootstrapMessage {
     pub bootstrap_snapshots: Option<SnapshotsContainer>,
 }
 
+/// UTxO bootstrap message containing partial UTxO state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOPartialState {
+    /// UTxOs
+    pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
+    UTxOPartialState(UTxOPartialState),
 }
 
 // === Global message enum ===

@@ -7,7 +7,7 @@ use acropolis_common::{
     ledger_state::SPOState,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
-        SnapshotStateMessage,
+        SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
@@ -15,12 +15,14 @@ use acropolis_common::{
         GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
         SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
-    BlockInfo, EpochBootstrapData,
+    BlockInfo, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::sync::Arc;
 use tracing::info;
+
+const UTXO_BATCH_SIZE: usize = 10_000;
 
 /// External epoch context containing nonces and timing information.
 ///
@@ -81,6 +83,7 @@ pub struct SnapshotPublisher {
     snapshot_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
+    utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
@@ -100,6 +103,7 @@ impl SnapshotPublisher {
             snapshot_topic,
             metadata: None,
             utxo_count: 0,
+            utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
             pools: SPOState::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
@@ -147,17 +151,47 @@ impl SnapshotPublisher {
             praos_params: Some(PraosParams::mainnet()),
         }
     }
+
+    fn complete_batchers(&mut self) {
+        if !self.utxo_batch.is_empty() {
+            self.publish_utxo_batch();
+        }
+    }
+
+    fn publish_utxo_batch(&mut self) {
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::UTxOPartialState(UTxOPartialState {
+                utxos: self.utxo_batch.clone(),
+            }),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // Spawn async publish task since this callback is synchronous
+        tokio::spawn(async move {
+            if let Err(e) = context.publish(&snapshot_topic, message).await {
+                tracing::error!("Failed to publish SPO bootstrap: {}", e);
+            }
+        });
+        self.utxo_batch.clear();
+    }
 }
 
 impl UtxoCallback for SnapshotPublisher {
-    fn on_utxo(&mut self, _utxo: UtxoEntry) -> Result<()> {
+    fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
 
         // Log progress every million UTXOs
         if self.utxo_count.is_multiple_of(1_000_000) {
             info!("Processed {} UTXOs", self.utxo_count);
         }
-        // TODO: Accumulate UTXO data if needed or send in chunks to UTXOState processor
+
+        self.utxo_batch.push((utxo.id, utxo.value));
+        if self.utxo_batch.len() >= UTXO_BATCH_SIZE {
+            self.publish_utxo_batch();
+        }
         Ok(())
     }
 }
@@ -223,6 +257,10 @@ impl AccountsCallback for SnapshotPublisher {
 
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
+
+        // IMPORTANT: Complete batching senders now before what is to come, to ensure all
+        // batched data is flushed. See next, more detailed, comment
+        self.complete_batchers();
 
         // IMPORTANT: We use block_in_place + block_on to ensure each publish completes
         // before the callback returns. This guarantees message ordering.

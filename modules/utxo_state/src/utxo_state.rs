@@ -2,7 +2,10 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    messages::{
+        CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
+    },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
 use caryatid_sdk::{module, Context};
@@ -37,6 +40,7 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_STORE: &str = "memory";
+const MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC: &str = "snapshot-subscribe-topic";
 
 /// UTXO state module
 #[module(
@@ -54,6 +58,11 @@ impl UTXOState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
+        let maybe_snapshot_topic = config
+            .get_string(MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC)
+            .ok()
+            .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
+
         let utxos_query_topic = config
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
@@ -70,6 +79,7 @@ impl UTXOState {
             "fake" => Arc::new(FakeImmutableUTXOStore::new(config.clone())),
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
+        let snapshot_store = store.clone();
         let mut state = State::new(store);
 
         // Create address delta publisher and pass it observations
@@ -117,6 +127,45 @@ impl UTXOState {
                 }
             }
         });
+
+        // Subscribe for snapshot messages, if allowed
+        if let Some(snapshot_topic) = maybe_snapshot_topic {
+            let mut subscription = context.subscribe(&snapshot_topic).await?;
+            let context = context.clone();
+            let store = snapshot_store.clone();
+            enum SnapshotState {
+                Preparing,
+                Started,
+            }
+            let mut snapshot_state = SnapshotState::Preparing;
+            context.run(async move {
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            match snapshot_state {
+                                SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
+                                _ => error!("Snapshot Startup message received but we have already left preparing state"),
+                            }
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::UTxOPartialState(utxo_state),
+                        )) => {
+                            for (key, value) in &utxo_state.utxos {
+                                if store.add_utxo(*key, value.clone()).await.is_err() {
+                                    error!("Failed to add snapshot utxo to state store");
+                                }
+                            }
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => ()
+                    }
+                }
+            });
+        }
 
         // Query handler
         let state_query = state.clone();
