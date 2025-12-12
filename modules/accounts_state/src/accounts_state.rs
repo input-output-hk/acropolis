@@ -89,17 +89,17 @@ impl AccountsState {
     }
 
     /// Wait for and process snapshot bootstrap messages
-    /// Returns the BlockInfo from SnapshotComplete if bootstrap occurred, None otherwise
+    /// Returns the BlockInfo from SnapshotComplete if bootstrap occurred
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut completion_subscription: Option<Box<dyn Subscription<Message>>>,
-    ) -> Result<()> {
+    ) -> Result<Option<BlockInfo>> {
         let snapshot_subscription = match snapshot_subscription.as_mut() {
             Some(sub) => sub,
             None => {
                 info!("No snapshot subscription available, using default state");
-                return Ok(());
+                return Ok(None);
             }
         };
 
@@ -133,16 +133,19 @@ impl AccountsState {
             Some(sub) => sub,
             None => {
                 info!("No completion subscription available");
-                return Ok(());
+                return Ok(None);
             }
         };
 
         info!("Waiting for snapshot complete message...");
         let (_, message) = completion_subscription.read().await?;
         match message.as_ref() {
-            Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                info!("Received snapshot complete message");
-                Ok(())
+            Message::Cardano((block_info, CardanoMessage::SnapshotComplete)) => {
+                info!(
+                    "Received snapshot complete message at block {}",
+                    block_info.number
+                );
+                Ok(Some(block_info.clone()))
             }
             other => {
                 error!(
@@ -179,12 +182,36 @@ impl AccountsState {
         verifier: &Verifier,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
-        Self::wait_for_bootstrap(
+        let bootstrap_block_info = Self::wait_for_bootstrap(
             history.clone(),
             snapshot_subscription,
             completion_subscription,
         )
         .await?;
+
+        // Publish SPDD after bootstrap if bootstrap occurred
+        if let Some(block_info) = bootstrap_block_info {
+            let state = history.lock().await.get_current_state();
+            let spdd = state.generate_spdd();
+            if let Err(e) = spo_publisher.publish_spdd(&block_info, spdd).await {
+                error!("Error publishing SPO stake distribution after bootstrap: {e:#}");
+            } else {
+                info!(
+                    "Published SPDD after bootstrap for epoch {}",
+                    block_info.epoch
+                );
+            }
+
+            // Store SPDD history if enabled
+            if let Some(spdd_store) = spdd_store.as_ref() {
+                let spdd_state = state.dump_spdd_state();
+                let mut spdd_store_guard = spdd_store.lock().await;
+                // active stakes taken at beginning of epoch i is for epoch + 1
+                if let Err(e) = spdd_store_guard.store_spdd(block_info.epoch + 1, spdd_state) {
+                    error!("Error storing SPDD state after bootstrap: {e:#}");
+                }
+            }
+        }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)

@@ -14,7 +14,7 @@ use std::{
     },
     sync::atomic::AtomicU64,
 };
-use tracing::{error, warn};
+use tracing::error;
 
 /// State of an individual stake address
 #[serde_as]

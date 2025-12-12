@@ -45,6 +45,7 @@ pub use crate::{
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+use super::reward_snapshot::PulsingRewardUpdate;
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -555,7 +556,7 @@ impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
 /// DRep information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
-    /// Bech32-encoded DRep ID
+    /// DRep credential
     pub drep_id: DRepCredential,
     /// Lovelace deposit amount
     pub deposit: u64,
@@ -843,6 +844,7 @@ impl StreamingSnapshotParser {
 
             // Extract epoch number [0]
             let epoch = decoder.u64().context("Failed to parse epoch number")?;
+            info!("Parsing snapshot for epoch {}", epoch);
 
             // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
             let blocks_previous_epoch =
@@ -947,18 +949,34 @@ impl StreamingSnapshotParser {
                 }
             }
 
-            // Convert to AccountState for API
+            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+            // Parse instant rewards (MIRs) and combine with regular rewards
+            // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
+            let instant_rewards = Self::parse_instant_rewards(&mut decoder)
+                .context("Failed to parse instant rewards")?;
+
+            // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
                 .into_iter()
                 .map(|(credential, account)| {
                     // Convert StakeCredential to stake address representation
-                    let stake_address = StakeAddress::new(credential, NetworkId::Mainnet);
+                    let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
 
                     // Extract rewards from rewards_and_deposit (first element of tuple)
-                    let rewards = match &account.rewards_and_deposit {
+                    let regular_rewards = match &account.rewards_and_deposit {
                         StrictMaybe::Just((reward, _deposit)) => *reward,
                         StrictMaybe::Nothing => 0,
                     };
+
+                    // Add instant rewards (MIRs) if any
+                    let mir_rewards = instant_rewards.get(&credential).copied().unwrap_or(0);
+                    let rewards = regular_rewards + mir_rewards;
 
                     // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                     // PoolId is Hash<28>, we need to convert to Vec<u8>
@@ -990,18 +1008,6 @@ impl StreamingSnapshotParser {
                     }
                 })
                 .collect();
-
-            // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
-            // The UMap already handled all its internal elements including pointers
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
-            decoder.skip()?;
 
             // Navigate to UTxOState [3][1][1]
             let utxo_state_len = decoder
@@ -1049,52 +1055,12 @@ impl StreamingSnapshotParser {
         let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
         utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
 
-        info!(
-            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
-            position_after_utxos
-        );
-
-        // ========================================================================
-        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
-        // ========================================================================
-        // After extensive analysis, the remaining snapshot data (deposits, fees,
-        // protocol parameters, and mark/set/go snapshots) can be efficiently
-        // parsed by reading the entire remainder of the file into memory (~500MB)
-        // rather than streaming. This is much smaller than the full 2.5GB file.
-        //
-        // The CBOR structure from this point:
-        // UTxOState[1] = deposits
-        // UTxOState[2] = fees
-        // UTxOState[3] = gov_state
-        // UTxOState[4] = donations
-        // EpochState[2] = PParams (100-300MB)
-        // EpochState[3] = PParamsPrev (100-300MB)
-        // EpochState[4] = SnapShots (100+ MB stake distribution)
-        //
-        // This hybrid approach allows us to:
-        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
-        // 2. Parse remaining sections using snapshot.rs functions
-        // 3. Access mark/set/go snapshots that were previously unreachable
-        // ========================================================================
-
-        // Calculate remaining file size from current position
+        // Parse remainder of file (deposits, fees, gov_state, protocol params, snapshots)
         let current_file_size = utxo_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
-        info!(
-            "    Reading remainder of file into memory: {:.1} MB from position {}",
-            remaining_bytes as f64 / 1024.0 / 1024.0,
-            position_after_utxos
-        );
-
-        // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
         utxo_file.read_to_end(&mut remainder_buffer)?;
-
-        info!(
-            "    Successfully loaded {:.1} MB remainder buffer for parsing",
-            remainder_buffer.len() as f64 / 1024.0 / 1024.0
-        );
 
         // Create decoder for the remainder buffer
         let mut remainder_decoder = Decoder::new(&remainder_buffer);
@@ -1103,31 +1069,10 @@ impl StreamingSnapshotParser {
         // UTxOState = [utxos (already consumed), deposits, fees, gov_state, donations]
 
         // Parse deposits (UTxOState[1])
-        let deposits = match remainder_decoder.decode::<u64>() {
-            Ok(deposits_value) => {
-                info!(
-                    "    Successfully parsed deposits: {} lovelace",
-                    deposits_value
-                );
-                deposits_value
-            }
-            Err(e) => {
-                info!("    Failed to parse deposits: {}, using 0", e);
-                0
-            }
-        };
+        let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse fees (UTxOState[2])
-        let fees = match remainder_decoder.decode::<u64>() {
-            Ok(fees_value) => {
-                info!("    Successfully parsed fees: {} lovelace", fees_value);
-                fees_value as i64
-            }
-            Err(e) => {
-                info!("    Failed to parse fees: {}, using 0", e);
-                0
-            }
-        };
+        // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
+        let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         let (_root_params, _root_hard_fork, _root_cc, _root_constitution) = {
             // Epoch State / Ledger State / UTxO State / utxosGovState
@@ -1197,9 +1142,16 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
+
+        // Skip non_myopic (EpochState[3])
+        remainder_decoder.skip()?;
+
+        // Exit EpochState, now at NewEpochState level
+        // Parse pulsing_rew_update (NewEpochState[4]) to get reward snapshot
+        let reward_snapshot_rewards = Self::parse_pulsing_reward_update(&mut remainder_decoder)?;
 
         // Convert block production data to HashMap<PoolId, usize> for snapshot processing
         let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
@@ -1216,80 +1168,6 @@ impl StreamingSnapshotParser {
 
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
-                info!("    Successfully parsed mark/set/go snapshots!");
-
-                // DIAGNOSTIC: Compare Go snapshot stake with our computed UTXO values
-                // This helps identify delegated accounts we're failing to match from UTXOs
-                let go_stake_map: HashMap<StakeCredential, i64> =
-                    raw_snapshots.go.snapshot_stake.0.iter().cloned().collect();
-                let go_delegation_map: HashMap<StakeCredential, PoolId> =
-                    raw_snapshots.go.snapshot_delegations.0.iter().cloned().collect();
-
-                // Find credentials where Go snapshot has stake > 0 but we computed utxo_value = 0
-                let mut missing_stake_count = 0usize;
-                let mut missing_stake_total: i64 = 0;
-                let mut missing_delegated_count = 0usize;
-                let mut missing_delegated_stake: i64 = 0;
-                let mut sample_missing: Vec<(StakeCredential, i64, bool)> = Vec::new();
-
-                for (credential, &go_stake) in &go_stake_map {
-                    if go_stake > 0 {
-                        let our_utxo = stake_utxo_values.get(credential).copied().unwrap_or(0);
-                        if our_utxo == 0 {
-                            // Go snapshot has stake but we found no UTXO value
-                            missing_stake_count += 1;
-                            missing_stake_total += go_stake;
-
-                            let is_delegated = go_delegation_map.contains_key(credential);
-                            if is_delegated {
-                                missing_delegated_count += 1;
-                                missing_delegated_stake += go_stake;
-                            }
-
-                            // Collect samples for debugging
-                            if sample_missing.len() < 10 {
-                                sample_missing.push((credential.clone(), go_stake, is_delegated));
-                            }
-                        }
-                    }
-                }
-
-                info!("Go snapshot vs UTXO stake comparison:");
-                info!(
-                    "  Go snapshot stake credentials: {} (total stake entries)",
-                    go_stake_map.len()
-                );
-                info!(
-                    "  Credentials with Go stake > 0 but our UTXO = 0: {} ({} ADA)",
-                    missing_stake_count,
-                    missing_stake_total / 1_000_000
-                );
-                info!(
-                    "  Of those, delegated to a pool: {} ({} ADA) <- THIS IS THE SPDD GAP",
-                    missing_delegated_count,
-                    missing_delegated_stake / 1_000_000
-                );
-
-                if !sample_missing.is_empty() {
-                    info!("  Sample missing credentials (Go stake but no UTXO):");
-                    for (cred, stake, delegated) in &sample_missing {
-                        let cred_str = match cred {
-                            StakeCredential::AddrKeyHash(h) => {
-                                format!("KeyHash({})", hex::encode(h))
-                            }
-                            StakeCredential::ScriptHash(h) => {
-                                format!("ScriptHash({})", hex::encode(h))
-                            }
-                        };
-                        info!(
-                            "    {} - {} ADA, delegated: {}",
-                            cred_str,
-                            stake / 1_000_000,
-                            delegated
-                        );
-                    }
-                }
-
                 // Convert raw snapshots to processed SnapshotsContainer
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
@@ -1298,12 +1176,17 @@ impl StreamingSnapshotParser {
                     pots.clone(),
                     network.clone(),
                 );
+                info!(
+                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+                    processed.mark.spos.len(),
+                    processed.set.spos.len(),
+                    processed.go.spos.len()
+                );
                 callbacks.on_snapshots(processed.clone())?;
                 Some(processed)
             }
             Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Continuing with empty snapshots...");
+                info!("Failed to parse snapshots: {}, continuing without them", e);
                 None
             }
         };
@@ -1312,189 +1195,55 @@ impl StreamingSnapshotParser {
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
 
+        info!(
+            "Pools: {} registered, {} retiring, {} DReps",
+            pool_registrations.len(),
+            retiring_pools.len(),
+            dreps.len()
+        );
+
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
 
-        // Merge UTXO values into accounts
-        // The accounts Vec has stake_address.credential, and stake_utxo_values is keyed by StakeCredential
-        let mut accounts_matched = 0usize;
-        let mut total_utxo_value_matched: u64 = 0;
+        // Merge UTXO values and pulsing reward update rewards into accounts
+        // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
+        // added to DState rewards (accumulated rewards from previous epochs).
+        let mut pulsing_rewards_total: u64 = 0;
         let accounts_with_utxo_values: Vec<AccountState> = accounts
             .into_iter()
             .map(|mut account| {
                 if let Some(&utxo_value) = stake_utxo_values.get(&account.stake_address.credential)
                 {
                     account.address_state.utxo_value = utxo_value;
-                    accounts_matched += 1;
-                    total_utxo_value_matched += utxo_value;
+                }
+                if let Some(&pulsing_reward) =
+                    reward_snapshot_rewards.get(&account.stake_address.credential)
+                {
+                    account.address_state.rewards += pulsing_reward;
+                    pulsing_rewards_total += pulsing_reward;
                 }
                 account
             })
             .collect();
 
-        // Calculate total UTXO value from all stake credentials (including those not in accounts)
-        let total_utxo_value_all: u64 = stake_utxo_values.values().sum();
-        let unmatched_credentials = stake_utxo_values.len() - accounts_matched;
-        let unmatched_value = total_utxo_value_all - total_utxo_value_matched;
-
-        info!("UTXO stake accounting summary:");
-        info!(
-            "  Unique stake credentials in UTXOs: {}",
-            stake_utxo_values.len()
-        );
-        info!(
-            "  Total UTXO value at stake credentials: {} ADA (base addresses only)",
-            total_utxo_value_all / 1_000_000
-        );
-
-        // Note: Not all stake credentials are registered. Users can have base addresses
-        // with stake credentials but never submit a stake registration certificate.
-        // The match rate below shows how many registered accounts have UTXOs.
-        info!(
-            "  Registered accounts with UTXOs: {}/{} ({:.1}%)",
-            accounts_matched,
-            accounts_with_utxo_values.len(),
-            if accounts_with_utxo_values.is_empty() {
-                0.0
-            } else {
-                (accounts_matched as f64 / accounts_with_utxo_values.len() as f64) * 100.0
-            }
-        );
-        info!(
-            "  UTXO value at registered credentials: {} ADA ({:.1}% of base address value)",
-            total_utxo_value_matched / 1_000_000,
-            if total_utxo_value_all == 0 {
-                0.0
-            } else {
-                (total_utxo_value_matched as f64 / total_utxo_value_all as f64) * 100.0
-            }
-        );
-        if unmatched_credentials > 0 {
-            info!(
-                "  Unregistered stake credentials: {} ({} ADA) - base addresses with unregistered stake parts",
-                unmatched_credentials,
-                unmatched_value / 1_000_000
-            );
-        }
-
-        // Detailed breakdown of credential types for debugging
-        let dstate_keyhash_count = accounts_with_utxo_values
-            .iter()
-            .filter(|a| matches!(a.stake_address.credential, StakeCredential::AddrKeyHash(_)))
-            .count();
-        let dstate_scripthash_count = accounts_with_utxo_values
-            .iter()
-            .filter(|a| matches!(a.stake_address.credential, StakeCredential::ScriptHash(_)))
-            .count();
-        let utxo_keyhash_count = stake_utxo_values
-            .keys()
-            .filter(|c| matches!(c, StakeCredential::AddrKeyHash(_)))
-            .count();
-        let utxo_scripthash_count = stake_utxo_values
-            .keys()
-            .filter(|c| matches!(c, StakeCredential::ScriptHash(_)))
-            .count();
-        info!("  Credential type breakdown:");
-        info!(
-            "    Registered accounts: {} AddrKeyHash, {} ScriptHash",
-            dstate_keyhash_count, dstate_scripthash_count
-        );
-        info!(
-            "    UTXO stake creds: {} AddrKeyHash, {} ScriptHash",
-            utxo_keyhash_count, utxo_scripthash_count
-        );
-
-        // Calculate total rewards and active stake for comparison
-        // Note: "Active stake" for rewards only includes delegated accounts
+        // Calculate summary statistics
+        let total_utxo_value: u64 = stake_utxo_values.values().sum();
         let total_rewards: u64 =
             accounts_with_utxo_values.iter().map(|a| a.address_state.rewards).sum();
-        let delegated_active_stake: u64 = accounts_with_utxo_values
-            .iter()
-            .filter(|a| a.address_state.delegated_spo.is_some())
-            .map(|a| a.address_state.utxo_value + a.address_state.rewards)
-            .sum();
         let delegated_count = accounts_with_utxo_values
             .iter()
             .filter(|a| a.address_state.delegated_spo.is_some())
             .count();
-        let delegated_with_utxo = accounts_with_utxo_values
-            .iter()
-            .filter(|a| a.address_state.delegated_spo.is_some() && a.address_state.utxo_value > 0)
-            .count();
-        let delegated_utxo_value: u64 = accounts_with_utxo_values
-            .iter()
-            .filter(|a| a.address_state.delegated_spo.is_some())
-            .map(|a| a.address_state.utxo_value)
-            .sum();
-        let delegated_rewards: u64 = accounts_with_utxo_values
-            .iter()
-            .filter(|a| a.address_state.delegated_spo.is_some())
-            .map(|a| a.address_state.rewards)
-            .sum();
-        info!(
-            "  Total rewards in accounts: {} ADA",
-            total_rewards / 1_000_000
-        );
-        info!(
-            "  Delegated accounts: {}/{} ({:.1}%)",
-            delegated_count,
-            accounts_with_utxo_values.len(),
-            if accounts_with_utxo_values.is_empty() {
-                0.0
-            } else {
-                (delegated_count as f64 / accounts_with_utxo_values.len() as f64) * 100.0
-            }
-        );
-        // Accounts with delegation but no UTXO - these only contribute rewards to live stake
-        let delegated_without_utxo = delegated_count - delegated_with_utxo;
-        let delegated_without_utxo_rewards: u64 = accounts_with_utxo_values
-            .iter()
-            .filter(|a| a.address_state.delegated_spo.is_some() && a.address_state.utxo_value == 0)
-            .map(|a| a.address_state.rewards)
-            .sum();
-        info!(
-            "  Delegated accounts with UTXOs: {}/{} ({:.1}%)",
-            delegated_with_utxo,
-            delegated_count,
-            if delegated_count == 0 {
-                0.0
-            } else {
-                (delegated_with_utxo as f64 / delegated_count as f64) * 100.0
-            }
-        );
-        info!(
-            "  Delegated accounts WITHOUT UTXOs: {} (rewards only: {} ADA)",
-            delegated_without_utxo,
-            delegated_without_utxo_rewards / 1_000_000
-        );
-        info!(
-            "  Delegated UTXO value (SPDD 'active'): {} ADA ({} lovelace)",
-            delegated_utxo_value / 1_000_000,
-            delegated_utxo_value
-        );
-        info!("  Delegated rewards: {} ADA", delegated_rewards / 1_000_000);
-        info!(
-            "  Delegated live stake (utxo + rewards, SPDD 'live'): {} ADA ({} lovelace)",
-            delegated_active_stake / 1_000_000,
-            delegated_active_stake
-        );
 
-        // Compare with Go snapshot stake (the canonical stake distribution at epoch boundary)
-        // Snapshot total_stake = utxo + rewards at snapshot time, so compare with delegated_active_stake
-        // The difference is expected: our calculation is "live" state, snapshots are historical
-        if let Some(ref snapshots) = bootstrap_snapshots {
-            let go_total_stake: u64 = snapshots.go.spos.values().map(|s| s.total_stake).sum();
-            let stake_diff = delegated_active_stake as i64 - go_total_stake as i64;
-            info!(
-                "  Go snapshot stake (canonical, utxo+rewards at epoch boundary): {} ADA",
-                go_total_stake / 1_000_000
-            );
-            info!(
-                "  Difference (live - snapshot): {} ADA (expected: stake evolves within epoch)",
-                stake_diff / 1_000_000
-            );
-        }
+        info!(
+            "Accounts: {} total, {} delegated, {} ADA in UTXOs, {} ADA rewards ({} ADA from pulsing update)",
+            accounts_with_utxo_values.len(),
+            delegated_count,
+            total_utxo_value / 1_000_000,
+            total_rewards / 1_000_000,
+            pulsing_rewards_total / 1_000_000
+        );
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1521,8 +1270,6 @@ impl StreamingSnapshotParser {
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
         callbacks.on_epoch(epoch_bootstrap)?;
 
-        // Note: fees is parsed but not stored in Pots (not needed downstream)
-        let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
             pot_balances: Pots {
@@ -1536,7 +1283,13 @@ impl StreamingSnapshotParser {
         };
         callbacks.on_metadata(snapshot_metadata)?;
 
-        // Emit completion callback
+        info!(
+            "Snapshot parsing complete: treasury {} ADA, reserves {} ADA, deposits {} ADA",
+            treasury / 1_000_000,
+            reserves / 1_000_000,
+            deposits / 1_000_000
+        );
+
         callbacks.on_complete()?;
 
         Ok(())
@@ -1670,20 +1423,6 @@ impl StreamingSnapshotParser {
                         batch_processed += 1;
                         last_good_position = bytes_consumed;
 
-                        // Progress reporting - less frequent for better performance
-                        if utxo_count.is_multiple_of(1000000) {
-                            let buffer_usage = buffer.len();
-                            let stake_value_total: u64 = stake_values.values().sum();
-                            info!(
-                                "Streamed {} UTXOs: {} total ADA, {} stake credentials, {} ADA staked, buffer: {} MB",
-                                utxo_count,
-                                total_utxo_value / 1_000_000,
-                                stake_values.len(),
-                                stake_value_total / 1_000_000,
-                                buffer_usage / 1024 / 1024,
-                            );
-                        }
-
                         // Continue processing if we have more data and haven't hit limits
                         if entries_processed >= map_len
                             || entry_decoder.position()
@@ -1734,91 +1473,32 @@ impl StreamingSnapshotParser {
             }
         }
 
-        let stake_value_total: u64 = stake_values.values().sum();
-        info!("UTXO streaming complete:");
-        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "  Total UTXO value: {} ADA ({} lovelace)",
+            "Streamed {} UTXOs ({} ADA), {} stake credentials",
+            utxo_count,
             total_utxo_value / 1_000_000,
-            total_utxo_value
-        );
-        info!("  Stake credentials found: {}", stake_values.len());
-        info!(
-            "  Total staked value: {} ADA",
-            stake_value_total / 1_000_000
-        );
-        info!(
-            "  Data streamed: {:.2} MB, peak buffer: {} MB, largest entry: {} bytes",
-            total_bytes_processed as f64 / 1024.0 / 1024.0,
-            PARSE_BUFFER_SIZE / 1024 / 1024,
-            max_single_entry_size
+            stake_values.len()
         );
 
-        // Log address type breakdown
-        info!("  Address type breakdown:");
-        let type_names = [
-            "0 (base key/key)",
-            "1 (base script/key)",
-            "2 (base key/script)",
-            "3 (base script/script)",
-            "4 (pointer key)",
-            "5 (pointer script)",
-            "6 (enterprise key)",
-            "7 (enterprise script)",
-            "8-15 (other)",
-            "9",
-            "10",
-            "11",
-            "12",
-            "13",
-            "14",
-            "15",
-        ];
-        for i in 0..8 {
-            if addr_type_counts[i] > 0 {
-                info!(
-                    "    Type {}: {} UTXOs, {} ADA",
-                    type_names[i],
-                    addr_type_counts[i],
-                    addr_type_values[i] / 1_000_000
-                );
-            }
-        }
-        if byron_count > 0 {
-            info!(
-                "    Byron: {} UTXOs, {} ADA",
-                byron_count,
-                byron_value / 1_000_000
-            );
-        }
-        if short_addr_count > 0 {
-            info!(
-                "    Short/empty: {} UTXOs, {} ADA",
-                short_addr_count,
-                short_addr_value / 1_000_000
-            );
-        }
+        // Suppress unused variable warnings for address type tracking (kept for future debugging)
+        let _ = (
+            addr_type_counts,
+            addr_type_values,
+            byron_count,
+            byron_value,
+            short_addr_count,
+            short_addr_value,
+            max_single_entry_size,
+            total_bytes_processed,
+        );
 
-        // After successfully parsing all UTXOs, we need to consume the break token
-        // that ends the indefinite-length UTXO map if present
+        // Consume the break token that ends the indefinite-length UTXO map if present
         if !buffer.is_empty() {
             let mut decoder = Decoder::new(&buffer);
-            match decoder.datatype() {
-                Ok(Type::Break) => {
-                    info!("    Found break token after UTXOs, consuming it (end of indefinite UTXO map)");
-                    decoder.skip()?; // Consume the break that ends the UTXO map
-
-                    // Update our tracking to account for the consumed break token
-                    let break_bytes_consumed = decoder.position();
-                    buffer.drain(0..break_bytes_consumed);
-                }
-                Ok(_) => {
-                    // No break token, this is a definite-length map - continue normal parsing
-                    info!("    No break token found, assuming definite-length UTXO map");
-                }
-                Err(e) => {
-                    info!("    After UTXO parsing, datatype() check failed: {}", e);
-                }
+            if matches!(decoder.datatype(), Ok(Type::Break)) {
+                decoder.skip()?;
+                let break_bytes_consumed = decoder.position();
+                buffer.drain(0..break_bytes_consumed);
             }
         }
 
@@ -1873,19 +1553,14 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
-                    info!("Processing indefinite-length blocks array");
-                    let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
-                                info!("Found array break after {} entries", count);
                                 break;
                             }
-                            entry_type => {
-                                info!("  Block #{}: {:?}", count + 1, entry_type);
+                            _ => {
                                 decoder.skip().context("Failed to skip block entry")?;
-                                count += 1;
                             }
                         }
                     }
@@ -1940,34 +1615,96 @@ impl StreamingSnapshotParser {
 
                 Ok(block_productions)
             }
-            simple_type => {
-                // If it's a simple value or other type, skip it for now
-                // Try to get more details about simple types
-                match simple_type {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        let value = decoder.u64().context("Failed to read block integer value")?;
-                        info!("Block data is integer: {}", value);
-                    }
-                    Type::Bytes => {
-                        let bytes = decoder.bytes().context("Failed to read block bytes")?;
-                        info!("Block data is {} bytes", bytes.len());
-                    }
-                    Type::String => {
-                        let text = decoder.str().context("Failed to read block text")?;
-                        info!("Block data is text: '{}'", text);
-                    }
-                    Type::Null => {
-                        decoder.skip()?;
-                        info!("Block data is null");
-                    }
-                    _ => {
-                        decoder.skip().context("Failed to skip blocks value")?;
-                    }
-                }
-
+            _ => {
+                // Simple value or other type - skip it
+                decoder.skip().context("Failed to skip blocks value")?;
                 Ok(Vec::new())
             }
         }
+    }
+
+    /// Parse instant rewards (MIRs) from DState
+    ///
+    /// instantaneous_rewards = [
+    ///   ir_reserves : { * credential_staking => coin },
+    ///   ir_treasury : { * credential_staking => coin },
+    ///   ir_delta_reserves : delta_coin,
+    ///   ir_delta_treasury : delta_coin,
+    /// ]
+    ///
+    /// Returns a combined map of all instant rewards (from both reserves and treasury)
+    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        let ir_len = decoder
+            .array()
+            .context("Failed to parse instant_rewards array")?
+            .ok_or_else(|| anyhow!("instant_rewards must be a definite-length array"))?;
+
+        if ir_len < 4 {
+            return Err(anyhow!(
+                "instant_rewards array too short: expected 4 elements, got {ir_len}"
+            ));
+        }
+
+        // Parse ir_reserves and ir_treasury: { * credential_staking => coin }
+        let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
+        let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
+
+        // Skip ir_delta_reserves and ir_delta_treasury (not needed for account balances)
+        decoder.skip()?;
+        decoder.skip()?;
+
+        // Combine rewards from both sources
+        let mut combined = ir_reserves;
+        for (credential, amount) in ir_treasury {
+            *combined.entry(credential).or_insert(0) += amount;
+        }
+
+        Ok(combined)
+    }
+
+    /// Parse pulsing_rew_update to extract reward information.
+    ///
+    /// The pulsing_rew_update is wrapped in a StrictMaybe, so we first check if it's
+    /// present before parsing using the PulsingRewardUpdate type.
+    ///
+    /// Returns a map of stake credentials to their total rewards (sum of all reward entries).
+    fn parse_pulsing_reward_update(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        // Check if strict_maybe is empty or has content
+        match decoder.array()? {
+            Some(0) => return Ok(HashMap::new()),
+            Some(1) => {}
+            Some(other) => {
+                return Err(anyhow!(
+                    "Invalid strict_maybe length for pulsing_rew_update: {}",
+                    other
+                ));
+            }
+            None => {
+                return Err(anyhow!("pulsing_rew_update must be definite-length array"));
+            }
+        };
+
+        // Parse using the proper PulsingRewardUpdate type
+        let pulsing_update: PulsingRewardUpdate =
+            decoder.decode().context("Failed to decode PulsingRewardUpdate")?;
+
+        // Extract rewards based on variant, summing all reward entries per credential
+        let rewards = match pulsing_update {
+            PulsingRewardUpdate::Pulsing { snapshot } => snapshot
+                .leaders
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+            PulsingRewardUpdate::Complete { update } => update
+                .rewards
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+        };
+
+        Ok(rewards)
     }
 
     /// Parse a single UTXO entry from the streaming buffer
@@ -2116,8 +1853,6 @@ impl StreamingSnapshotParser {
         ctx: &mut SnapshotContext,
         _epoch: u64,
     ) -> Result<RawSnapshotsContainer> {
-        info!("    Starting snapshots parsing...");
-
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
@@ -2129,42 +1864,21 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
-
-        // Parse each snapshot using RawSnapshot::parse
-        // Parse Mark snapshot [0]
-        info!("    Parsing Mark snapshot...");
+        // Parse Mark, Set, Go snapshots
         let mark_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Mark")
             .context("Failed to parse Mark snapshot")?;
-
-        // Parse Set snapshot [1]
-        info!("    Parsing Set snapshot...");
         let set_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Set")
             .context("Failed to parse Set snapshot")?;
-
-        // Parse Go snapshot [2]
-        info!("    Parsing Go snapshot...");
         let go_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Go")
             .context("Failed to parse Go snapshot")?;
-
         let fee = decoder.decode::<u64>().unwrap_or(0);
 
-        info!(
-            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
-        );
-
-        // Create raw snapshots container with full snapshot data
-        let raw_snapshots = RawSnapshotsContainer {
+        Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
             go: go_snapshot,
             fee,
-        };
-
-        info!("    Raw snapshots container created with VMap data");
-
-        // Return only the raw snapshots - no more API compatibility needed
-        Ok(raw_snapshots)
+        })
     }
 }
 
