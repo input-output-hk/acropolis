@@ -46,3 +46,8 @@ do
   cargopid=$(pidof -s acropolis_process_omnibus)
 
 done
+
+if [ $count -eq $maxcount -a "$snapshot_complete" = "" ]; then
+  echo "Process did not complete in allotted time" >&2
+  exit 1
+fi
