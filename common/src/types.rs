@@ -277,6 +277,36 @@ pub struct TxUTxODeltas {
     pub outputs: Vec<TxOutput>,
 }
 
+// Individual transaction details
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Transaction {
+    // Transaction in which delta occured
+    pub tx_identifier: TxIdentifier,
+
+    // Created and spent UTxOs
+    pub inputs: Vec<UTxOIdentifier>,
+    pub outputs: Vec<TxOutput>,
+
+    // Certificates
+    pub certificates: Vec<TxCertificateWithPos>,
+
+    // Withdrawals
+    pub withdrawals: Vec<Withdrawal>,
+
+    // Witnesses
+    pub vkey_witnesses: Vec<VKeyWitness>,
+    pub native_scripts: Vec<NativeScript>,
+
+    // Low bound: validity interval start
+    pub low_bnd: Option<u64>,
+
+    // Upp bound: ttl
+    pub upp_bnd: Option<u64>,
+
+    // pp updates proposal
+    pub alonzo_babbage_update_proposal: Option<AlonzoBabbageUpdateProposal>,
+}
+
 /// Individual address balance change
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {

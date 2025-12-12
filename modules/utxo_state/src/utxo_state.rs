@@ -71,7 +71,7 @@ impl UTXOState {
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
-        let genesis = match bootstrapped_message.as_ref() {
+        let _genesis = match bootstrapped_message.as_ref() {
             Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
                 complete.values.clone()
             }
@@ -82,7 +82,7 @@ impl UTXOState {
         let _ = protocol_parameters_subscription.read().await?;
 
         loop {
-            let mut protocol_params =
+            let mut _protocol_params =
                 pp_history.lock().await.get_or_init_with(ProtocolParams::default);
 
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
@@ -101,7 +101,7 @@ impl UTXOState {
                 if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
                     protocol_parameters_msg.as_ref()
                 {
-                    protocol_params = params.params.clone();
+                    _protocol_params = params.params.clone();
                 }
             }
 

@@ -76,6 +76,13 @@ pub struct GenesisUTxOsMessage {
     pub utxos: Vec<(UTxOIdentifier, TxIdentifier)>,
 }
 
+/// Message encapsulating multiple unpacked transactions, in order
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnpackedTransactionsMessage {
+    /// Ordered array of unpacked transactions
+    pub transactions: Vec<Transaction>,
+}
+
 /// Message encapsulating multiple UTXO deltas, in order
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTXODeltasMessage {
@@ -314,6 +321,7 @@ pub enum CardanoMessage {
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
+    UnpackedTransactions(UnpackedTransactionsMessage), // Unpacked transactions received
     UTXODeltas(UTXODeltasMessage),           // UTXO deltas received
     AssetDeltas(AssetDeltasMessage),         // Asset mint and burn deltas
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received

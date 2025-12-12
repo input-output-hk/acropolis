@@ -6,8 +6,9 @@ use std::collections::HashSet;
 
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
-    validation::UTxOWValidationError, AddrKeyhash, GenesisDelegates, KeyHash, NativeScript,
-    ScriptHash, ShelleyAddressPaymentPart, TxHash, UTXOValue, UTxOIdentifier, VKeyWitness,
+    validation::UTxOWValidationError, AlonzoBabbageUpdateProposal, GenesisDelegates, KeyHash,
+    NativeScript, ScriptHash, ShelleyAddressPaymentPart, StakeCredential, TxCertificate,
+    TxCertificateWithPos, TxHash, UTXOValue, UTxOIdentifier, VKeyWitness, Withdrawal,
 };
 use anyhow::Result;
 use pallas::ledger::primitives::alonzo;
@@ -64,44 +65,43 @@ pub fn eval_native_script(
 /// This function extracts required VKey Hashes
 /// from TxCert (pallas type)
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
-fn get_cert_authors(cert: &alonzo::Certificate) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
+fn get_cert_authors(
+    cert_with_pos: &TxCertificateWithPos,
+) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
     let mut vkey_hashes = HashSet::new();
     let mut script_hashes = HashSet::new();
 
-    let mut parse_cred = |cred: &alonzo::StakeCredential| match cred {
-        alonzo::StakeCredential::AddrKeyhash(vkey_hash) => {
-            vkey_hashes.insert(AddrKeyhash::from(**vkey_hash));
+    let mut parse_cred = |cred: &StakeCredential| match cred {
+        StakeCredential::AddrKeyHash(vkey_hash) => {
+            vkey_hashes.insert(*vkey_hash);
         }
-        alonzo::StakeCredential::ScriptHash(script_hash) => {
-            script_hashes.insert(ScriptHash::from(**script_hash));
+        StakeCredential::ScriptHash(script_hash) => {
+            script_hashes.insert(*script_hash);
         }
     };
 
-    match cert {
+    match &cert_with_pos.cert {
         // Deregistration requires witness from stake credential
-        alonzo::Certificate::StakeDeregistration(cred) => {
-            parse_cred(cred);
+        TxCertificate::StakeDeregistration(addr) => {
+            parse_cred(&addr.credential);
         }
         // Delegation requries withness from delegator
-        alonzo::Certificate::StakeDelegation(cred, _) => {
-            parse_cred(cred);
+        TxCertificate::StakeDelegation(deleg) => {
+            parse_cred(&deleg.stake_address.credential);
         }
         // Pool registration requires witness from pool cold key and owners
-        alonzo::Certificate::PoolRegistration {
-            operator,
-            pool_owners,
-            ..
-        } => {
-            vkey_hashes.insert(AddrKeyhash::from(**operator));
-            vkey_hashes.extend(pool_owners.iter().map(|o| AddrKeyhash::from(**o)));
+        TxCertificate::PoolRegistration(pool_reg) => {
+            vkey_hashes.insert(*pool_reg.operator);
+            vkey_hashes
+                .extend(pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>());
         }
         // Pool retirement requires withness from pool cold key
-        alonzo::Certificate::PoolRetirement(operator, _) => {
-            vkey_hashes.insert(AddrKeyhash::from(**operator));
+        TxCertificate::PoolRetirement(retirement) => {
+            vkey_hashes.insert(*retirement.operator);
         }
         // Genesis delegation requires witness from genesis key
-        alonzo::Certificate::GenesisKeyDelegation(_, genesis_delegate_hash, _) => {
-            vkey_hashes.insert(AddrKeyhash::try_from(genesis_delegate_hash.as_ref()).unwrap());
+        TxCertificate::GenesisKeyDelegation(gen_deleg) => {
+            vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
         }
         _ => {}
     }
@@ -127,20 +127,21 @@ fn get_cert_authors(cert: &alonzo::Certificate) -> (HashSet<KeyHash>, HashSet<Sc
 /// 2. Withdrawal scripts: scripts controlling reward accounts
 /// 3. Certificate scripts: scripts in certificate credentials.
 pub fn get_vkey_script_needed<F>(
-    transaction_body: &alonzo::TransactionBody,
-    tx_hash: TxHash,
+    inputs: &[UTxOIdentifier],
+    certificates: &[TxCertificateWithPos],
+    withdrawals: &[Withdrawal],
+    alonzo_babbage_update_proposal: &Option<AlonzoBabbageUpdateProposal>,
     lookup_utxo: F,
 ) -> (HashSet<KeyHash>, HashSet<ScriptHash>)
 where
-    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
+    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
 {
     let mut vkey_hashes = HashSet::new();
     let mut script_hashes = HashSet::new();
 
     // for each UTxO, extract the needed vkey and script hashes
-    for utxo in transaction_body.inputs.iter() {
-        let tx_out_ref = UTxOIdentifier::new(tx_hash, utxo.index as u16);
-        if let Ok(Some(utxo)) = lookup_utxo(tx_out_ref) {
+    for utxo in inputs.iter() {
+        if let Ok(Some(utxo)) = lookup_utxo(utxo) {
             // NOTE:
             // Need to check inputs from byron bootstrap addresses
             // with bootstrap witnesses
@@ -158,25 +159,28 @@ where
     }
 
     // for each certificate, get the required vkey and script hashes
-    for cert in transaction_body.certificates.as_ref().unwrap_or(&vec![]) {
+    for cert in certificates.iter() {
         let (v, s) = get_cert_authors(cert);
         vkey_hashes.extend(v);
         script_hashes.extend(s);
     }
 
     // for each withdrawal, get the required vkey and script hashes
-    if let Some(withdrawals) = transaction_body.withdrawals.as_ref() {
-        for (key_hash, _) in withdrawals.iter() {
-            // NOTE:
-            // Withdrawal is guaranteed to be always AddrKeyhash???
-            vkey_hashes.insert(AddrKeyhash::try_from(key_hash.as_ref()).unwrap());
+    for withdrawal in withdrawals.iter() {
+        match withdrawal.address.credential {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(script_hash);
+            }
         }
     }
 
     // for each governance action, get the required vkey hashes
-    if let Some(update) = transaction_body.update.as_ref() {
-        for (genesis_key, _) in update.proposed_protocol_parameter_updates.iter() {
-            vkey_hashes.insert(AddrKeyhash::try_from(genesis_key.as_ref()).unwrap());
+    if let Some(update) = alonzo_babbage_update_proposal {
+        for (genesis_key, _) in update.proposals.iter() {
+            vkey_hashes.insert(*genesis_key);
         }
     }
 
@@ -186,7 +190,7 @@ where
 /// Validate Native Scripts from Transaction witnesses
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L373
 pub fn validate_failed_native_scripts(
-    native_scripts: &Vec<NativeScript>,
+    native_scripts: &[NativeScript],
     vkey_hashes_provided: &HashSet<KeyHash>,
     low_bnd: Option<u64>,
     upp_bnd: Option<u64>,
@@ -275,20 +279,17 @@ pub fn validate_needed_witnesses(
 /// Validate genesis keys signatures for MIR certificate
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L463
 pub fn validate_mir_insufficient_genesis_sigs(
-    transaction_body: &alonzo::TransactionBody,
+    certificates: &[TxCertificateWithPos],
     vkey_hashes_provided: &HashSet<KeyHash>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let has_mir = transaction_body
-        .certificates
-        .as_ref()
-        .map(|certs| {
-            certs
-                .iter()
-                .any(|cert| matches!(cert, alonzo::Certificate::MoveInstantaneousRewardsCert(_)))
-        })
-        .unwrap_or(false);
+    let has_mir = certificates.iter().any(|cert_with_pos| {
+        matches!(
+            cert_with_pos.cert,
+            TxCertificate::MoveInstantaneousReward(_)
+        )
+    });
     if !has_mir {
         return Ok(());
     }
@@ -314,47 +315,44 @@ pub fn validate_mir_insufficient_genesis_sigs(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate<F>(
-    tx: &alonzo::MintedTx,
     tx_hash: TxHash,
+    inputs: &[UTxOIdentifier],
+    certificates: &[TxCertificateWithPos],
+    withdrawals: &[Withdrawal],
+    alonzo_babbage_update_proposal: &Option<AlonzoBabbageUpdateProposal>,
+    vkey_witnesses: &[VKeyWitness],
+    native_scripts: &[NativeScript],
+    low_bnd: Option<u64>,
+    upp_bnd: Option<u64>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     lookup_utxo: F,
 ) -> Result<(), Box<UTxOWValidationError>>
 where
-    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
+    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
 {
-    let transaction_body = &tx.transaction_body;
     // Extract required vkey and script hashes
-    let (vkey_hashes_needed, script_hashes_needed) =
-        get_vkey_script_needed(transaction_body, tx_hash, lookup_utxo);
+    let (vkey_hashes_needed, script_hashes_needed) = get_vkey_script_needed(
+        inputs,
+        certificates,
+        withdrawals,
+        alonzo_babbage_update_proposal,
+        lookup_utxo,
+    );
 
-    // Extract vkey hashes from witnesses
-    let vkey_witnesses = get_vkey_witnesses(tx);
+    // Extract vkey hashes from vkey_witnesses
     let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
 
-    let native_scripts: Vec<NativeScript> = tx
-        .transaction_witness_set
-        .native_script
-        .as_ref()
-        .map(|scripts| {
-            scripts.iter().map(|script| acropolis_codec::map_native_script(script)).collect()
-        })
-        .unwrap_or_default();
-
     // validate native scripts
-    validate_failed_native_scripts(
-        &native_scripts,
-        &vkey_hashes_provided,
-        transaction_body.validity_interval_start,
-        transaction_body.ttl,
-    )?;
+    validate_failed_native_scripts(native_scripts, &vkey_hashes_provided, low_bnd, upp_bnd)?;
 
     // validate missing & extra scripts
-    validate_missing_extra_scripts(&script_hashes_needed, &native_scripts)?;
+    validate_missing_extra_scripts(&script_hashes_needed, native_scripts)?;
 
     // validate vkey witnesses signatures
-    validate_verified_wits(&vkey_witnesses, tx_hash)?;
+    validate_verified_wits(vkey_witnesses, tx_hash)?;
 
     // validate required vkey witnesses are provided
     validate_needed_witnesses(&vkey_hashes_needed, &vkey_hashes_provided)?;
@@ -364,7 +362,7 @@ where
 
     // validate mir certificate genesis sig
     validate_mir_insufficient_genesis_sigs(
-        transaction_body,
+        certificates,
         &vkey_hashes_provided,
         genesis_delegs,
         update_quorum,

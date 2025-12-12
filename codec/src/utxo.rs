@@ -1,6 +1,6 @@
-use crate::address::map_address;
+use crate::{address::map_address, witness::map_native_script};
 use acropolis_common::{validation::TransactionValidationError, *};
-use pallas_primitives::{alonzo, conway};
+use pallas_primitives::conway;
 use pallas_traverse::{MultiEraInput, MultiEraPolicyAssets, MultiEraTx, MultiEraValue};
 
 pub fn map_value(pallas_value: &MultiEraValue) -> Value {
@@ -81,25 +81,6 @@ pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
         Some(conway::MintedDatumOption::Hash(h)) => Some(Datum::Hash(h.to_vec())),
         Some(conway::MintedDatumOption::Data(d)) => Some(Datum::Inline(d.raw_cbor().to_vec())),
         None => None,
-    }
-}
-
-pub fn map_native_script(script: &alonzo::NativeScript) -> NativeScript {
-    match script {
-        alonzo::NativeScript::ScriptPubkey(addr_key_hash) => {
-            NativeScript::ScriptPubkey(AddrKeyhash::from(**addr_key_hash))
-        }
-        alonzo::NativeScript::ScriptAll(scripts) => {
-            NativeScript::ScriptAll(scripts.iter().map(map_native_script).collect())
-        }
-        alonzo::NativeScript::ScriptAny(scripts) => {
-            NativeScript::ScriptAny(scripts.iter().map(map_native_script).collect())
-        }
-        alonzo::NativeScript::ScriptNOfK(n, scripts) => {
-            NativeScript::ScriptNOfK(*n, scripts.iter().map(map_native_script).collect())
-        }
-        alonzo::NativeScript::InvalidBefore(slot_no) => NativeScript::InvalidBefore(*slot_no),
-        alonzo::NativeScript::InvalidHereafter(slot_no) => NativeScript::InvalidHereafter(*slot_no),
     }
 }
 

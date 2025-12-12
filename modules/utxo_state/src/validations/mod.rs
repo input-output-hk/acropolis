@@ -1,37 +1,46 @@
 use acropolis_common::{
     validation::{Phase1ValidationError, TransactionValidationError},
-    GenesisDelegates, TxHash, UTXOValue, UTxOIdentifier,
+    AlonzoBabbageUpdateProposal, GenesisDelegates, NativeScript, TxCertificateWithPos, TxHash,
+    UTXOValue, UTxOIdentifier, VKeyWitness, Withdrawal,
 };
 use anyhow::Result;
-use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
 mod shelley;
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_shelley_tx<F>(
-    raw_tx: &[u8],
+    tx_hash: TxHash,
+    inputs: &[UTxOIdentifier],
+    certificates: &[TxCertificateWithPos],
+    withdrawals: &[Withdrawal],
+    alonzo_babbage_update_proposal: &Option<AlonzoBabbageUpdateProposal>,
+    vkey_witnesses: &[VKeyWitness],
+    native_scripts: &[NativeScript],
+    low_bnd: Option<u64>,
+    upp_bnd: Option<u64>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     lookup_utxo: F,
 ) -> Result<(), TransactionValidationError>
 where
-    F: Fn(UTxOIdentifier) -> Result<Option<UTXOValue>>,
+    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
 {
-    let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, raw_tx)
-        .map_err(|e| TransactionValidationError::CborDecodeError(e.to_string()))?;
-    let tx_hash = TxHash::from(*tx.hash());
-
-    let mtx = match tx {
-        MultiEraTx::AlonzoCompatible(mtx, PallasEra::Shelley) => mtx,
-        _ => {
-            return Err(TransactionValidationError::MalformedTransaction(
-                "Not a Shelley transaction".to_string(),
-            ));
-        }
-    };
-
-    shelley::utxo::validate(&mtx, &lookup_utxo)
+    shelley::utxo::validate(inputs, &lookup_utxo)
         .map_err(|e| Phase1ValidationError::UTxOValidationError(*e))?;
-    shelley::utxow::validate(&mtx, tx_hash, genesis_delegs, update_quorum, &lookup_utxo)
-        .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
+    shelley::utxow::validate(
+        tx_hash,
+        inputs,
+        certificates,
+        withdrawals,
+        alonzo_babbage_update_proposal,
+        vkey_witnesses,
+        native_scripts,
+        low_bnd,
+        upp_bnd,
+        genesis_delegs,
+        update_quorum,
+        &lookup_utxo,
+    )
+    .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
 
     Ok(())
 }
