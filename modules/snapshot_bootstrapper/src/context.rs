@@ -1,10 +1,11 @@
+use crate::block::{BlockContext, BlockContextError};
 use crate::configuration::{BootstrapConfig, ConfigError, Snapshot};
-use crate::header::{HeaderContext, HeaderContextError};
 use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
-use acropolis_common::genesis_values::GenesisValues;
-use acropolis_common::protocol_params::Nonces;
-use acropolis_common::{BlockInfo, BlockIntent, BlockStatus, Era, Point};
+use acropolis_common::{
+    genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
+    Era, Point,
+};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -20,7 +21,7 @@ pub enum BootstrapContextError {
     },
 
     #[error(transparent)]
-    Header(#[from] HeaderContextError),
+    Block(#[from] BlockContextError),
 
     #[error(transparent)]
     Nonces(#[from] NonceContextError),
@@ -57,13 +58,13 @@ impl BootstrapContext {
             });
         }
 
-        // Load header
-        let header = HeaderContext::load(&network_dir, &snapshot.point)?;
-        let hash = header
+        // Load block
+        let block_ctx = BlockContext::load(&network_dir, &snapshot.point)?;
+        let hash = block_ctx
             .point
             .hash()
-            .unwrap_or_else(|| panic!("Origin point has no hash: {:?}", header.point));
-        let slot = header.point.slot();
+            .unwrap_or_else(|| panic!("Origin point has no hash: {:?}", block_ctx.point));
+        let slot = block_ctx.point.slot();
 
         // Build nonce
         let nonces = nonces_file.into_nonces(target_epoch, *hash);
@@ -74,14 +75,14 @@ impl BootstrapContext {
             status: BlockStatus::Immutable,
             intent: BlockIntent::Apply,
             slot,
-            number: header.block_number,
+            number: block_ctx.block_number,
             hash: *hash,
             epoch: target_epoch,
             epoch_slot,
             new_epoch: false,
             timestamp: genesis.slot_to_timestamp(slot),
             tip_slot: None,
-            era: Era::Conway, // TODO: Make dynamic with era history
+            era: Era::Conway,
         };
 
         Ok(Self {
