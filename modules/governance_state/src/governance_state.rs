@@ -1,14 +1,16 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::messages::StateTransitionMessage;
-use acropolis_common::queries::errors::QueryError;
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
+    caryatid::SubscriptionExt,
+    declare_cardano_reader,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, Message, ProtocolParamsMessage,
-        SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
+        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
+        StateTransitionMessage,
     },
+    queries::errors::QueryError,
     queries::governance::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
@@ -39,6 +41,8 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
+    ("validation-outcome-topic", "cardano.validation.governance");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -57,6 +61,7 @@ pub struct GovernanceStateConfig {
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
+    validation_outcome_topic: String,
     verification_output_file: Option<String>,
 }
 
@@ -75,6 +80,7 @@ impl GovernanceStateConfig {
             protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
+            validation_outcome_topic: Self::conf(config, DEFAULT_VALIDATION_OUTCOME_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
@@ -84,44 +90,18 @@ impl GovernanceStateConfig {
 }
 
 impl GovernanceState {
-    async fn read_parameters(
-        parameters_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, ProtocolParamsMessage)> {
-        match parameters_s.read_ignoring_rollbacks().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::ProtocolParams(params))) => {
-                Ok((blk.clone(), params.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for protocol parameters topic"
-            )),
-        }
-    }
-
-    async fn read_drep(
-        drep_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, DRepStakeDistributionMessage)> {
-        match drep_s.read_ignoring_rollbacks().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::DRepStakeDistribution(distr))) => {
-                Ok((blk.clone(), distr.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for DRep distribution topic"
-            )),
-        }
-    }
-
-    async fn read_spo(
-        spo_s: &mut Box<dyn Subscription<Message>>,
-    ) -> Result<(BlockInfo, SPOStakeDistributionMessage)> {
-        match spo_s.read_ignoring_rollbacks().await?.1.as_ref() {
-            Message::Cardano((blk, CardanoMessage::SPOStakeDistribution(distr))) => {
-                Ok((blk.clone(), distr.clone()))
-            }
-            msg => Err(anyhow!(
-                "Unexpected message {msg:?} for SPO distribution topic"
-            )),
-        }
-    }
+    declare_cardano_reader!(
+        read_governance,
+        GovernanceProcedures,
+        GovernanceProceduresMessage
+    );
+    declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
+    declare_cardano_reader!(
+        read_drep,
+        DRepStakeDistribution,
+        DRepStakeDistributionMessage
+    );
+    declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
     async fn run(
         context: Arc<Context<Message>>,
@@ -234,6 +214,7 @@ impl GovernanceState {
                 _ => bail!("Unexpected message {message:?} for governance procedures topic"),
             };
 
+            let mut outcomes = ValidationOutcomes::default();
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
                 if blk_g.new_epoch {
@@ -246,15 +227,15 @@ impl GovernanceState {
 
                 // Governance may present in any block -- not only in 'new epoch' blocks.
                 {
-                    state.lock().await.handle_governance(&blk_g, &gov_procs).await?;
+                    outcomes.merge(&mut state.lock().await.handle_governance(&blk_g, &gov_procs).await?);
                 }
 
                 if blk_g.new_epoch {
                     let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
                     if blk_g != blk_p {
-                        error!(
+                        outcomes.push_anyhow(anyhow!(
                             "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                        );
+                        ));
                     }
 
                     {
@@ -265,21 +246,23 @@ impl GovernanceState {
                         // TODO: make sync more stable
                         let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
                         if blk_g != blk_drep {
-                            error!("Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync");
+                            outcomes.push_anyhow(anyhow!(
+                                "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
+                            ));
                         }
 
                         let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
                         if blk_g != blk_spo {
-                            error!(
+                            outcomes.push_anyhow(anyhow!(
                                 "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                            );
+                            ));
                         }
 
                         if blk_spo.epoch != d_spo.epoch + 1 {
-                            error!(
+                            outcomes.push_anyhow(anyhow!(
                                 "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
                                 d_spo.epoch
-                            );
+                            ));
                         }
 
                         state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
@@ -291,6 +274,8 @@ impl GovernanceState {
                 }
                 Ok::<(), anyhow::Error>(())
             }.instrument(span).await?;
+
+            outcomes.publish(&context, &config.validation_outcome_topic, &blk_g).await?;
         }
     }
 

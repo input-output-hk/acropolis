@@ -204,6 +204,12 @@ pub enum BlockIntent {
     ValidateAndApply = BlockIntent::Validate.bits | BlockIntent::Apply.bits, // Validate and apply block
 }
 
+impl BlockIntent {
+    pub fn do_validation(&self) -> bool {
+        (*self & BlockIntent::Validate) == BlockIntent::Validate
+    }
+}
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
@@ -257,6 +263,12 @@ impl PartialOrd for BlockInfo {
 }
 
 impl BlockInfo {
+    pub fn with_intent(&self, intent: BlockIntent) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.intent = intent;
+        copy
+    }
+
     pub fn is_at_tip(&self) -> bool {
         // The slot of a newly-reported block can be later than the slot of the tip.
         // This is because the tip is the most recent slot with a _validated_ block,
@@ -683,7 +695,7 @@ declare_hash_type_with_bech32!(PoolId, 28, "pool");
 
 declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
 declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
-declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepKeyHash, 28, "drep");
 declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
@@ -815,6 +827,36 @@ impl Display for Point {
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
+
+/// Global 'pot' account state (treasury, reserves, deposits)
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Pots {
+    /// Unallocated reserves
+    pub reserves: Lovelace,
+
+    /// Treasury
+    pub treasury: Lovelace,
+
+    /// Deposits
+    pub deposits: Lovelace,
+}
+
+/// Registration change kind for stake addresses
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RegistrationChangeKind {
+    Registered,
+    Deregistered,
+}
+
+/// Registration change on a stake address during an epoch
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegistrationChange {
+    /// Stake address
+    pub address: StakeAddress,
+
+    /// Change type
+    pub kind: RegistrationChangeKind,
+}
 
 /// Rational number = numerator / denominator
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
@@ -1899,7 +1941,7 @@ pub struct AlonzoBabbageUpdateProposal {
     pub enactment_epoch: u64,
 }
 
-#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
+#[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
@@ -1960,21 +2002,21 @@ impl Committee {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
     pub script_hash: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
     #[serde_as(as = "Vec<(_, _)>")]
     pub rewards: HashMap<Vec<u8>, Lovelace>,
@@ -1982,7 +2024,7 @@ pub struct TreasuryWithdrawalsAction {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
@@ -1990,19 +2032,19 @@ pub struct CommitteeChange {
     pub terms: RationalNumber,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
     pub data: CommitteeChange,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewConstitutionAction {
     pub previous_action_id: Option<GovActionId>,
     pub new_constitution: Constitution,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GovernanceAction {
     ParameterChange(ParameterChangeAction),
     HardForkInitiation(HardForkInitiationAction),
@@ -2057,7 +2099,7 @@ impl GovernanceAction {
 pub enum Voter {
     ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
     ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
-    DRepKey(DrepKeyHash),
+    DRepKey(DRepKeyHash),
     DRepScript(DRepScriptHash),
     StakePoolKey(PoolId),
 }
@@ -2212,7 +2254,7 @@ pub struct VotingOutcome {
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: StakeAddress,

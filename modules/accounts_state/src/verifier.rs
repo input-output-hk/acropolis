@@ -1,7 +1,6 @@
 //! Verification of calculated values against captured CSV from Haskell node / DBSync
 use crate::rewards::{RewardDetail, RewardsResult};
-use crate::state::Pots;
-use acropolis_common::{PoolId, RewardType, StakeAddress};
+use acropolis_common::{PoolId, Pots, RewardType, StakeAddress};
 use hex::FromHex;
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;

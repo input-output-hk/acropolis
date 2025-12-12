@@ -1,23 +1,24 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
-use crate::snapshot::Snapshot;
 use crate::verifier::Verifier;
+use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::RewardType;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
-        DRepDelegationDistribution, DRepStateMessage, EpochActivityMessage, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, Pot, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    PoolRegistration, Pot, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
+    StakeRewardDelta, TxCertificate,
 };
+pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::OrdMap;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -34,56 +35,26 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 // up to the point of start of the calculation, rather than point of snapshot
 const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
 
-/// Global 'pot' account state
-#[derive(Debug, Default, PartialEq, Clone, serde::Serialize)]
-pub struct Pots {
-    /// Unallocated reserves
-    pub reserves: Lovelace,
-
-    /// Treasury
-    pub treasury: Lovelace,
-
-    /// Deposits
-    pub deposits: Lovelace,
-}
-
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
-    pub mark: Arc<Snapshot>,
+    pub mark: Arc<EpochSnapshot>,
 
     /// Previous snapshot (epoch i-1)
-    pub set: Arc<Snapshot>,
+    pub set: Arc<EpochSnapshot>,
 
     /// One before that (epoch i-2)
-    pub go: Arc<Snapshot>,
+    pub go: Arc<EpochSnapshot>,
 }
 
 impl EpochSnapshots {
     /// Push a new snapshot
-    pub fn push(&mut self, latest: Snapshot) {
+    pub fn push(&mut self, latest: EpochSnapshot) {
         self.go = self.set.clone();
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
     }
-}
-
-/// Registration change kind
-#[derive(Debug, Clone)]
-pub enum RegistrationChangeKind {
-    Registered,
-    Deregistered,
-}
-
-/// Registration change on a stake address
-#[derive(Debug, Clone)]
-pub struct RegistrationChange {
-    /// Stake address (full address, not just hash)
-    pub address: StakeAddress,
-
-    /// Change type
-    pub kind: RegistrationChangeKind,
 }
 
 /// Overall state - stored per block
@@ -128,6 +99,83 @@ pub struct State {
 }
 
 impl State {
+    /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
+    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) {
+        let num_accounts = bootstrap_msg.accounts.len();
+        let num_pools = bootstrap_msg.pools.len();
+        let num_retiring = bootstrap_msg.retiring_pools.len();
+        let num_dreps = bootstrap_msg.dreps.len();
+
+        info!(
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_dreps
+        );
+
+        // Load stake addresses
+        {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            for account in bootstrap_msg.accounts {
+                stake_addresses.insert(account.stake_address, account.address_state);
+            }
+        }
+        info!("Loaded {} stake addresses", num_accounts);
+
+        // Load pools
+        for pool_reg in bootstrap_msg.pools {
+            let operator = pool_reg.operator;
+            self.spos.insert(operator, pool_reg);
+        }
+        info!("Loaded {} pools", self.spos.len());
+
+        // Load retiring pools
+        self.retiring_spos = bootstrap_msg.retiring_pools;
+        info!("Loaded {} retiring pools", self.retiring_spos.len());
+
+        // Load DReps
+        self.dreps = bootstrap_msg.dreps;
+        info!("Loaded {} DReps", self.dreps.len());
+
+        // Load pots
+        self.pots = bootstrap_msg.pots;
+        info!(
+            "Loaded pots: reserves={}, treasury={}, deposits={}",
+            self.pots.reserves, self.pots.treasury, self.pots.deposits
+        );
+
+        // Load mark/set/go snapshots if available
+        if let Some(snapshots) = bootstrap_msg.bootstrap_snapshots {
+            self.epoch_snapshots = EpochSnapshots {
+                mark: Arc::new(snapshots.mark),
+                set: Arc::new(snapshots.set),
+                go: Arc::new(snapshots.go),
+            };
+
+            info!(
+                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
+                self.epoch_snapshots.mark.epoch,
+                self.epoch_snapshots.mark.spos.len(),
+                self.epoch_snapshots.set.epoch,
+                self.epoch_snapshots.set.spos.len(),
+                self.epoch_snapshots.go.epoch,
+                self.epoch_snapshots.go.spos.len(),
+            );
+        } else {
+            info!("No bootstrap snapshot data available");
+        }
+
+        info!(
+            "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
+             pots(reserves={}, treasury={}, deposits={})",
+            bootstrap_msg.epoch,
+            num_accounts,
+            self.spos.len(),
+            self.dreps.len(),
+            self.pots.reserves,
+            self.pots.treasury,
+            self.pots.deposits,
+        );
+    }
+
     /// Get the stake address state for a give stake key
     pub fn get_stake_state(&self, stake_key: &StakeAddress) -> Option<StakeAddressState> {
         self.stake_addresses.lock().unwrap().get(stake_key)
@@ -302,7 +350,7 @@ impl State {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Capture a new snapshot for the end of the previous epoch and push it to state
-        let snapshot = Snapshot::new(
+        let snapshot = EpochSnapshot::new(
             epoch - 1,
             &self.stake_addresses.lock().unwrap(),
             &self.spos,
@@ -590,20 +638,21 @@ impl State {
         Ok(())
     }
 
-    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
-    /// the just-ended epoch
-    /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
-    /// and stake reward deltas for publishing to the StakeRewardDeltas topic (For epoch N)
-    pub async fn handle_epoch_activity(
+    /// Complete the previous epoch rewards calculation
+    /// And apply the rewards to the stake_addresses
+    /// This function is called at NEWEPOCH tick from epoch N-1 to N
+    ///
+    /// This also returns SPO rewards (from epoch N-1) for publishing to the SPDD topic
+    /// and stake reward deltas for publishing to the StakeRewardDeltas topic
+    pub async fn complete_previous_epoch_rewards_calculation(
         &mut self,
-        ea_msg: &EpochActivityMessage,
         verifier: &Verifier,
     ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
-        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
+        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
-        // Check previous epoch work is done
+        // Check previous epoch rewards calculation is done
         let mut task = {
             match self.epoch_rewards_task.lock() {
                 Ok(mut task) => task.take(),
@@ -667,6 +716,20 @@ impl State {
             }
         };
 
+        Ok((spo_rewards, reward_deltas))
+    }
+
+    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
+    /// the just-ended epoch
+    ///
+    /// This returns stake reward deltas (Refund for pools retiring at epoch N) for publishing to the StakeRewardDeltas topic
+    pub async fn handle_epoch_activity(
+        &mut self,
+        ea_msg: &EpochActivityMessage,
+        verifier: &Verifier,
+    ) -> Result<Vec<StakeRewardDelta>> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
         let spo_blocks: HashMap<PoolId, usize> = ea_msg
             .spo_blocks
@@ -683,7 +746,7 @@ impl State {
             verifier,
         )?);
 
-        Ok((spo_rewards, reward_deltas))
+        Ok(reward_deltas)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
