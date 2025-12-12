@@ -16,7 +16,7 @@ The required data for bootstrapping are:
 
 - snapshot file (with an associated epoch number and point (slot + block hash))
 - nonces
-- block.{slot}.{hash}.cbor file (needed to get the block number for once snapshot is completed and block info must be sent to [PeerNetworkInterface](../src/peer_network_interface/peer_network_interface.rs)
+- block.{slot}.{hash}.cbor file -- this cbor file is decoded to get the necessary block information (currently the block number) so that once bootstrap process is completed, we can send the block that we're currently synced to to the [PeerNetworkInterface](../peer_network_interface/src/peer_network_interface.rs).
 
 ## Snapshot Files
 
