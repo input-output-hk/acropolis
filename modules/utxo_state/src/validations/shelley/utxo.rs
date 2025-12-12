@@ -6,6 +6,7 @@ pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
 /// Validate every transaction's input exists in the current UTxO set.
 /// This prevents double spending.
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L468
+#[allow(dead_code)]
 pub fn validate_bad_inputs_utxo<F>(
     inputs: &[UTxOIdentifier],
     lookup_utxo: F,
@@ -26,6 +27,7 @@ where
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate<F>(inputs: &[UTxOIdentifier], lookup_utxo: F) -> UTxOValidationResult
 where
     F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,

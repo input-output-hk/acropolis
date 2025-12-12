@@ -23,6 +23,8 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use crate::snapshot::AccountState;
+use crate::Pots;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -30,6 +32,7 @@ use crate::types::*;
 use crate::validation::ValidationStatus;
 
 // Caryatid core messages which we re-export
+use crate::epoch_snapshot::SnapshotsContainer;
 pub use caryatid_module_clock::messages::ClockTickMessage;
 pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 
@@ -400,11 +403,39 @@ pub struct EpochBootstrapMessage {
     pub praos_params: Option<PraosParams>,
 }
 
+/// Accounts bootstrap message containing all data needed to bootstrap accounts state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountsBootstrapMessage {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
+
+    /// Pot balances (treasury, reserves, deposits)
+    pub pots: Pots,
+
+    /// Fully processed bootstrap snapshots (Mark, Set, Go)
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state
+    pub bootstrap_snapshots: Option<SnapshotsContainer>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
     EpochState(EpochBootstrapMessage),
+    AccountsState(AccountsBootstrapMessage),
 }
 
 // === Global message enum ===

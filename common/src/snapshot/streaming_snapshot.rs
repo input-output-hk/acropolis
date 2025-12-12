@@ -30,15 +30,19 @@ use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
+use crate::epoch_snapshot::SnapshotsContainer;
 pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-pub use crate::{
-    Constitution, EpochBootstrapData, Lovelace, MultiHostName, NetworkId, PoolId, PoolMetadata,
-    PoolRegistration, Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
+use crate::{
+    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
+    PoolMetadata, Pots, Relay,
 };
-
+pub use crate::{
+    Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
+    StakeAddress, StakeCredential,
+};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 
@@ -63,10 +67,7 @@ pub enum StakeCredential {
 */
 
 impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
-    fn decode(
-        d: &mut minicbor::Decoder<'b>,
-        _ctx: &mut C,
-    ) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
@@ -239,7 +240,7 @@ pub enum DRep {
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for DRep {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
@@ -300,7 +301,7 @@ pub struct Account {
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for Account {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         Ok(Account {
             rewards_and_deposit: d.decode_with(ctx)?,
@@ -361,15 +362,15 @@ where
             vrf_key_hash: d.decode_with(ctx)?,
             pledge: d.decode_with(ctx)?,
             cost: d.decode_with(ctx)?,
-            margin: (SnapshotRatio::decode(d, ctx)?).0,
-            reward_account: (SnapshotStakeAddress::decode(d, ctx)?).0,
-            pool_owners: (SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?)
+            margin: SnapshotRatio::decode(d, ctx)?.0,
+            reward_account: SnapshotStakeAddress::decode(d, ctx)?.0,
+            pool_owners: SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
                 .0
                 .into_iter()
                 .map(|a| a.0)
                 .collect(),
-            relays: (Vec::<SnapshotRelay>::decode(d, ctx)?).into_iter().map(|r| r.0).collect(),
-            pool_metadata: (SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?).0.map(|m| m.0),
+            relays: Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect(),
+            pool_metadata: SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0),
         }))
     }
 }
@@ -434,7 +435,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
         match tag {
             0 => {
                 // SingleHostAddr
-                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
                 let ipv4 = Option::<Ipv4Addr>::decode(d, ctx)?;
                 let ipv6 = Option::<Ipv6Addr>::decode(d, ctx)?;
                 Ok(Self(Relay::SingleHostAddr(SingleHostAddr {
@@ -445,7 +446,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
             }
             1 => {
                 // SingleHostName
-                let port = (Option::<SnapshotPort>::decode(d, ctx)?).map(|p| p as u16);
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
                 let dns_name = d.str()?.to_string();
                 Ok(Self(Relay::SingleHostName(SingleHostName {
                     port,
@@ -468,7 +469,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let url = d.str()?.to_string();
-        let hash = (Hash::<32>::decode(d, ctx)?).to_vec();
+        let hash = Hash::<32>::decode(d, ctx)?.to_vec();
         Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }
@@ -538,21 +539,23 @@ pub struct UtxoEntry {
 // Ledger types for DState parsing
 // -----------------------------------------------------------------------------
 
-/// DRep credential (ledger format for CBOR decoding)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DRepCredential {
-    AddrKeyhash(AddrKeyhash),
-    ScriptHash(ScriptHash),
-}
+/// Local newtype wrapper for DRepCredential to provide custom CBOR decoding
+/// without conflicting with the main Credential type's Decode implementation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LocalDRepCredential(DRepCredential);
 
-impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
+impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
         match variant {
-            0 => Ok(DRepCredential::AddrKeyhash(d.decode_with(ctx)?)),
-            1 => Ok(DRepCredential::ScriptHash(d.decode_with(ctx)?)),
+            0 => Ok(LocalDRepCredential(DRepCredential::AddrKeyHash(
+                d.decode_with(ctx)?,
+            ))),
+            1 => Ok(LocalDRepCredential(DRepCredential::ScriptHash(
+                d.decode_with(ctx)?,
+            ))),
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for DRepCredential",
             )),
@@ -568,7 +571,7 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
     /// Bech32-encoded DRep ID
-    pub drep_id: String,
+    pub drep_id: DRepCredential,
     /// Lovelace deposit amount
     pub deposit: u64,
     /// Optional anchor (URL and hash)
@@ -599,34 +602,19 @@ pub struct AnchorInfo {
     pub data_hash: String,
 }
 
-/// Pot balances (treasury, reserves, deposits)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PotBalances {
-    /// Current reserves pot balance in Lovelace
-    pub reserves: u64,
-    /// Current treasury pot balance in Lovelace
-    pub treasury: u64,
-    /// Current deposits pot balance in Lovelace
-    pub deposits: u64,
-    /// Current fees accumulated in Lovelace
-    pub fees: u64,
-}
-
 /// Snapshot metadata extracted before streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
     /// Epoch number
     pub epoch: u64,
     /// Pot balances
-    pub pot_balances: PotBalances,
+    pub pot_balances: Pots,
     /// Total number of UTXOs (for progress tracking)
     pub utxo_count: Option<u64>,
     /// Block production statistics for previous epoch
-    pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    pub blocks_previous_epoch: Vec<PoolBlockProduction>,
     /// Block production statistics for current epoch
-    pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
-    /// Parsed snapshots (Mark, Set, Go, Fee)
-    pub snapshots: Option<SnapshotsInfo>,
+    pub blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -649,10 +637,31 @@ pub trait PoolCallback {
     fn on_pools(&mut self, spo_state: SPOState) -> Result<()>;
 }
 
-/// Callback invoked with bulk stake account data
-pub trait StakeCallback {
-    /// Called once with all account states
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()>;
+/// Data needed to bootstrap accounts state, parsed from the snapshot.
+/// This is a pure data structure - the publisher is responsible for
+/// converting it to the appropriate message type.
+#[derive(Debug, Clone)]
+pub struct AccountsBootstrapData {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
+    /// Treasury, reserves, and deposits
+    pub pots: Pots,
+    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation
+    pub snapshots: Option<SnapshotsContainer>,
+}
+
+/// Callback invoked with accounts bootstrap data
+pub trait AccountsCallback {
+    /// Called once with all data needed to bootstrap accounts state
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()>;
 }
 
 /// Callback invoked with bulk DRep data
@@ -682,7 +691,7 @@ pub trait GovernanceProtocolParametersCallback {
 pub trait SnapshotCallbacks:
     UtxoCallback
     + PoolCallback
-    + StakeCallback
+    + AccountsCallback
     + DRepCallback
     + GovernanceProtocolParametersCallback
     + ProposalCallback
@@ -708,8 +717,8 @@ struct ParsedMetadata {
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
     utxo_position: u64,
 }
 
@@ -721,8 +730,8 @@ struct ParsedMetadataWithoutUtxoPosition {
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -802,7 +811,9 @@ impl StreamingSnapshotParser {
         let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
 
-        let mut ctx = SnapshotContext { network };
+        let mut ctx = SnapshotContext {
+            network: network.clone(),
+        };
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
@@ -956,14 +967,7 @@ impl StreamingSnapshotParser {
                 .into_iter()
                 .map(|(credential, account)| {
                     // Convert StakeCredential to stake address representation
-                    let stake_address = match &credential {
-                        StakeCredential::AddrKeyHash(hash) => {
-                            format!("stake_key_{}", hex::encode(hash))
-                        }
-                        StakeCredential::ScriptHash(hash) => {
-                            format!("stake_script_{}", hex::encode(hash))
-                        }
-                    };
+                    let stake_address = StakeAddress::new(credential, NetworkId::Mainnet);
 
                     // Extract rewards from rewards_and_deposit (first element of tuple)
                     let rewards = match &account.rewards_and_deposit {
@@ -981,10 +985,10 @@ impl StreamingSnapshotParser {
                     // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                     let delegated_drep = match &account.drep {
                         StrictMaybe::Just(drep) => Some(match drep {
-                            DRep::Key(hash) => crate::DRepChoice::Key(*hash),
-                            DRep::Script(hash) => crate::DRepChoice::Script(*hash),
-                            DRep::Abstain => crate::DRepChoice::Abstain,
-                            DRep::NoConfidence => crate::DRepChoice::NoConfidence,
+                            DRep::Key(hash) => DRepChoice::Key(*hash),
+                            DRep::Script(hash) => DRepChoice::Script(*hash),
+                            DRep::Abstain => DRepChoice::Abstain,
+                            DRep::NoConfidence => DRepChoice::NoConfidence,
                         }),
                         StrictMaybe::Nothing => None,
                     };
@@ -1211,59 +1215,81 @@ impl StreamingSnapshotParser {
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
-        match &snapshots_result {
+        // Convert block production data to HashMap<PoolId, usize> for snapshot processing
+        let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+        let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+
+        // Build pots for snapshot conversion
+        let pots = Pots {
+            reserves,
+            treasury,
+            deposits,
+        };
+
+        let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("    Successfully parsed mark/set/go snapshots!");
-                // Call the raw snapshots callback
-                callbacks.on_snapshots(raw_snapshots.clone())?;
+                // Convert raw snapshots to processed SnapshotsContainer
+                let processed = raw_snapshots.into_snapshots_container(
+                    epoch,
+                    &blocks_prev_map,
+                    &blocks_curr_map,
+                    pots.clone(),
+                    network.clone(),
+                );
+                callbacks.on_snapshots(processed.clone())?;
+                Some(processed)
             }
             Err(e) => {
                 info!("    Failed to parse snapshots: {}", e);
                 info!("    Continuing with empty snapshots...");
+                None
             }
-        }
+        };
+
+        // Build pool registrations list for AccountsBootstrapMessage
+        let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
+        let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
+
+        // Convert DRepInfo to (credential, deposit) tuples
+        let drep_deposits: Vec<(DRepCredential, u64)> =
+            dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
+
+        // Build the accounts bootstrap data
+        let accounts_bootstrap_data = AccountsBootstrapData {
+            epoch,
+            accounts,
+            pools: pool_registrations,
+            retiring_pools,
+            dreps: drep_deposits,
+            pots: Pots {
+                reserves,
+                treasury,
+                deposits,
+            },
+            snapshots: bootstrap_snapshots,
+        };
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
         callbacks.on_dreps(dreps)?;
-        callbacks.on_accounts(accounts)?;
+        callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
-
-        // Emit metadata callback with accurate deposits, fees, utxo count, and snapshots
-        let snapshots_info = match snapshots_result {
-            Ok(_raw_snapshots) => {
-                // For metadata, we can provide basic info without converting to API format
-                Some(SnapshotsInfo {
-                    mark: SnapshotInfo {
-                        name: "Mark".to_string(),
-                        sections_count: _raw_snapshots.mark.0.len() as u64,
-                    },
-                    set: SnapshotInfo {
-                        name: "Set".to_string(),
-                        sections_count: _raw_snapshots.set.0.len() as u64,
-                    },
-                    go: SnapshotInfo {
-                        name: "Go".to_string(),
-                        sections_count: _raw_snapshots.go.0.len() as u64,
-                    },
-                    fee: _raw_snapshots.fee,
-                })
-            }
-            Err(_) => None,
-        };
 
         let epoch_bootstrap =
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
         callbacks.on_epoch(epoch_bootstrap)?;
 
+        // Note: fees is parsed but not stored in Pots (not needed downstream)
+        let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
-            snapshots: snapshots_info,
-            pot_balances: PotBalances {
+            pot_balances: Pots {
                 reserves,
                 treasury,
                 deposits,
-                fees: fees as u64,
             },
             utxo_count: Some(utxo_count),
             blocks_previous_epoch,
@@ -1469,9 +1495,7 @@ impl StreamingSnapshotParser {
     fn parse_single_block_production_entry(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<crate::types::PoolBlockProduction> {
-        use crate::types::PoolBlockProduction;
-
+    ) -> Result<PoolBlockProduction> {
         // Parse the pool ID (key) - stored as bytes (28 bytes for pool ID)
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
@@ -1493,7 +1517,7 @@ impl StreamingSnapshotParser {
     fn parse_blocks_with_epoch(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<Vec<crate::types::PoolBlockProduction>> {
+    ) -> Result<Vec<PoolBlockProduction>> {
         // Blocks are typically encoded as an array or map
         match decoder.datatype().context("Failed to read blocks datatype")? {
             Type::Array | Type::ArrayIndef => {
@@ -1646,19 +1670,12 @@ impl StreamingSnapshotParser {
 
         // Parse DReps map [0]: StakeCredential -> DRepState
         // Using minicbor's Decode trait - much simpler than manual parsing!
-        let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
+        let dreps_map: BTreeMap<LocalDRepCredential, DRepState> = decoder.decode()?;
 
-        // Convert to DRepInfo for API compatibility
+        // Convert to DRepInfo
         let dreps = dreps_map
             .into_iter()
-            .map(|(cred, state)| {
-                let drep_id = match cred {
-                    StakeCredential::AddrKeyHash(hash) => format!("drep_{}", hex::encode(hash)),
-                    StakeCredential::ScriptHash(hash) => {
-                        format!("drep_script_{}", hex::encode(hash))
-                    }
-                };
-
+            .map(|(LocalDRepCredential(drep_id), state)| {
                 let anchor = match state.anchor {
                     StrictMaybe::Just(a) => Some(AnchorInfo {
                         url: a.url,
@@ -1912,13 +1929,11 @@ impl StreamingSnapshotParser {
     ) -> Result<RawSnapshotsContainer> {
         info!("    Starting snapshots parsing...");
 
-        // SnapShots = [Mark, Set, Go, Fee] or possibly different structure
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
             .ok_or_else(|| anyhow!("SnapShots must be a definite-length array"))?;
 
-        // Investigate actual structure before enforcing 3 elements
         if snapshots_len != 4 {
             return Err(anyhow!(
                 "SnapShots array must have exactly 4 elements (Mark, Set, Go, Fee), got {snapshots_len}"
@@ -1927,51 +1942,34 @@ impl StreamingSnapshotParser {
 
         info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
 
-        // Parse each snapshot using snapshot.rs functions
-        let mut parsed_snapshots = Vec::new();
-
+        // Parse each snapshot using RawSnapshot::parse
         // Parse Mark snapshot [0]
         info!("    Parsing Mark snapshot...");
-        let mark_snapshot =
-            super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Mark")
-                .context("Failed to parse Mark snapshot")?;
-        parsed_snapshots.push(mark_snapshot);
+        let mark_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Mark")
+            .context("Failed to parse Mark snapshot")?;
 
         // Parse Set snapshot [1]
         info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Set")
+        let set_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Set")
             .context("Failed to parse Set snapshot")?;
-        parsed_snapshots.push(set_snapshot);
 
         // Parse Go snapshot [2]
         info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, ctx, "Go")
+        let go_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Go")
             .context("Failed to parse Go snapshot")?;
-        parsed_snapshots.push(go_snapshot);
 
-        // Parse Fee snapshot [3]
-        info!("    Parsing Fee snapshot...");
-        let fee_value = match decoder.decode::<u64>() {
-            Ok(fee) => {
-                info!("    Successfully parsed Fee value: {}", fee);
-                fee
-            }
-            Err(e) => {
-                info!("    Failed to parse Fee value: {}, using 0", e);
-                0
-            }
-        };
+        let fee = decoder.decode::<u64>().unwrap_or(0);
 
         info!(
             "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
         );
 
-        // Create raw snapshots container with VMap data directly
+        // Create raw snapshots container with full snapshot data
         let raw_snapshots = RawSnapshotsContainer {
-            mark: parsed_snapshots[0].snapshot_stake.clone(),
-            set: parsed_snapshots[1].snapshot_stake.clone(),
-            go: parsed_snapshots[2].snapshot_stake.clone(),
-            fee: fee_value,
+            mark: mark_snapshot,
+            set: set_snapshot,
+            go: go_snapshot,
+            fee,
         };
 
         info!("    Raw snapshots container created with VMap data");
@@ -1979,28 +1977,6 @@ impl StreamingSnapshotParser {
         // Return only the raw snapshots - no more API compatibility needed
         Ok(raw_snapshots)
     }
-}
-
-/// Information about a parsed snapshot (Mark, Set, or Go)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotInfo {
-    /// Name of the snapshot (Mark, Set, or Go)
-    pub name: String,
-    /// Number of sections in the snapshot
-    pub sections_count: u64,
-}
-
-/// Information about all four snapshots (Mark, Set, Go, Fee)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotsInfo {
-    /// Mark snapshot information
-    pub mark: SnapshotInfo,
-    /// Set snapshot information
-    pub set: SnapshotInfo,
-    /// Go snapshot information
-    pub go: SnapshotInfo,
-    /// Fee value from the snapshots
-    pub fee: u64,
 }
 
 // -----------------------------------------------------------------------------
@@ -2044,9 +2020,9 @@ impl PoolCallback for CollectingCallbacks {
     }
 }
 
-impl StakeCallback for CollectingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.accounts = accounts;
+impl AccountsCallback for CollectingCallbacks {
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()> {
+        self.accounts = data.accounts;
         Ok(())
     }
 }
@@ -2091,13 +2067,13 @@ impl SnapshotCallbacks for CollectingCallbacks {
 }
 
 impl SnapshotsCallback for CollectingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
-            "CollectingCallbacks: Received raw snapshots data with {} mark, {} set, {} go entries",
-            snapshots.mark.0.len(),
-            snapshots.set.0.len(),
-            snapshots.go.0.len()
+            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
+            snapshots.mark.spos.len(),
+            snapshots.set.spos.len(),
+            snapshots.go.spos.len()
         );
         Ok(())
     }
@@ -2115,16 +2091,14 @@ mod tests {
         callbacks
             .on_metadata(SnapshotMetadata {
                 epoch: 507,
-                pot_balances: PotBalances {
+                pot_balances: Pots {
                     reserves: 1000000,
                     treasury: 2000000,
                     deposits: 500000,
-                    fees: 100000,
                 },
                 utxo_count: Some(100),
                 blocks_previous_epoch: Vec::new(),
                 blocks_current_epoch: Vec::new(),
-                snapshots: None,
             })
             .unwrap();
 

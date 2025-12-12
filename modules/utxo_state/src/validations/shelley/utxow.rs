@@ -45,8 +45,7 @@ pub fn validate_missing_extra_scripts(
     script_hashes_needed: &HashSet<ScriptHash>,
     script_hashes_provided: &[ScriptHash],
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let mut scripts_used =
-        script_hashes_provided.iter().map(|h| (false, h.clone())).collect::<Vec<_>>();
+    let mut scripts_used = script_hashes_provided.iter().map(|h| (false, *h)).collect::<Vec<_>>();
 
     // check for missing & extra scripts
     for script_hash in script_hashes_needed.iter() {

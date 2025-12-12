@@ -2,6 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
+    configuration::StartupMethod,
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
@@ -67,6 +68,8 @@ impl GenesisBootstrapper {
             config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
+        let snapshot_bootstrap = StartupMethod::from_config(config.as_ref()).is_snapshot();
+
         let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
             let Ok(_) = subscription.read().await else {
@@ -75,21 +78,6 @@ impl GenesisBootstrapper {
             let span = info_span!("genesis_bootstrapper", block = 0);
             async {
                 info!("Received startup message");
-
-                let publish_utxo_deltas_topic = config
-                    .get_string("publish-utxo-deltas-topic")
-                    .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
-                info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
-
-                let publish_pot_deltas_topic = config
-                    .get_string("publish-pot-deltas-topic")
-                    .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
-                info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
-
-                let publish_genesis_utxos_topic = config
-                    .get_string("publish-genesis-utxos-topic")
-                    .unwrap_or(DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC.to_string());
-                info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
 
                 let completion_topic = config
                     .get_string("completion-topic")
@@ -145,81 +133,98 @@ impl GenesisBootstrapper {
                     tip_slot: None,
                 };
 
-                let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
+                if !snapshot_bootstrap {
+                    let publish_utxo_deltas_topic = config
+                        .get_string("publish-utxo-deltas-topic")
+                        .unwrap_or(DEFAULT_PUBLISH_UTXO_DELTAS_TOPIC.to_string());
+                    info!("Publishing UTXO deltas on '{publish_utxo_deltas_topic}'");
 
-                // Convert the AVVM distributions into pseudo-UTXOs
-                let gen_utxos = genesis_utxos(&byron_genesis);
-                let mut gen_utxo_identifiers = Vec::new();
-                let mut total_allocated: u64 = 0;
-                for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
-                    let tx_identifier = TxIdentifier::new(0, tx_index as u16);
-                    let utxo_identifier = UTxOIdentifier::new(TxHash::from(**hash), 0);
+                    let publish_pot_deltas_topic = config
+                        .get_string("publish-pot-deltas-topic")
+                        .unwrap_or(DEFAULT_PUBLISH_POT_DELTAS_TOPIC.to_string());
+                    info!("Publishing pot deltas on '{publish_pot_deltas_topic}'");
 
-                    gen_utxo_identifiers.push((utxo_identifier, tx_identifier));
+                    let publish_genesis_utxos_topic = config
+                        .get_string("publish-genesis-utxos-topic")
+                        .unwrap_or(DEFAULT_PUBLISH_GENESIS_UTXO_REGISTRY_TOPIC.to_string());
+                    info!("Publishing genesis transactions on '{publish_genesis_utxos_topic}'");
 
-                    let tx_output = TxOutput {
-                        utxo_identifier,
-                        address: Address::Byron(ByronAddress {
-                            payload: address.payload.to_vec(),
-                        }),
-                        value: Value::new(*amount, Vec::new()),
-                        datum: None,
-                        reference_script: None,
-                    };
+                    let mut utxo_deltas_message = UTXODeltasMessage { deltas: Vec::new() };
 
-                    utxo_deltas_message.deltas.push(TxUTxODeltas {
-                        tx_identifier,
-                        inputs: Vec::new(),
-                        outputs: vec![tx_output],
-                        vkey_hashes_needed: HashSet::new(),
-                        script_hashes_needed: HashSet::new(),
-                        vkey_hashes_provided: vec![],
-                        script_hashes_provided: vec![],
+                    // Convert the AVVM distributions into pseudo-UTXOs
+                    let gen_utxos = genesis_utxos(&byron_genesis);
+                    let mut gen_utxo_identifiers = Vec::new();
+                    let mut total_allocated: u64 = 0;
+                    for (tx_index, (hash, address, amount)) in gen_utxos.iter().enumerate() {
+                        let tx_identifier = TxIdentifier::new(0, tx_index as u16);
+                        let utxo_identifier = UTxOIdentifier::new(TxHash::from(**hash), 0);
+
+                        gen_utxo_identifiers.push((utxo_identifier, tx_identifier));
+
+                        let tx_output = TxOutput {
+                            utxo_identifier,
+                            address: Address::Byron(ByronAddress {
+                                payload: address.payload.to_vec(),
+                            }),
+                            value: Value::new(*amount, Vec::new()),
+                            datum: None,
+                            reference_script: None,
+                        };
+
+                        utxo_deltas_message.deltas.push(TxUTxODeltas {
+                            tx_identifier,
+                            inputs: Vec::new(),
+                            outputs: vec![tx_output],
+                            vkey_hashes_needed: HashSet::new(),
+                            script_hashes_needed: HashSet::new(),
+                            vkey_hashes_provided: vec![],
+                            script_hashes_provided: vec![],
+                        });
+                        total_allocated += amount;
+                    }
+
+                    info!(
+                        total_allocated,
+                        count = gen_utxos.len(),
+                        "AVVM genesis UTXOs"
+                    );
+
+                    let message_enum = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::UTXODeltas(utxo_deltas_message),
+                    ));
+                    context
+                        .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                    // Send the pot update message with the remaining reserves
+                    let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
+                    pot_deltas_message.deltas.push(PotDelta {
+                        pot: Pot::Reserves,
+                        delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
                     });
-                    total_allocated += amount;
+
+                    let message_enum = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::PotDeltas(pot_deltas_message),
+                    ));
+                    context
+                        .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+
+                    let gen_utxos_message = Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
+                            utxos: gen_utxo_identifiers,
+                        }),
+                    ));
+                    context
+                        .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                 }
-
-                info!(
-                    total_allocated,
-                    count = gen_utxos.len(),
-                    "AVVM genesis UTXOs"
-                );
-
-                let message_enum = Message::Cardano((
-                    block_info.clone(),
-                    CardanoMessage::UTXODeltas(utxo_deltas_message),
-                ));
-                context
-                    .publish(&publish_utxo_deltas_topic, Arc::new(message_enum))
-                    .await
-                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-                // Send the pot update message with the remaining reserves
-                let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
-                pot_deltas_message.deltas.push(PotDelta {
-                    pot: Pot::Reserves,
-                    delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
-                });
-
-                let message_enum = Message::Cardano((
-                    block_info.clone(),
-                    CardanoMessage::PotDeltas(pot_deltas_message),
-                ));
-                context
-                    .publish(&publish_pot_deltas_topic, Arc::new(message_enum))
-                    .await
-                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-                let gen_utxos_message = Message::Cardano((
-                    block_info.clone(),
-                    CardanoMessage::GenesisUTxOs(GenesisUTxOsMessage {
-                        utxos: gen_utxo_identifiers,
-                    }),
-                ));
-                context
-                    .publish(&publish_genesis_utxos_topic, Arc::new(gen_utxos_message))
-                    .await
-                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                 let values = GenesisValues {
                     byron_timestamp: byron_genesis.start_time,

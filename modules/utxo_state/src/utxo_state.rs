@@ -20,8 +20,6 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::{ImmutableUTXOStore, State};
 
-mod test_utils;
-
 mod address_delta_publisher;
 mod volatile_index;
 use address_delta_publisher::AddressDeltaPublisher;

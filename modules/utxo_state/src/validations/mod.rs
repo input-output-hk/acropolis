@@ -7,6 +7,7 @@ use acropolis_common::{
 use anyhow::Result;
 mod shelley;
 
+#[allow(dead_code)]
 pub fn validate_shelley_tx<F>(
     inputs: &[UTxOIdentifier],
     vkey_hashes_needed: &mut HashSet<KeyHash>,

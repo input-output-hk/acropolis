@@ -9,6 +9,7 @@ use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
 use serde_with::{hex::Hex, serde_as};
+use std::fmt::Formatter;
 use std::ops::Deref;
 use std::{collections::HashMap, fmt::Display};
 
@@ -255,9 +256,19 @@ pub struct ProtocolVersion {
     pub minor: u64,
 }
 
+impl Display for ProtocolVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
 impl ProtocolVersion {
     pub fn new(major: u64, minor: u64) -> Self {
         Self { major, minor }
+    }
+
+    pub fn chang() -> Self {
+        Self { major: 9, minor: 0 }
     }
 
     pub fn is_chang(&self) -> Result<bool> {
