@@ -1,5 +1,8 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::messages::DRepBootstrapMessage;
+use acropolis_common::messages::{
+    DRepBootstrapMessage, GovernanceProtocolParametersBootstrapMessage,
+    GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
+};
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
@@ -19,6 +22,7 @@ use acropolis_common::{
     stake_addresses::AccountState,
     BlockInfo, DRepCredential, EpochBootstrapData,
 };
+
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::collections::HashMap;
@@ -303,18 +307,50 @@ impl ProposalCallback for SnapshotPublisher {
 impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
-        _gs_previous_params: ProtocolParameters,
-        _gs_current_params: ProtocolParameters,
-        _gs_future_params: ProtocolParameters,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        info!("Received governance protocol parameters (current, previous, future)");
-        // TODO: Publish protocol parameters to appropriate message bus topics
-        // This could involve publishing messages for:
-        // - CurrentProtocolParameters → ParametersState processor
-        // - PreviousProtocolParameters → ParametersState processor
-        // - FutureProtocolParameters → ParametersState processor
+        // Separate publish for each slice so that the messages enum is not too large
+        [
+            (Previous, gs_previous_params),
+            (Current, gs_current_params),
+            (Future, gs_future_params),
+        ]
+        .into_iter()
+        .for_each(|(slice, params)| {
+            publish_gov_state(&self.context, &self.snapshot_topic, slice, params)
+        });
+
         Ok(())
     }
+}
+
+fn publish_gov_state(
+    context: &Arc<Context<Message>>,
+    topic: &str,
+    slice: GovernanceProtocolParametersSlice,
+    params: ProtocolParameters,
+) {
+    info!("Received governance protocol parameters (current, previous, future)");
+    // Send a message to the protocol parameters state, one per slice
+    let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+        SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+            slice,
+            params,
+        }),
+    )));
+
+    // Clone what we need for the async task
+    let context = context.clone();
+    let topic = topic.to_owned();
+
+    // Spawn async publish task since this callback is synchronous
+    tokio::spawn(async move {
+        if let Err(e) = context.publish(&topic, message).await {
+            tracing::error!("Failed to publish DRepBootstrap message: {e}");
+        }
+    });
 }
 
 impl EpochCallback for SnapshotPublisher {

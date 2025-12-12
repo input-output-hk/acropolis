@@ -1,7 +1,8 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -30,6 +31,9 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Parameters State module
 #[module(
@@ -178,6 +182,58 @@ impl ParametersState {
 
         let query_state = history.clone();
 
+        // Subscribe for snapshot messages, if booting from snapshot
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        let cfg_clone = cfg.clone();
+        let history_clone = history.clone();
+
+        if let Some(mut subscription) = snapshot_subscription {
+            let cfg_snapshot = cfg.clone();
+            let history_snapshot = history.clone();
+            context.run(async move {
+                // Get current state and current params
+                let mut state = {
+                    let network_name = cfg_snapshot.network_name.clone();
+                    let mut h = history_snapshot.lock().await;
+                    h.get_or_init_with(|| State::new(network_name))
+                };
+
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("ParameterState: Snapshot Startup message received");
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::ParametersState(msg),
+                        )) => {
+                            info!("ParameterState: Snapshot Bootstrap message received");
+                            info!(
+                                "ParameterState: got slice: {:?} params: {:?}",
+                                msg.slice, msg.params
+                            );
+                            state.bootstrap(msg);
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => (),
+                    }
+                }
+            });
+        }
+
         // Handle parameters queries
         context.handle(&cfg.parameters_query_topic, move |message| {
             let history = query_state.clone();
@@ -227,7 +283,9 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, history, enact).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg_clone, history_clone, enact)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

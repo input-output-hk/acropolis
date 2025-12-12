@@ -23,6 +23,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::AccountState;
 use crate::Pots;
 use std::collections::HashMap;
@@ -356,6 +357,19 @@ pub struct DRepBootstrapMessage {
     pub dreps: HashMap<DRepCredential, DRepRecord>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum GovernanceProtocolParametersSlice {
+    Previous,
+    Current,
+    Future,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProtocolParametersBootstrapMessage {
+    pub slice: GovernanceProtocolParametersSlice,
+    pub params: ProtocolParameters,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotDumpMessage {
     pub block_height: u64,
@@ -443,6 +457,7 @@ pub enum SnapshotStateMessage {
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
     DRepState(DRepBootstrapMessage),
+    ParametersState(GovernanceProtocolParametersBootstrapMessage),
 }
 
 // === Global message enum ===

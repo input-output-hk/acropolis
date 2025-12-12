@@ -10,10 +10,12 @@ use crate::configuration::BootstrapConfig;
 use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
+use acropolis_common::messages::RawBlockMessage;
 use acropolis_common::{
     configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -22,6 +24,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::time::Instant;
 use tracing::{error, info, info_span, Instrument};
+
+const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
+    ("block-publish-topic", "cardano.block.available");
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
@@ -102,17 +107,48 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
         );
 
-        // Download
-        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
-        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
-
         // Publish
         let mut publisher = SnapshotPublisher::new(
-            context,
+            context.clone(),
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
             bootstrap_ctx.context(),
         );
+
+        // Send Conway era "genesis" block before updating from snapshot
+        // because some of the models, like protocol parameters, depend
+        // on having a base state. This is synchronization of modules.
+        if bootstrap_ctx.block_info.era == acropolis_common::Era::Conway {
+            let mut block_info = bootstrap_ctx.block_info.clone();
+            block_info.status = BlockStatus::Immutable;
+            block_info.intent = BlockIntent::Apply;
+            block_info.hash = BlockHash::default(); // Genesis block has no hash
+            let raw_block = vec![]; // Genesis block has no body
+            let header = vec![]; // Genesis block has no header
+
+            // Send the block message
+            let message = RawBlockMessage {
+                header,
+                body: raw_block,
+            };
+
+            let message_enum =
+                Message::Cardano((block_info.clone(), CardanoMessage::BlockAvailable(message)));
+
+            let block_publish_topic = DEFAULT_BLOCK_PUBLISH_TOPIC.1.to_string();
+            info!("Publishing Conway genesisblock on '{block_publish_topic}'");
+
+            context
+                .clone()
+                .message_bus
+                .publish(&block_publish_topic, Arc::new(message_enum))
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
+        }
+
+        // Download
+        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
+        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         publisher.publish_start().await?;
 
