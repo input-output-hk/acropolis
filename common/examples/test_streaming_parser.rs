@@ -51,10 +51,10 @@ impl UtxoCallback for CountingCallbacks {
                 eprintln!(
                     "  UTXO #{}: {}:{} → {} ({} lovelace)",
                     self.utxo_count,
-                    &utxo.tx_hash[..16],
-                    utxo.output_index,
-                    &utxo.address[..utxo.address.len().min(32)],
-                    utxo.value
+                    &utxo.tx_hash_hex()[..16],
+                    utxo.input.output_index,
+                    hex::encode(&utxo.output.address[..utxo.output.address.len().min(16)]),
+                    utxo.coin()
                 );
             }
             self.sample_utxos.push(utxo);
@@ -505,10 +505,10 @@ fn main() {
                     println!(
                         "  {}: {}:{} → {} ({} lovelace)",
                         i + 1,
-                        &utxo.tx_hash[..16],
-                        utxo.output_index,
-                        &utxo.address[..32],
-                        utxo.value
+                        &utxo.tx_hash_hex()[..16],
+                        utxo.input.output_index,
+                        hex::encode(&utxo.output.address[..utxo.output.address.len().min(16)]),
+                        utxo.coin()
                     );
                 }
                 println!();

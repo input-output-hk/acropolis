@@ -71,19 +71,11 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
         d.array()?;
         let variant = d.u16()?;
 
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
+        // Variant 0 = key hash, Variant 1 = script hash
         match variant {
             0 => {
-                // ScriptHash variant (first in enum) - decode bytes directly
-                let bytes = d.bytes()?;
-                let key_hash = bytes.try_into().map_err(|_| {
-                    minicbor::decode::Error::message(
-                        "invalid length for ScriptHash in StakeCredential",
-                    )
-                })?;
-                Ok(StakeCredential::ScriptHash(key_hash))
-            }
-            1 => {
-                // AddrKeyHash variant (second in enum) - decodes bytes directly
+                // AddrKeyHash variant - key hash credential
                 let bytes = d.bytes()?;
                 let key_hash = bytes.try_into().map_err(|_| {
                     minicbor::decode::Error::message(
@@ -91,6 +83,16 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
                     )
                 })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
+            }
+            1 => {
+                // ScriptHash variant - script hash credential
+                let bytes = d.bytes()?;
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
+                Ok(StakeCredential::ScriptHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for StakeCredential",
@@ -105,16 +107,17 @@ impl<C> minicbor::encode::Encode<C> for StakeCredential {
         e: &mut minicbor::Encoder<W>,
         ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
         match self {
-            StakeCredential::ScriptHash(key_hash) => {
-                // ScriptHash is variant 0 (first in enum)
+            StakeCredential::AddrKeyHash(key_hash) => {
+                // AddrKeyHash is variant 0 (key hash)
                 e.array(2)?;
                 e.encode_with(0, ctx)?;
                 e.encode_with(key_hash, ctx)?;
                 Ok(())
             }
-            StakeCredential::AddrKeyHash(key_hash) => {
-                // AddrKeyHash is variant 1 (second in enum)
+            StakeCredential::ScriptHash(key_hash) => {
+                // ScriptHash is variant 1 (script hash)
                 e.array(2)?;
                 e.encode_with(1, ctx)?;
                 e.encode_with(key_hash, ctx)?;
@@ -180,7 +183,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// Set type (encoded as array, sometimes with CBOR tag 258)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotSet<T>(pub Vec<T>);
 
 impl<T> SnapshotSet<T> {
@@ -514,59 +517,8 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
-/// UTXO entry with transaction hash, index, address, and value
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UtxoEntry {
-    /// Transaction hash (hex-encoded)
-    pub tx_hash: String,
-    /// Output index
-    pub output_index: u64,
-    /// Hex encoded Cardano addresses
-    pub address: String,
-    /// Lovelace amount
-    pub value: u64,
-    /// Optional inline datum (hex-encoded CBOR)
-    pub datum: Option<String>,
-    /// Optional script reference (hex-encoded CBOR)
-    pub script_ref: Option<String>,
-}
-
-impl UtxoEntry {
-    /// Extract the stake credential from the UTXO's address, if present.
-    ///
-    /// Returns `Some(StakeCredential)` for Shelley base addresses that have
-    /// a stake credential embedded. Returns `None` for:
-    /// - Byron addresses
-    /// - Enterprise addresses (no stake part)
-    /// - Pointer addresses (would need chain state to resolve)
-    /// - Invalid/malformed addresses
-    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
-        use crate::address::{ShelleyAddress, ShelleyAddressDelegationPart};
-
-        let address_bytes = hex::decode(&self.address).ok()?;
-
-        // Try to parse as a Shelley address
-        let shelley_addr = ShelleyAddress::from_bytes_key(&address_bytes).ok()?;
-
-        // Extract stake credential from the delegation part
-        match shelley_addr.delegation {
-            ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
-                Some(StakeCredential::AddrKeyHash(hash))
-            }
-            ShelleyAddressDelegationPart::ScriptHash(hash) => {
-                Some(StakeCredential::ScriptHash(hash))
-            }
-            // Pointer addresses would need chain state to resolve
-            ShelleyAddressDelegationPart::Pointer(_) => None,
-            // Enterprise addresses have no stake credential
-            ShelleyAddressDelegationPart::None => None,
-        }
-    }
-}
+// Re-export UtxoEntry from the utxo module
+pub use super::utxo::UtxoEntry;
 
 // -----------------------------------------------------------------------------
 // Ledger types for DState parsing
@@ -1322,6 +1274,7 @@ impl StreamingSnapshotParser {
             "  Total UTXO value: {} ADA",
             total_utxo_value_all / 1_000_000
         );
+
         info!(
             "  Accounts with UTXO values: {}/{} ({:.1}%)",
             accounts_matched,
@@ -1348,6 +1301,39 @@ impl StreamingSnapshotParser {
                 unmatched_value / 1_000_000
             );
         }
+
+        // Calculate total rewards and active stake for comparison
+        // Note: "Active stake" for rewards only includes delegated accounts
+        let total_rewards: u64 =
+            accounts_with_utxo_values.iter().map(|a| a.address_state.rewards).sum();
+        let delegated_active_stake: u64 = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .map(|a| a.address_state.utxo_value + a.address_state.rewards)
+            .sum();
+        let delegated_count = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .count();
+        info!(
+            "  Total rewards in accounts: {} ADA",
+            total_rewards / 1_000_000
+        );
+        info!(
+            "  Delegated accounts: {}/{} ({:.1}%)",
+            delegated_count,
+            accounts_with_utxo_values.len(),
+            if accounts_with_utxo_values.is_empty() {
+                0.0
+            } else {
+                (delegated_count as f64 / accounts_with_utxo_values.len() as f64) * 100.0
+            }
+        );
+        info!(
+            "  Delegated active stake (utxo + rewards): {} ADA ({} lovelace)",
+            delegated_active_stake / 1_000_000,
+            delegated_active_stake
+        );
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1414,6 +1400,7 @@ impl StreamingSnapshotParser {
 
         let mut buffer = Vec::with_capacity(PARSE_BUFFER_SIZE);
         let mut utxo_count = 0u64;
+        let mut total_utxo_value = 0u64;
         let mut total_bytes_processed = 0usize;
         let mut total_bytes_read_from_file = 0u64;
 
@@ -1483,9 +1470,13 @@ impl StreamingSnapshotParser {
                         let entry_size = bytes_consumed - position_before;
                         max_single_entry_size = max_single_entry_size.max(entry_size);
 
+                        // Track total UTXO value
+                        let coin = utxo.coin();
+                        total_utxo_value += coin;
+
                         // Accumulate UTXO value by stake credential for SPDD
                         if let Some(stake_cred) = utxo.extract_stake_credential() {
-                            *stake_values.entry(stake_cred).or_insert(0) += utxo.value;
+                            *stake_values.entry(stake_cred).or_insert(0) += coin;
                         }
 
                         // Emit the UTXO
@@ -1500,8 +1491,9 @@ impl StreamingSnapshotParser {
                             let buffer_usage = buffer.len();
                             let stake_value_total: u64 = stake_values.values().sum();
                             info!(
-                                "Streamed {} UTXOs: {} stake credentials, {} ADA staked, buffer: {} MB",
+                                "Streamed {} UTXOs: {} total ADA, {} stake credentials, {} ADA staked, buffer: {} MB",
                                 utxo_count,
+                                total_utxo_value / 1_000_000,
                                 stake_values.len(),
                                 stake_value_total / 1_000_000,
                                 buffer_usage / 1024 / 1024,
@@ -1561,6 +1553,11 @@ impl StreamingSnapshotParser {
         let stake_value_total: u64 = stake_values.values().sum();
         info!("UTXO streaming complete:");
         info!("  UTXOs processed: {}", utxo_count);
+        info!(
+            "  Total UTXO value: {} ADA ({} lovelace)",
+            total_utxo_value / 1_000_000,
+            total_utxo_value
+        );
         info!("  Stake credentials found: {}", stake_values.len());
         info!(
             "  Total staked value: {} ADA",
@@ -1746,25 +1743,7 @@ impl StreamingSnapshotParser {
 
     /// Parse a single UTXO entry from the streaming buffer
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
-        // Parse key: TransactionInput (array [tx_hash, output_index])
-        decoder.array().context("Failed to parse TxIn array")?;
-
-        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
-        let output_index = decoder.u64().context("Failed to parse output_index")?;
-        let tx_hash = hex::encode(tx_hash_bytes);
-
-        // Parse value: TransactionOutput
-        let (address, value) = Self::parse_transaction_output(decoder)
-            .context("Failed to parse transaction output")?;
-
-        Ok(UtxoEntry {
-            tx_hash,
-            output_index,
-            address,
-            value,
-            datum: None,      // TODO: Extract from TxOut
-            script_ref: None, // TODO: Extract from TxOut
-        })
+        UtxoEntry::decode(decoder).context("Failed to decode UTXO entry")
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
@@ -1894,138 +1873,6 @@ impl StreamingSnapshotParser {
             updates,
             retiring,
         })
-    }
-
-    /// Stream UTXOs with per-entry callback
-    ///
-    /// Parse a single TxOut from the CBOR decoder
-    fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
-        // TxOut is typically an array [address, value, ...]
-        // or a map for Conway with optional fields
-
-        // Try array format first (most common)
-        match dec.datatype().context("Failed to read TxOut datatype")? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = dec.array().context("Failed to parse TxOut array")?;
-                if arr_len == Some(0) {
-                    return Err(anyhow!("empty TxOut array"));
-                }
-
-                // Element 0: Address (bytes)
-                let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let hex_address = hex::encode(address_bytes);
-
-                // Element 1: Value (coin or map)
-                let value = match dec.datatype().context("Failed to read value datatype")? {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        // Simple ADA-only value
-                        dec.u64().context("Failed to parse u64 value")?
-                    }
-                    Type::Array | Type::ArrayIndef => {
-                        // Multi-asset: [coin, assets_map]
-                        dec.array().context("Failed to parse value array")?;
-                        let coin = dec.u64().context("Failed to parse coin amount")?;
-                        // Skip the assets map
-                        dec.skip().context("Failed to skip assets map")?;
-                        coin
-                    }
-                    _ => {
-                        return Err(anyhow!("unexpected value type"));
-                    }
-                };
-
-                // Skip remaining fields (datum, script_ref)
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        dec.skip().context("Failed to skip TxOut field")?;
-                    }
-                }
-
-                Ok((hex_address, value))
-            }
-            Type::Map | Type::MapIndef => {
-                // Map format (Conway with optional fields)
-                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
-                let map_len = dec.map().context("Failed to parse TxOut map")?;
-
-                let mut address = String::new();
-                let mut value = 0u64;
-                let mut found_address = false;
-                let mut found_value = false;
-
-                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
-                        dec.skip().ok(); // consume break
-                        break;
-                    }
-
-                    // Read key
-                    let key = match dec.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            // Skip both key and value if key is not u32
-                            dec.skip().ok();
-                            dec.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    // Read value based on key
-                    match key {
-                        0 => {
-                            // Address
-                            if let Ok(addr_bytes) = dec.bytes() {
-                                address = hex::encode(addr_bytes);
-                                found_address = true;
-                            } else {
-                                dec.skip().ok();
-                            }
-                        }
-                        1 => {
-                            // Value (coin or multi-asset)
-                            match dec.datatype() {
-                                Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
-                                    if let Ok(coin) = dec.u64() {
-                                        value = coin;
-                                        found_value = true;
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                                    // Multi-asset: [coin, assets_map]
-                                    if dec.array().is_ok() {
-                                        if let Ok(coin) = dec.u64() {
-                                            value = coin;
-                                            found_value = true;
-                                        }
-                                        dec.skip().ok(); // skip assets map
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                _ => {
-                                    dec.skip().ok();
-                                }
-                            }
-                        }
-                        _ => {
-                            // datum (2), script_ref (3), or unknown - skip
-                            dec.skip().ok();
-                        }
-                    }
-                }
-
-                if found_address && found_value {
-                    Ok((address, value))
-                } else {
-                    Err(anyhow!("map-based TxOut missing required fields"))
-                }
-            }
-            _ => Err(anyhow!("unexpected TxOut type")),
-        }
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
@@ -2195,6 +2042,26 @@ impl SnapshotsCallback for CollectingCallbacks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::utxo::{TransactionInput, TransactionOutput, Value};
+
+    /// Helper to create a test UtxoEntry with just an address
+    fn make_test_utxo(address_bytes: Vec<u8>) -> UtxoEntry {
+        UtxoEntry {
+            input: TransactionInput {
+                tx_hash: [0u8; 32],
+                output_index: 0,
+            },
+            output: TransactionOutput {
+                address: address_bytes,
+                value: Value {
+                    coin: 1_000_000,
+                    multiasset: None,
+                },
+                datum: None,
+                script_ref: None,
+            },
+        }
+    }
 
     #[test]
     fn test_extract_stake_credential_base_address_key_hash() {
@@ -2205,14 +2072,7 @@ mod tests {
         address_bytes.extend([0xAA; 28]); // payment key hash
         address_bytes.extend([0xBB; 28]); // stake key hash
 
-        let utxo = UtxoEntry {
-            tx_hash: "test".to_string(),
-            output_index: 0,
-            address: hex::encode(&address_bytes),
-            value: 1000000,
-            datum: None,
-            script_ref: None,
-        };
+        let utxo = make_test_utxo(address_bytes);
 
         let stake_cred = utxo.extract_stake_credential();
         assert!(stake_cred.is_some());
@@ -2232,14 +2092,7 @@ mod tests {
         address_bytes.extend([0xAA; 28]); // payment key hash
         address_bytes.extend([0xCC; 28]); // stake script hash
 
-        let utxo = UtxoEntry {
-            tx_hash: "test".to_string(),
-            output_index: 0,
-            address: hex::encode(&address_bytes),
-            value: 1000000,
-            datum: None,
-            script_ref: None,
-        };
+        let utxo = make_test_utxo(address_bytes);
 
         let stake_cred = utxo.extract_stake_credential();
         assert!(stake_cred.is_some());
@@ -2258,14 +2111,7 @@ mod tests {
         let mut address_bytes = vec![0x61]; // header
         address_bytes.extend([0xAA; 28]); // payment key hash only
 
-        let utxo = UtxoEntry {
-            tx_hash: "test".to_string(),
-            output_index: 0,
-            address: hex::encode(&address_bytes),
-            value: 1000000,
-            datum: None,
-            script_ref: None,
-        };
+        let utxo = make_test_utxo(address_bytes);
 
         let stake_cred = utxo.extract_stake_credential();
         assert!(
@@ -2279,14 +2125,7 @@ mod tests {
         // Byron address - high bit set in header
         let address_bytes = vec![0x82, 0xD8, 0x18]; // Byron CBOR prefix
 
-        let utxo = UtxoEntry {
-            tx_hash: "test".to_string(),
-            output_index: 0,
-            address: hex::encode(&address_bytes),
-            value: 1000000,
-            datum: None,
-            script_ref: None,
-        };
+        let utxo = make_test_utxo(address_bytes);
 
         let stake_cred = utxo.extract_stake_credential();
         assert!(
@@ -2297,14 +2136,8 @@ mod tests {
 
     #[test]
     fn test_extract_stake_credential_invalid_address() {
-        let utxo = UtxoEntry {
-            tx_hash: "test".to_string(),
-            output_index: 0,
-            address: "not_valid_hex".to_string(),
-            value: 1000000,
-            datum: None,
-            script_ref: None,
-        };
+        // Empty address - too short to be valid
+        let utxo = make_test_utxo(vec![]);
 
         let stake_cred = utxo.extract_stake_credential();
         assert!(stake_cred.is_none(), "Invalid addresses should return None");
@@ -2336,18 +2169,24 @@ mod tests {
         );
 
         // Test UTXO callback
-        callbacks
-            .on_utxo(UtxoEntry {
-                tx_hash: "abc123".to_string(),
+        let test_utxo = UtxoEntry {
+            input: TransactionInput {
+                tx_hash: [0xAB; 32],
                 output_index: 0,
-                address: "addr1...".to_string(),
-                value: 5000000,
+            },
+            output: TransactionOutput {
+                address: vec![0x01; 57],
+                value: Value {
+                    coin: 5_000_000,
+                    multiasset: None,
+                },
                 datum: None,
                 script_ref: None,
-            })
-            .unwrap();
+            },
+        };
+        callbacks.on_utxo(test_utxo).unwrap();
 
         assert_eq!(callbacks.utxos.len(), 1);
-        assert_eq!(callbacks.utxos[0].value, 5000000);
+        assert_eq!(callbacks.utxos[0].coin(), 5_000_000);
     }
 }
