@@ -2,7 +2,7 @@
 use acropolis_common::hash::Hash;
 use acropolis_common::Point;
 use pallas_traverse::Era::Conway;
-use pallas_traverse::MultiEraHeader;
+use pallas_traverse::{MultiEraBlock, MultiEraHeader};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -48,7 +48,7 @@ impl HeaderContext {
     pub fn load(network_dir: &Path, point: &Point) -> Result<Self, HeaderContextError> {
         let path = Self::path(network_dir, point)?;
         let cbor = fs::read(&path).map_err(|e| HeaderContextError::ReadFile(path, e))?;
-        let header = MultiEraHeader::decode(Conway as u8, None, &cbor)
+        let header = MultiEraBlock::decode(&cbor)
             .map_err(|e| HeaderContextError::Decode(point.slot(), e.to_string()))?;
         Ok(Self {
             point: point.clone(),
