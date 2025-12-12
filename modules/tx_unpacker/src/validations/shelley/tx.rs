@@ -4,19 +4,19 @@
 use acropolis_common::{protocol_params::ShelleyParams, validation::Phase1ValidationError};
 use anyhow::Result;
 use pallas::ledger::primitives::alonzo;
-
 pub type Phase1ValidationResult = Result<(), Box<Phase1ValidationError>>;
 
-pub fn validate_shelley_tx(
+pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_size: u32,
     shelley_params: &ShelleyParams,
     current_slot: u64,
 ) -> Phase1ValidationResult {
     let transaction_body = &mtx.transaction_body;
-
-    validate_time_to_live(mtx, current_slot)?;
-    validate_fee_too_small_utxo(transaction_body, tx_size, shelley_params)?;
+    let fee = transaction_body.fee;
+    let ttl = transaction_body.ttl;
+    validate_time_to_live(ttl, current_slot)?;
+    validate_fee_too_small_utxo(fee, tx_size, shelley_params)?;
     validate_max_tx_size_utxo(tx_size, shelley_params)?;
     Ok(())
 }
@@ -24,8 +24,8 @@ pub fn validate_shelley_tx(
 /// Validate transaction's TTL field
 /// pass if ttl >= current_slot
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L421
-pub fn validate_time_to_live(tx: &alonzo::MintedTx, current_slot: u64) -> Phase1ValidationResult {
-    if let Some(ttl) = tx.transaction_body.ttl {
+pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1ValidationResult {
+    if let Some(ttl) = ttl {
         if ttl >= current_slot {
             Ok(())
         } else {
@@ -35,9 +35,9 @@ pub fn validate_time_to_live(tx: &alonzo::MintedTx, current_slot: u64) -> Phase1
             }))
         }
     } else {
-        Err(Box::new(Phase1ValidationError::Other(
-            "TTL is missing for Shelley Tx".to_string(),
-        )))
+        Err(Box::new(Phase1ValidationError::MalformedTransaction {
+            errors: vec!["TTL is missing for Shelley Tx".to_string()],
+        }))
     }
 }
 
@@ -46,14 +46,14 @@ pub fn validate_time_to_live(tx: &alonzo::MintedTx, current_slot: u64) -> Phase1
 /// minFee = (tx_size_in_bytes * min_a) + min_b + ref_script_fee (this is after Alonzo Era)
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L447
 pub fn validate_fee_too_small_utxo(
-    transaction_body: &alonzo::TransactionBody,
+    fee: u64,
     tx_size: u32,
     shelley_params: &ShelleyParams,
 ) -> Phase1ValidationResult {
     let min_fee = shelley_params.min_fee(tx_size);
-    if transaction_body.fee < min_fee {
+    if fee < min_fee {
         Err(Box::new(Phase1ValidationError::FeeTooSmallUTxO {
-            supplied: transaction_body.fee,
+            supplied: fee,
             required: min_fee,
         }))
     } else {
@@ -109,7 +109,6 @@ mod tests {
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), Phase1ValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
-        validate_shelley_tx(mtx, tx.size() as u32, &ctx.shelley_params, ctx.current_slot)
-            .map_err(|e| *e)
+        validate(mtx, tx.size() as u32, &ctx.shelley_params, ctx.current_slot).map_err(|e| *e)
     }
 }

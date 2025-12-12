@@ -682,7 +682,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
@@ -859,6 +859,22 @@ mod tests {
             },
             datum: datum.map(Datum::Inline),
             reference_script: None,
+        }
+    }
+
+    fn make_tx_utxo_deltas(
+        tx_identifier: TxIdentifier,
+        inputs: Vec<UTxOIdentifier>,
+        outputs: Vec<TxOutput>,
+    ) -> TxUTxODeltas {
+        TxUTxODeltas {
+            tx_identifier,
+            inputs,
+            outputs,
+            vkey_hashes_needed: HashSet::new(),
+            script_hashes_needed: HashSet::new(),
+            vkey_hashes_provided: vec![],
+            script_hashes_provided: vec![],
         }
     }
 
@@ -1169,11 +1185,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, reference_name, Some(datum_blob.clone()));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
         let info = new_state.info.expect("info should be Some");
@@ -1200,11 +1212,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, normal_name, Some(datum_blob.clone()));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1232,11 +1240,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, name, Some(datum_blob));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1266,11 +1270,7 @@ mod tests {
         let input = UTxOIdentifier::new(TxHash::default(), 0);
         let output = make_output(policy_id, name, None);
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: vec![input],
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![input], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1308,11 +1308,7 @@ mod tests {
 
         let output = make_output(policy_id, name, Some(datum.clone()));
 
-        let tx = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: vec![],
-            outputs: vec![output],
-        };
+        let tx = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
         let new_state = state.handle_cip68_metadata(&[tx], &registry).unwrap();
         let record = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
 
@@ -1424,22 +1420,8 @@ mod tests {
 
         let tx_identifier = TxIdentifier::new(0, 0);
 
-        let tx1 = TxUTxODeltas {
-            tx_identifier,
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..output.clone()
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier,
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 1),
-                ..output
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(tx_identifier, vec![], vec![output.clone()]);
+        let tx2 = make_tx_utxo_deltas(tx_identifier, vec![], vec![output]);
 
         let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
@@ -1466,22 +1448,8 @@ mod tests {
         let out1 = make_output(policy_id, asset_name, None);
         let out2 = make_output(policy_id, asset_name, None);
 
-        let tx1 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(9, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..out1
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(10, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..out2
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(TxIdentifier::new(9, 0), vec![], vec![out1]);
+        let tx2 = make_tx_utxo_deltas(TxIdentifier::new(10, 0), vec![], vec![out2]);
 
         let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
@@ -1509,30 +1477,9 @@ mod tests {
         );
 
         let base_output = make_output(policy_id, asset_name, None);
-        let tx1 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(9, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output.clone()
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(8, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output.clone()
-            }],
-        };
-        let tx3 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(7, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(TxIdentifier::new(9, 0), vec![], vec![base_output.clone()]);
+        let tx2 = make_tx_utxo_deltas(TxIdentifier::new(8, 0), vec![], vec![base_output.clone()]);
+        let tx3 = make_tx_utxo_deltas(TxIdentifier::new(7, 0), vec![], vec![base_output]);
 
         let new_state = state.handle_transactions(&[tx1, tx2, tx3], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");

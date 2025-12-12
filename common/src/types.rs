@@ -275,36 +275,14 @@ pub struct TxUTxODeltas {
     // Created and spent UTxOs
     pub inputs: Vec<UTxOIdentifier>,
     pub outputs: Vec<TxOutput>,
-}
 
-// Individual transaction details
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Transaction {
-    // Transaction in which delta occured
-    pub tx_identifier: TxIdentifier,
-
-    // Created and spent UTxOs
-    pub inputs: Vec<UTxOIdentifier>,
-    pub outputs: Vec<TxOutput>,
-
-    // Certificates
-    pub certificates: Vec<TxCertificateWithPos>,
-
-    // Withdrawals
-    pub withdrawals: Vec<Withdrawal>,
-
-    // Witnesses
-    pub vkey_witnesses: Vec<VKeyWitness>,
-    pub native_scripts: Vec<NativeScript>,
-
-    // Low bound: validity interval start
-    pub low_bnd: Option<u64>,
-
-    // Upp bound: ttl
-    pub upp_bnd: Option<u64>,
-
-    // pp updates proposal
-    pub alonzo_babbage_update_proposal: Option<AlonzoBabbageUpdateProposal>,
+    // State needed for validation
+    // This is missing UTxO Authors
+    pub vkey_hashes_needed: HashSet<KeyHash>,
+    pub script_hashes_needed: HashSet<ScriptHash>,
+    // From witnesses
+    pub vkey_hashes_provided: Vec<KeyHash>,
+    pub script_hashes_provided: Vec<ScriptHash>,
 }
 
 /// Individual address balance change
@@ -593,6 +571,42 @@ impl NativeScript {
         let raw_bytes = minicbor::to_vec(self).expect("Failed to encode NativeScript to CBOR");
         data.extend_from_slice(raw_bytes.as_slice());
         ScriptHash::from(keyhash_224(&data))
+    }
+
+    pub fn eval(
+        &self,
+        vkey_hashes_provided: &HashSet<KeyHash>,
+        low_bnd: Option<u64>,
+        upp_bnd: Option<u64>,
+    ) -> bool {
+        match self {
+            Self::ScriptAll(scripts) => {
+                scripts.iter().all(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptAny(scripts) => {
+                scripts.iter().any(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptPubkey(hash) => vkey_hashes_provided.contains(hash),
+            Self::ScriptNOfK(val, scripts) => {
+                let count = scripts
+                    .iter()
+                    .map(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+                    .fold(0, |x, y| x + y as u32);
+                count >= *val
+            }
+            Self::InvalidBefore(val) => {
+                match low_bnd {
+                    Some(time) => *val >= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+            Self::InvalidHereafter(val) => {
+                match upp_bnd {
+                    Some(time) => *val <= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+        }
     }
 }
 
@@ -2513,6 +2527,56 @@ pub enum TxCertificate {
 
     /// DRep update
     DRepUpdate(DRepUpdate),
+}
+
+impl TxCertificate {
+    /// This function extracts required VKey Hashes
+    /// from TxCertificate
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    ///
+    /// returns (vkey_hashes, script_hashes)
+    pub fn get_cert_authors(&self) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
+        let mut vkey_hashes = HashSet::new();
+        let mut script_hashes = HashSet::new();
+
+        let mut parse_cred = |cred: &StakeCredential| match cred {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(*vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(*script_hash);
+            }
+        };
+
+        match self {
+            // Deregistration requires witness from stake credential
+            Self::StakeDeregistration(addr) => {
+                parse_cred(&addr.credential);
+            }
+            // Delegation requries withness from delegator
+            Self::StakeDelegation(deleg) => {
+                parse_cred(&deleg.stake_address.credential);
+            }
+            // Pool registration requires witness from pool cold key and owners
+            Self::PoolRegistration(pool_reg) => {
+                vkey_hashes.insert(*pool_reg.operator);
+                vkey_hashes.extend(
+                    pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>(),
+                );
+            }
+            // Pool retirement requires withness from pool cold key
+            Self::PoolRetirement(retirement) => {
+                vkey_hashes.insert(*retirement.operator);
+            }
+            // Genesis delegation requires witness from genesis key
+            Self::GenesisKeyDelegation(gen_deleg) => {
+                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
+            }
+            _ => {}
+        }
+
+        (vkey_hashes, script_hashes)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

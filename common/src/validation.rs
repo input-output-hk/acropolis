@@ -52,12 +52,8 @@ pub enum ValidationError {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum TransactionValidationError {
     /// **Cause**: Raw Transaction CBOR is invalid
-    #[error("CBOR Decoding error: {0}")]
-    CborDecodeError(String),
-
-    /// **Cause**: Transaction is not in correct form.
-    #[error("Malformed Transaction: {0}")]
-    MalformedTransaction(String),
+    #[error("CBOR Decoding error: era={era}, reason={reason}")]
+    CborDecodeError { era: Era, reason: String },
 
     /// **Cause**: Phase 1 Validation Error
     #[error("Phase 1 Validation Failed: {0}")]
@@ -70,6 +66,13 @@ pub enum TransactionValidationError {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum Phase1ValidationError {
+    /// **Cause**: Transaction is not in correct form.
+    #[error(
+        "Malformed Transaction: {}",
+         errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")
+    )]
+    MalformedTransaction { errors: Vec<String> },
+
     /// **Cause:** The UTXO has expired (Shelley only)
     #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
     ExpiredUTxO { ttl: Slot, current_slot: Slot },
@@ -92,10 +95,6 @@ pub enum Phase1ValidationError {
     /// **Cause:** UTxOW rules failure
     #[error("{0}")]
     UTxOWValidationError(#[from] UTxOWValidationError),
-
-    /// **Cause:** Other errors (e.g. Invalid shelley params)
-    #[error("{0}")]
-    Other(String),
 }
 
 /// UTxO Rules Failure

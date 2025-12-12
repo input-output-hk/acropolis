@@ -16,6 +16,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "hex",
  "pallas 0.33.0",
  "pallas-primitives 0.33.0",
  "pallas-traverse 0.33.0",
@@ -495,12 +496,16 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "cryptoxide 0.5.1",
  "futures",
  "hex",
  "pallas 0.33.0",
+ "quickcheck",
+ "quickcheck_macros",
  "serde",
  "serde_json",
  "test-case",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]
@@ -509,22 +514,17 @@ dependencies = [
 name = "acropolis_module_utxo_state"
 version = "0.1.0"
 dependencies = [
- "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "async-trait",
  "caryatid_sdk",
  "config",
- "cryptoxide 0.5.1",
  "dashmap",
  "fjall",
  "hex",
- "pallas 0.33.0",
- "quickcheck",
- "quickcheck_macros",
+ "serde",
  "serde_cbor",
  "sled",
- "thiserror 2.0.17",
  "tokio",
  "tracing",
 ]

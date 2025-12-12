@@ -20,6 +20,8 @@ use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::{ImmutableUTXOStore, State};
 
+mod test_utils;
+
 mod address_delta_publisher;
 mod volatile_index;
 use address_delta_publisher::AddressDeltaPublisher;
@@ -38,7 +40,6 @@ use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
-mod crypto;
 mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =

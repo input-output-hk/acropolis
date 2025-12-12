@@ -1,24 +1,18 @@
+use std::collections::HashSet;
+
 use acropolis_common::{
     validation::{Phase1ValidationError, TransactionValidationError},
-    AlonzoBabbageUpdateProposal, GenesisDelegates, NativeScript, TxCertificateWithPos, TxHash,
-    UTXOValue, UTxOIdentifier, VKeyWitness, Withdrawal,
+    KeyHash, ScriptHash, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 mod shelley;
 
-#[allow(clippy::too_many_arguments)]
 pub fn validate_shelley_tx<F>(
-    tx_hash: TxHash,
     inputs: &[UTxOIdentifier],
-    certificates: &[TxCertificateWithPos],
-    withdrawals: &[Withdrawal],
-    alonzo_babbage_update_proposal: &Option<AlonzoBabbageUpdateProposal>,
-    vkey_witnesses: &[VKeyWitness],
-    native_scripts: &[NativeScript],
-    low_bnd: Option<u64>,
-    upp_bnd: Option<u64>,
-    genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
+    vkey_hashes_needed: &mut HashSet<KeyHash>,
+    script_hashes_needed: &mut HashSet<ScriptHash>,
+    vkey_hashes_provided: &[KeyHash],
+    script_hashes_provided: &[ScriptHash],
     lookup_utxo: F,
 ) -> Result<(), TransactionValidationError>
 where
@@ -27,17 +21,11 @@ where
     shelley::utxo::validate(inputs, &lookup_utxo)
         .map_err(|e| Phase1ValidationError::UTxOValidationError(*e))?;
     shelley::utxow::validate(
-        tx_hash,
         inputs,
-        certificates,
-        withdrawals,
-        alonzo_babbage_update_proposal,
-        vkey_witnesses,
-        native_scripts,
-        low_bnd,
-        upp_bnd,
-        genesis_delegs,
-        update_quorum,
+        vkey_hashes_needed,
+        script_hashes_needed,
+        vkey_hashes_provided,
+        script_hashes_provided,
         &lookup_utxo,
     )
     .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
