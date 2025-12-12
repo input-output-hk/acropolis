@@ -36,9 +36,10 @@ use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
-    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, Lovelace, MultiHostName,
-    NetworkId, PoolBlockProduction, PoolId, PoolMetadata, PoolRegistration, Pots, Ratio, Relay,
-    SingleHostAddr, SingleHostName, StakeAddress, StakeCredential, TxHash, UTxOIdentifier,
+    Address, Constitution, DRepChoice, DRepCredential, EpochBootstrapData, Lovelace, MultiHostName,
+    NativeAssets, NetworkId, PoolBlockProduction, PoolId, PoolMetadata, PoolRegistration, Pots,
+    Ratio, Relay, SingleHostAddr, SingleHostName, StakeAddress, StakeCredential, TxHash, UTXOValue,
+    UTxOIdentifier, Value,
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
@@ -471,6 +472,19 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     }
 }
 
+struct SnapshotUTxO(pub UtxoEntry);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxO {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let id: SnapshotUTxOIdentifier = d.decode()?;
+        let value: SnapshotUTXOValue = d.decode()?;
+        Ok(Self(UtxoEntry {
+            id: id.0,
+            value: value.0,
+        }))
+    }
+}
+
 struct SnapshotUTxOIdentifier(pub UTxOIdentifier);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxOIdentifier {
@@ -481,10 +495,192 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxOIdentifier {
             ));
         };
         let output_index = d.u64()? as u16;
-        Ok(SnapshotUTxOIdentifier(UTxOIdentifier {
+        Ok(Self(UTxOIdentifier {
             tx_hash,
             output_index,
         }))
+    }
+}
+
+struct SnapshotAddress(pub Address);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotAddress {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let Ok(_address_bytes) = d.bytes() else {
+            return Err(minicbor::decode::Error::message(
+                "Failed to read address bytes",
+            ));
+        };
+        // TODO: Turn address bytes into one of the possible address types
+        Ok(Self(Address::None))
+    }
+}
+
+struct SnapshotValue(pub Value);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotValue {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let Ok(datatype) = d.datatype() else {
+            return Err(minicbor::decode::Error::message(
+                "Failed to read Value datatype",
+            ));
+        };
+        match datatype {
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+                // Simple ADA-only value
+                let Ok(lovelace) = d.u64() else {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to parse coin amount",
+                    ));
+                };
+                Ok(Self(Value {
+                    lovelace,
+                    assets: NativeAssets::default(),
+                }))
+            }
+            Type::Array | Type::ArrayIndef => {
+                // Multi-asset: [coin, assets_map]
+                if d.array().is_err() {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to parse value array",
+                    ));
+                }
+                let Ok(lovelace) = d.u64() else {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to parse coin amount",
+                    ));
+                };
+                // TODO: read assets map
+                if d.skip().is_err() {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to skip assets map",
+                    ));
+                }
+                Ok(Self(Value {
+                    lovelace,
+                    assets: NativeAssets::default(),
+                }))
+            }
+            _ => Err(minicbor::decode::Error::message(
+                "Unexpected Value datatype",
+            )),
+        }
+    }
+}
+
+struct SnapshotUTXOValue(pub UTXOValue);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTXOValue {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        // TxOut is typically an array [address, value, ...]
+        // or a map for Conway with optional fields
+
+        let Ok(datatype) = d.datatype() else {
+            return Err(minicbor::decode::Error::message(
+                "Failed to read TxOut datatype",
+            ));
+        };
+
+        // Try array format first (most common)
+        match datatype {
+            Type::Array | Type::ArrayIndef => {
+                let Ok(arr_len) = d.array() else {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to parse TxOut array",
+                    ));
+                };
+                if arr_len == Some(0) {
+                    return Err(minicbor::decode::Error::message("empty TxOut array"));
+                }
+
+                // Element 0: Address (bytes)
+                let address: SnapshotAddress = d.decode()?;
+
+                // Element 1: Value (coin or map)
+                let value: SnapshotValue = d.decode()?;
+
+                // Skip remaining fields (datum, script_ref)
+                // TODO: Read datum, script ref
+                if let Some(len) = arr_len {
+                    for _ in 2..len {
+                        if d.skip().is_err() {
+                            return Err(minicbor::decode::Error::message(
+                                "Failed to skip TxOut field",
+                            ));
+                        }
+                    }
+                }
+
+                Ok(Self(UTXOValue {
+                    address: address.0,
+                    value: value.0,
+                    datum: None,
+                    reference_script: None,
+                }))
+            }
+            Type::Map | Type::MapIndef => {
+                // Map format (Conway with optional fields)
+                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
+                let Ok(map_len) = d.map() else {
+                    return Err(minicbor::decode::Error::message(
+                        "Failed to parse TxOut map",
+                    ));
+                };
+
+                let mut address = Option::<Address>::default();
+                let mut value = Option::<Value>::default();
+
+                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
+                for _ in 0..entries {
+                    // Check for break in indefinite map
+                    if map_len.is_none() && matches!(d.datatype(), Ok(Type::Break)) {
+                        d.skip().ok(); // consume break
+                        break;
+                    }
+
+                    // Read key
+                    let key = match d.u32() {
+                        Ok(k) => k,
+                        Err(_) => {
+                            // Skip both key and value if key is not u32
+                            d.skip().ok();
+                            d.skip().ok();
+                            continue;
+                        }
+                    };
+
+                    // Read value based on key
+                    match key {
+                        0 => {
+                            address = Some((d.decode::<SnapshotAddress>()?).0);
+                        }
+                        1 => {
+                            // Value (coin or multi-asset)
+                            value = Some((d.decode::<SnapshotValue>()?).0);
+                        }
+                        _ => {
+                            // TODO: read datum, script ref
+                            // datum (2), script_ref (3), or unknown - skip
+                            d.skip().ok();
+                        }
+                    }
+                }
+
+                if let (Some(address), Some(value)) = (address, value) {
+                    Ok(Self(UTXOValue {
+                        address,
+                        value,
+                        datum: None,
+                        reference_script: None,
+                    }))
+                } else {
+                    Err(minicbor::decode::Error::message(
+                        "map-based TxOut missing required fields",
+                    ))
+                }
+            }
+            _ => Err(minicbor::decode::Error::message("unexpected TxOut type")),
+        }
     }
 }
 
@@ -536,15 +732,9 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UtxoEntry {
     /// UTxO Identifier
-    pub utxo: UTxOIdentifier,
-    /// Hex encoded Cardano addresses
-    pub address: String,
-    /// Lovelace amount
-    pub value: u64,
-    /// Optional inline datum (hex-encoded CBOR)
-    pub datum: Option<String>,
-    /// Optional script reference (hex-encoded CBOR)
-    pub script_ref: Option<String>,
+    pub id: UTxOIdentifier,
+    /// UTxO Value
+    pub value: UTXOValue,
 }
 
 // -----------------------------------------------------------------------------
@@ -1647,23 +1837,8 @@ impl StreamingSnapshotParser {
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
         // Parse key: TransactionInput (array [tx_hash, output_index])
         decoder.array().context("Failed to parse TxIn array")?;
-
-        let utxo = (decoder
-            .decode::<SnapshotUTxOIdentifier>()
-            .context("Failed to parse UTxOIdentifier")?)
-        .0;
-
-        // Parse value: TransactionOutput
-        let (address, value) = Self::parse_transaction_output(decoder)
-            .context("Failed to parse transaction output")?;
-
-        Ok(UtxoEntry {
-            utxo,
-            address,
-            value,
-            datum: None,      // TODO: Extract from TxOut
-            script_ref: None, // TODO: Extract from TxOut
-        })
+        let utxo: SnapshotUTxO = decoder.decode().context("Failed to parse UTxO")?;
+        Ok(utxo.0)
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
@@ -1793,138 +1968,6 @@ impl StreamingSnapshotParser {
             updates,
             retiring,
         })
-    }
-
-    /// Stream UTXOs with per-entry callback
-    ///
-    /// Parse a single TxOut from the CBOR decoder
-    fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
-        // TxOut is typically an array [address, value, ...]
-        // or a map for Conway with optional fields
-
-        // Try array format first (most common)
-        match dec.datatype().context("Failed to read TxOut datatype")? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = dec.array().context("Failed to parse TxOut array")?;
-                if arr_len == Some(0) {
-                    return Err(anyhow!("empty TxOut array"));
-                }
-
-                // Element 0: Address (bytes)
-                let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let hex_address = hex::encode(address_bytes);
-
-                // Element 1: Value (coin or map)
-                let value = match dec.datatype().context("Failed to read value datatype")? {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        // Simple ADA-only value
-                        dec.u64().context("Failed to parse u64 value")?
-                    }
-                    Type::Array | Type::ArrayIndef => {
-                        // Multi-asset: [coin, assets_map]
-                        dec.array().context("Failed to parse value array")?;
-                        let coin = dec.u64().context("Failed to parse coin amount")?;
-                        // Skip the assets map
-                        dec.skip().context("Failed to skip assets map")?;
-                        coin
-                    }
-                    _ => {
-                        return Err(anyhow!("unexpected value type"));
-                    }
-                };
-
-                // Skip remaining fields (datum, script_ref)
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        dec.skip().context("Failed to skip TxOut field")?;
-                    }
-                }
-
-                Ok((hex_address, value))
-            }
-            Type::Map | Type::MapIndef => {
-                // Map format (Conway with optional fields)
-                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
-                let map_len = dec.map().context("Failed to parse TxOut map")?;
-
-                let mut address = String::new();
-                let mut value = 0u64;
-                let mut found_address = false;
-                let mut found_value = false;
-
-                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
-                        dec.skip().ok(); // consume break
-                        break;
-                    }
-
-                    // Read key
-                    let key = match dec.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            // Skip both key and value if key is not u32
-                            dec.skip().ok();
-                            dec.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    // Read value based on key
-                    match key {
-                        0 => {
-                            // Address
-                            if let Ok(addr_bytes) = dec.bytes() {
-                                address = hex::encode(addr_bytes);
-                                found_address = true;
-                            } else {
-                                dec.skip().ok();
-                            }
-                        }
-                        1 => {
-                            // Value (coin or multi-asset)
-                            match dec.datatype() {
-                                Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
-                                    if let Ok(coin) = dec.u64() {
-                                        value = coin;
-                                        found_value = true;
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                                    // Multi-asset: [coin, assets_map]
-                                    if dec.array().is_ok() {
-                                        if let Ok(coin) = dec.u64() {
-                                            value = coin;
-                                            found_value = true;
-                                        }
-                                        dec.skip().ok(); // skip assets map
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                _ => {
-                                    dec.skip().ok();
-                                }
-                            }
-                        }
-                        _ => {
-                            // datum (2), script_ref (3), or unknown - skip
-                            dec.skip().ok();
-                        }
-                    }
-                }
-
-                if found_address && found_value {
-                    Ok((address, value))
-                } else {
-                    Err(anyhow!("map-based TxOut missing required fields"))
-                }
-            }
-            _ => Err(anyhow!("unexpected TxOut type")),
-        }
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
