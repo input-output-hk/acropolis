@@ -2166,15 +2166,20 @@ mod tests {
         // Test UTXO callback
         callbacks
             .on_utxo(UtxoEntry {
-                utxo: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
-                address: "addr1...".to_string(),
-                value: 5000000,
-                datum: None,
-                script_ref: None,
+                id: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
+                value: UTXOValue {
+                    address: Address::None,
+                    value: Value {
+                        lovelace: 5000000,
+                        assets: NativeAssets::default(),
+                    },
+                    datum: None,
+                    reference_script: None,
+                },
             })
             .unwrap();
 
         assert_eq!(callbacks.utxos.len(), 1);
-        assert_eq!(callbacks.utxos[0].value, 5000000);
+        assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
     }
 }
