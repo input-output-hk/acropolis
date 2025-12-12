@@ -6,9 +6,7 @@ use std::collections::HashSet;
 
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
-    validation::UTxOWValidationError, AlonzoBabbageUpdateProposal, GenesisDelegates, KeyHash,
-    NativeScript, ScriptHash, ShelleyAddressPaymentPart, StakeCredential, TxCertificate,
-    TxCertificateWithPos, TxHash, UTXOValue, UTxOIdentifier, VKeyWitness, Withdrawal,
+    validation::UTxOWValidationError, GenesisDelegates, KeyHash, NativeScript, TxHash, VKeyWitness,
 };
 use anyhow::Result;
 use pallas::ledger::primitives::alonzo;
@@ -23,131 +21,6 @@ fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
                 .any(|cert| matches!(cert, alonzo::Certificate::MoveInstantaneousRewardsCert(_)))
         })
         .unwrap_or(false)
-}
-
-/// This function extracts required VKey Hashes
-/// from TxCert (pallas type)
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
-fn get_cert_authors(
-    cert_with_pos: &TxCertificateWithPos,
-) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
-    let mut vkey_hashes = HashSet::new();
-    let mut script_hashes = HashSet::new();
-
-    let mut parse_cred = |cred: &StakeCredential| match cred {
-        StakeCredential::AddrKeyHash(vkey_hash) => {
-            vkey_hashes.insert(*vkey_hash);
-        }
-        StakeCredential::ScriptHash(script_hash) => {
-            script_hashes.insert(*script_hash);
-        }
-    };
-
-    match &cert_with_pos.cert {
-        // Deregistration requires witness from stake credential
-        TxCertificate::StakeDeregistration(addr) => {
-            parse_cred(&addr.credential);
-        }
-        // Delegation requries witness from delegator
-        TxCertificate::StakeDelegation(deleg) => {
-            parse_cred(&deleg.stake_address.credential);
-        }
-        // Pool registration requires witness from pool cold key and owners
-        TxCertificate::PoolRegistration(pool_reg) => {
-            vkey_hashes.insert(*pool_reg.operator);
-            vkey_hashes
-                .extend(pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>());
-        }
-        // Pool retirement requires witness from pool cold key
-        TxCertificate::PoolRetirement(retirement) => {
-            vkey_hashes.insert(*retirement.operator);
-        }
-        // Genesis delegation requires witness from genesis key
-        TxCertificate::GenesisKeyDelegation(gen_deleg) => {
-            vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
-        }
-        _ => {}
-    }
-
-    (vkey_hashes, script_hashes)
-}
-
-/// Get VKey Witnesses needed for transaction
-/// Get Scripts needed for transaction
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L274
-/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L226
-/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L103
-///
-/// VKey Witnesses needed
-/// 1. UTxO authors: keys that own the UTxO being spent
-/// 2. Certificate authors: keys authorizing certificates
-/// 3. Pool owners: owners that must sign pool registration
-/// 4. Withdrawal authors: keys authorizing reward withdrawals
-/// 5. Governance authors: keys authorizing governance actions (e.g. protocol update)
-///
-/// Script Witnesses needed
-/// 1. Input scripts: scripts locking UTxO being spent
-/// 2. Withdrawal scripts: scripts controlling reward accounts
-/// 3. Certificate scripts: scripts in certificate credentials.
-pub fn get_vkey_script_needed<F>(
-    inputs: &[UTxOIdentifier],
-    certificates: &[TxCertificateWithPos],
-    withdrawals: &[Withdrawal],
-    alonzo_babbage_update_proposal: &Option<AlonzoBabbageUpdateProposal>,
-    lookup_utxo: F,
-) -> (HashSet<KeyHash>, HashSet<ScriptHash>)
-where
-    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
-{
-    let mut vkey_hashes = HashSet::new();
-    let mut script_hashes = HashSet::new();
-
-    // for each UTxO, extract the needed vkey and script hashes
-    for utxo in inputs.iter() {
-        if let Ok(Some(utxo)) = lookup_utxo(utxo) {
-            // NOTE:
-            // Need to check inputs from byron bootstrap addresses
-            // with bootstrap witnesses
-            if let Some(payment_part) = utxo.address.get_payment_part() {
-                match payment_part {
-                    ShelleyAddressPaymentPart::PaymentKeyHash(payment_key_hash) => {
-                        vkey_hashes.insert(payment_key_hash);
-                    }
-                    ShelleyAddressPaymentPart::ScriptHash(script_hash) => {
-                        script_hashes.insert(script_hash);
-                    }
-                }
-            }
-        }
-    }
-
-    // for each certificate, get the required vkey and script hashes
-    for cert in certificates.iter() {
-        let (v, s) = get_cert_authors(cert);
-        vkey_hashes.extend(v);
-        script_hashes.extend(s);
-    }
-
-    // for each withdrawal, get the required vkey and script hashes
-    for withdrawal in withdrawals.iter() {
-        match withdrawal.address.credential {
-            StakeCredential::AddrKeyHash(vkey_hash) => {
-                vkey_hashes.insert(vkey_hash);
-            }
-            StakeCredential::ScriptHash(script_hash) => {
-                script_hashes.insert(script_hash);
-            }
-        }
-    }
-
-    // for each governance action, get the required vkey hashes
-    if let Some(update) = alonzo_babbage_update_proposal {
-        for (genesis_key, _) in update.proposals.iter() {
-            vkey_hashes.insert(*genesis_key);
-        }
-    }
-
-    (vkey_hashes, script_hashes)
 }
 
 /// Validate Native Scripts from Transaction witnesses
@@ -171,40 +44,6 @@ pub fn validate_failed_native_scripts(
     Ok(())
 }
 
-/// Validate all needed scripts are provided in witnesses
-/// No missing, no extra
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L386
-pub fn validate_missing_extra_scripts(
-    script_hashes_needed: &HashSet<ScriptHash>,
-    native_scripts: &[NativeScript],
-) -> Result<(), Box<UTxOWValidationError>> {
-    // check for missing & extra scripts
-    let mut scripts_used =
-        native_scripts.iter().map(|script| (false, script.compute_hash())).collect::<Vec<_>>();
-    for script_hash in script_hashes_needed.iter() {
-        if let Some((used, _)) = scripts_used.iter_mut().find(|(u, h)| !(*u) && script_hash.eq(h)) {
-            *used = true;
-        } else {
-            return Err(Box::new(
-                UTxOWValidationError::MissingScriptWitnessesUTxOW {
-                    script_hash: *script_hash,
-                },
-            ));
-        }
-    }
-
-    for (used, script_hash) in scripts_used.iter() {
-        if !*used {
-            return Err(Box::new(
-                UTxOWValidationError::ExtraneousScriptWitnessesUTXOW {
-                    script_hash: *script_hash,
-                },
-            ));
-        }
-    }
-    Ok(())
-}
-
 /// Validate that all vkey witnesses signatures
 /// are verified
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
@@ -217,22 +56,6 @@ pub fn validate_verified_wits(
             return Err(Box::new(UTxOWValidationError::InvalidWitnessesUTxOW {
                 key_hash: vkey_witness.key_hash(),
                 witness: vkey_witness.clone(),
-            }));
-        }
-    }
-    Ok(())
-}
-
-/// Validate that all required witnesses are provided
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L424
-pub fn validate_needed_witnesses(
-    vkey_hashes_needed: &HashSet<KeyHash>,
-    vkey_hashes_provided: &HashSet<KeyHash>,
-) -> Result<(), Box<UTxOWValidationError>> {
-    for vkey_hash in vkey_hashes_needed.iter() {
-        if !vkey_hashes_provided.contains(vkey_hash) {
-            return Err(Box::new(UTxOWValidationError::MissingVKeyWitnessesUTxOW {
-                key_hash: *vkey_hash,
             }));
         }
     }

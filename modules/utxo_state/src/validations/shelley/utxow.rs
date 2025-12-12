@@ -5,12 +5,12 @@
 use std::collections::HashSet;
 
 use acropolis_common::{
-    validation::UTxOWValidationError, GenesisDelegates, KeyHash, ScriptHash,
-    ShelleyAddressPaymentPart, TxCertificate, TxCertificateWithPos, UTXOValue, UTxOIdentifier,
+    validation::UTxOWValidationError, KeyHash, ScriptHash, ShelleyAddressPaymentPart, UTXOValue,
+    UTxOIdentifier,
 };
 use anyhow::Result;
 
-pub fn get_vkey_script_needed_from_inputs<F>(
+fn get_vkey_script_needed_from_inputs<F>(
     inputs: &[UTxOIdentifier],
     vkey_hashes_needed: &mut HashSet<KeyHash>,
     script_hashes_needed: &mut HashSet<ScriptHash>,
@@ -85,45 +85,6 @@ pub fn validate_needed_witnesses(
             }));
         }
     }
-    Ok(())
-}
-
-/// Validate genesis keys signatures for MIR certificate
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L463
-pub fn validate_mir_insufficient_genesis_sigs(
-    certificates: &[TxCertificateWithPos],
-    vkey_hashes_provided: &HashSet<KeyHash>,
-    genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
-) -> Result<(), Box<UTxOWValidationError>> {
-    let has_mir = certificates.iter().any(|cert_with_pos| {
-        matches!(
-            cert_with_pos.cert,
-            TxCertificate::MoveInstantaneousReward(_)
-        )
-    });
-    if !has_mir {
-        return Ok(());
-    }
-
-    let genesis_delegate_hashes =
-        genesis_delegs.as_ref().values().map(|delegate| delegate.delegate).collect::<HashSet<_>>();
-
-    // genSig := genDelegates ∩ witsKeyHashes
-    let genesis_sigs =
-        genesis_delegate_hashes.intersection(vkey_hashes_provided).copied().collect::<HashSet<_>>();
-
-    // Check: |genSig| ≥ Quorum
-    // If insufficient, report the signatures that were found (not the missing ones)
-    if genesis_sigs.len() < update_quorum as usize {
-        return Err(Box::new(
-            UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW {
-                genesis_keys: genesis_sigs,
-                quorum: update_quorum,
-            },
-        ));
-    }
-
     Ok(())
 }
 
