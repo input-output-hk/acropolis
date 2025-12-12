@@ -1,7 +1,8 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -30,6 +31,9 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Parameters State module
 #[module(
@@ -177,6 +181,42 @@ impl ParametersState {
         };
 
         let query_state = history.clone();
+
+        // Subscribe for snapshot messages, if allowed
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        if let Some(mut subscription) = snapshot_subscription {
+            context.run(async move {
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("ParameterState: Snapshot Startup message received");
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::ParametersState(msg),
+                        )) => {
+                            info!("ParameterState: Snapshot Bootstrap message received");
+                            info!("ParameterState: got slice: {:?} params: {:?}", msg.slice, msg.params);
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => (),
+                    }
+                }
+            });
+        }
 
         // Handle parameters queries
         context.handle(&cfg.parameters_query_topic, move |message| {
