@@ -2,11 +2,8 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
-    caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
-    protocol_params::ProtocolParams,
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
-    state_history::{StateHistory, StateHistoryStore},
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -42,14 +39,6 @@ mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
-const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "bootstrapped-subscribe-topic",
-    "cardano.sequence.bootstrapped",
-);
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "protocol-parameters-subscribe-topic",
-    "cardano.protocol.parameters",
-);
 const DEFAULT_STORE: &str = "memory";
 
 /// UTXO state module
@@ -64,45 +53,12 @@ impl UTXOState {
     /// Main run function
     async fn run(
         state: Arc<Mutex<State>>,
-        pp_history: Arc<Mutex<StateHistory<ProtocolParams>>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
-        let _genesis = match bootstrapped_message.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
-                complete.values.clone()
-            }
-            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
-        };
-
-        // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
-
         loop {
-            let mut _protocol_params =
-                pp_history.lock().await.get_or_init_with(ProtocolParams::default);
-
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
-            let new_epoch = match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::UTXODeltas(_))) => {
-                    block_info.new_epoch && block_info.epoch > 0
-                }
-                _ => false,
-            };
-
-            if new_epoch {
-                let (_, protocol_parameters_msg) =
-                    protocol_parameters_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
-                    protocol_parameters_msg.as_ref()
-                {
-                    _protocol_params = params.params.clone();
-                }
-            }
 
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
@@ -143,14 +99,6 @@ impl UTXOState {
             .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating bootstrapped subscriber on '{bootstrapped_subscribe_topic}'");
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating protocol parameters subscriber on '{protocol_parameters_subscribe_topic}'");
 
         let utxos_query_topic = config
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
@@ -178,27 +126,12 @@ impl UTXOState {
 
         // Subscribers
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
-        let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let protocol_parameters_subscription =
-            context.subscribe(&protocol_parameters_subscribe_topic).await?;
-
-        // Prepare validation state history
-        let validation_state_history = Arc::new(Mutex::new(StateHistory::<ProtocolParams>::new(
-            "utxo-state-validation",
-            StateHistoryStore::default_block_store(),
-        )));
 
         let state_run = state.clone();
         context.run(async move {
-            Self::run(
-                state_run,
-                validation_state_history,
-                utxo_deltas_subscription,
-                bootstrapped_subscription,
-                protocol_parameters_subscription,
-            )
-            .await
-            .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(state_run, utxo_deltas_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         // Query handler
