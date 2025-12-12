@@ -638,20 +638,21 @@ impl State {
         Ok(())
     }
 
-    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
-    /// the just-ended epoch
-    /// This also returns SPO rewards for publishing to the SPDD topic (For epoch N)
-    /// and stake reward deltas for publishing to the StakeRewardDeltas topic (For epoch N)
-    pub async fn handle_epoch_activity(
+    /// Complete the previous epoch rewards calculation
+    /// And apply the rewards to the stake_addresses
+    /// This function is called at NEWEPOCH tick from epoch N-1 to N
+    ///
+    /// This also returns SPO rewards (from epoch N-1) for publishing to the SPDD topic
+    /// and stake reward deltas for publishing to the StakeRewardDeltas topic
+    pub async fn complete_previous_epoch_rewards_calculation(
         &mut self,
-        ea_msg: &EpochActivityMessage,
         verifier: &Verifier,
     ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
-        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         // Collect stake addresses reward deltas
+        let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
-        // Check previous epoch work is done
+        // Check previous epoch rewards calculation is done
         let mut task = {
             match self.epoch_rewards_task.lock() {
                 Ok(mut task) => task.take(),
@@ -715,6 +716,20 @@ impl State {
             }
         };
 
+        Ok((spo_rewards, reward_deltas))
+    }
+
+    /// Handle an EpochActivityMessage giving total fees and block counts by SPO for
+    /// the just-ended epoch
+    ///
+    /// This returns stake reward deltas (Refund for pools retiring at epoch N) for publishing to the StakeRewardDeltas topic
+    pub async fn handle_epoch_activity(
+        &mut self,
+        ea_msg: &EpochActivityMessage,
+        verifier: &Verifier,
+    ) -> Result<Vec<StakeRewardDelta>> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
         let spo_blocks: HashMap<PoolId, usize> = ea_msg
             .spo_blocks
@@ -731,7 +746,7 @@ impl State {
             verifier,
         )?);
 
-        Ok((spo_rewards, reward_deltas))
+        Ok(reward_deltas)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
