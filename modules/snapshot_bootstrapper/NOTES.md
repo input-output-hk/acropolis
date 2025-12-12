@@ -15,8 +15,8 @@ to bootstrap the node.
 The required data for bootstrapping are:
 
 - snapshot file (with an associated epoch number and point (slot + block hash))
-- nonces (not implemented yet)
-- headers (not implemented yet)
+- nonces
+- block.{slot}.{hash}.cbor file (needed to get the block number for once snapshot is completed and block info must be sent to [PeerNetworkInterface](../src/peer_network_interface/peer_network_interface.rs)
 
 ## Snapshot Files
 
@@ -35,7 +35,7 @@ See [Amaru snapshot format](../../docs/amaru-snapshot-structure.md)
 ## Configuration files
 
 There is a path for each network bootstrap configuration file. Network should
-be one of 'mainnet', 'preprod', 'preview' or 'testnet_<magic>' where
+be one of 'mainnet', 'preprod', 'preview' or 'testnet\_<magic>' where
 `magic` is a 32-bits unsigned value denoting a particular testnet.
 
 Data structure, e.g. as [Amaru mainnet](https://github.com/pragma-org/amaru/tree/main/data/mainnet)
@@ -46,7 +46,7 @@ be used as a prefix to resolve per-network configuration files
 needed for bootstrapping. Given a source directory `data`, and a
 a network name of `preview`, the expected layout for configuration files would be:
 
-* `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url)
+- `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url)
 
 This file along with the TOML config is loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
@@ -103,4 +103,3 @@ The bootstrapper supports the following configuration options:
 - `snapshot-topic`: Topic to publish snapshot messages (default: "cardano.snapshot")
 - `bootstrapped-subscribe-topic`: Topic to receive genesis completion (default: "cardano.sequence.bootstrapped")
 - `completion-topic`: Topic to publish completion signal (default: "cardano.snapshot.complete")
-
