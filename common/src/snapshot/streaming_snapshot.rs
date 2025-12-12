@@ -981,8 +981,8 @@ impl StreamingSnapshotParser {
                     AccountState {
                         stake_address,
                         address_state: StakeAddressState {
-                            registered: false, // Accounts are registered by SPOState
-                            utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                            registered: true, // Accounts in DState are registered by definition
+                            utxo_value: 0,    // Will be populated from UTXO parsing
                             rewards,
                             delegated_spo,
                             delegated_drep,
@@ -1217,6 +1217,79 @@ impl StreamingSnapshotParser {
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("    Successfully parsed mark/set/go snapshots!");
+
+                // DIAGNOSTIC: Compare Go snapshot stake with our computed UTXO values
+                // This helps identify delegated accounts we're failing to match from UTXOs
+                let go_stake_map: HashMap<StakeCredential, i64> =
+                    raw_snapshots.go.snapshot_stake.0.iter().cloned().collect();
+                let go_delegation_map: HashMap<StakeCredential, PoolId> =
+                    raw_snapshots.go.snapshot_delegations.0.iter().cloned().collect();
+
+                // Find credentials where Go snapshot has stake > 0 but we computed utxo_value = 0
+                let mut missing_stake_count = 0usize;
+                let mut missing_stake_total: i64 = 0;
+                let mut missing_delegated_count = 0usize;
+                let mut missing_delegated_stake: i64 = 0;
+                let mut sample_missing: Vec<(StakeCredential, i64, bool)> = Vec::new();
+
+                for (credential, &go_stake) in &go_stake_map {
+                    if go_stake > 0 {
+                        let our_utxo = stake_utxo_values.get(credential).copied().unwrap_or(0);
+                        if our_utxo == 0 {
+                            // Go snapshot has stake but we found no UTXO value
+                            missing_stake_count += 1;
+                            missing_stake_total += go_stake;
+
+                            let is_delegated = go_delegation_map.contains_key(credential);
+                            if is_delegated {
+                                missing_delegated_count += 1;
+                                missing_delegated_stake += go_stake;
+                            }
+
+                            // Collect samples for debugging
+                            if sample_missing.len() < 10 {
+                                sample_missing.push((credential.clone(), go_stake, is_delegated));
+                            }
+                        }
+                    }
+                }
+
+                info!("Go snapshot vs UTXO stake comparison:");
+                info!(
+                    "  Go snapshot stake credentials: {} (total stake entries)",
+                    go_stake_map.len()
+                );
+                info!(
+                    "  Credentials with Go stake > 0 but our UTXO = 0: {} ({} ADA)",
+                    missing_stake_count,
+                    missing_stake_total / 1_000_000
+                );
+                info!(
+                    "  Of those, delegated to a pool: {} ({} ADA) <- THIS IS THE SPDD GAP",
+                    missing_delegated_count,
+                    missing_delegated_stake / 1_000_000
+                );
+
+                if !sample_missing.is_empty() {
+                    info!("  Sample missing credentials (Go stake but no UTXO):");
+                    for (cred, stake, delegated) in &sample_missing {
+                        let cred_str = match cred {
+                            StakeCredential::AddrKeyHash(h) => {
+                                format!("KeyHash({})", hex::encode(h))
+                            }
+                            StakeCredential::ScriptHash(h) => {
+                                format!("ScriptHash({})", hex::encode(h))
+                            }
+                        };
+                        info!(
+                            "    {} - {} ADA, delegated: {}",
+                            cred_str,
+                            stake / 1_000_000,
+                            delegated
+                        );
+                    }
+                }
+
                 // Convert raw snapshots to processed SnapshotsContainer
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
@@ -1267,16 +1340,19 @@ impl StreamingSnapshotParser {
 
         info!("UTXO stake accounting summary:");
         info!(
-            "  Stake credentials with UTXOs: {}",
+            "  Unique stake credentials in UTXOs: {}",
             stake_utxo_values.len()
         );
         info!(
-            "  Total UTXO value: {} ADA",
+            "  Total UTXO value at stake credentials: {} ADA (base addresses only)",
             total_utxo_value_all / 1_000_000
         );
 
+        // Note: Not all stake credentials are registered. Users can have base addresses
+        // with stake credentials but never submit a stake registration certificate.
+        // The match rate below shows how many registered accounts have UTXOs.
         info!(
-            "  Accounts with UTXO values: {}/{} ({:.1}%)",
+            "  Registered accounts with UTXOs: {}/{} ({:.1}%)",
             accounts_matched,
             accounts_with_utxo_values.len(),
             if accounts_with_utxo_values.is_empty() {
@@ -1286,7 +1362,7 @@ impl StreamingSnapshotParser {
             }
         );
         info!(
-            "  Matched UTXO value: {} ADA ({:.1}%)",
+            "  UTXO value at registered credentials: {} ADA ({:.1}% of base address value)",
             total_utxo_value_matched / 1_000_000,
             if total_utxo_value_all == 0 {
                 0.0
@@ -1296,11 +1372,38 @@ impl StreamingSnapshotParser {
         );
         if unmatched_credentials > 0 {
             info!(
-                "  Unmatched stake credentials: {} ({} ADA) - UTXOs at addresses not registered as stake accounts",
+                "  Unregistered stake credentials: {} ({} ADA) - base addresses with unregistered stake parts",
                 unmatched_credentials,
                 unmatched_value / 1_000_000
             );
         }
+
+        // Detailed breakdown of credential types for debugging
+        let dstate_keyhash_count = accounts_with_utxo_values
+            .iter()
+            .filter(|a| matches!(a.stake_address.credential, StakeCredential::AddrKeyHash(_)))
+            .count();
+        let dstate_scripthash_count = accounts_with_utxo_values
+            .iter()
+            .filter(|a| matches!(a.stake_address.credential, StakeCredential::ScriptHash(_)))
+            .count();
+        let utxo_keyhash_count = stake_utxo_values
+            .keys()
+            .filter(|c| matches!(c, StakeCredential::AddrKeyHash(_)))
+            .count();
+        let utxo_scripthash_count = stake_utxo_values
+            .keys()
+            .filter(|c| matches!(c, StakeCredential::ScriptHash(_)))
+            .count();
+        info!("  Credential type breakdown:");
+        info!(
+            "    Registered accounts: {} AddrKeyHash, {} ScriptHash",
+            dstate_keyhash_count, dstate_scripthash_count
+        );
+        info!(
+            "    UTXO stake creds: {} AddrKeyHash, {} ScriptHash",
+            utxo_keyhash_count, utxo_scripthash_count
+        );
 
         // Calculate total rewards and active stake for comparison
         // Note: "Active stake" for rewards only includes delegated accounts
@@ -1315,6 +1418,20 @@ impl StreamingSnapshotParser {
             .iter()
             .filter(|a| a.address_state.delegated_spo.is_some())
             .count();
+        let delegated_with_utxo = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some() && a.address_state.utxo_value > 0)
+            .count();
+        let delegated_utxo_value: u64 = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .map(|a| a.address_state.utxo_value)
+            .sum();
+        let delegated_rewards: u64 = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .map(|a| a.address_state.rewards)
+            .sum();
         info!(
             "  Total rewards in accounts: {} ADA",
             total_rewards / 1_000_000
@@ -1329,11 +1446,55 @@ impl StreamingSnapshotParser {
                 (delegated_count as f64 / accounts_with_utxo_values.len() as f64) * 100.0
             }
         );
+        // Accounts with delegation but no UTXO - these only contribute rewards to live stake
+        let delegated_without_utxo = delegated_count - delegated_with_utxo;
+        let delegated_without_utxo_rewards: u64 = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some() && a.address_state.utxo_value == 0)
+            .map(|a| a.address_state.rewards)
+            .sum();
         info!(
-            "  Delegated active stake (utxo + rewards): {} ADA ({} lovelace)",
+            "  Delegated accounts with UTXOs: {}/{} ({:.1}%)",
+            delegated_with_utxo,
+            delegated_count,
+            if delegated_count == 0 {
+                0.0
+            } else {
+                (delegated_with_utxo as f64 / delegated_count as f64) * 100.0
+            }
+        );
+        info!(
+            "  Delegated accounts WITHOUT UTXOs: {} (rewards only: {} ADA)",
+            delegated_without_utxo,
+            delegated_without_utxo_rewards / 1_000_000
+        );
+        info!(
+            "  Delegated UTXO value (SPDD 'active'): {} ADA ({} lovelace)",
+            delegated_utxo_value / 1_000_000,
+            delegated_utxo_value
+        );
+        info!("  Delegated rewards: {} ADA", delegated_rewards / 1_000_000);
+        info!(
+            "  Delegated live stake (utxo + rewards, SPDD 'live'): {} ADA ({} lovelace)",
             delegated_active_stake / 1_000_000,
             delegated_active_stake
         );
+
+        // Compare with Go snapshot stake (the canonical stake distribution at epoch boundary)
+        // Snapshot total_stake = utxo + rewards at snapshot time, so compare with delegated_active_stake
+        // The difference is expected: our calculation is "live" state, snapshots are historical
+        if let Some(ref snapshots) = bootstrap_snapshots {
+            let go_total_stake: u64 = snapshots.go.spos.values().map(|s| s.total_stake).sum();
+            let stake_diff = delegated_active_stake as i64 - go_total_stake as i64;
+            info!(
+                "  Go snapshot stake (canonical, utxo+rewards at epoch boundary): {} ADA",
+                go_total_stake / 1_000_000
+            );
+            info!(
+                "  Difference (live - snapshot): {} ADA (expected: stake evolves within epoch)",
+                stake_diff / 1_000_000
+            );
+        }
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1407,6 +1568,14 @@ impl StreamingSnapshotParser {
         // Accumulate UTXO values by stake credential for SPDD generation
         let mut stake_values: HashMap<StakeCredential, u64> = HashMap::new();
 
+        // Track address types for debugging
+        let mut addr_type_counts: [u64; 16] = [0; 16];
+        let mut addr_type_values: [u64; 16] = [0; 16];
+        let mut byron_count = 0u64;
+        let mut byron_value = 0u64;
+        let mut short_addr_count = 0u64;
+        let mut short_addr_value = 0u64;
+
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
         let initial_read = file.read(&mut chunk)?;
@@ -1473,6 +1642,21 @@ impl StreamingSnapshotParser {
                         // Track total UTXO value
                         let coin = utxo.coin();
                         total_utxo_value += coin;
+
+                        // Track address types for debugging
+                        let addr = &utxo.output.address;
+                        if addr.is_empty() {
+                            short_addr_count += 1;
+                            short_addr_value += coin;
+                        } else if addr[0] & 0x80 != 0 {
+                            // Byron address (high bit set)
+                            byron_count += 1;
+                            byron_value += coin;
+                        } else {
+                            let addr_type = (addr[0] & 0xF0) >> 4;
+                            addr_type_counts[addr_type as usize] += 1;
+                            addr_type_values[addr_type as usize] += coin;
+                        }
 
                         // Accumulate UTXO value by stake credential for SPDD
                         if let Some(stake_cred) = utxo.extract_stake_credential() {
@@ -1569,6 +1753,51 @@ impl StreamingSnapshotParser {
             PARSE_BUFFER_SIZE / 1024 / 1024,
             max_single_entry_size
         );
+
+        // Log address type breakdown
+        info!("  Address type breakdown:");
+        let type_names = [
+            "0 (base key/key)",
+            "1 (base script/key)",
+            "2 (base key/script)",
+            "3 (base script/script)",
+            "4 (pointer key)",
+            "5 (pointer script)",
+            "6 (enterprise key)",
+            "7 (enterprise script)",
+            "8-15 (other)",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+        ];
+        for i in 0..8 {
+            if addr_type_counts[i] > 0 {
+                info!(
+                    "    Type {}: {} UTXOs, {} ADA",
+                    type_names[i],
+                    addr_type_counts[i],
+                    addr_type_values[i] / 1_000_000
+                );
+            }
+        }
+        if byron_count > 0 {
+            info!(
+                "    Byron: {} UTXOs, {} ADA",
+                byron_count,
+                byron_value / 1_000_000
+            );
+        }
+        if short_addr_count > 0 {
+            info!(
+                "    Short/empty: {} UTXOs, {} ADA",
+                short_addr_count,
+                short_addr_value / 1_000_000
+            );
+        }
 
         // After successfully parsing all UTXOs, we need to consume the break token
         // that ends the indefinite-length UTXO map if present
