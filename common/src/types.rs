@@ -2598,7 +2598,7 @@ impl TxCertificate {
             Self::StakeDeregistration(addr) => {
                 parse_cred(&addr.credential);
             }
-            // Delegation requries withness from delegator
+            // Delegation requries witness from delegator
             Self::StakeDelegation(deleg) => {
                 parse_cred(&deleg.stake_address.credential);
             }
@@ -2609,7 +2609,7 @@ impl TxCertificate {
                     pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>(),
                 );
             }
-            // Pool retirement requires withness from pool cold key
+            // Pool retirement requires witness from pool cold key
             Self::PoolRetirement(retirement) => {
                 vkey_hashes.insert(*retirement.operator);
             }

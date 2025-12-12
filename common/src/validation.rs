@@ -222,13 +222,13 @@ pub enum UTxOWValidationError {
 
     /// **Cause:** Insufficient genesis signatures for MIR Tx
     #[error(
-        "Insufficient Genesis Signatures for MIR: gensis_keys={}, count={}, quorum={}", 
-        gensis_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(","), 
-        gensis_keys.len(),
+        "Insufficient Genesis Signatures for MIR: genesis_keys={}, count={}, quorum={}", 
+        genesis_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(","), 
+        genesis_keys.len(),
         quorum
     )]
     MIRInsufficientGenesisSigsUTXOW {
-        gensis_keys: HashSet<Hash<28>>,
+        genesis_keys: HashSet<Hash<28>>,
         quorum: u32,
     },
 

@@ -118,7 +118,7 @@ pub fn validate_mir_insufficient_genesis_sigs(
     if genesis_sigs.len() < update_quorum as usize {
         return Err(Box::new(
             UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW {
-                gensis_keys: genesis_sigs,
+                genesis_keys: genesis_sigs,
                 quorum: update_quorum,
             },
         ));

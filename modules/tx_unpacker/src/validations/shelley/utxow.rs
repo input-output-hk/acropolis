@@ -48,7 +48,7 @@ fn get_cert_authors(
         TxCertificate::StakeDeregistration(addr) => {
             parse_cred(&addr.credential);
         }
-        // Delegation requries withness from delegator
+        // Delegation requries witness from delegator
         TxCertificate::StakeDelegation(deleg) => {
             parse_cred(&deleg.stake_address.credential);
         }
@@ -58,7 +58,7 @@ fn get_cert_authors(
             vkey_hashes
                 .extend(pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>());
         }
-        // Pool retirement requires withness from pool cold key
+        // Pool retirement requires witness from pool cold key
         TxCertificate::PoolRetirement(retirement) => {
             vkey_hashes.insert(*retirement.operator);
         }
@@ -258,7 +258,7 @@ pub fn validate_mir_insufficient_genesis_sigs(
     if genesis_sigs.len() < update_quorum as usize {
         return Err(Box::new(
             UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW {
-                gensis_keys: genesis_sigs,
+                genesis_keys: genesis_sigs,
                 quorum: update_quorum,
             },
         ));
