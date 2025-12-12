@@ -43,7 +43,7 @@ impl ParametersUpdater {
         self.cw_upd(f, &u.map(u32::try_from).transpose()?)
     }
 
-    fn update_conway_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
+    pub fn update_conway_params(&mut self, p: &ProtocolParamUpdate) -> Result<()> {
         self.cw_upd(|c| &mut c.pool_voting_thresholds, &p.pool_voting_thresholds)?;
         self.cw_upd(
             |c| &mut c.d_rep_voting_thresholds,
