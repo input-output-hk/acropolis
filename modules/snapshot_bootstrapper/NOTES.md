@@ -51,6 +51,73 @@ a network name of `preview`, the expected layout for configuration files would b
 This file along with the TOML config is loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
 
+## Block CBOR and Nonces 
+
+In order to retrieve block CBOR data and ledger state nonces, we can use [Demeter's managed services](https://demeter.run/products) (Mumak PostgreSQL and Ogmios).
+
+### Prerequisites
+
+A Demeter account with access to:
+
+- [Mumak](https://demeter.run/products) PG (PostgreSQL instance with Cardano chain data)
+- [Ogmios](https://demeter.run/products) ([HTTP JSON-RPC interface](https://ogmios.dev/http-api/#operation/jsonRPC) to a Cardano node)
+- `curl`, `jq`, `xxd`, and `psql` installed
+
+---
+
+### Get Block CBOR from Mumak PG
+
+
+postgresql://<username>:<password>@<host>:<port>/<database>
+```
+
+Query block CBOR by slot and save to file:
+
+```bash
+psql "postgresql://<username>:<password>@<host>:<port>/<database>" -t -A -c "
+SELECT encode(cbor, 'hex') FROM blocks WHERE slot = 134092758;
+" | xxd -r -p > block.cbor
+```
+
+The `-t -A` flags remove headers and alignment, giving you just the raw hex output.
+
+---
+
+### Query Ledger State Nonces from Ogmios
+
+
+Given a url such as: `https://<instance-id>.cardano-mainnet-v6.ogmios-m1.dmtr.host`
+```
+
+Query nonces and transform with jq:
+
+```bash
+curl -s -X POST "https://<your-ogmios-endpoint>.dmtr.host" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "queryLedgerState/nonces", "id": 509}' | jq '{
+    active: .result.epochNonce,
+    candidate: .result.candidateNonce,
+    evolving: .result.evolvingNonce,
+    tail: .result.lastEpochLastAncestor
+  }'
+```
+
+Output:
+
+```json
+{
+  "active": "4c4fbd257da2ddea6f3f4af5056eb36cf4da3aea7088acb07907ce68a4f73b97",
+  "candidate": "f885c04321729ec680086413477ac46d34021fe693882f38365a38e1eac82bed",
+  "evolving": "f885c04321729ec680086413477ac46d34021fe693882f38365a38e1eac82bed",
+  "tail": "8f983bd7d905ea5b4f552df019718c860f90aab803f48b11b94b98e2cc2ebaa6"
+}
+```
+Where these fields mean the following:
+- `epochNonce` / `active` => The nonce for the current epoch          
+- `candidateNonce`/ `candidate` => The candidate nonce for the next epoch   
+- `evolvingNonce` /`evolving` => The evolving nonce (updated each block)  
+- `lastEpochLastAncestor` / `tail` => Block hash of last block in prior epoch  
+
 ## Bootstrapping sequence
 
 The bootstrapper will be started with a configuration that specifies a network,
