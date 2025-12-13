@@ -1,6 +1,7 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::reward_snapshot::PulsingRewardUpdate;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -12,8 +13,8 @@ use acropolis_common::{
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal,
-        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
-        SnapshotMetadata, UtxoCallback, UtxoEntry,
+        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback,
+        PulsingRewardUpdateCallback, SnapshotCallbacks, SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
     BlockInfo, EpochBootstrapData,
 };
@@ -203,7 +204,7 @@ impl AccountsCallback for SnapshotPublisher {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some(),
+            !data.snapshots.mark.spos.is_empty(),
         );
 
         // Convert the parsed data to the message type
@@ -329,6 +330,37 @@ impl EpochCallback for SnapshotPublisher {
     }
 }
 
+impl PulsingRewardUpdateCallback for SnapshotPublisher {
+    fn on_pulsing_reward_update(&mut self, update: Option<PulsingRewardUpdate>) -> Result<()> {
+        match &update {
+            Some(PulsingRewardUpdate::Pulsing { snapshot }) => {
+                info!(
+                    "Received pulsing reward snapshot: fees={}, r={}, delta_r1={}, delta_t1={}, {} pool likelihoods, {} leader entries",
+                    snapshot.fees,
+                    snapshot.r,
+                    snapshot.delta_r1,
+                    snapshot.delta_t1,
+                    snapshot.likelihoods.0.len(),
+                    snapshot.leaders.0.len()
+                );
+            }
+            Some(PulsingRewardUpdate::Complete { update }) => {
+                info!(
+                    "Received complete reward update: delta_treasury={}, delta_reserves={}, {} reward entries",
+                    update.delta_treasury,
+                    update.delta_reserves,
+                    update.rewards.0.len()
+                );
+            }
+            None => {
+                info!("No pulsing reward update present in snapshot");
+            }
+        }
+        // TODO: Publish reward update to appropriate message bus topic if needed
+        Ok(())
+    }
+}
+
 impl SnapshotsCallback for SnapshotPublisher {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // Calculate totals from processed snapshots
@@ -372,6 +404,11 @@ impl SnapshotsCallback for SnapshotPublisher {
 
 impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
+        let total_blocks_previous: u32 =
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+        let total_blocks_current: u32 =
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+
         info!("Snapshot metadata for epoch {}", metadata.epoch);
         info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
@@ -380,14 +417,8 @@ impl SnapshotCallbacks for SnapshotPublisher {
             metadata.pot_balances.reserves,
             metadata.pot_balances.deposits
         );
-        info!(
-            "  - Previous epoch blocks: {}",
-            metadata.blocks_previous_epoch.len()
-        );
-        info!(
-            "  - Current epoch blocks: {}",
-            metadata.blocks_current_epoch.len()
-        );
+        info!("  - Previous epoch blocks: {}", total_blocks_previous);
+        info!("  - Current epoch blocks: {}", total_blocks_current);
 
         self.metadata = Some(metadata);
         Ok(())

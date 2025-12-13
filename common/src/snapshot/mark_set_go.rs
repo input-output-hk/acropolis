@@ -149,12 +149,19 @@ impl RawSnapshotsContainer {
     /// Convert raw snapshots to processed SnapshotsContainer
     ///
     /// Block count assignments:
-    /// - Mark (epoch-2): No block data available, all pools get 0 blocks
+    /// - Mark (epoch-2): No block data available during bootstrap, all pools get 0 blocks
     /// - Set (epoch-1): Uses blocks_previous_epoch
     /// - Go (epoch): Uses blocks_current_epoch
     ///
-    /// Note: Pots are passed for the current epoch. For mark/set snapshots,
-    /// we don't have historical pots data during bootstrap, so they use default values.
+    /// Pots assignment:
+    /// - Go (current epoch) gets the current pots for consistency
+    /// - Mark and Set use default pots
+    ///
+    /// Note: The pots assignment on bootstrapped snapshots doesn't actually affect rewards
+    /// calculation. When rewards are calculated, `performance = mark` is used - but by that
+    /// time, a fresh snapshot created during `enter_epoch` will have become the new mark,
+    /// and these bootstrapped snapshots will have shifted to set/go positions (or been
+    /// discarded). The fresh snapshot captures the correct pots at creation time.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
