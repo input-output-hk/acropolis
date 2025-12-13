@@ -1,10 +1,11 @@
-pub mod address;
-pub mod block;
-pub mod certs;
-pub mod parameter;
-pub mod tx;
-pub mod utils;
-pub mod utxo;
+mod address;
+mod block;
+mod certs;
+mod parameter;
+mod tx;
+mod utils;
+mod utxo;
+mod witness;
 
 pub use address::*;
 pub use block::*;
@@ -13,3 +14,4 @@ pub use parameter::*;
 pub use tx::*;
 pub use utils::*;
 pub use utxo::*;
+pub use witness::*;

@@ -5,7 +5,7 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 
 use acropolis_common::queries::errors::QueryError;
 use anyhow::{anyhow, Result};
@@ -35,7 +35,10 @@ use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
+mod validations;
+
+const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 const DEFAULT_STORE: &str = "memory";
 
 /// UTXO state module
@@ -47,12 +50,55 @@ const DEFAULT_STORE: &str = "memory";
 pub struct UTXOState;
 
 impl UTXOState {
+    /// Main run function
+    async fn run(
+        state: Arc<Mutex<State>>,
+        mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        loop {
+            let Ok((_, message)) = utxo_deltas_subscription.read().await else {
+                return Err(anyhow!("Failed to read UTxO deltas subscription error"));
+            };
+
+            match message.as_ref() {
+                Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
+                    let span = info_span!("utxo_state.handle", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        state
+                            .handle(block, deltas_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    let mut state = state.lock().await;
+                    state
+                        .handle_rollback(message)
+                        .await
+                        .inspect_err(|e| error!("Rollback handling error: {e}"))
+                        .ok();
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+        }
+    }
+
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{subscribe_topic}'");
+        let utxo_deltas_subscribe_topic = config
+            .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
 
         let utxos_query_topic = config
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
@@ -78,44 +124,14 @@ impl UTXOState {
 
         let state = Arc::new(Mutex::new(state));
 
-        // Subscribe for UTXO messages
-        let state1 = state.clone();
-        let mut subscription = context.subscribe(&subscribe_topic).await?;
+        // Subscribers
+        let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
+
+        let state_run = state.clone();
         context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                        let span = info_span!("utxo_state.handle", block = block.number);
-                        async {
-                            let mut state = state1.lock().await;
-                            state
-                                .handle(block, deltas_msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    Message::Cardano((
-                        _,
-                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                    )) => {
-                        let mut state = state1.lock().await;
-                        state
-                            .handle_rollback(message)
-                            .await
-                            .inspect_err(|e| error!("Rollback handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-            }
+            Self::run(state_run, utxo_deltas_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         // Query handler

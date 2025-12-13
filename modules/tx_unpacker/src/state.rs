@@ -1,7 +1,7 @@
 use crate::validations;
 use acropolis_common::{
     messages::ProtocolParamsMessage, protocol_params::ProtocolParams,
-    validation::TransactionValidationError, BlockInfo, Era,
+    validation::TransactionValidationError, BlockInfo, Era, GenesisDelegates,
 };
 use anyhow::Result;
 
@@ -25,6 +25,7 @@ impl State {
         &self,
         block_info: &BlockInfo,
         raw_tx: &[u8],
+        genesis_delegs: &GenesisDelegates,
     ) -> Result<(), TransactionValidationError> {
         match block_info.era {
             Era::Shelley => {
@@ -33,7 +34,12 @@ impl State {
                         "Shelley params are not set".to_string(),
                     ));
                 };
-                validations::validate_shelley_tx(raw_tx, shelley_params, block_info.slot)
+                validations::validate_shelley_tx(
+                    raw_tx,
+                    genesis_delegs,
+                    shelley_params,
+                    block_info.slot,
+                )
             }
             _ => Ok(()),
         }

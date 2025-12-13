@@ -2,12 +2,21 @@ use acropolis_common::{
     Address, ByronAddress, NetworkId, ShelleyAddress, ShelleyAddressDelegationPart,
     ShelleyAddressPaymentPart, ShelleyAddressPointer, StakeAddress, StakeCredential,
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use pallas::ledger::{
     addresses as pallas_addresses, primitives::StakeCredential as PallasStakeCredential,
 };
 
-use crate::{tx::map_network, utils::to_hash};
+use crate::utils::to_hash;
+
+/// Map Pallas Network to our NetworkId
+pub fn map_network(network: pallas_addresses::Network) -> Result<NetworkId> {
+    match network {
+        pallas_addresses::Network::Mainnet => Ok(NetworkId::Mainnet),
+        pallas_addresses::Network::Testnet => Ok(NetworkId::Testnet),
+        _ => Err(anyhow!("Unknown network in address")),
+    }
+}
 
 /// Derive our Address from a Pallas address
 // This is essentially a 1:1 mapping but makes the Message definitions independent
