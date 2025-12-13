@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -34,6 +34,7 @@ use crate::epoch_snapshot::SnapshotsContainer;
 pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
     Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
@@ -45,6 +46,7 @@ pub use crate::{
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+use super::reward_snapshot::PulsingRewardUpdate;
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
@@ -71,19 +73,11 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
         d.array()?;
         let variant = d.u16()?;
 
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
+        // Variant 0 = key hash, Variant 1 = script hash
         match variant {
             0 => {
-                // ScriptHash variant (first in enum) - decode bytes directly
-                let bytes = d.bytes()?;
-                let key_hash = bytes.try_into().map_err(|_| {
-                    minicbor::decode::Error::message(
-                        "invalid length for ScriptHash in StakeCredential",
-                    )
-                })?;
-                Ok(StakeCredential::ScriptHash(key_hash))
-            }
-            1 => {
-                // AddrKeyHash variant (second in enum) - decodes bytes directly
+                // AddrKeyHash variant - key hash credential
                 let bytes = d.bytes()?;
                 let key_hash = bytes.try_into().map_err(|_| {
                     minicbor::decode::Error::message(
@@ -91,6 +85,16 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
                     )
                 })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
+            }
+            1 => {
+                // ScriptHash variant - script hash credential
+                let bytes = d.bytes()?;
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
+                Ok(StakeCredential::ScriptHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for StakeCredential",
@@ -105,16 +109,17 @@ impl<C> minicbor::encode::Encode<C> for StakeCredential {
         e: &mut minicbor::Encoder<W>,
         ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
         match self {
-            StakeCredential::ScriptHash(key_hash) => {
-                // ScriptHash is variant 0 (first in enum)
+            StakeCredential::AddrKeyHash(key_hash) => {
+                // AddrKeyHash is variant 0 (key hash)
                 e.array(2)?;
                 e.encode_with(0, ctx)?;
                 e.encode_with(key_hash, ctx)?;
                 Ok(())
             }
-            StakeCredential::AddrKeyHash(key_hash) => {
-                // AddrKeyHash is variant 1 (second in enum)
+            StakeCredential::ScriptHash(key_hash) => {
+                // ScriptHash is variant 1 (script hash)
                 e.array(2)?;
                 e.encode_with(1, ctx)?;
                 e.encode_with(key_hash, ctx)?;
@@ -180,7 +185,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// Set type (encoded as array, sometimes with CBOR tag 258)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotSet<T>(pub Vec<T>);
 
 impl<T> SnapshotSet<T> {
@@ -514,26 +519,8 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
-/// UTXO entry with transaction hash, index, address, and value
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UtxoEntry {
-    /// Transaction hash (hex-encoded)
-    pub tx_hash: String,
-    /// Output index
-    pub output_index: u64,
-    /// Hex encoded Cardano addresses
-    pub address: String,
-    /// Lovelace amount
-    pub value: u64,
-    /// Optional inline datum (hex-encoded CBOR)
-    pub datum: Option<String>,
-    /// Optional script reference (hex-encoded CBOR)
-    pub script_ref: Option<String>,
-}
+// Re-export UtxoEntry from the utxo module
+pub use super::utxo::UtxoEntry;
 
 // -----------------------------------------------------------------------------
 // Ledger types for DState parsing
@@ -570,7 +557,7 @@ impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
 /// DRep information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
-    /// Bech32-encoded DRep ID
+    /// DRep credential
     pub drep_id: DRepCredential,
     /// Lovelace deposit amount
     pub deposit: u64,
@@ -858,6 +845,7 @@ impl StreamingSnapshotParser {
 
             // Extract epoch number [0]
             let epoch = decoder.u64().context("Failed to parse epoch number")?;
+            info!("Parsing snapshot for epoch {}", epoch);
 
             // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
             let blocks_previous_epoch =
@@ -962,18 +950,34 @@ impl StreamingSnapshotParser {
                 }
             }
 
-            // Convert to AccountState for API
+            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+            // Parse instant rewards (MIRs) and combine with regular rewards
+            // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
+            let instant_rewards = Self::parse_instant_rewards(&mut decoder)
+                .context("Failed to parse instant rewards")?;
+
+            // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
                 .into_iter()
                 .map(|(credential, account)| {
                     // Convert StakeCredential to stake address representation
-                    let stake_address = StakeAddress::new(credential, NetworkId::Mainnet);
+                    let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
 
                     // Extract rewards from rewards_and_deposit (first element of tuple)
-                    let rewards = match &account.rewards_and_deposit {
+                    let regular_rewards = match &account.rewards_and_deposit {
                         StrictMaybe::Just((reward, _deposit)) => *reward,
                         StrictMaybe::Nothing => 0,
                     };
+
+                    // Add instant rewards (MIRs) if any
+                    let mir_rewards = instant_rewards.get(&credential).copied().unwrap_or(0);
+                    let rewards = regular_rewards + mir_rewards;
 
                     // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                     // PoolId is Hash<28>, we need to convert to Vec<u8>
@@ -996,8 +1000,8 @@ impl StreamingSnapshotParser {
                     AccountState {
                         stake_address,
                         address_state: StakeAddressState {
-                            registered: false, // Accounts are registered by SPOState
-                            utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                            registered: true, // Accounts in DState are registered by definition
+                            utxo_value: 0,    // Will be populated from UTXO parsing
                             rewards,
                             delegated_spo,
                             delegated_drep,
@@ -1005,18 +1009,6 @@ impl StreamingSnapshotParser {
                     }
                 })
                 .collect();
-
-            // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
-            // The UMap already handled all its internal elements including pointers
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
-            decoder.skip()?;
 
             // Navigate to UTxOState [3][1][1]
             let utxo_state_len = decoder
@@ -1055,60 +1047,21 @@ impl StreamingSnapshotParser {
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        let (utxo_count, bytes_consumed_from_file) = Self::stream_utxos(&mut utxo_file, callbacks)
-            .context("Failed to stream UTXOs with true streaming")?;
+        let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
+            Self::stream_utxos(&mut utxo_file, callbacks)
+                .context("Failed to stream UTXOs with true streaming")?;
 
         // After UTXOs, parse deposits from UTxOState[1]
         // Reset our file pointer to a position after UTXOs
         let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
         utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
 
-        info!(
-            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
-            position_after_utxos
-        );
-
-        // ========================================================================
-        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
-        // ========================================================================
-        // After extensive analysis, the remaining snapshot data (deposits, fees,
-        // protocol parameters, and mark/set/go snapshots) can be efficiently
-        // parsed by reading the entire remainder of the file into memory (~500MB)
-        // rather than streaming. This is much smaller than the full 2.5GB file.
-        //
-        // The CBOR structure from this point:
-        // UTxOState[1] = deposits
-        // UTxOState[2] = fees
-        // UTxOState[3] = gov_state
-        // UTxOState[4] = donations
-        // EpochState[2] = PParams (100-300MB)
-        // EpochState[3] = PParamsPrev (100-300MB)
-        // EpochState[4] = SnapShots (100+ MB stake distribution)
-        //
-        // This hybrid approach allows us to:
-        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
-        // 2. Parse remaining sections using snapshot.rs functions
-        // 3. Access mark/set/go snapshots that were previously unreachable
-        // ========================================================================
-
-        // Calculate remaining file size from current position
+        // Parse remainder of file (deposits, fees, gov_state, protocol params, snapshots)
         let current_file_size = utxo_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
-        info!(
-            "    Reading remainder of file into memory: {:.1} MB from position {}",
-            remaining_bytes as f64 / 1024.0 / 1024.0,
-            position_after_utxos
-        );
-
-        // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
         utxo_file.read_to_end(&mut remainder_buffer)?;
-
-        info!(
-            "    Successfully loaded {:.1} MB remainder buffer for parsing",
-            remainder_buffer.len() as f64 / 1024.0 / 1024.0
-        );
 
         // Create decoder for the remainder buffer
         let mut remainder_decoder = Decoder::new(&remainder_buffer);
@@ -1117,31 +1070,10 @@ impl StreamingSnapshotParser {
         // UTxOState = [utxos (already consumed), deposits, fees, gov_state, donations]
 
         // Parse deposits (UTxOState[1])
-        let deposits = match remainder_decoder.decode::<u64>() {
-            Ok(deposits_value) => {
-                info!(
-                    "    Successfully parsed deposits: {} lovelace",
-                    deposits_value
-                );
-                deposits_value
-            }
-            Err(e) => {
-                info!("    Failed to parse deposits: {}, using 0", e);
-                0
-            }
-        };
+        let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse fees (UTxOState[2])
-        let fees = match remainder_decoder.decode::<u64>() {
-            Ok(fees_value) => {
-                info!("    Successfully parsed fees: {} lovelace", fees_value);
-                fees_value as i64
-            }
-            Err(e) => {
-                info!("    Failed to parse fees: {}, using 0", e);
-                0
-            }
-        };
+        // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
+        let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         let (_root_params, _root_hard_fork, _root_cc, _root_constitution) = {
             // Epoch State / Ledger State / UTxO State / utxosGovState
@@ -1211,9 +1143,16 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
+
+        // Skip non_myopic (EpochState[3])
+        remainder_decoder.skip()?;
+
+        // Exit EpochState, now at NewEpochState level
+        // Parse pulsing_rew_update (NewEpochState[4]) to get reward snapshot
+        let reward_snapshot_rewards = Self::parse_pulsing_reward_update(&mut remainder_decoder)?;
 
         // Convert block production data to HashMap<PoolId, usize> for snapshot processing
         let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
@@ -1230,7 +1169,6 @@ impl StreamingSnapshotParser {
 
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
-                info!("    Successfully parsed mark/set/go snapshots!");
                 // Convert raw snapshots to processed SnapshotsContainer
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
@@ -1239,12 +1177,17 @@ impl StreamingSnapshotParser {
                     pots.clone(),
                     network.clone(),
                 );
+                info!(
+                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+                    processed.mark.spos.len(),
+                    processed.set.spos.len(),
+                    processed.go.spos.len()
+                );
                 callbacks.on_snapshots(processed.clone())?;
                 Some(processed)
             }
             Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Continuing with empty snapshots...");
+                info!("Failed to parse snapshots: {}, continuing without them", e);
                 None
             }
         };
@@ -1253,14 +1196,60 @@ impl StreamingSnapshotParser {
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
 
+        info!(
+            "Pools: {} registered, {} retiring, {} DReps",
+            pool_registrations.len(),
+            retiring_pools.len(),
+            dreps.len()
+        );
+
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
 
+        // Merge UTXO values and pulsing reward update rewards into accounts
+        // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
+        // added to DState rewards (accumulated rewards from previous epochs).
+        let mut pulsing_rewards_total: u64 = 0;
+        let accounts_with_utxo_values: Vec<AccountState> = accounts
+            .into_iter()
+            .map(|mut account| {
+                if let Some(&utxo_value) = stake_utxo_values.get(&account.stake_address.credential)
+                {
+                    account.address_state.utxo_value = utxo_value;
+                }
+                if let Some(&pulsing_reward) =
+                    reward_snapshot_rewards.get(&account.stake_address.credential)
+                {
+                    account.address_state.rewards += pulsing_reward;
+                    pulsing_rewards_total += pulsing_reward;
+                }
+                account
+            })
+            .collect();
+
+        // Calculate summary statistics
+        let total_utxo_value: u64 = stake_utxo_values.values().sum();
+        let total_rewards: u64 =
+            accounts_with_utxo_values.iter().map(|a| a.address_state.rewards).sum();
+        let delegated_count = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .count();
+
+        info!(
+            "Accounts: {} total, {} delegated, {} ADA in UTXOs, {} ADA rewards ({} ADA from pulsing update)",
+            accounts_with_utxo_values.len(),
+            delegated_count,
+            total_utxo_value / 1_000_000,
+            total_rewards / 1_000_000,
+            pulsing_rewards_total / 1_000_000
+        );
+
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
             epoch,
-            accounts,
+            accounts: accounts_with_utxo_values,
             pools: pool_registrations,
             retiring_pools,
             dreps: drep_deposits,
@@ -1282,8 +1271,6 @@ impl StreamingSnapshotParser {
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
         callbacks.on_epoch(epoch_bootstrap)?;
 
-        // Note: fees is parsed but not stored in Pots (not needed downstream)
-        let _ = fees;
         let snapshot_metadata = SnapshotMetadata {
             epoch,
             pot_balances: Pots {
@@ -1297,14 +1284,28 @@ impl StreamingSnapshotParser {
         };
         callbacks.on_metadata(snapshot_metadata)?;
 
-        // Emit completion callback
+        info!(
+            "Snapshot parsing complete: treasury {} ADA, reserves {} ADA, deposits {} ADA",
+            treasury / 1_000_000,
+            reserves / 1_000_000,
+            deposits / 1_000_000
+        );
+
         callbacks.on_complete()?;
 
         Ok(())
     }
 
     /// STREAMING: Process UTXOs with chunked buffering and incremental parsing
-    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<(u64, u64)> {
+    ///
+    /// Returns a tuple of:
+    /// - UTXO count
+    /// - Bytes consumed from file
+    /// - Map of stake credentials to accumulated UTXO values
+    fn stream_utxos<C: UtxoCallback>(
+        file: &mut File,
+        callbacks: &mut C,
+    ) -> Result<(u64, u64, HashMap<StakeCredential, u64>)> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
 
@@ -1314,8 +1315,20 @@ impl StreamingSnapshotParser {
 
         let mut buffer = Vec::with_capacity(PARSE_BUFFER_SIZE);
         let mut utxo_count = 0u64;
+        let mut total_utxo_value = 0u64;
         let mut total_bytes_processed = 0usize;
         let mut total_bytes_read_from_file = 0u64;
+
+        // Accumulate UTXO values by stake credential for SPDD generation
+        let mut stake_values: HashMap<StakeCredential, u64> = HashMap::new();
+
+        // Track address types for debugging
+        let mut addr_type_counts: [u64; 16] = [0; 16];
+        let mut addr_type_values: [u64; 16] = [0; 16];
+        let mut byron_count = 0u64;
+        let mut byron_value = 0u64;
+        let mut short_addr_count = 0u64;
+        let mut short_addr_value = 0u64;
 
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
@@ -1380,23 +1393,36 @@ impl StreamingSnapshotParser {
                         let entry_size = bytes_consumed - position_before;
                         max_single_entry_size = max_single_entry_size.max(entry_size);
 
+                        // Track total UTXO value
+                        let coin = utxo.coin();
+                        total_utxo_value += coin;
+
+                        // Track address types for debugging
+                        let addr = &utxo.output.address;
+                        if addr.is_empty() {
+                            short_addr_count += 1;
+                            short_addr_value += coin;
+                        } else if addr[0] & 0x80 != 0 {
+                            // Byron address (high bit set)
+                            byron_count += 1;
+                            byron_value += coin;
+                        } else {
+                            let addr_type = (addr[0] & 0xF0) >> 4;
+                            addr_type_counts[addr_type as usize] += 1;
+                            addr_type_values[addr_type as usize] += coin;
+                        }
+
+                        // Accumulate UTXO value by stake credential for SPDD
+                        if let Some(stake_cred) = utxo.extract_stake_credential() {
+                            *stake_values.entry(stake_cred).or_insert(0) += coin;
+                        }
+
                         // Emit the UTXO
                         callbacks.on_utxo(utxo)?;
                         utxo_count += 1;
                         entries_processed += 1;
                         batch_processed += 1;
                         last_good_position = bytes_consumed;
-
-                        // Progress reporting - less frequent for better performance
-                        if utxo_count.is_multiple_of(1000000) {
-                            let buffer_usage = buffer.len();
-                            info!(
-                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
-                                utxo_count,
-                                buffer_usage / 1024 / 1024,
-                                max_single_entry_size
-                            );
-                        }
 
                         // Continue processing if we have more data and haven't hit limits
                         if entries_processed >= map_len
@@ -1448,38 +1474,32 @@ impl StreamingSnapshotParser {
             }
         }
 
-        info!("Streaming results:");
-        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "  Total data streamed: {:.2} MB",
-            total_bytes_processed as f64 / 1024.0 / 1024.0
+            "Streamed {} UTXOs ({} ADA), {} stake credentials",
+            utxo_count,
+            total_utxo_value / 1_000_000,
+            stake_values.len()
         );
-        info!(
-            "  Peak buffer usage: {} MB",
-            PARSE_BUFFER_SIZE / 1024 / 1024
-        );
-        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
-        // After successfully parsing all UTXOs, we need to consume the break token
-        // that ends the indefinite-length UTXO map if present
+        // Suppress unused variable warnings for address type tracking (kept for future debugging)
+        let _ = (
+            addr_type_counts,
+            addr_type_values,
+            byron_count,
+            byron_value,
+            short_addr_count,
+            short_addr_value,
+            max_single_entry_size,
+            total_bytes_processed,
+        );
+
+        // Consume the break token that ends the indefinite-length UTXO map if present
         if !buffer.is_empty() {
             let mut decoder = Decoder::new(&buffer);
-            match decoder.datatype() {
-                Ok(Type::Break) => {
-                    info!("    Found break token after UTXOs, consuming it (end of indefinite UTXO map)");
-                    decoder.skip()?; // Consume the break that ends the UTXO map
-
-                    // Update our tracking to account for the consumed break token
-                    let break_bytes_consumed = decoder.position();
-                    buffer.drain(0..break_bytes_consumed);
-                }
-                Ok(_) => {
-                    // No break token, this is a definite-length map - continue normal parsing
-                    info!("    No break token found, assuming definite-length UTXO map");
-                }
-                Err(e) => {
-                    info!("    After UTXO parsing, datatype() check failed: {}", e);
-                }
+            if matches!(decoder.datatype(), Ok(Type::Break)) {
+                decoder.skip()?;
+                let break_bytes_consumed = decoder.position();
+                buffer.drain(0..break_bytes_consumed);
             }
         }
 
@@ -1487,7 +1507,7 @@ impl StreamingSnapshotParser {
         // This is the total bytes processed minus any remaining buffer content
         let bytes_consumed_from_file = total_bytes_read_from_file - buffer.len() as u64;
 
-        Ok((utxo_count, bytes_consumed_from_file))
+        Ok((utxo_count, bytes_consumed_from_file, stake_values))
     }
 
     /// Parse a single block production entry from a map (producer pool ID -> block count)
@@ -1534,19 +1554,14 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
-                    info!("Processing indefinite-length blocks array");
-                    let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
-                                info!("Found array break after {} entries", count);
                                 break;
                             }
-                            entry_type => {
-                                info!("  Block #{}: {:?}", count + 1, entry_type);
+                            _ => {
                                 decoder.skip().context("Failed to skip block entry")?;
-                                count += 1;
                             }
                         }
                     }
@@ -1601,57 +1616,101 @@ impl StreamingSnapshotParser {
 
                 Ok(block_productions)
             }
-            simple_type => {
-                // If it's a simple value or other type, skip it for now
-                // Try to get more details about simple types
-                match simple_type {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        let value = decoder.u64().context("Failed to read block integer value")?;
-                        info!("Block data is integer: {}", value);
-                    }
-                    Type::Bytes => {
-                        let bytes = decoder.bytes().context("Failed to read block bytes")?;
-                        info!("Block data is {} bytes", bytes.len());
-                    }
-                    Type::String => {
-                        let text = decoder.str().context("Failed to read block text")?;
-                        info!("Block data is text: '{}'", text);
-                    }
-                    Type::Null => {
-                        decoder.skip()?;
-                        info!("Block data is null");
-                    }
-                    _ => {
-                        decoder.skip().context("Failed to skip blocks value")?;
-                    }
-                }
-
+            _ => {
+                // Simple value or other type - skip it
+                decoder.skip().context("Failed to skip blocks value")?;
                 Ok(Vec::new())
             }
         }
     }
 
+    /// Parse instant rewards (MIRs) from DState
+    ///
+    /// instantaneous_rewards = [
+    ///   ir_reserves : { * credential_staking => coin },
+    ///   ir_treasury : { * credential_staking => coin },
+    ///   ir_delta_reserves : delta_coin,
+    ///   ir_delta_treasury : delta_coin,
+    /// ]
+    ///
+    /// Returns a combined map of all instant rewards (from both reserves and treasury)
+    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        let ir_len = decoder
+            .array()
+            .context("Failed to parse instant_rewards array")?
+            .ok_or_else(|| anyhow!("instant_rewards must be a definite-length array"))?;
+
+        if ir_len < 4 {
+            return Err(anyhow!(
+                "instant_rewards array too short: expected 4 elements, got {ir_len}"
+            ));
+        }
+
+        // Parse ir_reserves and ir_treasury: { * credential_staking => coin }
+        let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
+        let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
+
+        // Skip ir_delta_reserves and ir_delta_treasury (not needed for account balances)
+        decoder.skip()?;
+        decoder.skip()?;
+
+        // Combine rewards from both sources
+        let mut combined = ir_reserves;
+        for (credential, amount) in ir_treasury {
+            *combined.entry(credential).or_insert(0) += amount;
+        }
+
+        Ok(combined)
+    }
+
+    /// Parse pulsing_rew_update to extract reward information.
+    ///
+    /// The pulsing_rew_update is wrapped in a StrictMaybe, so we first check if it's
+    /// present before parsing using the PulsingRewardUpdate type.
+    ///
+    /// Returns a map of stake credentials to their total rewards (sum of all reward entries).
+    fn parse_pulsing_reward_update(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        // Check if strict_maybe is empty or has content
+        match decoder.array()? {
+            Some(0) => return Ok(HashMap::new()),
+            Some(1) => {}
+            Some(other) => {
+                return Err(anyhow!(
+                    "Invalid strict_maybe length for pulsing_rew_update: {}",
+                    other
+                ));
+            }
+            None => {
+                return Err(anyhow!("pulsing_rew_update must be definite-length array"));
+            }
+        };
+
+        // Parse using the proper PulsingRewardUpdate type
+        let pulsing_update: PulsingRewardUpdate =
+            decoder.decode().context("Failed to decode PulsingRewardUpdate")?;
+
+        // Extract rewards based on variant, summing all reward entries per credential
+        let rewards = match pulsing_update {
+            PulsingRewardUpdate::Pulsing { snapshot } => snapshot
+                .leaders
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+            PulsingRewardUpdate::Complete { update } => update
+                .rewards
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+        };
+
+        Ok(rewards)
+    }
+
     /// Parse a single UTXO entry from the streaming buffer
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
-        // Parse key: TransactionInput (array [tx_hash, output_index])
-        decoder.array().context("Failed to parse TxIn array")?;
-
-        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
-        let output_index = decoder.u64().context("Failed to parse output_index")?;
-        let tx_hash = hex::encode(tx_hash_bytes);
-
-        // Parse value: TransactionOutput
-        let (address, value) = Self::parse_transaction_output(decoder)
-            .context("Failed to parse transaction output")?;
-
-        Ok(UtxoEntry {
-            tx_hash,
-            output_index,
-            address,
-            value,
-            datum: None,      // TODO: Extract from TxOut
-            script_ref: None, // TODO: Extract from TxOut
-        })
+        UtxoEntry::decode(decoder).context("Failed to decode UTXO entry")
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
@@ -1783,138 +1842,6 @@ impl StreamingSnapshotParser {
         })
     }
 
-    /// Stream UTXOs with per-entry callback
-    ///
-    /// Parse a single TxOut from the CBOR decoder
-    fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
-        // TxOut is typically an array [address, value, ...]
-        // or a map for Conway with optional fields
-
-        // Try array format first (most common)
-        match dec.datatype().context("Failed to read TxOut datatype")? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = dec.array().context("Failed to parse TxOut array")?;
-                if arr_len == Some(0) {
-                    return Err(anyhow!("empty TxOut array"));
-                }
-
-                // Element 0: Address (bytes)
-                let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let hex_address = hex::encode(address_bytes);
-
-                // Element 1: Value (coin or map)
-                let value = match dec.datatype().context("Failed to read value datatype")? {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        // Simple ADA-only value
-                        dec.u64().context("Failed to parse u64 value")?
-                    }
-                    Type::Array | Type::ArrayIndef => {
-                        // Multi-asset: [coin, assets_map]
-                        dec.array().context("Failed to parse value array")?;
-                        let coin = dec.u64().context("Failed to parse coin amount")?;
-                        // Skip the assets map
-                        dec.skip().context("Failed to skip assets map")?;
-                        coin
-                    }
-                    _ => {
-                        return Err(anyhow!("unexpected value type"));
-                    }
-                };
-
-                // Skip remaining fields (datum, script_ref)
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        dec.skip().context("Failed to skip TxOut field")?;
-                    }
-                }
-
-                Ok((hex_address, value))
-            }
-            Type::Map | Type::MapIndef => {
-                // Map format (Conway with optional fields)
-                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
-                let map_len = dec.map().context("Failed to parse TxOut map")?;
-
-                let mut address = String::new();
-                let mut value = 0u64;
-                let mut found_address = false;
-                let mut found_value = false;
-
-                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
-                        dec.skip().ok(); // consume break
-                        break;
-                    }
-
-                    // Read key
-                    let key = match dec.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            // Skip both key and value if key is not u32
-                            dec.skip().ok();
-                            dec.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    // Read value based on key
-                    match key {
-                        0 => {
-                            // Address
-                            if let Ok(addr_bytes) = dec.bytes() {
-                                address = hex::encode(addr_bytes);
-                                found_address = true;
-                            } else {
-                                dec.skip().ok();
-                            }
-                        }
-                        1 => {
-                            // Value (coin or multi-asset)
-                            match dec.datatype() {
-                                Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
-                                    if let Ok(coin) = dec.u64() {
-                                        value = coin;
-                                        found_value = true;
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                                    // Multi-asset: [coin, assets_map]
-                                    if dec.array().is_ok() {
-                                        if let Ok(coin) = dec.u64() {
-                                            value = coin;
-                                            found_value = true;
-                                        }
-                                        dec.skip().ok(); // skip assets map
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                _ => {
-                                    dec.skip().ok();
-                                }
-                            }
-                        }
-                        _ => {
-                            // datum (2), script_ref (3), or unknown - skip
-                            dec.skip().ok();
-                        }
-                    }
-                }
-
-                if found_address && found_value {
-                    Ok((address, value))
-                } else {
-                    Err(anyhow!("map-based TxOut missing required fields"))
-                }
-            }
-            _ => Err(anyhow!("unexpected TxOut type")),
-        }
-    }
-
     /// Parse snapshots using hybrid approach with memory-based parsing
     /// Uses snapshot.rs functions to parse mark/set/go snapshots from buffer
     /// We expect the following structure:
@@ -1927,8 +1854,6 @@ impl StreamingSnapshotParser {
         ctx: &mut SnapshotContext,
         _epoch: u64,
     ) -> Result<RawSnapshotsContainer> {
-        info!("    Starting snapshots parsing...");
-
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
@@ -1940,42 +1865,21 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
-
-        // Parse each snapshot using RawSnapshot::parse
-        // Parse Mark snapshot [0]
-        info!("    Parsing Mark snapshot...");
-        let mark_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Mark")
-            .context("Failed to parse Mark snapshot")?;
-
-        // Parse Set snapshot [1]
-        info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Set")
-            .context("Failed to parse Set snapshot")?;
-
-        // Parse Go snapshot [2]
-        info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Go")
-            .context("Failed to parse Go snapshot")?;
-
+        // Parse Mark, Set, Go snapshots
+        let mark_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
+        let set_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
+        let go_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
         let fee = decoder.decode::<u64>().unwrap_or(0);
 
-        info!(
-            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
-        );
-
-        // Create raw snapshots container with full snapshot data
-        let raw_snapshots = RawSnapshotsContainer {
+        Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
             go: go_snapshot,
             fee,
-        };
-
-        info!("    Raw snapshots container created with VMap data");
-
-        // Return only the raw snapshots - no more API compatibility needed
-        Ok(raw_snapshots)
+        })
     }
 }
 
@@ -2082,6 +1986,106 @@ impl SnapshotsCallback for CollectingCallbacks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::utxo::{TransactionInput, TransactionOutput, Value};
+
+    /// Helper to create a test UtxoEntry with just an address
+    fn make_test_utxo(address_bytes: Vec<u8>) -> UtxoEntry {
+        UtxoEntry {
+            input: TransactionInput {
+                tx_hash: [0u8; 32],
+                output_index: 0,
+            },
+            output: TransactionOutput {
+                address: address_bytes,
+                value: Value {
+                    coin: 1_000_000,
+                    multiasset: None,
+                },
+                datum: None,
+                script_ref: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_base_address_key_hash() {
+        // Base address with payment key hash and stake key hash (type 0)
+        // Header: 0x01 = mainnet (0x01) | addr_type 0 (key/key)
+        // Format: [header:1][payment_hash:28][stake_hash:28] = 57 bytes
+        let mut address_bytes = vec![0x01]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xBB; 28]); // stake key hash
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::AddrKeyHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xBB; 28]);
+            }
+            _ => panic!("Expected AddrKeyHash"),
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_base_address_script_hash() {
+        // Base address with payment key hash and stake script hash (type 2)
+        // Header: 0x21 = mainnet (0x01) | addr_type 2 (key/script)
+        let mut address_bytes = vec![0x21]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xCC; 28]); // stake script hash
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::ScriptHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xCC; 28]);
+            }
+            _ => panic!("Expected ScriptHash"),
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_enterprise_address() {
+        // Enterprise address (no stake part) - type 6
+        // Header: 0x61 = mainnet (0x01) | addr_type 6 (key/none)
+        let mut address_bytes = vec![0x61]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash only
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(
+            stake_cred.is_none(),
+            "Enterprise addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_byron_address() {
+        // Byron address - high bit set in header
+        let address_bytes = vec![0x82, 0xD8, 0x18]; // Byron CBOR prefix
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(
+            stake_cred.is_none(),
+            "Byron addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_invalid_address() {
+        // Empty address - too short to be valid
+        let utxo = make_test_utxo(vec![]);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_none(), "Invalid addresses should return None");
+    }
 
     #[test]
     fn test_collecting_callbacks() {
@@ -2109,18 +2113,24 @@ mod tests {
         );
 
         // Test UTXO callback
-        callbacks
-            .on_utxo(UtxoEntry {
-                tx_hash: "abc123".to_string(),
+        let test_utxo = UtxoEntry {
+            input: TransactionInput {
+                tx_hash: [0xAB; 32],
                 output_index: 0,
-                address: "addr1...".to_string(),
-                value: 5000000,
+            },
+            output: TransactionOutput {
+                address: vec![0x01; 57],
+                value: Value {
+                    coin: 5_000_000,
+                    multiasset: None,
+                },
                 datum: None,
                 script_ref: None,
-            })
-            .unwrap();
+            },
+        };
+        callbacks.on_utxo(test_utxo).unwrap();
 
         assert_eq!(callbacks.utxos.len(), 1);
-        assert_eq!(callbacks.utxos[0].value, 5000000);
+        assert_eq!(callbacks.utxos[0].coin(), 5_000_000);
     }
 }
