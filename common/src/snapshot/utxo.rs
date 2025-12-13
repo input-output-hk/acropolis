@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright © 2025, Acropolis team.
-
 //! UTXO types and CBOR decoding for snapshot parsing.
 //!
 //! This module handles the UTXO structures from the NewEpochState ledger state.

@@ -1,6 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-// Copyright © 2025, Acropolis team.
-
 //! Reward snapshot types and CBOR decoding for pulsing reward updates.
 //!
 //! This module handles the `pulsing_rew_update` structure from the NewEpochState,
