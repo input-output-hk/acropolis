@@ -5,7 +5,6 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::info;
 
 /// SPO data captured in a stake snapshot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -189,20 +188,8 @@ impl EpochSnapshot {
             HashMap::new();
         let mut stake_by_pool: HashMap<PoolId, Lovelace> = HashMap::new();
 
-        // Track statistics for debugging
-        let mut delegations_without_stake = 0usize;
-        let mut delegations_with_zero_stake = 0usize;
-        let mut delegations_with_negative_stake = 0usize;
-        let mut total_negative_stake: i64 = 0;
-
         for (credential, pool_id) in delegation_map {
             if let Some(&stake) = stake_map.get(&credential) {
-                if stake < 0 {
-                    delegations_with_negative_stake += 1;
-                    total_negative_stake += stake;
-                } else if stake == 0 {
-                    delegations_with_zero_stake += 1;
-                }
                 let stake_lovelace = stake.max(0) as Lovelace;
                 if stake_lovelace > 0 {
                     let stake_address = StakeAddress {
@@ -215,20 +202,7 @@ impl EpochSnapshot {
                         .push((stake_address, stake_lovelace));
                     *stake_by_pool.entry(pool_id).or_default() += stake_lovelace;
                 }
-            } else {
-                delegations_without_stake += 1;
             }
-        }
-
-        // Log any anomalies
-        if delegations_without_stake > 0
-            || delegations_with_zero_stake > 0
-            || delegations_with_negative_stake > 0
-        {
-            info!(
-                "Epoch {} snapshot anomalies: {} delegations without stake entry, {} with zero stake, {} with negative stake (total: {} lovelace)",
-                epoch, delegations_without_stake, delegations_with_zero_stake, delegations_with_negative_stake, total_negative_stake
-            );
         }
 
         // Second pass: build SPO entries
@@ -261,25 +235,6 @@ impl EpochSnapshot {
             pots,
             registration_changes: Vec::new(),
         }
-    }
-
-    /// Generate SPDD (Stake Pool Delegation Distribution) from this snapshot's data.
-    /// This uses the snapshot's total_stake values directly, which should match db-sync's epoch_stake.
-    pub fn generate_spdd(&self) -> std::collections::BTreeMap<PoolId, crate::DelegatedStake> {
-        self.spos
-            .iter()
-            .map(|(pool_id, spo)| {
-                (
-                    *pool_id,
-                    crate::DelegatedStake {
-                        // For snapshots, active and live are the same (snapshot captures utxo+rewards at that moment)
-                        active: spo.total_stake,
-                        active_delegators_count: spo.delegators.len() as u64,
-                        live: spo.total_stake,
-                    },
-                )
-            })
-            .collect()
     }
 
     /// Get the total stake held by a vector of stake addresses for a particular SPO (by ID)

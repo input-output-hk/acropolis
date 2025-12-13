@@ -34,6 +34,7 @@ use crate::epoch_snapshot::SnapshotsContainer;
 pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
     Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
@@ -1865,12 +1866,12 @@ impl StreamingSnapshotParser {
         }
 
         // Parse Mark, Set, Go snapshots
-        let mark_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Mark")
-            .context("Failed to parse Mark snapshot")?;
-        let set_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Set")
-            .context("Failed to parse Set snapshot")?;
-        let go_snapshot = super::mark_set_go::RawSnapshot::parse(decoder, ctx, "Go")
-            .context("Failed to parse Go snapshot")?;
+        let mark_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
+        let set_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
+        let go_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
         let fee = decoder.decode::<u64>().unwrap_or(0);
 
         Ok(RawSnapshotsContainer {
