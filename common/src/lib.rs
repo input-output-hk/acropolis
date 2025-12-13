@@ -8,6 +8,7 @@ pub mod cip19;
 pub mod commands;
 pub mod configuration;
 pub mod crypto;
+pub mod drep;
 pub mod epoch_snapshot;
 pub mod genesis_values;
 pub mod hash;
@@ -32,5 +33,6 @@ pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
+pub use self::drep::*;
 pub use self::metadata::*;
 pub use self::types::*;

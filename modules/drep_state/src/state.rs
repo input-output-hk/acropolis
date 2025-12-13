@@ -1,27 +1,19 @@
 //! Acropolis DRepState: State storage
 
 use acropolis_common::{
-    messages::{Message, StateQuery, StateQueryResponse},
+    messages::{DRepBootstrapMessage, Message, StateQuery, StateQueryResponse},
     queries::{
         accounts::{AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_ACCOUNTS_QUERY_TOPIC},
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, DRepChoice, DRepCredential, Lovelace, StakeAddress, TxCertificate,
+    Anchor, DRepChoice, DRepCredential, DRepRecord, Lovelace, StakeAddress, TxCertificate,
     TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
-use serde_with::serde_as;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
-
-#[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRecord {
-    pub deposit: Lovelace,
-    pub anchor: Option<Anchor>,
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoricalDRepState {
@@ -63,12 +55,6 @@ pub struct DRepRecordExtended {
     pub retired: bool,
     pub active_epoch: Option<u64>,
     pub last_active_epoch: u64,
-}
-
-impl DRepRecord {
-    pub fn new(deposit: Lovelace, anchor: Option<Anchor>) -> Self {
-        Self { deposit, anchor }
-    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -550,6 +536,37 @@ impl State {
                 Some((&d.stake_address, &d.drep))
             }
             _ => None,
+        }
+    }
+}
+
+impl State {
+    /// Initialize state from snapshot data
+    pub fn bootstrap(&mut self, drep_msg: &DRepBootstrapMessage) {
+        for (cred, record) in &drep_msg.dreps {
+            self.dreps.insert(cred.clone(), record.clone());
+            // update historical state if enabled
+            /*
+            This will be needed once we want historical drep data from snapshots
+            if let Some(hist_map) = self.historical_dreps.as_mut() {
+                let cfg = self.config;
+                let entry = hist_map
+                    .entry(cred.clone())
+                    .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
+                if let Some(info) = entry.info.as_mut() {
+                    info.deposit = record.deposit;
+                    info.expired = false;
+                    info.retired = false;
+                    info.active_epoch = None;
+                    info.last_active_epoch = 0; // unknown from snapshot
+                    info!(
+                        "Bootstrapped Historical DRepState: DRep {:?} => {:?}",
+                        cred, record
+                    );
+                }
+            }
+            */
+            // info!("Bootstrapped DRepState: DRep {:?} => {:?}", cred, record);
         }
     }
 }
