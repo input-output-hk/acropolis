@@ -346,6 +346,11 @@ fn calculate_spo_rewards(
                 let reward = &to_delegators * &proportion;
                 let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
+                // Skip if it's rounded to zero
+                if to_pay == 0 {
+                    continue;
+                }
+
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
                        delegator_stake_address);
 
