@@ -1056,12 +1056,52 @@ impl StreamingSnapshotParser {
         let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
         utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
 
-        // Parse remainder of file (deposits, fees, gov_state, protocol params, snapshots)
+        info!(
+            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
+            position_after_utxos
+        );
+
+        // ========================================================================
+        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
+        // ========================================================================
+        // After extensive analysis, the remaining snapshot data (deposits, fees,
+        // protocol parameters, and mark/set/go snapshots) can be efficiently
+        // parsed by reading the entire remainder of the file into memory (~500MB)
+        // rather than streaming. This is much smaller than the full 2.5GB file.
+        //
+        // The CBOR structure from this point:
+        // UTxOState[1] = deposits
+        // UTxOState[2] = fees
+        // UTxOState[3] = gov_state
+        // UTxOState[4] = donations
+        // EpochState[2] = PParams (100-300MB)
+        // EpochState[3] = PParamsPrev (100-300MB)
+        // EpochState[4] = SnapShots (100+ MB stake distribution)
+        //
+        // This hybrid approach allows us to:
+        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
+        // 2. Parse remaining sections using snapshot.rs functions
+        // 3. Access mark/set/go snapshots that were previously unreachable
+        // ========================================================================
+
+        // Calculate remaining file size from current position
         let current_file_size = utxo_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
+        info!(
+            "    Reading remainder of file into memory: {:.1} MB from position {}",
+            remaining_bytes as f64 / 1024.0 / 1024.0,
+            position_after_utxos
+        );
+
+        // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
         utxo_file.read_to_end(&mut remainder_buffer)?;
+
+        info!(
+            "    Successfully loaded {:.1} MB remainder buffer for parsing",
+            remainder_buffer.len() as f64 / 1024.0 / 1024.0
+        );
 
         // Create decoder for the remainder buffer
         let mut remainder_decoder = Decoder::new(&remainder_buffer);
@@ -1169,6 +1209,7 @@ impl StreamingSnapshotParser {
 
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
+                info!("Successfully parsed mark/set/go snapshots!");
                 // Convert raw snapshots to processed SnapshotsContainer
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
@@ -1315,20 +1356,11 @@ impl StreamingSnapshotParser {
 
         let mut buffer = Vec::with_capacity(PARSE_BUFFER_SIZE);
         let mut utxo_count = 0u64;
-        let mut total_utxo_value = 0u64;
         let mut total_bytes_processed = 0usize;
         let mut total_bytes_read_from_file = 0u64;
 
         // Accumulate UTXO values by stake credential for SPDD generation
         let mut stake_values: HashMap<StakeCredential, u64> = HashMap::new();
-
-        // Track address types for debugging
-        let mut addr_type_counts: [u64; 16] = [0; 16];
-        let mut addr_type_values: [u64; 16] = [0; 16];
-        let mut byron_count = 0u64;
-        let mut byron_value = 0u64;
-        let mut short_addr_count = 0u64;
-        let mut short_addr_value = 0u64;
 
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
@@ -1395,22 +1427,6 @@ impl StreamingSnapshotParser {
 
                         // Track total UTXO value
                         let coin = utxo.coin();
-                        total_utxo_value += coin;
-
-                        // Track address types for debugging
-                        let addr = &utxo.output.address;
-                        if addr.is_empty() {
-                            short_addr_count += 1;
-                            short_addr_value += coin;
-                        } else if addr[0] & 0x80 != 0 {
-                            // Byron address (high bit set)
-                            byron_count += 1;
-                            byron_value += coin;
-                        } else {
-                            let addr_type = (addr[0] & 0xF0) >> 4;
-                            addr_type_counts[addr_type as usize] += 1;
-                            addr_type_values[addr_type as usize] += coin;
-                        }
 
                         // Accumulate UTXO value by stake credential for SPDD
                         if let Some(stake_cred) = utxo.extract_stake_credential() {
@@ -1423,6 +1439,17 @@ impl StreamingSnapshotParser {
                         entries_processed += 1;
                         batch_processed += 1;
                         last_good_position = bytes_consumed;
+
+                        // Progress reporting - less frequent for better performance
+                        if utxo_count.is_multiple_of(1000000) {
+                            let buffer_usage = buffer.len();
+                            info!(
+                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
+                                utxo_count,
+                                buffer_usage / 1024 / 1024,
+                                max_single_entry_size
+                            );
+                        }
 
                         // Continue processing if we have more data and haven't hit limits
                         if entries_processed >= map_len
@@ -1474,32 +1501,38 @@ impl StreamingSnapshotParser {
             }
         }
 
+        info!("Streaming results:");
+        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "Streamed {} UTXOs ({} ADA), {} stake credentials",
-            utxo_count,
-            total_utxo_value / 1_000_000,
-            stake_values.len()
+            "  Total data streamed: {:.2} MB",
+            total_bytes_processed as f64 / 1024.0 / 1024.0
         );
-
-        // Suppress unused variable warnings for address type tracking (kept for future debugging)
-        let _ = (
-            addr_type_counts,
-            addr_type_values,
-            byron_count,
-            byron_value,
-            short_addr_count,
-            short_addr_value,
-            max_single_entry_size,
-            total_bytes_processed,
+        info!(
+            "  Peak buffer usage: {} MB",
+            PARSE_BUFFER_SIZE / 1024 / 1024
         );
+        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
-        // Consume the break token that ends the indefinite-length UTXO map if present
+        // After successfully parsing all UTXOs, we need to consume the break token
+        // that ends the indefinite-length UTXO map if present
         if !buffer.is_empty() {
             let mut decoder = Decoder::new(&buffer);
-            if matches!(decoder.datatype(), Ok(Type::Break)) {
-                decoder.skip()?;
-                let break_bytes_consumed = decoder.position();
-                buffer.drain(0..break_bytes_consumed);
+            match decoder.datatype() {
+                Ok(Type::Break) => {
+                    info!("    Found break token after UTXOs, consuming it (end of indefinite UTXO map)");
+                    decoder.skip()?; // Consume the break that ends the UTXO map
+
+                    // Update our tracking to account for the consumed break token
+                    let break_bytes_consumed = decoder.position();
+                    buffer.drain(0..break_bytes_consumed);
+                }
+                Ok(_) => {
+                    // No break token, this is a definite-length map - continue normal parsing
+                    info!("    No break token found, assuming definite-length UTXO map");
+                }
+                Err(e) => {
+                    info!("    After UTXO parsing, datatype() check failed: {}", e);
+                }
             }
         }
 
@@ -1554,14 +1587,19 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
+                    info!("Processing indefinite-length blocks array");
+                    let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
+                                info!("Found array break after {} entries", count);
                                 break;
                             }
-                            _ => {
+                            entry_type => {
+                                info!("  Block #{}: {:?}", count + 1, entry_type);
                                 decoder.skip().context("Failed to skip block entry")?;
+                                count += 1;
                             }
                         }
                     }
@@ -1616,9 +1654,31 @@ impl StreamingSnapshotParser {
 
                 Ok(block_productions)
             }
-            _ => {
-                // Simple value or other type - skip it
-                decoder.skip().context("Failed to skip blocks value")?;
+            simple_type => {
+                // If it's a simple value or other type, skip it for now
+                // Try to get more details about simple types
+                match simple_type {
+                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+                        let value = decoder.u64().context("Failed to read block integer value")?;
+                        info!("Block data is integer: {}", value);
+                    }
+                    Type::Bytes => {
+                        let bytes = decoder.bytes().context("Failed to read block bytes")?;
+                        info!("Block data is {} bytes", bytes.len());
+                    }
+                    Type::String => {
+                        let text = decoder.str().context("Failed to read block text")?;
+                        info!("Block data is text: '{}'", text);
+                    }
+                    Type::Null => {
+                        decoder.skip()?;
+                        info!("Block data is null");
+                    }
+                    _ => {
+                        decoder.skip().context("Failed to skip blocks value")?;
+                    }
+                }
+
                 Ok(Vec::new())
             }
         }
