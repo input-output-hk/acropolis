@@ -25,11 +25,10 @@ pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrit
 pub use streaming_snapshot::{
     AccountState, AccountsBootstrapData, AccountsCallback, Anchor, DRepCallback, DRepInfo,
     EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
-    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback,
 };
 
 pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};
 pub use reward_snapshot::{
     Likelihood, NonMyopic, PulsingRewardUpdate, Reward, RewardSnapshot, RewardType, RewardUpdate,
 };
-pub use utxo::{Datum, TransactionInput, TransactionOutput, Value};

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright © 2025, Acropolis team.
+
 //! UTXO types and CBOR decoding for snapshot parsing.
 //!
 //! This module handles the UTXO structures from the NewEpochState ledger state.
@@ -16,375 +19,279 @@
 //! address = bytes
 //! value = coin / [coin, multiasset<positive_coin>]
 //! coin = uint
-//! multiasset<a0> = {* bytes => {* bytes => int } }
+//! multiasset<a0> = {* policy_id => {* asset_name => a0 } }
 //!
-//! datum_option = [0, hash32 // 1, data]
+//! datum_option = [0, hash32] / [1, data]
 //! script_ref = #6.24(bytes .cbor script)
 //! ```
 
-use anyhow::{Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
-use crate::StakeCredential;
+use crate::{
+    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, PolicyId, ReferenceScript,
+    ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue, UTxOIdentifier, Value,
+};
 
 // =============================================================================
-// TransactionInput
+// Public Types
 // =============================================================================
 
-/// Transaction input reference (TxIn)
-/// CDDL: transaction_input = [txin_transaction_id : transaction_id, txin_index : uint .size 2]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TransactionInput {
-    /// Transaction hash (32 bytes, hex-encoded for display)
-    pub tx_hash: [u8; 32],
-    /// Output index within the transaction
-    pub output_index: u16,
+/// UTXO entry combining transaction input reference and output value.
+///
+/// This is the primary type exposed to consumers of the snapshot parser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UtxoEntry {
+    /// UTxO identifier (transaction hash + output index)
+    pub id: UTxOIdentifier,
+    /// UTxO value (address, lovelace, assets, datum, script_ref)
+    pub value: UTXOValue,
 }
 
-impl TransactionInput {
+impl UtxoEntry {
     /// Get the transaction hash as a hex string
+    #[inline]
     pub fn tx_hash_hex(&self) -> String {
-        hex::encode(self.tx_hash)
+        self.id.tx_hash_hex()
+    }
+
+    /// Get the output index
+    #[inline]
+    pub fn output_index(&self) -> u16 {
+        self.id.output_index
+    }
+
+    /// Get the coin (lovelace) value of this UTXO
+    #[inline]
+    pub fn coin(&self) -> u64 {
+        self.value.coin()
+    }
+
+    /// Get the address bytes
+    #[inline]
+    pub fn address_bytes(&self) -> Vec<u8> {
+        self.value.address_bytes()
+    }
+
+    /// Extract the stake credential from the UTXO's address, if present.
+    #[inline]
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        self.value.extract_stake_credential()
     }
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for TransactionInput {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
+// =============================================================================
+// CBOR Decoding Wrappers
+// =============================================================================
+//
+// These wrapper types provide minicbor::Decode implementations for parsing
+// the snapshot CBOR format. They wrap the public types from crate::types.
+//
+// The wrappers are crate-private since consumers should use UtxoEntry directly.
 
-        let tx_hash_bytes = d.bytes()?;
-        if tx_hash_bytes.len() != 32 {
-            return Err(minicbor::decode::Error::message(format!(
-                "invalid tx_hash length: expected 32, got {}",
-                tx_hash_bytes.len()
-            )));
-        }
-        let mut tx_hash = [0u8; 32];
-        tx_hash.copy_from_slice(tx_hash_bytes);
+/// Wrapper for decoding a complete UTXO entry (input + output pair)
+pub(crate) struct SnapshotUTxO(pub UtxoEntry);
 
-        let output_index = d.u16()?;
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxO {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let id: SnapshotUTxOIdentifier = d.decode()?;
+        let value: SnapshotUTXOValue = d.decode()?;
+        Ok(Self(UtxoEntry {
+            id: id.0,
+            value: value.0,
+        }))
+    }
+}
 
-        Ok(TransactionInput {
+// =============================================================================
+// Transaction Input Decoding
+// =============================================================================
+
+/// Wrapper for decoding transaction input (TxIn)
+/// CDDL: transaction_input = [txin_transaction_id, txin_index]
+struct SnapshotUTxOIdentifier(pub UTxOIdentifier);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxOIdentifier {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let tx_hash = TxHash::try_from(d.bytes()?)
+            .map_err(|_| minicbor::decode::Error::message("Invalid TxHash (wrong size?)"))?;
+        let output_index = d.u64()? as u16;
+        Ok(Self(UTxOIdentifier {
             tx_hash,
             output_index,
-        })
+        }))
     }
 }
 
 // =============================================================================
-// Value (coin or multi-asset)
+// Transaction Output Decoding
 // =============================================================================
 
-/// Policy ID (28-byte hash)
-pub type PolicyId = [u8; 28];
-
-/// Asset name (up to 32 bytes)
-pub type AssetName = Vec<u8>;
-
-/// Multi-asset map: policy_id -> [(asset_name, amount)]
-pub type MultiAsset = Vec<(PolicyId, Vec<(AssetName, u64)>)>;
-
-/// Lovelace value, potentially with multi-assets
-/// CDDL: value = coin / [coin, multiasset<positive_coin>]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Value {
-    /// Lovelace (ADA) amount
-    pub coin: u64,
-    /// Multi-assets (policy_id -> asset_name -> amount)
-    /// None if this is a simple coin-only value
-    pub multiasset: Option<MultiAsset>,
-}
-
-impl Value {
-    /// Create a simple coin-only value
-    pub fn coin_only(coin: u64) -> Self {
-        Value {
-            coin,
-            multiasset: None,
-        }
-    }
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for Value {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        match d.datatype()? {
-            // Simple coin value
-            Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                let coin = d.u64()?;
-                Ok(Value::coin_only(coin))
-            }
-            // Multi-asset: [coin, multiasset]
-            Type::Array | Type::ArrayIndef => {
-                d.array()?;
-                let coin = d.u64()?;
-
-                // Parse multiasset map: {* policy_id => {* asset_name => amount } }
-                let mut multiasset = Vec::new();
-                let policy_map_len = d.map()?;
-
-                match policy_map_len {
-                    Some(len) => {
-                        for _ in 0..len {
-                            let policy_id = decode_policy_id(d)?;
-                            let assets = decode_asset_map(d)?;
-                            multiasset.push((policy_id, assets));
-                        }
-                    }
-                    None => {
-                        while d.datatype()? != Type::Break {
-                            let policy_id = decode_policy_id(d)?;
-                            let assets = decode_asset_map(d)?;
-                            multiasset.push((policy_id, assets));
-                        }
-                        d.skip()?; // consume break
-                    }
-                }
-
-                Ok(Value {
-                    coin,
-                    multiasset: if multiasset.is_empty() {
-                        None
-                    } else {
-                        Some(multiasset)
-                    },
-                })
-            }
-            other => Err(minicbor::decode::Error::message(format!(
-                "unexpected value type: {:?}",
-                other
-            ))),
-        }
-    }
-}
-
-fn decode_policy_id(d: &mut Decoder) -> Result<PolicyId, minicbor::decode::Error> {
-    let bytes = d.bytes()?;
-    if bytes.len() != 28 {
-        return Err(minicbor::decode::Error::message(format!(
-            "invalid policy_id length: expected 28, got {}",
-            bytes.len()
-        )));
-    }
-    let mut policy_id = [0u8; 28];
-    policy_id.copy_from_slice(bytes);
-    Ok(policy_id)
-}
-
-fn decode_asset_map(d: &mut Decoder) -> Result<Vec<(AssetName, u64)>, minicbor::decode::Error> {
-    let mut assets = Vec::new();
-    let asset_map_len = d.map()?;
-
-    match asset_map_len {
-        Some(len) => {
-            for _ in 0..len {
-                let asset_name = d.bytes()?.to_vec();
-                let amount = d.u64()?;
-                assets.push((asset_name, amount));
-            }
-        }
-        None => {
-            while d.datatype()? != Type::Break {
-                let asset_name = d.bytes()?.to_vec();
-                let amount = d.u64()?;
-                assets.push((asset_name, amount));
-            }
-            d.skip()?; // consume break
-        }
-    }
-
-    Ok(assets)
-}
-
-// =============================================================================
-// TransactionOutput
-// =============================================================================
-
-/// Transaction output (TxOut)
+/// Wrapper for decoding transaction output (TxOut)
 /// CDDL: transaction_output = shelley_transaction_output / babbage_transaction_output
-/// shelley_transaction_output = [address, amount : value, ? hash32]
-/// babbage_transaction_output = {0 : address, 1 : value, ? 2 : datum_option, ? 3 : script_ref}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TransactionOutput {
-    /// Address (raw bytes)
-    pub address: Vec<u8>,
-    /// Value (coin + optional multi-assets)
-    pub value: Value,
-    /// Optional datum hash or inline datum
-    pub datum: Option<Datum>,
-    /// Optional script reference
-    pub script_ref: Option<Vec<u8>>,
-}
+struct SnapshotUTXOValue(pub UTXOValue);
 
-/// Datum attached to a transaction output
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Datum {
-    /// Datum hash (32 bytes)
-    Hash([u8; 32]),
-    /// Inline datum (raw CBOR bytes)
-    Inline(Vec<u8>),
-}
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTXOValue {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let datatype = d
+            .datatype()
+            .map_err(|_| minicbor::decode::Error::message("Failed to read TxOut datatype"))?;
 
-impl TransactionOutput {
-    /// Get the address as a hex string
-    pub fn address_hex(&self) -> String {
-        hex::encode(&self.address)
-    }
-
-    /// Get the coin (lovelace) value
-    pub fn coin(&self) -> u64 {
-        self.value.coin
-    }
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for TransactionOutput {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        match d.datatype()? {
+        match datatype {
             // Shelley format: [address, value, ? datum_hash]
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = d.array()?;
-                if arr_len == Some(0) {
-                    return Err(minicbor::decode::Error::message("empty TxOut array"));
-                }
-
-                let address = d.bytes()?.to_vec();
-                let value: Value = d.decode()?;
-
-                // Optional datum hash (Shelley style)
-                let datum = if arr_len.map(|l| l > 2).unwrap_or(true) {
-                    match d.datatype() {
-                        Ok(Type::Bytes) => {
-                            let hash_bytes = d.bytes()?;
-                            if hash_bytes.len() == 32 {
-                                let mut hash = [0u8; 32];
-                                hash.copy_from_slice(hash_bytes);
-                                Some(Datum::Hash(hash))
-                            } else {
-                                None
-                            }
-                        }
-                        Ok(Type::Break) => {
-                            // End of indefinite array
-                            None
-                        }
-                        _ => {
-                            // Skip unknown field
-                            d.skip().ok();
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                // Skip remaining fields in Shelley format
-                if let Some(len) = arr_len {
-                    for _ in 3..len {
-                        d.skip()?;
-                    }
-                }
-
-                Ok(TransactionOutput {
-                    address,
-                    value,
-                    datum,
-                    script_ref: None,
-                })
-            }
-            // Babbage format: {0: address, 1: value, ? 2: datum_option, ? 3: script_ref}
-            Type::Map | Type::MapIndef => {
-                let map_len = d.map()?;
-
-                let mut address = Vec::new();
-                let mut value = Value::coin_only(0);
-                let mut datum = None;
-                let mut script_ref = None;
-
-                let entries = map_len.unwrap_or(4);
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(d.datatype(), Ok(Type::Break)) {
-                        d.skip()?;
-                        break;
-                    }
-
-                    let key = match d.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            d.skip().ok();
-                            d.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    match key {
-                        0 => {
-                            // Address
-                            address = d.bytes()?.to_vec();
-                        }
-                        1 => {
-                            // Value
-                            value = d.decode()?;
-                        }
-                        2 => {
-                            // Datum option: [0, hash32] or [1, data]
-                            datum = decode_datum_option(d)?;
-                        }
-                        3 => {
-                            // Script ref: #6.24(bytes .cbor script)
-                            script_ref = decode_script_ref(d)?;
-                        }
-                        _ => {
-                            d.skip()?;
-                        }
-                    }
-                }
-
-                Ok(TransactionOutput {
-                    address,
-                    value,
-                    datum,
-                    script_ref,
-                })
-            }
-            other => Err(minicbor::decode::Error::message(format!(
-                "unexpected TxOut type: {:?}",
-                other
-            ))),
+            Type::Array | Type::ArrayIndef => Self::decode_array_format(d),
+            // Babbage/Conway format: {0: address, 1: value, ? 2: datum, ? 3: script_ref}
+            Type::Map | Type::MapIndef => Self::decode_map_format(d),
+            _ => Err(minicbor::decode::Error::message("unexpected TxOut type")),
         }
     }
 }
 
+impl SnapshotUTXOValue {
+    /// Decode Shelley-era array format: [address, value, ? datum_hash]
+    fn decode_array_format(d: &mut Decoder) -> Result<Self, minicbor::decode::Error> {
+        let arr_len = d
+            .array()
+            .map_err(|_| minicbor::decode::Error::message("Failed to parse TxOut array"))?;
+
+        if arr_len == Some(0) {
+            return Err(minicbor::decode::Error::message("empty TxOut array"));
+        }
+
+        // Element 0: Address
+        let address: SnapshotAddress = d.decode()?;
+
+        // Element 1: Value
+        let value: SnapshotValue = d.decode()?;
+
+        // Element 2 (optional): Datum hash (Shelley style - just the hash, not datum_option)
+        let datum = if arr_len.map(|l| l > 2).unwrap_or(true) {
+            match d.datatype() {
+                Ok(Type::Bytes) => {
+                    let hash_bytes = d.bytes()?;
+                    if hash_bytes.len() == 32 {
+                        Some(Datum::Hash(hash_bytes.to_vec()))
+                    } else {
+                        None
+                    }
+                }
+                Ok(Type::Break) => None,
+                _ => {
+                    d.skip().ok();
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Skip remaining fields
+        if let Some(len) = arr_len {
+            for _ in 3..len {
+                d.skip()
+                    .map_err(|_| minicbor::decode::Error::message("Failed to skip TxOut field"))?;
+            }
+        }
+
+        Ok(Self(UTXOValue {
+            address: address.0,
+            value: value.0,
+            datum,
+            reference_script: None,
+        }))
+    }
+
+    /// Decode Babbage/Conway-era map format: {0: address, 1: value, ? 2: datum, ? 3: script_ref}
+    fn decode_map_format(d: &mut Decoder) -> Result<Self, minicbor::decode::Error> {
+        let map_len =
+            d.map().map_err(|_| minicbor::decode::Error::message("Failed to parse TxOut map"))?;
+
+        let mut address: Option<Address> = None;
+        let mut value: Option<Value> = None;
+        let mut datum: Option<Datum> = None;
+        let mut reference_script: Option<ReferenceScript> = None;
+
+        let entries = map_len.unwrap_or(4);
+        for _ in 0..entries {
+            // Check for break in indefinite map
+            if map_len.is_none() && matches!(d.datatype(), Ok(Type::Break)) {
+                d.skip().ok();
+                break;
+            }
+
+            let key = match d.u32() {
+                Ok(k) => k,
+                Err(_) => {
+                    d.skip().ok();
+                    d.skip().ok();
+                    continue;
+                }
+            };
+
+            match key {
+                0 => address = Some(d.decode::<SnapshotAddress>()?.0),
+                1 => value = Some(d.decode::<SnapshotValue>()?.0),
+                2 => datum = decode_datum_option(d)?,
+                3 => reference_script = decode_script_ref(d)?,
+                _ => {
+                    d.skip().ok();
+                }
+            }
+        }
+
+        match (address, value) {
+            (Some(address), Some(value)) => Ok(Self(UTXOValue {
+                address,
+                value,
+                datum,
+                reference_script,
+            })),
+            _ => Err(minicbor::decode::Error::message(
+                "map-based TxOut missing required fields",
+            )),
+        }
+    }
+}
+
+// =============================================================================
+// Datum Decoding
+// =============================================================================
+
+/// Decode datum_option: [0, hash32] / [1, data]
 fn decode_datum_option(d: &mut Decoder) -> Result<Option<Datum>, minicbor::decode::Error> {
     d.array()?;
     let variant = d.u8()?;
 
     match variant {
         0 => {
-            // Datum hash
+            // Datum hash: [0, hash32]
             let hash_bytes = d.bytes()?;
-            if hash_bytes.len() == 32 {
-                let mut hash = [0u8; 32];
-                hash.copy_from_slice(hash_bytes);
-                Ok(Some(Datum::Hash(hash)))
-            } else {
-                Ok(None)
-            }
+            Ok(Some(Datum::Hash(hash_bytes.to_vec())))
         }
         1 => {
-            // Inline datum - store raw CBOR
-            // The datum is wrapped in #6.24 tag
-            if d.datatype()? == Type::Tag {
+            // Inline datum: [1, #6.24(bytes)]
+            // The datum may be wrapped in CBOR tag 24 (encoded CBOR)
+            if matches!(d.datatype(), Ok(Type::Tag)) {
                 let tag = d.tag()?;
                 if tag.as_u64() == 24 {
                     let datum_bytes = d.bytes()?.to_vec();
                     return Ok(Some(Datum::Inline(datum_bytes)));
                 }
             }
-            // Fallback: skip and return None
-            d.skip()?;
-            Ok(None)
+            // Not tagged, read raw bytes or skip
+            match d.datatype() {
+                Ok(Type::Bytes) => {
+                    let datum_bytes = d.bytes()?.to_vec();
+                    Ok(Some(Datum::Inline(datum_bytes)))
+                }
+                _ => {
+                    // Complex inline datum - capture the CBOR
+                    // For now, skip it
+                    d.skip()?;
+                    Ok(None)
+                }
+            }
         }
         _ => {
             d.skip()?;
@@ -393,246 +300,239 @@ fn decode_datum_option(d: &mut Decoder) -> Result<Option<Datum>, minicbor::decod
     }
 }
 
-fn decode_script_ref(d: &mut Decoder) -> Result<Option<Vec<u8>>, minicbor::decode::Error> {
-    // Script ref is #6.24(bytes .cbor script)
-    if d.datatype()? == Type::Tag {
-        let tag = d.tag()?;
-        if tag.as_u64() == 24 {
-            let script_bytes = d.bytes()?.to_vec();
-            return Ok(Some(script_bytes));
-        }
+// =============================================================================
+// Script Reference Decoding
+// =============================================================================
+
+/// Decode script_ref: #6.24(bytes .cbor script)
+/// Script format: [script_type, script_bytes]
+/// script_type: 0 = Native, 1 = PlutusV1, 2 = PlutusV2, 3 = PlutusV3
+fn decode_script_ref(d: &mut Decoder) -> Result<Option<ReferenceScript>, minicbor::decode::Error> {
+    // Script ref is wrapped in CBOR tag 24 (encoded CBOR)
+    if !matches!(d.datatype(), Ok(Type::Tag)) {
+        d.skip()?;
+        return Ok(None);
     }
-    d.skip()?;
-    Ok(None)
+
+    let tag = d.tag()?;
+    if tag.as_u64() != 24 {
+        d.skip()?;
+        return Ok(None);
+    }
+
+    // The content is CBOR-encoded bytes containing [script_type, script_bytes]
+    let script_cbor = d.bytes()?;
+    let mut script_decoder = Decoder::new(script_cbor);
+
+    // Parse [script_type, script_bytes]
+    if script_decoder.array().is_err() {
+        return Ok(None);
+    }
+
+    let script_type = match script_decoder.u8() {
+        Ok(t) => t,
+        Err(_) => return Ok(None),
+    };
+
+    let script_bytes = match script_decoder.bytes() {
+        Ok(b) => b.to_vec(),
+        Err(_) => return Ok(None),
+    };
+
+    let reference_script = match script_type {
+        0 => ReferenceScript::Native(script_bytes),
+        1 => ReferenceScript::PlutusV1(script_bytes),
+        2 => ReferenceScript::PlutusV2(script_bytes),
+        3 => ReferenceScript::PlutusV3(script_bytes),
+        _ => return Ok(None),
+    };
+
+    Ok(Some(reference_script))
 }
 
 // =============================================================================
-// UtxoEntry
+// Address Decoding
 // =============================================================================
 
-/// Complete UTXO entry combining input reference and output
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UtxoEntry {
-    /// Transaction input (reference to the UTXO)
-    pub input: TransactionInput,
-    /// Transaction output (the actual UTXO data)
-    pub output: TransactionOutput,
-}
+/// Wrapper for decoding addresses from raw bytes
+/// Handles Byron, Shelley, and Stake address formats
+struct SnapshotAddress(pub Address);
 
-impl UtxoEntry {
-    /// Parse a single UTXO entry from a CBOR decoder
-    /// This decodes one key-value pair from the UTXO map
-    pub fn decode(d: &mut Decoder) -> Result<Self> {
-        let input: TransactionInput = d.decode().context("Failed to decode TransactionInput")?;
-        let output: TransactionOutput = d.decode().context("Failed to decode TransactionOutput")?;
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotAddress {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d
+            .bytes()
+            .map_err(|_| minicbor::decode::Error::message("Failed to read address bytes"))?;
 
-        Ok(UtxoEntry { input, output })
-    }
-
-    /// Get the transaction hash as a hex string
-    pub fn tx_hash_hex(&self) -> String {
-        self.input.tx_hash_hex()
-    }
-
-    /// Get the output index
-    pub fn output_index(&self) -> u16 {
-        self.input.output_index
-    }
-
-    /// Get the address as a hex string
-    pub fn address_hex(&self) -> String {
-        self.output.address_hex()
-    }
-
-    /// Get the coin (lovelace) value
-    pub fn coin(&self) -> u64 {
-        self.output.coin()
-    }
-
-    /// Extract the stake credential from the UTXO's address, if present.
-    ///
-    /// Returns `Some(StakeCredential)` for Shelley base addresses that have
-    /// a stake credential embedded. Returns `None` for:
-    /// - Byron addresses
-    /// - Enterprise addresses (no stake part)
-    /// - Pointer addresses (stake part is a pointer, not a credential)
-    /// - Reward addresses
-    /// - Invalid/malformed addresses
-    ///
-    /// Address format (Shelley):
-    /// - Header byte encodes network and address type
-    /// - Base addresses (type 0-3): 1 byte header + 28 bytes payment + 28 bytes stake
-    /// - For types 0,1: stake part is key hash
-    /// - For types 2,3: stake part is script hash
-    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
-        let addr = &self.output.address;
-
-        // Minimum length for base address: 1 (header) + 28 (payment) + 28 (stake) = 57
-        if addr.len() < 57 {
-            return None;
+        if bytes.is_empty() {
+            return Err(minicbor::decode::Error::message("Empty utxo address"));
         }
 
-        let header = addr[0];
-        let addr_type = (header & 0xF0) >> 4;
+        Self::parse_address_bytes(bytes)
+    }
+}
 
-        // Only base addresses (types 0-3) have embedded stake credentials
-        match addr_type {
-            0 | 1 => {
-                // Base address with stake key hash
-                let stake_bytes: [u8; 28] = addr[29..57].try_into().ok()?;
-                Some(StakeCredential::AddrKeyHash(stake_bytes.into()))
+impl SnapshotAddress {
+    fn parse_address_bytes(bytes: &[u8]) -> Result<Self, minicbor::decode::Error> {
+        match bytes[0] {
+            // Byron addresses start with 0x82 (CBOR array of 2)
+            0x82 => Self::decode_byron(bytes),
+            // Shelley addresses: check header nibble
+            _ => Self::decode_shelley(bytes),
+        }
+    }
+
+    fn decode_byron(bytes: &[u8]) -> Result<Self, minicbor::decode::Error> {
+        let mut dec = minicbor::Decoder::new(bytes);
+        let byron = ByronAddress::from_cbor(&mut dec)
+            .map_err(|_| minicbor::decode::Error::message("Failed to read Byron address"))?;
+        Ok(Self(Address::Byron(byron)))
+    }
+
+    fn decode_shelley(bytes: &[u8]) -> Result<Self, minicbor::decode::Error> {
+        let header_type = (bytes[0] >> 4) & 0x0F;
+
+        match header_type {
+            // Stake/reward addresses (type 14, 15)
+            0b1110 | 0b1111 => {
+                let stake = StakeAddress::from_binary(bytes).map_err(|_| {
+                    minicbor::decode::Error::message("Failed to read stake address")
+                })?;
+                Ok(Self(Address::Stake(stake)))
             }
-            2 | 3 => {
-                // Base address with stake script hash
-                let stake_bytes: [u8; 28] = addr[29..57].try_into().ok()?;
-                Some(StakeCredential::ScriptHash(stake_bytes.into()))
+            // Base, enterprise, pointer addresses (types 0-7)
+            _ => {
+                let shelley = ShelleyAddress::from_bytes_key(bytes).map_err(|_| {
+                    minicbor::decode::Error::message("Failed to read Shelley address")
+                })?;
+                Ok(Self(Address::Shelley(shelley)))
             }
-            _ => None, // Enterprise, pointer, reward, or Byron addresses
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// =============================================================================
+// Value Decoding
+// =============================================================================
 
-    /// Helper to create a test UtxoEntry with just an address
-    fn make_test_utxo(address_bytes: Vec<u8>) -> UtxoEntry {
-        UtxoEntry {
-            input: TransactionInput {
-                tx_hash: [0u8; 32],
-                output_index: 0,
-            },
-            output: TransactionOutput {
-                address: address_bytes,
-                value: Value::coin_only(1_000_000),
-                datum: None,
-                script_ref: None,
-            },
-        }
-    }
+/// Wrapper for decoding value (coin or multi-asset)
+/// CDDL: value = coin / [coin, multiasset<positive_coin>]
+struct SnapshotValue(pub Value);
 
-    #[test]
-    fn test_transaction_input_decode() {
-        // [tx_hash (32 bytes), output_index (u16)]
-        let tx_hash = [0xab; 32];
-        let mut cbor = vec![0x82]; // array of 2
-        cbor.push(0x58); // bytes with 1-byte length
-        cbor.push(32);
-        cbor.extend_from_slice(&tx_hash);
-        cbor.push(0x05); // output_index = 5
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotValue {
+    fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let datatype = d
+            .datatype()
+            .map_err(|_| minicbor::decode::Error::message("Failed to read Value datatype"))?;
 
-        let mut decoder = Decoder::new(&cbor);
-        let input: TransactionInput = decoder.decode().unwrap();
-
-        assert_eq!(input.tx_hash, tx_hash);
-        assert_eq!(input.output_index, 5);
-    }
-
-    #[test]
-    fn test_value_coin_only() {
-        let cbor = [0x1a, 0x00, 0x0f, 0x42, 0x40]; // 1_000_000
-        let mut decoder = Decoder::new(&cbor);
-        let value: Value = decoder.decode().unwrap();
-
-        assert_eq!(value.coin, 1_000_000);
-        assert!(value.multiasset.is_none());
-    }
-
-    #[test]
-    fn test_extract_stake_credential_base_address() {
-        // Construct a base address (type 0): header + 28 payment + 28 stake
-        let mut address = vec![0x01]; // header: type 0, network 1
-        address.extend_from_slice(&[0x11; 28]); // payment key hash
-        address.extend_from_slice(&[0x22; 28]); // stake key hash
-
-        let entry = make_test_utxo(address);
-
-        let stake_cred = entry.extract_stake_credential();
-        assert!(stake_cred.is_some());
-
-        if let Some(StakeCredential::AddrKeyHash(hash)) = stake_cred {
-            assert_eq!(hash.as_ref(), &[0x22; 28]);
-        } else {
-            panic!("Expected AddrKeyHash");
-        }
-    }
-
-    #[test]
-    fn test_extract_stake_credential_base_address_key_hash() {
-        // Base address with payment key hash and stake key hash (type 0)
-        // Header: 0x01 = mainnet (0x01) | addr_type 0 (key/key)
-        // Format: [header:1][payment_hash:28][stake_hash:28] = 57 bytes
-        let mut address_bytes = vec![0x01]; // header
-        address_bytes.extend([0xAA; 28]); // payment key hash
-        address_bytes.extend([0xBB; 28]); // stake key hash
-
-        let utxo = make_test_utxo(address_bytes);
-
-        let stake_cred = utxo.extract_stake_credential();
-        assert!(stake_cred.is_some());
-        match stake_cred.unwrap() {
-            StakeCredential::AddrKeyHash(hash) => {
-                assert_eq!(hash.as_ref(), &[0xBB; 28]);
+        match datatype {
+            // Simple coin-only value
+            Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+                let lovelace = d
+                    .u64()
+                    .map_err(|_| minicbor::decode::Error::message("Failed to parse coin amount"))?;
+                Ok(Self(Value {
+                    lovelace,
+                    assets: NativeAssets::default(),
+                }))
             }
-            _ => panic!("Expected AddrKeyHash"),
-        }
-    }
+            // Multi-asset: [coin, multiasset]
+            Type::Array | Type::ArrayIndef => {
+                d.array()
+                    .map_err(|_| minicbor::decode::Error::message("Failed to parse value array"))?;
 
-    #[test]
-    fn test_extract_stake_credential_base_address_script_hash() {
-        // Base address with payment key hash and stake script hash (type 2)
-        // Header: 0x21 = mainnet (0x01) | addr_type 2 (key/script)
-        let mut address_bytes = vec![0x21]; // header
-        address_bytes.extend([0xAA; 28]); // payment key hash
-        address_bytes.extend([0xCC; 28]); // stake script hash
+                let lovelace = d
+                    .u64()
+                    .map_err(|_| minicbor::decode::Error::message("Failed to parse coin amount"))?;
 
-        let utxo = make_test_utxo(address_bytes);
+                let assets = decode_multiasset(d)?;
 
-        let stake_cred = utxo.extract_stake_credential();
-        assert!(stake_cred.is_some());
-        match stake_cred.unwrap() {
-            StakeCredential::ScriptHash(hash) => {
-                assert_eq!(hash.as_ref(), &[0xCC; 28]);
+                Ok(Self(Value { lovelace, assets }))
             }
-            _ => panic!("Expected ScriptHash"),
+            _ => Err(minicbor::decode::Error::message(
+                "Unexpected Value datatype",
+            )),
+        }
+    }
+}
+
+// =============================================================================
+// Multi-Asset Decoding
+// =============================================================================
+
+/// Decode multiasset: {* policy_id => {* asset_name => amount } }
+fn decode_multiasset(d: &mut Decoder) -> Result<NativeAssets, minicbor::decode::Error> {
+    let mut assets: NativeAssets = Vec::new();
+
+    let policy_map_len = d.map()?;
+
+    match policy_map_len {
+        Some(len) => {
+            for _ in 0..len {
+                let (policy_id, policy_assets) = decode_policy_assets(d)?;
+                assets.push((policy_id, policy_assets));
+            }
+        }
+        None => {
+            // Indefinite-length map
+            while !matches!(d.datatype(), Ok(Type::Break)) {
+                let (policy_id, policy_assets) = decode_policy_assets(d)?;
+                assets.push((policy_id, policy_assets));
+            }
+            d.skip()?; // consume break
         }
     }
 
-    #[test]
-    fn test_extract_stake_credential_enterprise_address() {
-        // Enterprise address (type 6): header + 28 payment (no stake part)
-        let mut address = vec![0x61]; // header: type 6, network 1
-        address.extend_from_slice(&[0x11; 28]); // payment key hash
+    Ok(assets)
+}
 
-        let entry = make_test_utxo(address);
+/// Decode a single policy's assets: policy_id => {* asset_name => amount }
+fn decode_policy_assets(
+    d: &mut Decoder,
+) -> Result<(PolicyId, Vec<NativeAsset>), minicbor::decode::Error> {
+    // Decode policy ID (28 bytes)
+    let policy_bytes = d.bytes()?;
+    if policy_bytes.len() != 28 {
+        return Err(minicbor::decode::Error::message(format!(
+            "invalid policy_id length: expected 28, got {}",
+            policy_bytes.len()
+        )));
+    }
+    let policy_id: PolicyId = policy_bytes
+        .try_into()
+        .map_err(|_| minicbor::decode::Error::message("Failed to convert policy_id bytes"))?;
 
-        assert!(
-            entry.extract_stake_credential().is_none(),
-            "Enterprise addresses should not have stake credentials"
-        );
+    // Decode asset map: {* asset_name => amount }
+    let mut policy_assets: Vec<NativeAsset> = Vec::new();
+    let asset_map_len = d.map()?;
+
+    match asset_map_len {
+        Some(len) => {
+            for _ in 0..len {
+                let asset = decode_native_asset(d)?;
+                policy_assets.push(asset);
+            }
+        }
+        None => {
+            // Indefinite-length map
+            while !matches!(d.datatype(), Ok(Type::Break)) {
+                let asset = decode_native_asset(d)?;
+                policy_assets.push(asset);
+            }
+            d.skip()?; // consume break
+        }
     }
 
-    #[test]
-    fn test_extract_stake_credential_byron_address() {
-        // Byron address - high bit set in header
-        let address_bytes = vec![0x82, 0xD8, 0x18]; // Byron CBOR prefix
+    Ok((policy_id, policy_assets))
+}
 
-        let utxo = make_test_utxo(address_bytes);
+/// Decode a single native asset: asset_name => amount
+fn decode_native_asset(d: &mut Decoder) -> Result<NativeAsset, minicbor::decode::Error> {
+    let name_bytes = d.bytes()?;
+    let name = AssetName::new(name_bytes)
+        .ok_or_else(|| minicbor::decode::Error::message("Asset name too long (max 32 bytes)"))?;
 
-        let stake_cred = utxo.extract_stake_credential();
-        assert!(
-            stake_cred.is_none(),
-            "Byron addresses should not have stake credentials"
-        );
-    }
+    let amount = d.u64()?;
 
-    #[test]
-    fn test_extract_stake_credential_invalid_address() {
-        // Empty address - too short to be valid
-        let utxo = make_test_utxo(vec![]);
-
-        let stake_cred = utxo.extract_stake_credential();
-        assert!(stake_cred.is_none(), "Invalid addresses should return None");
-    }
+    Ok(NativeAsset { name, amount })
 }

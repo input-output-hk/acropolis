@@ -657,6 +657,63 @@ pub struct UTXOValue {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl UTXOValue {
+    /// Get the coin (lovelace) value
+    pub fn coin(&self) -> u64 {
+        self.value.lovelace
+    }
+
+    /// Get the address as raw bytes
+    pub fn address_bytes(&self) -> Vec<u8> {
+        match &self.address {
+            Address::Shelley(shelley) => shelley.to_bytes_key(),
+            Address::Byron(byron) => byron.payload.clone(),
+            Address::Stake(stake) => stake.to_binary(),
+            Address::None => Vec::new(),
+        }
+    }
+
+    /// Extract the stake credential from the address, if present.
+    ///
+    /// Returns `Some(StakeCredential)` for Shelley base addresses that have
+    /// a stake credential embedded. Returns `None` for:
+    /// - Byron addresses
+    /// - Enterprise addresses (no stake part)
+    /// - Pointer addresses (stake part is a pointer, not a credential)
+    /// - Reward/stake addresses
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        match &self.address {
+            Address::Shelley(shelley) => {
+                let bytes = shelley.to_bytes_key();
+
+                // Minimum length for base address: 1 (header) + 28 (payment) + 28 (stake) = 57
+                if bytes.len() < 57 {
+                    return None;
+                }
+
+                let header = bytes[0];
+                let addr_type = (header & 0xF0) >> 4;
+
+                // Only base addresses (types 0-3) have embedded stake credentials
+                match addr_type {
+                    0 | 1 => {
+                        // Base address with stake key hash
+                        let stake_bytes: [u8; 28] = bytes[29..57].try_into().ok()?;
+                        Some(StakeCredential::AddrKeyHash(stake_bytes.into()))
+                    }
+                    2 | 3 => {
+                        // Base address with stake script hash
+                        let stake_bytes: [u8; 28] = bytes[29..57].try_into().ok()?;
+                        Some(StakeCredential::ScriptHash(stake_bytes.into()))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -769,6 +826,11 @@ impl UTxOIdentifier {
             tx_hash,
             output_index,
         }
+    }
+
+    /// Get the transaction hash as a hex string
+    pub fn tx_hash_hex(&self) -> String {
+        self.tx_hash.to_string()
     }
 
     pub fn to_bytes(&self) -> [u8; 34] {

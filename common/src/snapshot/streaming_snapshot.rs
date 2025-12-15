@@ -34,6 +34,7 @@ use crate::epoch_snapshot::SnapshotsContainer;
 pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::utxo::SnapshotUTxO;
 use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
@@ -1762,7 +1763,10 @@ impl StreamingSnapshotParser {
 
     /// Parse a single UTXO entry from the streaming buffer
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
-        UtxoEntry::decode(decoder).context("Failed to decode UTXO entry")
+        // Parse key: TransactionInput (array [tx_hash, output_index])
+        decoder.array().context("Failed to parse TxIn array")?;
+        let utxo: SnapshotUTxO = decoder.decode().context("Failed to parse UTxO")?;
+        Ok(utxo.0)
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
@@ -2032,5 +2036,57 @@ impl SnapshotsCallback for CollectingCallbacks {
             snapshots.go.spos.len()
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Address, NativeAssets, TxHash, UTXOValue, UTxOIdentifier, Value};
+
+    use super::*;
+
+    #[test]
+    fn test_collecting_callbacks() {
+        let mut callbacks = CollectingCallbacks::default();
+
+        // Test metadata callback
+        callbacks
+            .on_metadata(SnapshotMetadata {
+                epoch: 507,
+                pot_balances: Pots {
+                    reserves: 1000000,
+                    treasury: 2000000,
+                    deposits: 500000,
+                },
+                utxo_count: Some(100),
+                blocks_previous_epoch: Vec::new(),
+                blocks_current_epoch: Vec::new(),
+            })
+            .unwrap();
+
+        assert_eq!(callbacks.metadata.as_ref().unwrap().epoch, 507);
+        assert_eq!(
+            callbacks.metadata.as_ref().unwrap().pot_balances.treasury,
+            2000000
+        );
+
+        // Test UTXO callback
+        callbacks
+            .on_utxo(UtxoEntry {
+                id: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
+                value: UTXOValue {
+                    address: Address::None,
+                    value: Value {
+                        lovelace: 5000000,
+                        assets: NativeAssets::default(),
+                    },
+                    datum: None,
+                    reference_script: None,
+                },
+            })
+            .unwrap();
+
+        assert_eq!(callbacks.utxos.len(), 1);
+        assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
     }
 }
