@@ -116,6 +116,10 @@ impl SnapshotPublisher {
     }
 
     pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
+        info!(
+            "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",
+            self.completion_topic, block_info.number, block_info.slot, block_info.epoch
+        );
         let message = Arc::new(Message::Cardano((
             block_info,
             CardanoMessage::SnapshotComplete,
@@ -176,7 +180,6 @@ impl PoolCallback for SnapshotPublisher {
             SnapshotStateMessage::SPOState(pools),
         )));
 
-        // Clone what we need for the async task
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 

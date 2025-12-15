@@ -1372,7 +1372,7 @@ impl StreamingSnapshotParser {
         // Parse map header first
         let mut decoder = Decoder::new(&buffer);
         // Use u64::MAX for indefinite-length CBOR maps
-        let map_len = decoder.map()?.unwrap_or(u64::MAX);
+        let map_len = (decoder.map()?).unwrap_or(u64::MAX);
 
         let header_consumed = decoder.position();
         buffer.drain(0..header_consumed);
