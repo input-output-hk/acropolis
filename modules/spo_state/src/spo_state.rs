@@ -2,6 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -65,7 +66,8 @@ const DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC: (&str, &str) =
     ("clock-tick-subscribe-topic", "clock.tick");
-const MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC: &str = "snapshot-subscribe-topic";
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 // Publish Topics
 const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
@@ -461,10 +463,10 @@ impl SPOState {
             .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{clock_tick_subscribe_topic}'");
 
-        let maybe_snapshot_topic = config
-            .get_string(MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC)
-            .ok()
-            .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{snapshot_subscribe_topic}'");
 
         // Publish Topics
         let spo_state_publish_topic = config
@@ -479,7 +481,7 @@ impl SPOState {
         info!("Creating query handler on '{}'", pools_query_topic);
 
         // store config
-        let store_config = StoreConfig::from(config);
+        let store_config = StoreConfig::from(config.clone());
 
         // Create history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -728,8 +730,10 @@ impl SPOState {
             }
         });
 
-        // Subscribe for snapshot messages, if allowed
-        if let Some(snapshot_topic) = maybe_snapshot_topic {
+        // Subscribe for snapshot messages if using snapshot startup
+        if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            let snapshot_topic = snapshot_subscribe_topic.clone();
             let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context_snapshot = context.clone();
             let history = history_snapshot.clone();
@@ -748,15 +752,25 @@ impl SPOState {
                     match message.as_ref() {
                         Message::Snapshot(SnapshotMessage::Startup) => {
                             match snapshot_state {
-                                SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
+                                SnapshotState::Preparing => {
+                                    info!("Received snapshot startup signal, awaiting SPO bootstrap data...");
+                                    snapshot_state = SnapshotState::Started;
+                                }
                                 _ => error!("Snapshot Startup message received but we have already left preparing state"),
                             }
                         }
                         Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::SPOState(spo_state),
                         )) => {
+                            info!(
+                                "Bootstrapping SPO state: {} pools, {} pending updates, {} retiring",
+                                spo_state.pools.len(),
+                                spo_state.updates.len(),
+                                spo_state.retiring.len()
+                            );
                             guard.clear();
                             guard.commit_forced(spo_state.clone().into());
+                            info!("SPO state bootstrap complete");
                         }
                         Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
                             block_height,
@@ -783,6 +797,8 @@ impl SPOState {
                     }
                 }
             });
+        } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
         }
 
         // Subscriptions

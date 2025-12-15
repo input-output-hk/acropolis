@@ -47,6 +47,13 @@ impl PeerNetworkInterface {
         let command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
         context.clone().run(async move {
+            // For SyncPoint::Snapshot, start listening for SnapshotComplete immediately
+            // in a background task to avoid missing the message while waiting for genesis.
+            // The message bus may not buffer messages for subscriptions that haven't called read().
+            let snapshot_point_handle = snapshot_complete.map(|mut sub| {
+                tokio::spawn(async move { Self::wait_snapshot_completion(&mut sub).await })
+            });
+
             let genesis_values = if let Some(mut sub) = genesis_complete {
                 Self::wait_genesis_completion(&mut sub)
                     .await
@@ -103,20 +110,23 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Snapshot => {
-                    let mut subscription =
-                        snapshot_complete.expect("Snapshot topic subscription missing");
-                    match Self::wait_snapshot_completion(&mut subscription).await {
-                        Ok(point) => {
-                            if let Point::Specific(slot, _) = point {
-                                let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
+                    let handle = snapshot_point_handle.expect("Snapshot handle missing");
+                    match handle.await {
+                        Ok(Ok(point)) => {
+                            if let Point::Specific(slot, _) = &point {
+                                let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
                             }
                             let mut manager = Self::init_manager(cfg, sink, command_subscription);
                             manager.sync_to_point(point);
                             manager
                         }
-                        Err(error) => {
-                            warn!("snapshot restoration never completed: {error:#}");
+                        Ok(Err(error)) => {
+                            error!("snapshot completion failed: {error:#}");
+                            return;
+                        }
+                        Err(join_error) => {
+                            error!("snapshot completion task panicked: {join_error:#}");
                             return;
                         }
                     }
@@ -211,9 +221,16 @@ impl PeerNetworkInterface {
     async fn wait_snapshot_completion(
         subscription: &mut Box<dyn Subscription<Message>>,
     ) -> Result<Point> {
+        tracing::info!("Waiting for SnapshotComplete message...");
         let (_, message) = subscription.read().await?;
         match message.as_ref() {
             Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
+                tracing::info!(
+                    "Received SnapshotComplete for block {} slot {} epoch {}",
+                    block.number,
+                    block.slot,
+                    block.epoch
+                );
                 Ok(Point::Specific(block.slot, block.hash.to_vec()))
             }
             msg => bail!("Unexpected message in snapshot completion topic: {msg:?}"),
