@@ -1,7 +1,7 @@
+mod block;
 mod configuration;
 mod context;
 mod downloader;
-mod header;
 mod nonces;
 mod progress_reader;
 mod publisher;
