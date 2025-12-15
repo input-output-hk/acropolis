@@ -6,11 +6,12 @@ use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
     ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
-    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    StreamingSnapshotParser, UtxoCallback,
 };
 use acropolis_common::{NetworkId, PoolRegistration};
 use anyhow::Result;

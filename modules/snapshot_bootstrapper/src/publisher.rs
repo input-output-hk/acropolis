@@ -1,6 +1,7 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -13,7 +14,7 @@ use acropolis_common::{
     snapshot::streaming_snapshot::{
         DRepCallback, DRepInfo, EpochCallback, GovernanceProposal,
         GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
-        SnapshotMetadata, UtxoCallback, UtxoEntry,
+        SnapshotMetadata, UtxoCallback,
     },
     BlockInfo, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
@@ -84,6 +85,7 @@ pub struct SnapshotPublisher {
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
+    utxo_batches_published: u64,
     pools: SPOState,
     dreps: Vec<DRepInfo>,
     proposals: Vec<GovernanceProposal>,
@@ -104,6 +106,7 @@ impl SnapshotPublisher {
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
+            utxo_batches_published: 0,
             pools: SPOState::new(),
             dreps: Vec::new(),
             proposals: Vec::new(),
@@ -159,6 +162,21 @@ impl SnapshotPublisher {
     }
 
     fn publish_utxo_batch(&mut self) {
+        let batch_size = self.utxo_batch.len();
+        self.utxo_batches_published += 1;
+
+        if self.utxo_batches_published == 1 {
+            info!(
+                "Publishing first UTXO batch with {} UTXOs to topic '{}'",
+                batch_size, self.snapshot_topic
+            );
+        } else if self.utxo_batches_published.is_multiple_of(100) {
+            info!(
+                "Published {} UTXO batches ({} UTXOs total)",
+                self.utxo_batches_published, self.utxo_count
+            );
+        }
+
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
             SnapshotStateMessage::UTxOPartialState(UTxOPartialState {
                 utxos: self.utxo_batch.clone(),
@@ -169,11 +187,13 @@ impl SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // Spawn async publish task since this callback is synchronous
-        tokio::spawn(async move {
-            if let Err(e) = context.publish(&snapshot_topic, message).await {
-                tracing::error!("Failed to publish SPO bootstrap: {}", e);
-            }
+        // Block on async publish since this callback is synchronous
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                if let Err(e) = context.publish(&snapshot_topic, message).await {
+                    tracing::error!("Failed to publish UTXO batch: {}", e);
+                }
+            })
         });
         self.utxo_batch.clear();
     }
@@ -214,11 +234,13 @@ impl PoolCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // Spawn async publish task since this callback is synchronous
-        tokio::spawn(async move {
-            if let Err(e) = context.publish(&snapshot_topic, message).await {
-                tracing::error!("Failed to publish SPO bootstrap: {}", e);
-            }
+        // Block on async publish since this callback is synchronous
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                if let Err(e) = context.publish(&snapshot_topic, message).await {
+                    tracing::error!("Failed to publish SPO bootstrap: {}", e);
+                }
+            })
         });
 
         Ok(())

@@ -40,7 +40,8 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
 const DEFAULT_STORE: &str = "memory";
-const MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC: &str = "snapshot-subscribe-topic";
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// UTXO state module
 #[module(
@@ -58,10 +59,10 @@ impl UTXOState {
             config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
         info!("Creating subscriber on '{subscribe_topic}'");
 
-        let maybe_snapshot_topic = config
-            .get_string(MAYBE_SNAPSHOT_SUBSCRIBE_TOPIC)
-            .ok()
-            .inspect(|snapshot_topic| info!("Creating subscriber on '{snapshot_topic}'"));
+        let snapshot_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating snapshot subscriber on '{snapshot_topic}'");
 
         let utxos_query_topic = config
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
@@ -128,8 +129,8 @@ impl UTXOState {
             }
         });
 
-        // Subscribe for snapshot messages, if allowed
-        if let Some(snapshot_topic) = maybe_snapshot_topic {
+        // Subscribe for snapshot messages
+        {
             let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context = context.clone();
             let store = snapshot_store.clone();
@@ -138,6 +139,8 @@ impl UTXOState {
                 Started,
             }
             let mut snapshot_state = SnapshotState::Preparing;
+            let mut total_utxos_received = 0u64;
+            let mut batch_count = 0u64;
             context.run(async move {
                 loop {
                     let Ok((_, message)) = subscription.read().await else {
@@ -146,6 +149,7 @@ impl UTXOState {
 
                     match message.as_ref() {
                         Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("UTXO state received Snapshot Startup message");
                             match snapshot_state {
                                 SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
                                 _ => error!("Snapshot Startup message received but we have already left preparing state"),
@@ -154,14 +158,26 @@ impl UTXOState {
                         Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::UTxOPartialState(utxo_state),
                         )) => {
+                            let batch_size = utxo_state.utxos.len();
+                            batch_count += 1;
+                            total_utxos_received += batch_size as u64;
+
+                            if batch_count == 1 {
+                                info!("UTXO state received first UTxO batch with {} UTxOs", batch_size);
+                            } else if batch_count.is_multiple_of(100) {
+                                info!("UTXO state received {} batches, {} total UTxOs so far", batch_count, total_utxos_received);
+                            }
+
                             for (key, value) in &utxo_state.utxos {
                                 if store.add_utxo(*key, value.clone()).await.is_err() {
                                     error!("Failed to add snapshot utxo to state store");
                                 }
                             }
                         }
-                        // There will be other snapshot messages that we're not interested in
-                        _ => ()
+                        other => {
+                            info!("UTXO state received other snapshot message: {:?} (total so far: {} UTxOs in {} batches)",
+                                  std::mem::discriminant(other), total_utxos_received, batch_count);
+                        }
                     }
                 }
             });
