@@ -463,10 +463,9 @@ impl SPOState {
             .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{clock_tick_subscribe_topic}'");
 
-        let snapshot_subscribe_topic = config
+        let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{snapshot_subscribe_topic}'");
 
         // Publish Topics
         let spo_state_publish_topic = config
@@ -732,9 +731,9 @@ impl SPOState {
 
         // Subscribe for snapshot messages if using snapshot startup
         if StartupMethod::from_config(config.as_ref()).is_snapshot() {
-            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
-            let snapshot_topic = snapshot_subscribe_topic.clone();
+            info!("Creating subscriber for snapshot on '{snapshot_topic}'");
             let mut subscription = context.subscribe(&snapshot_topic).await?;
+            let snapshot_topic = snapshot_topic.clone();
             let context_snapshot = context.clone();
             let history = history_snapshot.clone();
             enum SnapshotState {
