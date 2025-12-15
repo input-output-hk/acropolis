@@ -147,13 +147,22 @@ mod tests {
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("cd9037018278826d8ee2a80fe233862d0ff20bf61fc9f74543d682828c7cdb9f") =>
-        matches Ok(());
-        "valid transaction 1"
-    )]
     #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
         matches Ok(());
+        "valid transaction 1 - with byron input & output"
+    )]
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+        matches Ok(());
         "valid transaction 2"
+    )]
+    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0") =>
+        matches Ok(());
+        "valid transaction 3 - with mir certificates"
+    )]
+    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0", "mir_insufficient_genesis_sigs_utxow") =>
+        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 }) 
+        if genesis_keys.len() == 4;
+        "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {

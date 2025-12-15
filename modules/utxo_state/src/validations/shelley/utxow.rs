@@ -104,6 +104,11 @@ pub fn validate(
         utxos_needed,
     );
 
+    println!("vkey_hashes_needed: {:?}", vkey_hashes_needed);
+    println!("script_hashes_needed: {:?}", script_hashes_needed);
+    println!("vkey_hashes_provided: {:?}", vkey_hashes_provided);
+    println!("script_hashes_provided: {:?}", script_hashes_provided);
+
     // validate missing & extra scripts
     validate_missing_extra_scripts(script_hashes_needed, script_hashes_provided)?;
 
@@ -111,4 +116,92 @@ pub fn validate(
     validate_needed_witnesses(vkey_hashes_needed, vkey_hashes_provided)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{test_utils::TestContext, validation_fixture};
+    use acropolis_common::{
+        AlonzoBabbageUpdateProposal, Era, GenesisDelegates, NetworkId, TxCertificateWithPos,
+        TxIdentifier, Withdrawal,
+    };
+    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use test_case::test_case;
+
+    fn get_vkey_script_needed(
+        certs: &[TxCertificateWithPos],
+        withdrawals: &[Withdrawal],
+        proposal_update: &Option<AlonzoBabbageUpdateProposal>,
+        genesis_delgs: &GenesisDelegates,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
+        // for each certificate, get the required vkey and script hashes
+        for cert_with_pos in certs.iter() {
+            cert_with_pos.cert.get_cert_authors(vkey_hashes, script_hashes);
+        }
+
+        // for each withdrawal, get the required vkey and script hashes
+        for withdrawal in withdrawals.iter() {
+            withdrawal.get_withdrawal_authors(vkey_hashes, script_hashes);
+        }
+
+        // for each governance action, get the required vkey hashes
+        if let Some(proposal_update) = proposal_update.as_ref() {
+            proposal_update.get_governance_authors(vkey_hashes, genesis_delgs);
+        }
+    }
+
+    #[test_case(validation_fixture!("b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46") =>
+        matches Ok(());
+        "valid transaction 1"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+        let raw_tx = tx.encode();
+        let tx_identifier = TxIdentifier::new(4533644, 1);
+        let (
+            tx_inputs,
+            _,
+            _,
+            tx_certs,
+            tx_withdrawals,
+            tx_proposal_update,
+            vkey_witnesses,
+            native_scripts,
+            tx_error,
+        ) = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            tx_identifier,
+            NetworkId::Mainnet,
+            Era::Shelley,
+        );
+        assert!(tx_error.is_none());
+
+        let mut vkey_hashes_needed = HashSet::new();
+        let mut script_hashes_needed = HashSet::new();
+        get_vkey_script_needed(
+            &tx_certs,
+            &tx_withdrawals,
+            &tx_proposal_update,
+            &mut vkey_hashes_needed,
+            &mut script_hashes_needed,
+        );
+        let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+        let script_hashes_provided =
+            native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
+
+        validate(
+            &tx_inputs,
+            &mut vkey_hashes_needed,
+            &mut script_hashes_needed,
+            &vkey_hashes_provided,
+            &script_hashes_provided,
+            &ctx.utxos,
+        )
+        .map_err(|e| *e)
+    }
 }

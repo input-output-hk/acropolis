@@ -7,9 +7,7 @@ use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
-    },
-    state_history::{StateHistory, StateHistoryStore},
-    *,
+    }, protocol_params::ProtocolParams, state_history::{StateHistory, StateHistoryStore}, *
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
@@ -126,6 +124,7 @@ impl TxUnpacker {
 
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
                     span.in_scope(|| {
+                        let genesis_delegs: Option<GenesisDelegates> = state.protocol_params.shelley.as_ref().map(|shelley_params| shelley_params.gen_delegs.into());
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
 
@@ -150,15 +149,18 @@ impl TxUnpacker {
                                     let mut props = None;
                                     let mut votes = None;
 
-                                    let (vkey_hashes_needed, script_hashes_needed) = Self::get_vkey_script_needed(
+                                    let mut vkey_hashes_needed = HashSet::new();
+                                    let mut script_hashes_needed = HashSet::new();
+                                    Self::get_vkey_script_needed(
                                         &tx_certs,
                                         &tx_withdrawals,
                                         &tx_proposal_update,
+                                        state.protocol_params.shelley.
+                                        &mut vkey_hashes_needed,
+                                        &mut script_hashes_needed,
                                     );
-                                    let (vkey_hashes_provided, script_hashes_provided) = Self::get_vkey_script_provided(
-                                        &vkey_witnesses,
-                                        &native_scripts,
-                                    );
+                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
@@ -577,55 +579,29 @@ impl TxUnpacker {
         certs: &[TxCertificateWithPos],
         withdrawals: &[Withdrawal],
         proposal_update: &Option<AlonzoBabbageUpdateProposal>,
-    ) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
-        let mut vkey_hashes = HashSet::new();
-        let mut script_hashes = HashSet::new();
-
+        protocol_params: &ProtocolParams,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
+        let genesis_delegs: Option<GenesisDelegates> = protocol_params.shelley.as_ref().map(|shelley_params| shelley_params.gen_delegs.into());
         // for each certificate, get the required vkey and script hashes
         for cert_with_pos in certs.iter() {
-            let (v, s) = cert_with_pos.cert.get_cert_authors();
-            vkey_hashes.extend(v);
-            script_hashes.extend(s);
+            cert_with_pos.cert.get_cert_authors(vkey_hashes, script_hashes);
         }
 
         // for each withdrawal, get the required vkey and script hashes
         for withdrawal in withdrawals.iter() {
-            match withdrawal.address.credential {
-                StakeCredential::AddrKeyHash(vkey_hash) => {
-                    vkey_hashes.insert(vkey_hash);
-                }
-                StakeCredential::ScriptHash(script_hash) => {
-                    script_hashes.insert(script_hash);
-                }
-            }
+            withdrawal.get_withdrawal_authors(vkey_hashes, script_hashes);
         }
 
         // for each governance action, get the required vkey hashes
         if let Some(proposal_update) = proposal_update.as_ref() {
-            for (genesis_key, _) in proposal_update.proposals.iter() {
-                vkey_hashes.insert(*genesis_key);
+            if let Some(genesis_delegs) = genesis_delegs {
+                proposal_update.get_governance_authors(vkey_hashes, &genesis_delegs);
+            } else {
+                error!("Genesis delegates not found in protocol parameters");
             }
         }
-
-        (vkey_hashes, script_hashes)
-    }
-
-    fn get_vkey_script_provided(
-        vkey_witnesses: &[VKeyWitness],
-        native_scripts: &[NativeScript],
-    ) -> (Vec<KeyHash>, Vec<ScriptHash>) {
-        let mut vkey_hashes = Vec::new();
-        let mut script_hashes = Vec::new();
-
-        for vkey_witness in vkey_witnesses.iter() {
-            vkey_hashes.push(vkey_witness.key_hash());
-        }
-
-        for native_script in native_scripts.iter() {
-            script_hashes.push(native_script.compute_hash());
-        }
-
-        (vkey_hashes, script_hashes)
     }
 
     /// Check for synchronisation
