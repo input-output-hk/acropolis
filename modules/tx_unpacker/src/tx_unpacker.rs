@@ -430,6 +430,19 @@ impl TxUnpacker {
                             tx_errors.push((tx_index, e));
                         }
                     }
+                    if !tx_errors.is_empty() {
+                        error!(
+                            "Validation failed: block={}, bad_transactions={}",
+                            block.number,
+                            tx_errors
+                                .iter()
+                                .map(|(tx_index, error)| format!(
+                                    "tx-index={tx_index}, error={error}"
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                    }
                     tx_validation_publisher
                         .publish_tx_validation(block, tx_errors)
                         .await

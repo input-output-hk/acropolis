@@ -139,3 +139,32 @@ pub fn validate(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{test_utils::TestContext, validation_fixture};
+    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use test_case::test_case;
+
+    #[test_case(validation_fixture!("cd9037018278826d8ee2a80fe233862d0ff20bf61fc9f74543d682828c7cdb9f") =>
+        matches Ok(());
+        "valid transaction 1"
+    )]
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+        matches Ok(());
+        "valid transaction 2"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+        let mtx = tx.as_alonzo().unwrap();
+        validate(
+            mtx,
+            TxHash::from(*tx.hash()),
+            &ctx.shelley_params.gen_delegs.into(),
+            ctx.shelley_params.update_quorum,
+        )
+        .map_err(|e| *e)
+    }
+}

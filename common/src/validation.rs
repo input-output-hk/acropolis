@@ -49,7 +49,7 @@ pub enum ValidationError {
     BadKES(#[from] KesValidationError),
 
     #[error(
-        "Invalid Transactions: {}", 
+        "bad_transactions: {}", 
         bad_transactions
             .iter()
             .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))

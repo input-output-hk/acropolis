@@ -1942,6 +1942,12 @@ impl AsRef<BTreeMap<GenesisKeyhash, GenesisDelegate>> for GenesisDelegates {
     }
 }
 
+impl From<HashMap<PoolId, GenesisDelegate>> for GenesisDelegates {
+    fn from(map: HashMap<PoolId, GenesisDelegate>) -> Self {
+        GenesisDelegates(map.into_iter().map(|(k, v)| (*k, v)).collect())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,

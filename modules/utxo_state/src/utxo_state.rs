@@ -66,7 +66,7 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
                         if let Err(e) = state.validate(block, deltas_msg).await {
-                            error!("Validation error: {e}");
+                            error!("Validation failed: block={}, error={e}", block.number);
                         }
                     }
                     .instrument(span)

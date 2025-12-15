@@ -5,7 +5,6 @@ use acropolis_common::{
 };
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::error;
 
 /// Message publisher for Block header Tx Validation Result
 pub struct TxValidationPublisher {
@@ -30,15 +29,6 @@ impl TxValidationPublisher {
         let validation_status = if tx_errors.is_empty() {
             ValidationStatus::Go
         } else {
-            error!(
-                "Tx validation failed: block={}, bad_transactions={}",
-                block.number,
-                tx_errors
-                    .iter()
-                    .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            );
             ValidationStatus::NoGo(ValidationError::BadTransactions {
                 bad_transactions: tx_errors,
             })
