@@ -31,19 +31,16 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
 use crate::epoch_snapshot::SnapshotsContainer;
-pub use crate::hash::Hash;
+use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
-use crate::snapshot::utxo::SnapshotUTxO;
+use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 use crate::{
-    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
-    PoolMetadata, Pots, Relay,
-};
-pub use crate::{
-    Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
-    StakeAddress, StakeCredential,
+    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, Lovelace, MultiHostName,
+    NetworkId, PoolBlockProduction, PoolId, PoolMetadata, PoolRegistration, Pots, Ratio, Relay,
+    SingleHostAddr, SingleHostName, StakeAddress, StakeCredential,
 };
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
@@ -519,9 +516,6 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
         })
     }
 }
-
-// Re-export UtxoEntry from the utxo module
-pub use super::utxo::UtxoEntry;
 
 // -----------------------------------------------------------------------------
 // Ledger types for DState parsing
