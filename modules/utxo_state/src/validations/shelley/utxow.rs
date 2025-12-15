@@ -2,7 +2,7 @@
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
     validation::UTxOWValidationError, KeyHash, ScriptHash, ShelleyAddressPaymentPart, UTXOValue,
@@ -10,17 +10,15 @@ use acropolis_common::{
 };
 use anyhow::Result;
 
-fn get_vkey_script_needed_from_inputs<F>(
+fn get_vkey_script_needed_from_inputs(
     inputs: &[UTxOIdentifier],
     vkey_hashes_needed: &mut HashSet<KeyHash>,
     script_hashes_needed: &mut HashSet<ScriptHash>,
-    lookup_utxo: F,
-) where
-    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
-{
+    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+) {
     // for each UTxO, extract the needed vkey and script hashes
     for utxo in inputs.iter() {
-        if let Ok(Some(utxo)) = lookup_utxo(utxo) {
+        if let Some(utxo) = utxos_needed.get(utxo) {
             // NOTE:
             // Need to check inputs from byron bootstrap addresses
             // with bootstrap witnesses
@@ -88,7 +86,7 @@ pub fn validate_needed_witnesses(
     Ok(())
 }
 
-pub fn validate<F>(
+pub fn validate(
     inputs: &[UTxOIdentifier],
     // Need to include vkey hashes and script hashes
     // from inputs
@@ -96,17 +94,14 @@ pub fn validate<F>(
     script_hashes_needed: &mut HashSet<ScriptHash>,
     vkey_hashes_provided: &[KeyHash],
     script_hashes_provided: &[ScriptHash],
-    lookup_utxo: F,
-) -> Result<(), Box<UTxOWValidationError>>
-where
-    F: Fn(&UTxOIdentifier) -> Result<Option<UTXOValue>>,
-{
+    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+) -> Result<(), Box<UTxOWValidationError>> {
     // Extract vkey hashes and script hashes from inputs
     get_vkey_script_needed_from_inputs(
         inputs,
         vkey_hashes_needed,
         script_hashes_needed,
-        lookup_utxo,
+        utxos_needed,
     );
 
     // validate missing & extra scripts

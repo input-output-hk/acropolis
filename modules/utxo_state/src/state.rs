@@ -1,10 +1,12 @@
 //! Acropolis UTXOState: State storage
+use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
+use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{Address, AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueMap};
+use acropolis_common::{Address, AddressDelta, Era, UTXOValue, UTxOIdentifier, Value, ValueMap};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -379,6 +381,65 @@ impl State {
             observer.rollback(message).await;
         }
         Ok(())
+    }
+
+    async fn collect_utxos(
+        &self,
+        inputs: &[&UTxOIdentifier],
+    ) -> HashMap<UTxOIdentifier, UTXOValue> {
+        let mut utxos = HashMap::new();
+        for input in inputs.iter().cloned() {
+            if utxos.contains_key(input) {
+                continue;
+            }
+            if let Ok(Some(utxo)) = self.lookup_utxo(input).await {
+                utxos.insert(*input, Some(utxo));
+            } else {
+                utxos.insert(*input, None);
+            }
+        }
+        utxos
+            .into_iter()
+            .filter_map(|(input, utxo)| utxo.map(|utxo| (input, utxo)))
+            .collect::<HashMap<_, _>>()
+    }
+
+    pub async fn validate(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<(), ValidationError> {
+        let mut invalid_transactions = Vec::new();
+
+        // collect utxos needed for validation
+        // NOTE:
+        // Also consider collateral inputs and reference inputs
+        let all_inputs =
+            deltas.deltas.iter().flat_map(|tx_deltas| tx_deltas.inputs.iter()).collect::<Vec<_>>();
+        let utxos_needed = self.collect_utxos(&all_inputs).await;
+
+        for tx_deltas in deltas.deltas.iter() {
+            if block.era == Era::Shelley {
+                if let Err(e) = validations::validate_shelley_tx(
+                    &tx_deltas.inputs,
+                    &mut tx_deltas.vkey_hashes_needed.clone(),
+                    &mut tx_deltas.script_hashes_needed.clone(),
+                    &tx_deltas.vkey_hashes_provided,
+                    &tx_deltas.script_hashes_provided,
+                    &utxos_needed,
+                ) {
+                    invalid_transactions.push((tx_deltas.tx_identifier.tx_index(), e));
+                }
+            }
+        }
+
+        if invalid_transactions.is_empty() {
+            Ok(())
+        } else {
+            Err(ValidationError::BadTransactions {
+                bad_transactions: invalid_transactions,
+            })
+        }
     }
 }
 

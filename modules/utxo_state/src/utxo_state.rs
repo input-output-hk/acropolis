@@ -62,6 +62,16 @@ impl UTXOState {
 
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
+                    let span = info_span!("utxo_state.validate", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        if let Err(e) = state.validate(block, deltas_msg).await {
+                            error!("Validation error: {e}");
+                        }
+                    }
+                    .instrument(span)
+                    .await;
+
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
                         let mut state = state.lock().await;
