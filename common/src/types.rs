@@ -1703,7 +1703,7 @@ pub struct HeavyDelegate {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
     pub delegate: Hash<28>,
@@ -1711,8 +1711,11 @@ pub struct GenesisDelegate {
     pub vrf: VrfKeyHash,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisDelegates(pub BTreeMap<GenesisKeyhash, GenesisDelegate>);
+#[serde_as]
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct GenesisDelegates(
+    #[serde_as(as = "BTreeMap<Hex, _>")] pub BTreeMap<GenesisKeyhash, GenesisDelegate>,
+);
 
 impl TryFrom<Vec<(&str, (&str, &str))>> for GenesisDelegates {
     type Error = anyhow::Error;

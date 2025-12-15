@@ -2,13 +2,13 @@ use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
     BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegate, HeavyDelegate, NetworkId, PoolId, PoolVotingThresholds,
-    ProtocolConsts,
+    ExUnitPrices, ExUnits, GenesisDelegates, HeavyDelegate, NetworkId, PoolId,
+    PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
 use chrono::{DateTime, Utc};
-use serde_with::{hex::Hex, serde_as};
+use serde_with::serde_as;
 use std::fmt::Formatter;
 use std::ops::Deref;
 use std::{collections::HashMap, fmt::Display};
@@ -142,8 +142,7 @@ pub struct ShelleyParams {
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
 
-    #[serde_as(as = "HashMap<Hex, _>")]
-    pub gen_delegs: HashMap<PoolId, GenesisDelegate>,
+    pub gen_delegs: GenesisDelegates,
 }
 
 impl ShelleyParams {
