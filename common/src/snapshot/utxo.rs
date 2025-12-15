@@ -496,6 +496,22 @@ impl UtxoEntry {
 mod tests {
     use super::*;
 
+    /// Helper to create a test UtxoEntry with just an address
+    fn make_test_utxo(address_bytes: Vec<u8>) -> UtxoEntry {
+        UtxoEntry {
+            input: TransactionInput {
+                tx_hash: [0u8; 32],
+                output_index: 0,
+            },
+            output: TransactionOutput {
+                address: address_bytes,
+                value: Value::coin_only(1_000_000),
+                datum: None,
+                script_ref: None,
+            },
+        }
+    }
+
     #[test]
     fn test_transaction_input_decode() {
         // [tx_hash (32 bytes), output_index (u16)]
@@ -530,18 +546,7 @@ mod tests {
         address.extend_from_slice(&[0x11; 28]); // payment key hash
         address.extend_from_slice(&[0x22; 28]); // stake key hash
 
-        let entry = UtxoEntry {
-            input: TransactionInput {
-                tx_hash: [0; 32],
-                output_index: 0,
-            },
-            output: TransactionOutput {
-                address,
-                value: Value::coin_only(1_000_000),
-                datum: None,
-                script_ref: None,
-            },
-        };
+        let entry = make_test_utxo(address);
 
         let stake_cred = entry.extract_stake_credential();
         assert!(stake_cred.is_some());
@@ -554,24 +559,80 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_stake_credential_base_address_key_hash() {
+        // Base address with payment key hash and stake key hash (type 0)
+        // Header: 0x01 = mainnet (0x01) | addr_type 0 (key/key)
+        // Format: [header:1][payment_hash:28][stake_hash:28] = 57 bytes
+        let mut address_bytes = vec![0x01]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xBB; 28]); // stake key hash
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::AddrKeyHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xBB; 28]);
+            }
+            _ => panic!("Expected AddrKeyHash"),
+        }
+    }
+
+    #[test]
+    fn test_extract_stake_credential_base_address_script_hash() {
+        // Base address with payment key hash and stake script hash (type 2)
+        // Header: 0x21 = mainnet (0x01) | addr_type 2 (key/script)
+        let mut address_bytes = vec![0x21]; // header
+        address_bytes.extend([0xAA; 28]); // payment key hash
+        address_bytes.extend([0xCC; 28]); // stake script hash
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_some());
+        match stake_cred.unwrap() {
+            StakeCredential::ScriptHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0xCC; 28]);
+            }
+            _ => panic!("Expected ScriptHash"),
+        }
+    }
+
+    #[test]
     fn test_extract_stake_credential_enterprise_address() {
         // Enterprise address (type 6): header + 28 payment (no stake part)
         let mut address = vec![0x61]; // header: type 6, network 1
         address.extend_from_slice(&[0x11; 28]); // payment key hash
 
-        let entry = UtxoEntry {
-            input: TransactionInput {
-                tx_hash: [0; 32],
-                output_index: 0,
-            },
-            output: TransactionOutput {
-                address,
-                value: Value::coin_only(1_000_000),
-                datum: None,
-                script_ref: None,
-            },
-        };
+        let entry = make_test_utxo(address);
 
-        assert!(entry.extract_stake_credential().is_none());
+        assert!(
+            entry.extract_stake_credential().is_none(),
+            "Enterprise addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_byron_address() {
+        // Byron address - high bit set in header
+        let address_bytes = vec![0x82, 0xD8, 0x18]; // Byron CBOR prefix
+
+        let utxo = make_test_utxo(address_bytes);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(
+            stake_cred.is_none(),
+            "Byron addresses should not have stake credentials"
+        );
+    }
+
+    #[test]
+    fn test_extract_stake_credential_invalid_address() {
+        // Empty address - too short to be valid
+        let utxo = make_test_utxo(vec![]);
+
+        let stake_cred = utxo.extract_stake_credential();
+        assert!(stake_cred.is_none(), "Invalid addresses should return None");
     }
 }
