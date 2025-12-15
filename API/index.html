@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Acropolis Open API</title>
+
+  <link rel="stylesheet" type="text/css" href="./swagger-ui.css">
+  <link rel="icon" type="image/png" href="./favicon-32x32.png" sizes="32x32" />
+  <link rel="icon" type="image/png" href="./favicon-16x16.png" sizes="16x16" />
+
+  <style>
+    .swagger-ui .topbar {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="swagger-ui"></div>
+
+  <script src="./swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script src="./swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+  <script src="https://unpkg.com/js-yaml@4/dist/js-yaml.min.js"></script>
+
+  <script>
+    window.onload = function() {
+      fetch("/openapi.yaml")
+        .then(r => {
+          if (!r.ok) throw new Error("Failed to load openapi.yaml");
+          return r.text();
+        })
+        .then(yamlText => {
+          const spec = jsyaml.load(yamlText);
+
+          const ui = SwaggerUIBundle({
+            spec,
+            dom_id: '#swagger-ui',
+            deepLinking: true,
+            defaultModelsExpandDepth: -1,
+            presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+            plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+            layout: "StandaloneLayout"
+          });
+
+          window.ui = ui;
+
+          setTimeout(() => {
+            document.querySelectorAll('.opblock').forEach(block => {
+              const pathEl = block.querySelector('.opblock-summary-path');
+              const methodEl = block.querySelector('.opblock-summary-method');
+              if (!pathEl || !methodEl) return;
+
+              const path = pathEl.textContent.trim();
+              const method = methodEl.textContent.trim().toLowerCase();
+              const op = spec.paths?.[path]?.[method];
+
+              if (op?.['x-enabled-by-default']) {
+                methodEl.style.backgroundColor = '#49cc90';
+                methodEl.style.borderColor = '#49cc90';
+                methodEl.style.boxShadow = '0 0 0 1px #49cc90';
+                methodEl.style.color = '#ffffff';
+              }
+            });
+          }, 0);
+        })
+        .catch(err => {
+          console.error(err);
+          document.body.innerHTML =
+            "<pre>No API definition provided</pre>";
+        });
+    };
+  </script>
+</body>
+</html>
