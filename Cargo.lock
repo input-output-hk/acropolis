@@ -1520,9 +1520,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5509d9f63ad2d973599703617120dbfeff58078b37895f433cc784b5d3890d6e"
+checksum = "9924a0e24e3589bd36f512938eb56bec29c78a69f2121ee1496c572ae7daa2ed"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1536,9 +1536,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a42373dd9604700e51dd07565303522f7b1d2a0002a8db7489c77d846f08c08b"
+checksum = "a0209d2e4c67aa210715d27e28951ddd7f41ad7a91dba737eba85c4d409d865d"
 dependencies = [
  "anyhow",
  "axum",
@@ -1548,15 +1548,16 @@ dependencies = [
  "hyper 0.14.32",
  "serde",
  "tokio",
+ "tower-http 0.3.5",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0432b56f66f5b3d527a704c9c4b090c03567aaefc48350e7bf41fce286431b5d"
+checksum = "39cd94aef4a9d3221de1f98e31ea3bcffece9fed9ea8239f194fdf61063b3f6a"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1566,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_process"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2297ab4f0eb5ccd04c30cd397cbde5e129097c8e3b0e3f7628d5c16dafdbd532"
+checksum = "d3ce41105ccb2b0b1b656f6e1993d01a8ee55ff488c6e842bfba8a49a49a7f46"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1588,9 +1589,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fceb8e403d1123e3a69fe108ea36d3e24c81f98605d2f15ca58f500774e956b0"
+checksum = "e196038230b4855acd5190baa2ee42927ea695e8e0c0c1ce37ce9e655af483a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3002,6 +3003,12 @@ dependencies = [
  "http-body 1.0.1",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range-header"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"
 
 [[package]]
 name = "httparse"
@@ -5369,7 +5376,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower 0.5.2",
- "tower-http",
+ "tower-http 0.6.8",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -6681,6 +6688,24 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f873044bf02dd1e8239e9c1293ea39dad76dc594ec16185d0a1bf31d8dc8d858"
+dependencies = [
+ "bitflags 1.3.2",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "http-range-header",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]
