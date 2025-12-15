@@ -146,15 +146,7 @@ impl DRepCallback for CountingCallbacks {
 
         // Show first 10 DReps
         for (i, (cred, record)) in dreps.iter().take(10).enumerate() {
-            let drep_id = match cred {
-                acropolis_common::StakeCredential::AddrKeyHash(hash) => {
-                    format!("drep_{}", hex::encode(hash))
-                }
-                acropolis_common::StakeCredential::ScriptHash(hash) => {
-                    format!("drep_script_{}", hex::encode(hash))
-                }
-            };
-
+            let drep_id = cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
             if let Some(anchor) = &record.anchor {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {}) - {}",
@@ -561,14 +553,8 @@ fn main() {
             if !callbacks.sample_dreps.is_empty() {
                 println!("Sample DReps (first 10):");
                 for (i, (cred, record)) in callbacks.sample_dreps.iter().enumerate() {
-                    let drep_id = match cred {
-                        acropolis_common::StakeCredential::AddrKeyHash(hash) => {
-                            format!("drep_{}", hex::encode(hash))
-                        }
-                        acropolis_common::StakeCredential::ScriptHash(hash) => {
-                            format!("drep_script_{}", hex::encode(hash))
-                        }
-                    };
+                    let drep_id =
+                        cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
                     print!(
                         "  {}: {} (deposit: {} lovelace)",
                         i + 1,

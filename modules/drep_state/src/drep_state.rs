@@ -310,8 +310,11 @@ impl DRepState {
                         Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::DRepState(drep_msg),
                         )) => {
-                            info!("DRepState: Snapshot Bootstrap message received");
+                            let drep_count = state.dreps.len();
+                            info!("DRepState: Snapshot Bootstrap message received {drep_count} DReps loaded");
                             state.bootstrap(drep_msg);
+                            // Commit the bootstrapped state to history to persist changes
+                            history.lock().await.commit(drep_msg.epoch, state);
                         }
                         // There will be other snapshot messages that we're not interested in
                         _ => (),

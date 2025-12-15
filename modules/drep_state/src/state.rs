@@ -546,8 +546,6 @@ impl State {
         for (cred, record) in &drep_msg.dreps {
             self.dreps.insert(cred.clone(), record.clone());
             // update historical state if enabled
-            /*
-            This will be needed once we want historical drep data from snapshots
             if let Some(hist_map) = self.historical_dreps.as_mut() {
                 let cfg = self.config;
                 let entry = hist_map
@@ -559,14 +557,8 @@ impl State {
                     info.retired = false;
                     info.active_epoch = None;
                     info.last_active_epoch = 0; // unknown from snapshot
-                    info!(
-                        "Bootstrapped Historical DRepState: DRep {:?} => {:?}",
-                        cred, record
-                    );
                 }
             }
-            */
-            // info!("Bootstrapped DRepState: DRep {:?} => {:?}", cred, record);
         }
     }
 }
