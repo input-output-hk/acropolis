@@ -1,11 +1,16 @@
 //! Acropolis Protocol Params: State storage
 
 use crate::ParametersUpdater;
-use acropolis_common::{messages::{
-    GovernanceOutcomesMessage,
-    GovernanceProtocolParametersBootstrapMessage,
-    GovernanceProtocolParametersSlice, ProtocolParamsMessage,
-}, protocol_params::ProtocolVersion, snapshot::protocol_parameters::ProtocolParameters, BlockInfo, Era, EnactStateElem, GovernanceOutcome, GovernanceOutcomeVariant, ProtocolParamUpdate, VotingOutcome, AlonzoBabbageVotingOutcome};
+use acropolis_common::{
+    messages::{
+        GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
+        GovernanceProtocolParametersSlice, ProtocolParamsMessage,
+    },
+    protocol_params::ProtocolVersion,
+    snapshot::protocol_parameters::ProtocolParameters,
+    AlonzoBabbageVotingOutcome, BlockInfo, EnactStateElem, Era, GovernanceOutcome,
+    GovernanceOutcomeVariant, ProtocolParamUpdate, VotingOutcome,
+};
 use anyhow::Result;
 use std::ops::RangeInclusive;
 use tracing::info;
@@ -59,7 +64,7 @@ impl State {
         &mut self,
         new_era: &Era,
         alonzo_gov: &Vec<AlonzoBabbageVotingOutcome>,
-        conway_gov: &Vec<GovernanceOutcomeVariant>
+        conway_gov: &Vec<GovernanceOutcomeVariant>,
     ) -> Result<()> {
         info!("Current Era: {:?}", self.current_era);
         if self.current_era != Some(*new_era) {
@@ -77,7 +82,7 @@ impl State {
         self.apply_governance_outcomes(
             new_era,
             &msg.alonzo_babbage_outcomes,
-            &msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect()
+            &msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect(),
         )?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
@@ -148,9 +153,9 @@ impl State {
         //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Constitution(constitution)));
         //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Committee(committee)));
 
-        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::ProtVer(
-            params.protocol_version.clone()
-        )));
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
+            EnactStateElem::ProtVer(params.protocol_version.clone()),
+        ));
 
         let mut param_update = ProtocolParamUpdate::default();
         param_update.minfee_a = Some(params.min_fee_a);
@@ -158,30 +163,9 @@ impl State {
         param_update.collateral_percentage = Some(params.collateral_percentage as u64);
         // TODO: fill other parameters
 
-        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Params(Box::new(param_update))));
-/*
-        // Get the plutus v3 cost model, or create empty one if not present
-        let plutus_v3_cost_model =
-            params.cost_models.plutus_v3.clone().unwrap_or_else(|| CostModel::new(Vec::new()));
-
-        ConwayParams {
-            pool_voting_thresholds: params.pool_voting_thresholds.clone(),
-            d_rep_voting_thresholds: params.drep_voting_thresholds.clone(),
-            committee_min_size: params.min_committee_size as u64,
-            committee_max_term_length: params.max_committee_term_length as u32,
-            gov_action_lifetime: params.gov_action_lifetime as u32,
-            gov_action_deposit: params.gov_action_deposit,
-            d_rep_deposit: params.drep_deposit,
-            d_rep_activity: params.drep_expiry as u32,
-            min_fee_ref_script_cost_per_byte: RationalNumber::from(
-                params.min_fee_ref_script_lovelace_per_byte.numerator,
-                params.min_fee_ref_script_lovelace_per_byte.denominator,
-            ),
-            plutus_v3_cost_model,
-            constitution,
-            committee,
-        }
-*/
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
+            EnactStateElem::Params(Box::new(param_update)),
+        ));
         outcomes
     }
 
