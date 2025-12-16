@@ -7,8 +7,8 @@ use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::{
     AccountsCallback, DRepCallback, DRepRecord, GovernanceProtocolParametersCallback, UtxoCallback,
-    UtxoEntry,
 };
+use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
     AccountState, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
@@ -52,12 +52,8 @@ impl UtxoCallback for CountingCallbacks {
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
                 eprintln!(
-                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
-                    self.utxo_count,
-                    &utxo.tx_hash[..16],
-                    utxo.output_index,
-                    &utxo.address[..utxo.address.len().min(32)],
-                    utxo.value
+                    "  UTXO #{}: {} → {:?}",
+                    self.utxo_count, utxo.id, utxo.value
                 );
             }
             self.sample_utxos.push(utxo);
@@ -506,14 +502,7 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
-                    println!(
-                        "  {}: {}:{} → {} ({} lovelace)",
-                        i + 1,
-                        &utxo.tx_hash[..16],
-                        utxo.output_index,
-                        &utxo.address[..32],
-                        utxo.value
-                    );
+                    println!("  {}: {} → {:?}", i + 1, utxo.id, utxo.value);
                 }
                 println!();
             }
