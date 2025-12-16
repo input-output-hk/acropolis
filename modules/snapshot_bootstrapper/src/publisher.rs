@@ -1,4 +1,5 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
+use acropolis_common::messages::DRepBootstrapMessage;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::utxo::UtxoEntry;
@@ -12,14 +13,16 @@ use acropolis_common::{
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
-        DRepCallback, DRepInfo, EpochCallback, GovernanceProposal,
+        DRepCallback, DRepRecord, EpochCallback, GovernanceProposal,
         GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
         SnapshotMetadata, UtxoCallback,
     },
-    BlockInfo, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    stake_addresses::AccountState,
+    BlockInfo, DRepCredential, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -87,7 +90,8 @@ pub struct SnapshotPublisher {
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
     utxo_batches_published: u64,
     pools: SPOState,
-    dreps: Vec<DRepInfo>,
+    accounts: Vec<AccountState>,
+    dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
 }
@@ -108,7 +112,8 @@ impl SnapshotPublisher {
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
             utxo_batches_published: 0,
             pools: SPOState::new(),
-            dreps: Vec::new(),
+            accounts: Vec::new(),
+            dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
         }
@@ -322,10 +327,26 @@ impl AccountsCallback for SnapshotPublisher {
 }
 
 impl DRepCallback for SnapshotPublisher {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
-        info!("Received {} DReps", dreps.len());
-        self.dreps.extend(dreps);
-        // TODO: Accumulate DRep data if needed or send in chunks to DRepState processor
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
+        info!("Received {} DReps for epoch {}", dreps.len(), epoch);
+        self.dreps_len += dreps.len();
+        // Send a message to the DRepState
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::DRepState(DRepBootstrapMessage { dreps, epoch }),
+        )));
+
+        // Clone what we need for the async task
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // See comment in AccountsCallback::on_accounts for why we block here.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish DRepBootstrap message: {}", e)
+                });
+            })
+        });
         Ok(())
     }
 }
@@ -467,7 +488,8 @@ impl SnapshotCallbacks for SnapshotPublisher {
             self.pools.updates.len(),
             self.pools.retiring.len()
         );
-        info!("  - DReps: {}", self.dreps.len());
+        info!("  - Accounts: {}", self.accounts.len());
+        info!("  - DReps: {}", self.dreps_len);
         info!("  - Proposals: {}", self.proposals.len());
 
         // Note: AccountsBootstrapMessage is now published via on_accounts callback
