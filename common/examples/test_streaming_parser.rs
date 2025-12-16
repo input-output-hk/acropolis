@@ -51,9 +51,14 @@ impl UtxoCallback for CountingCallbacks {
         // Keep first 10 for display
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
+                let addr_bytes = utxo.address_bytes();
                 eprintln!(
-                    "  UTXO #{}: {} → {:?}",
-                    self.utxo_count, utxo.id, utxo.value
+                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
+                    self.utxo_count,
+                    &utxo.tx_hash_hex()[..16],
+                    utxo.output_index(),
+                    hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                    utxo.coin()
                 );
             }
             self.sample_utxos.push(utxo);
@@ -502,7 +507,15 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
-                    println!("  {}: {} → {:?}", i + 1, utxo.id, utxo.value);
+                    let addr_bytes = utxo.address_bytes();
+                    println!(
+                        "  {}: {}:{} → {} ({} lovelace)",
+                        i + 1,
+                        &utxo.tx_hash_hex()[..16],
+                        utxo.output_index(),
+                        hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                        utxo.coin()
+                    );
                 }
                 println!();
             }

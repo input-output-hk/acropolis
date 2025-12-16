@@ -242,11 +242,12 @@ impl PoolCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // See comment in AccountsCallback::on_accounts for why we block here.
+        // IMPORTANT: We use block_in_place + block_on to ensure each publish completes
+        // before the callback returns. This guarantees message ordering. See on_accounts() for details.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                    tracing::error!("Failed to publish SPO bootstrap: {}", e);
+                    tracing::error!("Failed to publish SPO bootstrap message: {}", e)
                 });
             })
         });
