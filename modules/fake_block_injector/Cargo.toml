@@ -1,0 +1,27 @@
+# Fake block injector module
+
+[package]
+name = "acropolis_module_fake_block_injector"
+version = "0.1.0"
+edition = "2021"
+authors = ["Paul Clark <paul.clark@iohk.io>"]
+description = "Fake block injector Caryatid module for Acropolis"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+async-trait = "0.1.86"
+chrono = { workspace = true }
+config = { workspace = true }
+pallas = { version = "0.32.0" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+glob = "0.3.3"
+
+[lib]
+path = "src/fake_block_injector.rs"

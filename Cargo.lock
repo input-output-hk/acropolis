@@ -261,6 +261,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_fake_block_injector"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "async-trait",
+ "caryatid_sdk",
+ "chrono",
+ "config",
+ "glob",
+ "pallas 0.32.1",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_genesis_bootstrapper"
 version = "0.1.0"
 dependencies = [
