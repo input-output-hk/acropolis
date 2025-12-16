@@ -43,7 +43,8 @@ validators = [
 # Add these once they are actually being sent
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
-#           "cardano.validation.utxo"
+#           "cardano.validation.utxo",
+           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
