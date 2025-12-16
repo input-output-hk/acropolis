@@ -13,13 +13,6 @@ use std::str::FromStr;
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RationalNumber(pub Ratio<u64>);
 
-/// A rational number with a signed numerator.
-/// Used for values that can be negative, such as likelihood log-values.
-#[derive(
-    serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
-pub struct SignedRationalNumber(pub Ratio<i64>);
-
 pub fn rational_number_from_f32(f: f32) -> Result<RationalNumber> {
     RationalNumber::approximate_float_unsigned(f)
         .ok_or_else(|| anyhow!("Cannot convert {f} to Rational"))
@@ -40,32 +33,9 @@ impl RationalNumber {
     pub const ONE: RationalNumber = Self::new(1, 1);
 }
 
-impl SignedRationalNumber {
-    pub const fn new(numerator: i64, denominator: i64) -> Self {
-        SignedRationalNumber(Ratio::new_raw(numerator, denominator))
-    }
-    pub fn from(numerator: i64, denominator: i64) -> Self {
-        SignedRationalNumber(Ratio::new(numerator, denominator))
-    }
-    pub const ZERO: SignedRationalNumber = Self::new(0, 1);
-
-    /// Convert to f64 (lossy conversion - use only when precision loss is acceptable)
-    pub fn to_f64(&self) -> f64 {
-        *self.0.numer() as f64 / *self.0.denom() as f64
-    }
-}
-
 // Implement Deref to automatically access Ratio's methods
 impl Deref for RationalNumber {
     type Target = Ratio<u64>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Deref for SignedRationalNumber {
-    type Target = Ratio<i64>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -85,12 +55,6 @@ impl FromStr for RationalNumber {
 impl fmt::Display for RationalNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Delegate the formatting task to the inner Ratio<u64> field (self.0)
-        write!(f, "{}", self.0)
-    }
-}
-
-impl fmt::Display for SignedRationalNumber {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -117,30 +81,6 @@ impl<'a, C> Decode<'a, C> for RationalNumber {
         }
 
         Ok(RationalNumber(Ratio::new(num, den)))
-    }
-}
-
-impl<'a, C> Decode<'a, C> for SignedRationalNumber {
-    fn decode(
-        d: &mut minicbor::Decoder<'a>,
-        _ctx: &mut C,
-    ) -> Result<Self, minicbor::decode::Error> {
-        // Handle optional CBOR tag 30 for rationals
-        if matches!(d.datatype()?, minicbor::data::Type::Tag) {
-            d.tag()?; // consume the tag
-        }
-
-        d.array()?;
-        let num: i64 = d.i64()?;
-        let den: i64 = d.u64()? as i64; // denominator is always positive
-
-        if den == 0 {
-            return Err(minicbor::decode::Error::message(
-                "Denominator cannot be zero",
-            ));
-        }
-
-        Ok(SignedRationalNumber(Ratio::new(num, den)))
     }
 }
 
