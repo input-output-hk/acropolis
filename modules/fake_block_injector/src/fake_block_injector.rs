@@ -106,12 +106,12 @@ impl FakeBlockInjector {
             .unwrap_or(CONFIG_BLOCK_PUBLISH_TOPIC.1.to_string());
         info!("Publishing blocks on '{block_publish_topic}'");
 
-        if let Some(file_pattern) = config.get_string("block-files").ok() {
+        if let Ok(file_pattern) = config.get_string("block-files") {
             // Scan directory
             let mut files: Vec<PathBuf> = glob(&file_pattern)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.msg))?
                 .collect::<Result<_, _>>()
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
 
             // Sort into lexicographic order
             files.sort();

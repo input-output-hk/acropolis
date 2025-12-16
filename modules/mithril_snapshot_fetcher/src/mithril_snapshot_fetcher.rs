@@ -362,7 +362,6 @@ impl MithrilSnapshotFetcher {
                             info!(number, slot, "Stopping early");
                             stop = true;
                         } else {
-
                             // Send the block message
                             let message = RawBlockMessage {
                                 header: block.header().cbor().to_vec(),
