@@ -49,8 +49,8 @@ impl BlockUnpacker {
                                 let span = info_span!("block_unpacker", block = block_info.number);
 
                                 async {
-                                    if tracing::enabled!(tracing::Level::INFO) {
-                                        info!(
+                                    if tracing::enabled!(tracing::Level::DEBUG) {
+                                        debug!(
                                             "Decoded block number {} slot {} with {} txs",
                                             block.number(),
                                             block.slot(),
