@@ -1,4 +1,8 @@
-use std::collections::HashMap;
+use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::{
+    AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback,
+};
 use acropolis_common::{
     epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
@@ -15,10 +19,9 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
-use acropolis_common::snapshot::{AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback};
-use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
 
 const UTXO_BATCH_SIZE: usize = 10_000;
 
