@@ -127,6 +127,15 @@ impl SnapshotPublisher {
         Ok(())
     }
 
+    pub async fn publish_snapshot_complete(&self) -> Result<()> {
+        info!("Publishing Snapshot Complete on '{}'", self.snapshot_topic);
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Complete));
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish snapshot complete message: {}", e);
+        });
+        Ok(())
+    }
+
     pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
         info!(
             "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",

@@ -102,10 +102,9 @@ impl EpochsState {
                     Self::handle_bootstrap(&mut state, epoch_data);
                     history.lock().await.commit(epoch_data.epoch, state);
                     info!("Epoch state bootstrap complete");
-                    return Ok(());
                 }
-                Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                    warn!("Snapshot complete without epoch bootstrap data, using default state");
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting bootstrap loop");
                     return Ok(());
                 }
                 _ => {}

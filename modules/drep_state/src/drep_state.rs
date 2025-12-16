@@ -102,9 +102,11 @@ impl DRepState {
                         "Bootstrap complete - {} DReps committed to state",
                         drep_count
                     );
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting DRep state bootstrap loop");
                     return Ok(());
                 }
-                // Ignore other snapshot messages while waiting for DRepState
                 _ => (),
             }
         }

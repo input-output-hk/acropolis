@@ -346,6 +346,7 @@ pub enum CardanoMessage {
 pub enum SnapshotMessage {
     Startup, // subscribers should listen for incremental snapshot data
     Bootstrap(SnapshotStateMessage),
+    Complete, // all bootstrap data has been sent on this topic
     DumpRequest(SnapshotDumpMessage),
     Dump(SnapshotStateMessage),
 }
