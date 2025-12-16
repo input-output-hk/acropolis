@@ -75,6 +75,8 @@ impl FakeBlockInjector {
             era,
         };
 
+        info!("  -> block {number}, slot {slot}");
+
         // Send the block message
         let message = RawBlockMessage {
             header: block.header().cbor().to_vec(),
@@ -116,6 +118,7 @@ impl FakeBlockInjector {
 
             // Read and process them
             for path in files {
+                info!("  {}", path.display());
                 let raw_block = fs::read(&path)?; // Vec<u8>
                 Self::process_block(
                     context.clone(),
