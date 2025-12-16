@@ -20,6 +20,9 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
+# Stop constraint likewise
+# Get enough into Shelley to get parameters
+stop = "epoch:210"
 
 # ============================================================================
 # Core Module Configurations
