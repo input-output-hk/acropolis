@@ -34,7 +34,7 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol_params::ProtocolVersion;
-use crate::rational_number::SignedRationalNumber;
+use crate::rational_number::RationalNumber;
 use crate::{Lovelace, PoolId, StakeCredential};
 
 use super::mark_set_go::VMap;
@@ -46,9 +46,9 @@ use super::streaming_snapshot::SnapshotSet;
 
 /// Likelihood values for stake pool performance estimation.
 /// Encoded as a sequence of log-likelihood values.
-/// Uses SignedRationalNumber to preserve precision from CBOR rational encoding.
+/// Uses RationalNumber to preserve precision from CBOR rational encoding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Likelihood(pub Vec<SignedRationalNumber>);
+pub struct Likelihood(pub Vec<RationalNumber>);
 
 impl<'b, C> minicbor::Decode<'b, C> for Likelihood {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -76,39 +76,31 @@ impl<'b, C> minicbor::Decode<'b, C> for Likelihood {
     }
 }
 
-fn decode_likelihood_value(
-    d: &mut Decoder,
-) -> Result<SignedRationalNumber, minicbor::decode::Error> {
+fn decode_likelihood_value(d: &mut Decoder) -> Result<RationalNumber, minicbor::decode::Error> {
     // Check for CBOR tag 30 (rational number)
     if d.datatype()? == Type::Tag {
         let tag = d.tag()?;
         if tag.as_u64() == 30 {
             // Rational number: [numerator, denominator]
             d.array()?;
-            let num: i64 = d.decode()?;
+            let num: u64 = d.decode()?;
             let den: u64 = d.decode()?;
-            return Ok(SignedRationalNumber::from(num, den as i64));
+            return Ok(RationalNumber::from(num, den));
         }
     }
 
-    // Try as float or integer - convert to rational representation
     match d.datatype()? {
         Type::F16 | Type::F32 | Type::F64 => {
             // For floats, we approximate as a rational
-            // This is a fallback - ideally all values should be tag 30 rationals
             let f = d.f64()?;
             // Use a large denominator to preserve precision
-            let scale = 1_000_000_000_000i64;
-            let num = (f * scale as f64) as i64;
-            Ok(SignedRationalNumber::from(num, scale))
-        }
-        Type::I8 | Type::I16 | Type::I32 | Type::I64 => {
-            let num = d.i64()?;
-            Ok(SignedRationalNumber::from(num, 1))
+            let scale = 1_000_000_000_000u64;
+            let num = (f * scale as f64) as u64;
+            Ok(RationalNumber::from(num, scale))
         }
         Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-            let num = d.u64()? as i64;
-            Ok(SignedRationalNumber::from(num, 1))
+            let num = d.u64()?;
+            Ok(RationalNumber::from(num, 1))
         }
         other => Err(minicbor::decode::Error::message(format!(
             "unexpected type for likelihood value: {:?}",

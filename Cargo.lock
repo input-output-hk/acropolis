@@ -139,6 +139,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "hex",
  "pallas 0.33.0",
  "tracing",
 ]
@@ -269,7 +270,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "pallas 0.33.0",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
  "serde_json",
  "tokio",
  "tracing",
@@ -387,7 +388,7 @@ dependencies = [
  "config",
  "hex",
  "num-traits",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
  "rust_decimal",
  "serde",
  "serde_cbor",
@@ -410,7 +411,7 @@ dependencies = [
  "futures-util",
  "minicbor 0.25.1",
  "pallas-traverse 0.33.0",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
  "serde",
  "serde_json",
  "tempfile",
@@ -1519,9 +1520,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_clock"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5509d9f63ad2d973599703617120dbfeff58078b37895f433cc784b5d3890d6e"
+checksum = "9924a0e24e3589bd36f512938eb56bec29c78a69f2121ee1496c572ae7daa2ed"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1535,9 +1536,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_module_rest_server"
-version = "0.15.1"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a42373dd9604700e51dd07565303522f7b1d2a0002a8db7489c77d846f08c08b"
+checksum = "a0209d2e4c67aa210715d27e28951ddd7f41ad7a91dba737eba85c4d409d865d"
 dependencies = [
  "anyhow",
  "axum",
@@ -1547,15 +1548,16 @@ dependencies = [
  "hyper 0.14.32",
  "serde",
  "tokio",
+ "tower-http 0.3.5",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "caryatid_module_spy"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0432b56f66f5b3d527a704c9c4b090c03567aaefc48350e7bf41fce286431b5d"
+checksum = "39cd94aef4a9d3221de1f98e31ea3bcffece9fed9ea8239f194fdf61063b3f6a"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1565,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_process"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2297ab4f0eb5ccd04c30cd397cbde5e129097c8e3b0e3f7628d5c16dafdbd532"
+checksum = "d3ce41105ccb2b0b1b656f6e1993d01a8ee55ff488c6e842bfba8a49a49a7f46"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1587,9 +1589,9 @@ dependencies = [
 
 [[package]]
 name = "caryatid_sdk"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fceb8e403d1123e3a69fe108ea36d3e24c81f98605d2f15ca58f500774e956b0"
+checksum = "e196038230b4855acd5190baa2ee42927ea695e8e0c0c1ce37ce9e655af483a3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1753,9 +1755,9 @@ checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
 name = "cmake"
-version = "0.1.54"
+version = "0.1.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
+checksum = "b042e5d8a74ae91bb0961acd039822472ec99f8ab0948cbf6d1369588f8be586"
 dependencies = [
  "cc",
 ]
@@ -3003,6 +3005,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range-header"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3521,13 +3529,13 @@ checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libredox"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416f7e718bdb06000964960ffa43b4335ad4012ae8b99060261aa4a8088d5ccb"
+checksum = "df15f6eac291ed1cf25865b1ee60399f57e7c227e7f51bdbd4c5270396a9ed50"
 dependencies = [
  "bitflags 2.10.0",
  "libc",
- "redox_syscall 0.5.18",
+ "redox_syscall 0.6.0",
 ]
 
 [[package]]
@@ -3740,7 +3748,7 @@ dependencies = [
  "getrandom 0.2.16",
  "mithril-cardano-node-internal-database",
  "mithril-common",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
  "semver",
  "serde",
  "serde_json",
@@ -4038,7 +4046,7 @@ dependencies = [
  "bytes",
  "http 1.4.0",
  "opentelemetry",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
 ]
 
 [[package]]
@@ -4053,7 +4061,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
- "reqwest 0.12.25",
+ "reqwest 0.12.26",
  "thiserror 2.0.17",
  "tokio",
  "tonic 0.13.1",
@@ -5233,6 +5241,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_syscall"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec96166dafa0886eb81fe1c0a388bece180fbef2135f97c1e2cf8302e74b43b5"
+dependencies = [
+ "bitflags 2.10.0",
+]
+
+[[package]]
 name = "ref-cast"
 version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5332,9 +5349,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.25"
+version = "0.12.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6eff9328d40131d43bd911d42d79eb6a47312002a4daefc9e37f17e74a7701a"
+checksum = "3b4c14b2d9afca6a60277086b0cc6a6ae0b568f6f7916c943a8cdc79f8be240f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5368,7 +5385,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower 0.5.2",
- "tower-http",
+ "tower-http 0.6.8",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -6680,6 +6697,24 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tower-http"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f873044bf02dd1e8239e9c1293ea39dad76dc594ec16185d0a1bf31d8dc8d858"
+dependencies = [
+ "bitflags 1.3.2",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "http-range-header",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]

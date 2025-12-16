@@ -179,57 +179,6 @@ pub enum UTxOValidationError {
     },
 }
 
-/*
-<<<<<<< HEAD
-
-    /// **Cause:** The transaction size is too big.
-    #[error("Max tx size: supplied={supplied}, max={max}")]
-    MaxTxSizeUTxO { supplied: u32, max: u32 },
-
-    /// **Cause:** Malformed UTxO
-    #[error("Malformed UTxO: era={era}, reason={reason}")]
-    MalformedUTxO { era: Era, reason: String },
-}
-
-/// Validation error
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
-pub enum ValidationError {
-    #[error("Uncategorized validation error: {0}")]
-    Unclassified(String),
-
-    #[error("Governance failure: {0}")]
-    BadGovernance(#[from] GovernanceValidationError),
-
-    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
-    BadTransaction {
-        tx_index: u16,
-        error: TransactionValidationError,
-    },
-
-    #[error("CBOR Decoding error")]
-    CborDecodeError(usize, String),
-
-    #[error("Malformed transaction")]
-    MalformedTransaction(u16, String),
-
-    #[error("Doubly spent UTXO: {0}")]
-    DoubleSpendUTXO(String),
-}
-
-/// Validation status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(clippy::large_enum_variant)]
-pub enum ValidationStatus {
-    /// All good
-    Go,
-
-    /// Error
-    NoGo(ValidationError),
-=======
->>>>>>> 3044df25822506dcc35c03367d554e40c4ef7bf4
-}
-     */
-
 impl ValidationStatus {
     pub fn is_go(&self) -> bool {
         matches!(self, ValidationStatus::Go)
@@ -721,6 +670,16 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
+    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+        if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
+            self.outcomes.clear();
+        }
+    }
+
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
@@ -738,11 +697,8 @@ impl ValidationOutcomes {
             let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
-        } else if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+        } else {
+            self.print_errors(Some(block));
         }
         self.outcomes.clear();
         Ok(())

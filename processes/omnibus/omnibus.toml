@@ -43,7 +43,8 @@ validators = [
 # Add these once they are actually being sent
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
-#           "cardano.validation.utxo"
+#           "cardano.validation.utxo",
+           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -183,7 +184,7 @@ store-transactions = false
 [module.clock]
 
 [module.rest-server]
-address = "127.0.0.1"
+address = "0.0.0.0"
 port = 4340
 
 [module.spy]
