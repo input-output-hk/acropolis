@@ -11,6 +11,7 @@ use acropolis_common::snapshot::{
     AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
     ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback,
 };
+use acropolis_common::DRepRecord;
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
@@ -20,7 +21,7 @@ use acropolis_common::{
     },
     params::EPOCH_LENGTH,
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    BlockInfo, DRepCredential, EpochBootstrapData, Era, UTXOValue, UTxOIdentifier,
 };
 
 use anyhow::Result;
@@ -374,6 +375,7 @@ impl ProposalCallback for SnapshotPublisher {
 impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
@@ -386,7 +388,7 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
         ]
         .into_iter()
         .for_each(|(slice, params)| {
-            publish_gov_state(&self.context, &self.snapshot_topic, slice, params)
+            publish_gov_state(&self.context, &self.snapshot_topic, slice, epoch, params)
         });
 
         Ok(())
@@ -397,14 +399,18 @@ fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
     slice: GovernanceProtocolParametersSlice,
+    epoch: u64,
     params: ProtocolParameters,
 ) {
     info!("Received governance protocol parameters (current, previous, future)");
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+            epoch,
             slice,
             params,
+            era: Some(Era::Conway),
+            network_name: "mainnet".to_string(),
         }),
     )));
 
