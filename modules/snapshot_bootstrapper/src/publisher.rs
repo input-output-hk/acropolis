@@ -3,12 +3,13 @@ use acropolis_common::messages::DRepBootstrapMessage;
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
+use acropolis_common::snapshot::{AccountsCallback, GovernanceStateCallback, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage,
+        GovernanceBootstrapMessage, GovernanceProposalRoots, Message, SnapshotMessage,
         SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
@@ -449,6 +450,74 @@ impl SnapshotsCallback for SnapshotPublisher {
             go_delegators,
             go_stake / 1_000_000
         );
+
+        Ok(())
+    }
+}
+
+impl GovernanceStateCallback for SnapshotPublisher {
+    fn on_governance_state(
+        &mut self,
+        state: acropolis_common::snapshot::GovernanceState,
+    ) -> Result<()> {
+        let epoch = state.epoch;
+
+        info!(
+            "Received governance state for epoch {}: {} proposals, {} vote records",
+            epoch,
+            state.proposals.len(),
+            state.votes.len()
+        );
+
+        // Convert GovernanceState to ConwayVoting-compatible data
+        let (proposals, votes) = state.to_conway_voting_data(epoch);
+
+        // Convert proposal roots
+        let proposal_roots = GovernanceProposalRoots {
+            pparam_update: state.proposal_roots.pparam_update,
+            hard_fork: state.proposal_roots.hard_fork,
+            committee: state.proposal_roots.committee,
+            constitution: state.proposal_roots.constitution,
+        };
+
+        // Extract enacted action IDs
+        let enacted_action_ids: Vec<_> =
+            state.enacted_actions.iter().map(|s| s.id.clone()).collect();
+
+        // Build the bootstrap message
+        let message = GovernanceBootstrapMessage {
+            epoch,
+            proposals,
+            votes,
+            committee: state.committee,
+            constitution: state.constitution,
+            proposal_roots,
+            enacted_action_ids,
+            expired_action_ids: state.expired_action_ids,
+        };
+
+        info!(
+            "Publishing governance bootstrap: {} proposals, {} committee members, constitution: {}",
+            message.proposals.len(),
+            message.committee.as_ref().map(|c| c.members.len()).unwrap_or(0),
+            message.constitution.anchor.url,
+        );
+
+        let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::GovernanceState(message),
+        )));
+
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        // See comment in AccountsCallback::on_accounts for why we block here.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                context.publish(&snapshot_topic, msg).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to publish governance bootstrap message: {}", e)
+                });
+            })
+        });
 
         Ok(())
     }

@@ -1,4 +1,5 @@
 use crate::voting_state::VotingRegistrationState;
+use acropolis_common::messages::GovernanceBootstrapMessage;
 use acropolis_common::protocol_params::ConwayParams;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::validation::{GovernanceValidationError, ValidationError};
@@ -72,6 +73,47 @@ impl ConwayVoting {
 
     pub fn is_bootstrap(&self) -> Result<bool> {
         self.bootstrap.ok_or_else(|| anyhow!("ConwayVoting::is_bootstrap is not set"))
+    }
+
+    /// Bootstrap the governance state from a snapshot
+    /// Populates proposals, votes, and action_status from the bootstrap message
+    pub fn bootstrap_from_snapshot(
+        &mut self,
+        msg: &GovernanceBootstrapMessage,
+        voting_length: u64,
+    ) {
+        // Clear existing state
+        self.proposals.clear();
+        self.votes.clear();
+        self.action_status.clear();
+
+        // Populate proposals and action_status
+        for (proposed_epoch, proposal) in &msg.proposals {
+            let action_id = proposal.gov_action_id.clone();
+
+            // Insert proposal
+            self.proposals.insert(action_id.clone(), (*proposed_epoch, proposal.clone()));
+
+            // Create action status - calculate voting range from proposed epoch
+            let action_status = ActionStatus::new(*proposed_epoch, voting_length);
+            self.action_status.insert(action_id, action_status);
+        }
+
+        // Populate votes - convert from VotingProcedure to (TxHash, VotingProcedure)
+        // Note: We don't have the original TxHash from the snapshot, so we use a placeholder
+        let placeholder_tx = TxHash::default();
+        for (action_id, voter_votes) in &msg.votes {
+            let votes_entry = self.votes.entry(action_id.clone()).or_default();
+            for (voter, procedure) in voter_votes {
+                votes_entry.insert(voter.clone(), (placeholder_tx, procedure.clone()));
+            }
+        }
+
+        tracing::info!(
+            "ConwayVoting bootstrapped: {} proposals, {} actions with votes",
+            self.proposals.len(),
+            self.votes.len()
+        );
     }
 
     pub fn get_conway_params(&self) -> Result<&ConwayParams> {

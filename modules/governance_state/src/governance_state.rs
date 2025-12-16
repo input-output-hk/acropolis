@@ -1,14 +1,15 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
-        StateTransitionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse, StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -43,6 +44,9 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -106,17 +110,12 @@ impl GovernanceState {
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
+        state: Arc<Mutex<State>>,
         mut governance_s: Box<dyn Subscription<Message>>,
         mut drep_s: Box<dyn Subscription<Message>>,
         mut spo_s: Box<dyn Subscription<Message>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let state = Arc::new(Mutex::new(State::new(
-            context.clone(),
-            config.enact_state_topic.clone(),
-            config.verification_output_file.clone(),
-        )));
-
         // Ticker to log stats
         let state_tick = state.clone();
         let mut subscription = context.subscribe("clock.tick").await?;
@@ -281,13 +280,69 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
+
+        // Subscribe for snapshot messages, if allowed
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let state = Arc::new(Mutex::new(State::new(
+            context.clone(),
+            cfg.enact_state_topic.clone(),
+            cfg.verification_output_file.clone(),
+        )));
+
+        // Handle snapshot bootstrap if starting from snapshot
+        if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}' for governance snapshot bootstrap");
+            let mut snapshot_subscription = context.subscribe(&snapshot_subscribe_topic).await?;
+            let state_snapshot = state.clone();
+
+            context.run(async move {
+                loop {
+                    let Ok((_, message)) = snapshot_subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("GovernanceState: Snapshot Startup message received");
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::GovernanceState(gov_msg),
+                        )) => {
+                            let mut locked = state_snapshot.lock().await;
+                            // Use a default voting length if conway params not yet available
+                            // The actual voting length will be set when protocol params arrive
+                            let voting_length = locked
+                                .get_conway_voting()
+                                .get_conway_params()
+                                .map(|p| p.gov_action_lifetime as u64)
+                                .unwrap_or(6); // Default to 6 epochs if not set
+
+                            locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                            info!(
+                                "GovernanceState: Snapshot Bootstrap message received, {} proposals loaded",
+                                gov_msg.proposals.len()
+                            );
+                        }
+                        // Ignore other snapshot messages
+                        _ => (),
+                    }
+                }
+            });
+        }
+
         let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
         let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
         let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
+        let state_run = state.clone();
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, st, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, state_run, gt, dt, st, pt)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
