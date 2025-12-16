@@ -1,25 +1,23 @@
-use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::messages::DRepBootstrapMessage;
-use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::{AccountsCallback, GovernanceStateCallback, SnapshotsCallback};
 use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage,
+        AccountsBootstrapMessage, CardanoMessage, DRepBootstrapMessage, EpochBootstrapMessage,
         GovernanceBootstrapMessage, GovernanceProposalRoots, Message, SnapshotMessage,
         SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
-    snapshot::streaming_snapshot::{
-        DRepCallback, DRepRecord, EpochCallback, GovernanceProposal,
-        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
-        SnapshotMetadata, UtxoCallback,
+    protocol_params::{Nonces, PraosParams},
+    snapshot::{
+        protocol_parameters::ProtocolParameters,
+        streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
+        AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback,
+        PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+        UtxoCallback,
     },
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -124,6 +122,15 @@ impl SnapshotPublisher {
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Startup));
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish bootstrap startup message: {}", e);
+        });
+        Ok(())
+    }
+
+    pub async fn publish_snapshot_complete(&self) -> Result<()> {
+        info!("Publishing Snapshot Complete on '{}'", self.snapshot_topic);
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Complete));
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish snapshot complete message: {}", e);
         });
         Ok(())
     }
@@ -243,11 +250,12 @@ impl PoolCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // See comment in AccountsCallback::on_accounts for why we block here.
+        // IMPORTANT: We use block_in_place + block_on to ensure each publish completes
+        // before the callback returns. This guarantees message ordering. See on_accounts() for details.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
-                    tracing::error!("Failed to publish SPO bootstrap: {}", e);
+                    tracing::error!("Failed to publish SPO bootstrap message: {}", e)
                 });
             })
         });
@@ -268,7 +276,7 @@ impl AccountsCallback for SnapshotPublisher {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some(),
+            !data.snapshots.mark.spos.is_empty(),
         );
 
         // Convert the parsed data to the message type
@@ -525,6 +533,11 @@ impl GovernanceStateCallback for SnapshotPublisher {
 
 impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
+        let total_blocks_previous: u32 =
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+        let total_blocks_current: u32 =
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+
         info!("Snapshot metadata for epoch {}", metadata.epoch);
         info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
@@ -533,14 +546,8 @@ impl SnapshotCallbacks for SnapshotPublisher {
             metadata.pot_balances.reserves,
             metadata.pot_balances.deposits
         );
-        info!(
-            "  - Previous epoch blocks: {}",
-            metadata.blocks_previous_epoch.len()
-        );
-        info!(
-            "  - Current epoch blocks: {}",
-            metadata.blocks_current_epoch.len()
-        );
+        info!("  - Previous epoch blocks: {}", total_blocks_previous);
+        info!("  - Current epoch blocks: {}", total_blocks_current);
 
         self.metadata = Some(metadata);
         Ok(())
@@ -559,9 +566,6 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps_len);
         info!("  - Proposals: {}", self.proposals.len());
-
-        // Note: AccountsBootstrapMessage is now published via on_accounts callback
-
         Ok(())
     }
 }

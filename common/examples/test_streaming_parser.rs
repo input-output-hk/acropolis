@@ -1,27 +1,26 @@
 // Example: Test streaming snapshot parser with large snapshot
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
-
-use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::ledger_state::SPOState;
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::streaming_snapshot::{
-    AccountsCallback, DRepCallback, DRepRecord, GovernanceProtocolParametersCallback, UtxoCallback,
+use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
+    ledger_state::SPOState,
+    snapshot::{
+        protocol_parameters::ProtocolParameters,
+        streaming_snapshot::{AccountsCallback, GovernanceProtocolParametersCallback},
+        utxo::UtxoEntry,
+        AccountState, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+        StreamingSnapshotParser, UtxoCallback,
+    },
+    DRepCredential, NetworkId, PoolRegistration,
 };
-use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::EpochCallback;
-use acropolis_common::snapshot::{
-    AccountState, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
-    SnapshotMetadata, SnapshotsCallback, StreamingSnapshotParser,
-};
-use acropolis_common::{DRepCredential, NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 use tracing::info;
 
-use acropolis_common::EpochBootstrapData;
+use acropolis_common::{DRepRecord, EpochBootstrapData};
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
@@ -51,9 +50,14 @@ impl UtxoCallback for CountingCallbacks {
         // Keep first 10 for display
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
+                let addr_bytes = utxo.address_bytes();
                 eprintln!(
-                    "  UTXO #{}: {} → {:?}",
-                    self.utxo_count, utxo.id, utxo.value
+                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
+                    self.utxo_count,
+                    &utxo.tx_hash_hex()[..16],
+                    utxo.output_index(),
+                    hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                    utxo.coin()
                 );
             }
             self.sample_utxos.push(utxo);
@@ -126,7 +130,7 @@ impl AccountsCallback for CountingCallbacks {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some()
+            data.snapshots
         );
 
         // Keep first 10 for summary
@@ -517,7 +521,15 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
-                    println!("  {}: {} → {:?}", i + 1, utxo.id, utxo.value);
+                    let addr_bytes = utxo.address_bytes();
+                    println!(
+                        "  {}: {}:{} → {} ({} lovelace)",
+                        i + 1,
+                        &utxo.tx_hash_hex()[..16],
+                        utxo.output_index(),
+                        hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                        utxo.coin()
+                    );
                 }
                 println!();
             }
