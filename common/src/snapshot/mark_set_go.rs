@@ -153,15 +153,15 @@ impl RawSnapshotsContainer {
     /// - Set (epoch-1): Uses blocks_previous_epoch
     /// - Go (epoch): Uses blocks_current_epoch
     ///
-    /// Pots assignment:
-    /// - Go (current epoch) gets the current pots for consistency
-    /// - Mark and Set use default pots
+    /// Pots assignment (reserves, treasury, deposits - the global ADA accounting pots):
+    /// - Go (current epoch): receives the pots parsed from the bootstrap file
+    /// - Mark and Set: receive zeroed pots (we don't have historical pots for past epochs)
     ///
-    /// Note: The pots assignment on bootstrapped snapshots doesn't actually affect rewards
-    /// calculation. When rewards are calculated, `performance = mark` is used - but by that
-    /// time, a fresh snapshot created during `enter_epoch` will have become the new mark,
-    /// and these bootstrapped snapshots will have shifted to set/go positions (or been
-    /// discarded). The fresh snapshot captures the correct pots at creation time.
+    /// Why this is safe: Only `mark.pots.reserves` is used in rewards calculation (see
+    /// rewards.rs:79). The first `enter_epoch` after bootstrap creates a fresh snapshot
+    /// with correct pots (from `self.pots`) that becomes the new mark *before* rewards
+    /// are calculated. The bootstrapped snapshots with zeroed pots shift through set→go
+    /// over subsequent epochs, but set/go pots are never read.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
