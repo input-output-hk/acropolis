@@ -3,6 +3,7 @@ mod stores;
 use crate::stores::{fjall::FjallStore, Block, Store, Tx};
 use acropolis_common::queries::blocks::TransactionHashesAndTimeStamps;
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::GenesisDelegates;
 use acropolis_common::{
     caryatid::SubscriptionExt,
     crypto::keyhash_224,
@@ -26,8 +27,8 @@ use acropolis_common::{
         misc::Order,
     },
     state_history::{StateHistory, StateHistoryStore},
-    AssetName, BechOrdAddress, BlockHash, GenesisDelegate, HeavyDelegate,
-    InstantaneousRewardSource, NativeAsset, NetworkId, PoolId, StakeAddress, TxHash,
+    AssetName, BechOrdAddress, BlockHash, HeavyDelegate, InstantaneousRewardSource, NativeAsset,
+    NetworkId, PoolId, StakeAddress, TxHash,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
@@ -1293,14 +1294,14 @@ impl ChainStore {
 #[derive(Default, Debug, Clone)]
 pub struct State {
     pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
-    pub shelley_genesis_delegates: HashMap<PoolId, GenesisDelegate>,
+    pub shelley_genesis_delegates: GenesisDelegates,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
             byron_heavy_delegates: HashMap::new(),
-            shelley_genesis_delegates: HashMap::new(),
+            shelley_genesis_delegates: GenesisDelegates::default(),
         }
     }
 }

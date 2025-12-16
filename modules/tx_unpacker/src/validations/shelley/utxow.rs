@@ -171,7 +171,7 @@ mod tests {
         validate(
             mtx,
             TxHash::from(*tx.hash()),
-            &ctx.shelley_params.gen_delegs.into(),
+            &ctx.shelley_params.gen_delegs,
             ctx.shelley_params.update_quorum,
         )
         .map_err(|e| *e)

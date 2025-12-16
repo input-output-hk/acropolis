@@ -28,8 +28,8 @@ use crate::Pots;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
-use crate::types::*;
 use crate::validation::ValidationStatus;
+use crate::{types::*, DRepRecord};
 
 // Caryatid core messages which we re-export
 use crate::epoch_snapshot::SnapshotsContainer;
@@ -351,6 +351,12 @@ pub enum SnapshotMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepBootstrapMessage {
+    pub epoch: u64,
+    pub dreps: HashMap<DRepCredential, DRepRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SnapshotDumpMessage {
     pub block_height: u64,
 }
@@ -430,12 +436,22 @@ pub struct AccountsBootstrapMessage {
     pub bootstrap_snapshots: Option<SnapshotsContainer>,
 }
 
+/// UTxO bootstrap message containing partial UTxO state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOPartialState {
+    /// UTxOs
+    pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
+    UTxOPartialState(UTxOPartialState),
+    DRepState(DRepBootstrapMessage),
 }
 
 // === Global message enum ===

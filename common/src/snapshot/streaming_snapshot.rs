@@ -24,25 +24,24 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
 use crate::epoch_snapshot::SnapshotsContainer;
-pub use crate::hash::Hash;
+use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-use crate::{
-    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
-    PoolMetadata, Pots, Relay,
-};
 pub use crate::{
-    Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
-    StakeAddress, StakeCredential,
+    Constitution, DRepChoice, DRepCredential, DRepRecord, EpochBootstrapData, Lovelace,
+    MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
+    SingleHostName, StakeAddress, StakeCredential,
 };
+use crate::{PoolBlockProduction, Pots};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 
@@ -515,56 +514,7 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
 }
 
 // -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
-/// UTXO entry with transaction hash, index, address, and value
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UtxoEntry {
-    /// Transaction hash (hex-encoded)
-    pub tx_hash: String,
-    /// Output index
-    pub output_index: u64,
-    /// Hex encoded Cardano addresses
-    pub address: String,
-    /// Lovelace amount
-    pub value: u64,
-    /// Optional inline datum (hex-encoded CBOR)
-    pub datum: Option<String>,
-    /// Optional script reference (hex-encoded CBOR)
-    pub script_ref: Option<String>,
-}
-
-// -----------------------------------------------------------------------------
 // Ledger types for DState parsing
-// -----------------------------------------------------------------------------
-
-/// Local newtype wrapper for DRepCredential to provide custom CBOR decoding
-/// without conflicting with the main Credential type's Decode implementation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct LocalDRepCredential(DRepCredential);
-
-impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        let variant = d.u16()?;
-
-        match variant {
-            0 => Ok(LocalDRepCredential(DRepCredential::AddrKeyHash(
-                d.decode_with(ctx)?,
-            ))),
-            1 => Ok(LocalDRepCredential(DRepCredential::ScriptHash(
-                d.decode_with(ctx)?,
-            ))),
-            _ => Err(minicbor::decode::Error::message(
-                "invalid variant id for DRepCredential",
-            )),
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
 // -----------------------------------------------------------------------------
 
 /// DRep information
@@ -666,8 +616,8 @@ pub trait AccountsCallback {
 
 /// Callback invoked with bulk DRep data
 pub trait DRepCallback {
-    /// Called once with all DRep info
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()>;
+    /// Called once with all DRep data
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()>;
 }
 
 /// Callback invoked with bulk governance proposal data
@@ -1255,7 +1205,7 @@ impl StreamingSnapshotParser {
 
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
-            dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
+            dreps.iter().map(|(cred, record)| (cred.clone(), record.deposit)).collect();
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1274,7 +1224,7 @@ impl StreamingSnapshotParser {
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
-        callbacks.on_dreps(dreps)?;
+        callbacks.on_dreps(epoch, dreps)?;
         callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
@@ -1326,16 +1276,7 @@ impl StreamingSnapshotParser {
 
         // Parse map header first
         let mut decoder = Decoder::new(&buffer);
-        let map_len = match decoder.map()? {
-            Some(len) => {
-                // Found CBOR map with "len" UTXO entries
-                len
-            }
-            None => {
-                // indefinite-length CBOR map
-                u64::MAX
-            }
-        };
+        let map_len = (decoder.map()?).unwrap_or(u64::MAX);
 
         let header_consumed = decoder.position();
         buffer.drain(0..header_consumed);
@@ -1635,27 +1576,12 @@ impl StreamingSnapshotParser {
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
         // Parse key: TransactionInput (array [tx_hash, output_index])
         decoder.array().context("Failed to parse TxIn array")?;
-
-        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
-        let output_index = decoder.u64().context("Failed to parse output_index")?;
-        let tx_hash = hex::encode(tx_hash_bytes);
-
-        // Parse value: TransactionOutput
-        let (address, value) = Self::parse_transaction_output(decoder)
-            .context("Failed to parse transaction output")?;
-
-        Ok(UtxoEntry {
-            tx_hash,
-            output_index,
-            address,
-            value,
-            datum: None,      // TODO: Extract from TxOut
-            script_ref: None, // TODO: Extract from TxOut
-        })
+        let utxo: SnapshotUTxO = decoder.decode().context("Failed to parse UTxO")?;
+        Ok(utxo.0)
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
-    fn parse_vstate(decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
+    fn parse_vstate(decoder: &mut Decoder) -> Result<HashMap<DRepCredential, DRepRecord>> {
         // Parse VState array
         let vstate_len = decoder
             .array()
@@ -1670,25 +1596,24 @@ impl StreamingSnapshotParser {
 
         // Parse DReps map [0]: StakeCredential -> DRepState
         // Using minicbor's Decode trait - much simpler than manual parsing!
-        let dreps_map: BTreeMap<LocalDRepCredential, DRepState> = decoder.decode()?;
-
-        // Convert to DRepInfo
-        let dreps = dreps_map
+        let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
+        let dreps: HashMap<DRepCredential, DRepRecord> = dreps_map
             .into_iter()
-            .map(|(LocalDRepCredential(drep_id), state)| {
+            .map(|(cred, state)| {
                 let anchor = match state.anchor {
-                    StrictMaybe::Just(a) => Some(AnchorInfo {
+                    StrictMaybe::Just(a) => Some(crate::Anchor {
                         url: a.url,
-                        data_hash: a.content_hash.to_string(),
+                        data_hash: a.content_hash.to_vec(),
                     }),
                     StrictMaybe::Nothing => None,
                 };
 
-                DRepInfo {
-                    drep_id,
+                let record = DRepRecord {
                     deposit: state.deposit,
                     anchor,
-                }
+                };
+
+                (cred, record)
             })
             .collect();
 
@@ -1783,138 +1708,6 @@ impl StreamingSnapshotParser {
         })
     }
 
-    /// Stream UTXOs with per-entry callback
-    ///
-    /// Parse a single TxOut from the CBOR decoder
-    fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
-        // TxOut is typically an array [address, value, ...]
-        // or a map for Conway with optional fields
-
-        // Try array format first (most common)
-        match dec.datatype().context("Failed to read TxOut datatype")? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = dec.array().context("Failed to parse TxOut array")?;
-                if arr_len == Some(0) {
-                    return Err(anyhow!("empty TxOut array"));
-                }
-
-                // Element 0: Address (bytes)
-                let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let hex_address = hex::encode(address_bytes);
-
-                // Element 1: Value (coin or map)
-                let value = match dec.datatype().context("Failed to read value datatype")? {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        // Simple ADA-only value
-                        dec.u64().context("Failed to parse u64 value")?
-                    }
-                    Type::Array | Type::ArrayIndef => {
-                        // Multi-asset: [coin, assets_map]
-                        dec.array().context("Failed to parse value array")?;
-                        let coin = dec.u64().context("Failed to parse coin amount")?;
-                        // Skip the assets map
-                        dec.skip().context("Failed to skip assets map")?;
-                        coin
-                    }
-                    _ => {
-                        return Err(anyhow!("unexpected value type"));
-                    }
-                };
-
-                // Skip remaining fields (datum, script_ref)
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        dec.skip().context("Failed to skip TxOut field")?;
-                    }
-                }
-
-                Ok((hex_address, value))
-            }
-            Type::Map | Type::MapIndef => {
-                // Map format (Conway with optional fields)
-                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
-                let map_len = dec.map().context("Failed to parse TxOut map")?;
-
-                let mut address = String::new();
-                let mut value = 0u64;
-                let mut found_address = false;
-                let mut found_value = false;
-
-                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
-                        dec.skip().ok(); // consume break
-                        break;
-                    }
-
-                    // Read key
-                    let key = match dec.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            // Skip both key and value if key is not u32
-                            dec.skip().ok();
-                            dec.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    // Read value based on key
-                    match key {
-                        0 => {
-                            // Address
-                            if let Ok(addr_bytes) = dec.bytes() {
-                                address = hex::encode(addr_bytes);
-                                found_address = true;
-                            } else {
-                                dec.skip().ok();
-                            }
-                        }
-                        1 => {
-                            // Value (coin or multi-asset)
-                            match dec.datatype() {
-                                Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
-                                    if let Ok(coin) = dec.u64() {
-                                        value = coin;
-                                        found_value = true;
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                                    // Multi-asset: [coin, assets_map]
-                                    if dec.array().is_ok() {
-                                        if let Ok(coin) = dec.u64() {
-                                            value = coin;
-                                            found_value = true;
-                                        }
-                                        dec.skip().ok(); // skip assets map
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                _ => {
-                                    dec.skip().ok();
-                                }
-                            }
-                        }
-                        _ => {
-                            // datum (2), script_ref (3), or unknown - skip
-                            dec.skip().ok();
-                        }
-                    }
-                }
-
-                if found_address && found_value {
-                    Ok((address, value))
-                } else {
-                    Err(anyhow!("map-based TxOut missing required fields"))
-                }
-            }
-            _ => Err(anyhow!("unexpected TxOut type")),
-        }
-    }
-
     /// Parse snapshots using hybrid approach with memory-based parsing
     /// Uses snapshot.rs functions to parse mark/set/go snapshots from buffer
     /// We expect the following structure:
@@ -1990,7 +1783,7 @@ pub struct CollectingCallbacks {
     pub utxos: Vec<UtxoEntry>,
     pub pools: SPOState,
     pub accounts: Vec<AccountState>,
-    pub dreps: Vec<DRepInfo>,
+    pub dreps: HashMap<DRepCredential, DRepRecord>,
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
@@ -2028,7 +1821,7 @@ impl AccountsCallback for CollectingCallbacks {
 }
 
 impl DRepCallback for CollectingCallbacks {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
+    fn on_dreps(&mut self, _epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
         self.dreps = dreps;
         Ok(())
     }
@@ -2081,6 +1874,8 @@ impl SnapshotsCallback for CollectingCallbacks {
 
 #[cfg(test)]
 mod tests {
+    use crate::{Address, NativeAssets, TxHash, UTXOValue, UTxOIdentifier, Value};
+
     use super::*;
 
     #[test]
@@ -2111,16 +1906,20 @@ mod tests {
         // Test UTXO callback
         callbacks
             .on_utxo(UtxoEntry {
-                tx_hash: "abc123".to_string(),
-                output_index: 0,
-                address: "addr1...".to_string(),
-                value: 5000000,
-                datum: None,
-                script_ref: None,
+                id: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
+                value: UTXOValue {
+                    address: Address::None,
+                    value: Value {
+                        lovelace: 5000000,
+                        assets: NativeAssets::default(),
+                    },
+                    datum: None,
+                    reference_script: None,
+                },
             })
             .unwrap();
 
         assert_eq!(callbacks.utxos.len(), 1);
-        assert_eq!(callbacks.utxos[0].value, 5000000);
+        assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
     }
 }

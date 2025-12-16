@@ -187,6 +187,7 @@ mod tests {
             &tx_certs,
             &tx_withdrawals,
             &tx_proposal_update,
+            &ctx.shelley_params.gen_delegs,
             &mut vkey_hashes_needed,
             &mut script_hashes_needed,
         );

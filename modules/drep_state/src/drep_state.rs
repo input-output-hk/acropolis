@@ -2,7 +2,8 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -34,6 +35,9 @@ const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("governance-subscribe-topic", "cardano.governance");
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 // Publisher topic
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
@@ -72,6 +76,7 @@ impl DRepState {
                 info!("Consumed initial genesis params from params_subscription");
             }
         }
+
         // Main loop of synchronised messages
         loop {
             // Get the current state snapshot
@@ -272,6 +277,51 @@ impl DRepState {
         let query_history = history.clone();
         let ticker_history = history.clone();
         let ctx_run = context.clone();
+
+        // Subscribe for snapshot messages, if allowed
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        if let Some(mut subscription) = snapshot_subscription {
+            context.run(async move {
+                loop {
+                    // Get the current state snapshot
+                    let mut state = {
+                        let mut h = history.lock().await;
+                        h.get_or_init_with(|| State::new(storage_config))
+                    };
+
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("DRepState: Snapshot Startup message received");
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::DRepState(drep_msg),
+                        )) => {
+                            let drep_count = state.dreps.len();
+                            info!("DRepState: Snapshot Bootstrap message received {drep_count} DReps loaded");
+                            state.bootstrap(drep_msg);
+                            // Commit the bootstrapped state to history to persist changes
+                            history.lock().await.commit(drep_msg.epoch, state);
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => (),
+                    }
+                }
+            });
+        }
 
         // Query handler
         context.handle(&drep_query_topic, move |message| {

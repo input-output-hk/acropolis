@@ -7,7 +7,10 @@ use acropolis_common::{
     messages::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
-    }, protocol_params::ProtocolParams, state_history::{StateHistory, StateHistoryStore}, *
+    },
+    protocol_params::ProtocolParams,
+    state_history::{StateHistory, StateHistoryStore},
+    *,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
@@ -124,7 +127,6 @@ impl TxUnpacker {
 
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
                     span.in_scope(|| {
-                        let genesis_delegs: Option<GenesisDelegates> = state.protocol_params.shelley.as_ref().map(|shelley_params| shelley_params.gen_delegs.into());
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
 
@@ -155,7 +157,7 @@ impl TxUnpacker {
                                         &tx_certs,
                                         &tx_withdrawals,
                                         &tx_proposal_update,
-                                        state.protocol_params.shelley.
+                                        &state.protocol_params,
                                         &mut vkey_hashes_needed,
                                         &mut script_hashes_needed,
                                     );
@@ -583,7 +585,8 @@ impl TxUnpacker {
         vkey_hashes: &mut HashSet<KeyHash>,
         script_hashes: &mut HashSet<ScriptHash>,
     ) {
-        let genesis_delegs: Option<GenesisDelegates> = protocol_params.shelley.as_ref().map(|shelley_params| shelley_params.gen_delegs.into());
+        let genesis_delegs =
+            protocol_params.shelley.as_ref().map(|shelley_params| &shelley_params.gen_delegs);
         // for each certificate, get the required vkey and script hashes
         for cert_with_pos in certs.iter() {
             cert_with_pos.cert.get_cert_authors(vkey_hashes, script_hashes);
@@ -597,7 +600,7 @@ impl TxUnpacker {
         // for each governance action, get the required vkey hashes
         if let Some(proposal_update) = proposal_update.as_ref() {
             if let Some(genesis_delegs) = genesis_delegs {
-                proposal_update.get_governance_authors(vkey_hashes, &genesis_delegs);
+                proposal_update.get_governance_authors(vkey_hashes, genesis_delegs);
             } else {
                 error!("Genesis delegates not found in protocol parameters");
             }
