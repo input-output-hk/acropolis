@@ -1,16 +1,14 @@
+use crate::store_config::StoreConfig;
 use acropolis_common::{
-    BlockInfo, KeyHash, PoolEpochState, PoolId,
-    messages::{
-        EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage
-    },
+    messages::{EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage},
     rational_number::RationalNumber,
-    validation::ValidationOutcomes
+    validation::ValidationOutcomes,
+    BlockInfo, KeyHash, PoolEpochState, PoolId,
 };
+use anyhow::anyhow;
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::{collections::BTreeMap, sync::Arc};
-use anyhow::anyhow;
-use crate::store_config::StoreConfig;
 
 /// Epoch State for certain pool
 /// Store active_stake, delegators_count, rewards
@@ -140,7 +138,11 @@ impl EpochsHistoryState {
     /// Handle SPO rewards data calculated from accounts-state
     /// NOTE:
     /// The calculated result is one epoch off against blockfrost's response.
-    pub fn handle_spo_rewards(&self, block: &BlockInfo, spo_rewards_message: &SPORewardsMessage) -> ValidationOutcomes {
+    pub fn handle_spo_rewards(
+        &self,
+        block: &BlockInfo,
+        spo_rewards_message: &SPORewardsMessage,
+    ) -> ValidationOutcomes {
         let mut vld = ValidationOutcomes::new();
         let Some(epochs_history) = self.epochs_history.as_ref() else {
             return vld;
@@ -149,7 +151,8 @@ impl EpochsHistoryState {
         if *epoch != block.epoch - 1 {
             vld.push_anyhow(anyhow!(
                 "SPO Rewards Message's epoch {} is wrong against current block's epoch {}",
-                *epoch, block.epoch
+                *epoch,
+                block.epoch
             ))
         }
 

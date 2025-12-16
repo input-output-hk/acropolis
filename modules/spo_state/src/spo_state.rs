@@ -5,6 +5,7 @@ use acropolis_common::caryatid::SubscriptionExt;
 use acropolis_common::configuration::StartupMethod;
 use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     ledger_state::SPOState as LedgerSPOState,
     messages::{
@@ -26,7 +27,6 @@ use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-use acropolis_common::validation::ValidationOutcomes;
 
 mod epochs_history;
 mod historical_spo_state;
@@ -89,11 +89,11 @@ struct SPOStateImpl {
     validation: ValidationOutcomes,
     current_block: Option<BlockInfo>,
     context: Arc<Context<Message>>,
-    validation_topic: String
+    validation_topic: String,
 }
 
 impl SPOStateImpl {
-    pub fn new (context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
+    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
         Self {
             validation: ValidationOutcomes::new(),
             current_block: None,
@@ -119,19 +119,18 @@ impl SPOStateImpl {
     pub fn merge_handling(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
         match outcome {
             Err(e) => self.handling_error(handler, &e),
-            Ok(mut outcome) => self.validation.merge(&mut outcome)
+            Ok(mut outcome) => self.validation.merge(&mut outcome),
         }
     }
 
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
-            if let Err(e) = self.validation.publish(
-                &self.context, &self.validation_topic, blk
-            ).await {
+            if let Err(e) =
+                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            {
                 error!("Publish failed: {:?}", e);
             }
-        }
-        else {
+        } else {
             self.validation.print_errors(None);
         }
     }
@@ -141,7 +140,9 @@ impl SPOStateImpl {
         if let Some(ref block) = self.current_block {
             if block.number != actual.number {
                 self.validation.push_anyhow(anyhow!(
-                    "Messages out of sync: expected {}, actual {}", block.number, actual.number
+                    "Messages out of sync: expected {}, actual {}",
+                    block.number,
+                    actual.number
                 ));
             }
         }
@@ -241,9 +242,10 @@ impl SPOState {
                                 }
                             }
 
-                            Err(e) => ctx.validation.push_anyhow(
-                                anyhow!("Can't decode header {}: {e}", block_info.slot)
-                            ),
+                            Err(e) => ctx.validation.push_anyhow(anyhow!(
+                                "Can't decode header {}: {e}",
+                                block_info.slot
+                            )),
                         }
                     });
                 }
@@ -274,9 +276,8 @@ impl SPOState {
 
                             // publish spo message
                             if let Err(e) = spo_state_publisher.publish(message).await {
-                                ctx.validation.push_anyhow(anyhow!(
-                                    "Error publishing SPO State: {e:#}"
-                                ))
+                                ctx.validation
+                                    .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
                             }
                         }
                     }
@@ -325,9 +326,10 @@ impl SPOState {
                         span.in_scope(|| {
                             ctx.check_sync(block_info);
                             // update epochs_history
-                            ctx.validation.merge(&mut epochs_history.handle_spo_rewards(
-                                block_info, spo_rewards_message
-                            ));
+                            ctx.validation.merge(
+                                &mut epochs_history
+                                    .handle_spo_rewards(block_info, spo_rewards_message),
+                            );
                         });
                     }
                 }
@@ -353,8 +355,9 @@ impl SPOState {
                             ctx.merge_handling(
                                 "StakeRewardDeltas",
                                 state.handle_stake_reward_deltas(
-                                    block_info, stake_reward_deltas_message
-                                )
+                                    block_info,
+                                    stake_reward_deltas_message,
+                                ),
                             );
                         });
                     }
@@ -943,7 +946,7 @@ impl SPOState {
                 spo_rewards_subscription,
                 stake_reward_deltas_subscription,
                 spo_state_publisher,
-                validation_publish_topic
+                validation_publish_topic,
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run SPO State: {e}"));

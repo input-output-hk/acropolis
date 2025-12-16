@@ -1,5 +1,7 @@
 //! Acropolis SPOState: State storage
 
+use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     crypto::keyhash_224,
     ledger_state::SPOState,
@@ -17,8 +19,6 @@ use anyhow::{anyhow, Result};
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
-use acropolis_common::validation::ValidationOutcomes;
-use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
@@ -264,7 +264,11 @@ impl State {
         true
     }
 
-    fn handle_new_epoch(&mut self, block: &BlockInfo, vld: &mut ValidationOutcomes) -> Arc<Message> {
+    fn handle_new_epoch(
+        &mut self,
+        block: &BlockInfo,
+        vld: &mut ValidationOutcomes,
+    ) -> Arc<Message> {
         self.epoch = block.epoch;
         debug!(epoch = self.epoch, "New epoch");
 
@@ -285,9 +289,8 @@ impl State {
             for dr in deregistrations {
                 debug!("Retiring SPO {}", dr);
                 match self.spos.remove(&dr) {
-                    None => vld.push_anyhow(anyhow!(
-                        "Retirement requested for unregistered SPO {}", dr,
-                    )),
+                    None => vld
+                        .push_anyhow(anyhow!("Retirement requested for unregistered SPO {}", dr,)),
                     Some(_de_reg) => {
                         retired_spos.push(dr);
                     }
@@ -375,12 +378,14 @@ impl State {
         if ret.epoch <= self.epoch {
             vld.push_anyhow(anyhow!(
                 "SPO retirement received for current or past epoch {} for SPO {}",
-                ret.epoch, ret.operator
+                ret.epoch,
+                ret.operator
             ));
         } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
             vld.push_anyhow(anyhow!(
                 "SPO retirement received for epoch {} that exceeds future limit for SPO {}",
-                ret.epoch, ret.operator
+                ret.epoch,
+                ret.operator
             ));
         } else {
             // Replace any existing queued deregistrations
@@ -443,7 +448,8 @@ impl State {
                             if !removed {
                                 vld.push_anyhow(anyhow!(
                                     "Historical SPO state for {} does not contain delegator {}",
-                                    old_spo, stake_address
+                                    old_spo,
+                                    stake_address
                                 ));
                             }
                         }
@@ -456,9 +462,11 @@ impl State {
 
     /// Record a stake delegation
     /// Update historical_spo_state's delegators
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId)
-        -> ValidationOutcomes
-    {
+    fn record_stake_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        spo: &PoolId,
+    ) -> ValidationOutcomes {
         let mut vld = ValidationOutcomes::default();
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
             return vld;
@@ -477,13 +485,17 @@ impl State {
                                 if !removed {
                                     vld.push_anyhow(anyhow!(
                                         "Historical SPO state for {} does not contain delegator {}",
-                                        old_spo, stake_address
+                                        old_spo,
+                                        stake_address
                                     ));
                                 }
                             }
                         }
                         _ => {
-                            vld.push_anyhow(anyhow!("Missing Historical SPO state for {}", old_spo));
+                            vld.push_anyhow(anyhow!(
+                                "Missing Historical SPO state for {}",
+                                old_spo
+                            ));
                         }
                     }
                 }
@@ -496,7 +508,8 @@ impl State {
                     if !added {
                         vld.push_anyhow(anyhow!(
                             "Historical SPO state for {} already contains delegator {}",
-                            spo, stake_address
+                            spo,
+                            stake_address
                         ));
                     }
                 }
@@ -523,7 +536,7 @@ impl State {
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
-        vld: &mut ValidationOutcomes
+        vld: &mut ValidationOutcomes,
     ) -> Result<Option<Arc<Message>>> {
         let mut maybe_message: Option<Arc<Message>> = None;
         if block.epoch > self.epoch {
@@ -668,7 +681,8 @@ impl State {
             let mut stake_addresses = stake_addresses.lock().unwrap();
             if let Err(e) = stake_addresses.pay_reward(&delta.stake_address, delta.delta) {
                 vld.push_anyhow(anyhow!(
-                    "Updating reward account {}: {e}", delta.stake_address
+                    "Updating reward account {}: {e}",
+                    delta.stake_address
                 ));
             }
         }
