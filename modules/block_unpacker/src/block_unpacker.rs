@@ -219,8 +219,8 @@ mod tests {
         println!("{}", hex::encode(RAW_4495225));
 
         let decoded = MultiEraBlock::decode(&RAW_4495225)?;
-        let tx0 = decoded.txs().get(0).unwrap().clone();
-        let cert0 = tx0.certs().get(0).unwrap().clone();
+        let tx0 = decoded.txs().first().unwrap().clone();
+        let cert0 = tx0.certs().first().unwrap().clone();
         let alonzo_cert = cert0.as_alonzo().unwrap().clone();
         let Certificate::PoolRetirement(pool, epoch) = alonzo_cert else {
             bail!("PoolRetirement(PoolRetirementMessage) expected")
