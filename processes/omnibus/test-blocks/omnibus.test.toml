@@ -64,7 +64,6 @@ address-delta-topic = "cardano.address.delta"
 [module.governance-state]
 
 [module.parameters-state]
-store-history = false
 
 [module.stake-delta-filter]
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
@@ -73,14 +72,6 @@ write-full-cache = "false"
 [module.epochs-state]
 
 [module.accounts-state]
-# Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
-spdd-retention-epochs = 0
-spdd-db-path = "./fjall-spdd"
-spdd-clear-on-start = true
-# Verify against captured CSV
-verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
-verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
-verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.block-vrf-validator]
 
@@ -88,22 +79,9 @@ verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.clock]
 
-[module.rest-server]
-address = "127.0.0.1"
-port = 4340
-
-[module.spy]
-# Enable for message spying
-#topic = "cardano.#"
-
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
-
 [message-bus.internal]
 class = "in-memory"
 workers = 50
