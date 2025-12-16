@@ -2,7 +2,10 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::configuration::StartupMethod;
-use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
+use acropolis_common::messages::{
+    GovernanceProtocolParametersSlice, SnapshotMessage, SnapshotStateMessage,
+    StateTransitionMessage,
+};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -106,6 +109,8 @@ impl ParametersState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut enact_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        // Process the snapshot messages first to bootstrap state if needed
+
         loop {
             let (_, message) = enact_s.read().await?;
             match message.as_ref() {
@@ -196,18 +201,10 @@ impl ParametersState {
 
         let cfg_clone = cfg.clone();
         let history_clone = history.clone();
+        let network_name = cfg.network_name.clone();
 
         if let Some(mut subscription) = snapshot_subscription {
-            let cfg_snapshot = cfg.clone();
-            let history_snapshot = history.clone();
             context.run(async move {
-                // Get current state and current params
-                let mut state = {
-                    let network_name = cfg_snapshot.network_name.clone();
-                    let mut h = history_snapshot.lock().await;
-                    h.get_or_init_with(|| State::new(network_name))
-                };
-
                 loop {
                     let Ok((_, message)) = subscription.read().await else {
                         return;
@@ -220,12 +217,24 @@ impl ParametersState {
                         Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::ParametersState(msg),
                         )) => {
+                            // Get current state and current params
+                            let mut state = {
+                                let mut h = history.lock().await;
+                                h.get_or_init_with(|| State::new(network_name.clone()))
+                            };
                             info!("ParameterState: Snapshot Bootstrap message received");
-                            info!(
-                                "ParameterState: got slice: {:?} params: {:?}",
-                                msg.slice, msg.params
-                            );
-                            state.bootstrap(msg);
+                            info!("ParameterState: got slice: {:?}", msg.slice);
+                            if msg.slice == GovernanceProtocolParametersSlice::Current {
+                                let epoch = state.bootstrap(msg);
+                                let mut h = history.lock().await;
+                                h.commit(epoch, state);
+                            } else {
+                                error!(
+                                    "ParameterState: Unsupported slice in bootstrap: {:?}",
+                                    msg.slice
+                                );
+                                continue;
+                            }
                         }
                         // There will be other snapshot messages that we're not interested in
                         _ => (),

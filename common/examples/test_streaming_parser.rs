@@ -199,11 +199,12 @@ impl ProposalCallback for CountingCallbacks {
 impl GovernanceProtocolParametersCallback for CountingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        eprintln!("\n=== Governance Protocol Parameters ===\n");
+        eprintln!("\n=== Governance Protocol Parameters for epoch {epoch} ===\n");
 
         eprintln!("Previous Protocol Parameters:");
         eprintln!(

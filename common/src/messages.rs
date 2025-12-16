@@ -366,8 +366,11 @@ pub enum GovernanceProtocolParametersSlice {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GovernanceProtocolParametersBootstrapMessage {
+    pub network_name: String,
+    pub era: Option<Era>,
     pub slice: GovernanceProtocolParametersSlice,
     pub params: ProtocolParameters,
+    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -4,7 +4,7 @@ use acropolis_common::messages::{
     GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
 };
 use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::protocol_parameters::{self, ProtocolParameters};
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -20,12 +20,13 @@ use acropolis_common::{
         SnapshotMetadata, UtxoCallback, UtxoEntry,
     },
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, EpochBootstrapData,
+    BlockInfo, DRepCredential, EpochBootstrapData, Era,
 };
 
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::collections::HashMap;
+use std::f32::consts::E;
 use std::sync::Arc;
 use tracing::info;
 
@@ -307,6 +308,7 @@ impl ProposalCallback for SnapshotPublisher {
 impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
@@ -319,7 +321,7 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
         ]
         .into_iter()
         .for_each(|(slice, params)| {
-            publish_gov_state(&self.context, &self.snapshot_topic, slice, params)
+            publish_gov_state(&self.context, &self.snapshot_topic, slice, epoch,params)
         });
 
         Ok(())
@@ -330,14 +332,18 @@ fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
     slice: GovernanceProtocolParametersSlice,
+    epoch: u64,
     params: ProtocolParameters,
 ) {
     info!("Received governance protocol parameters (current, previous, future)");
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+            epoch,
             slice,
             params,
+            era: Some(Era::Conway),
+            network_name: "mainnet".to_string(),
         }),
     )));
 

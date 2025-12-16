@@ -651,6 +651,7 @@ pub trait GovernanceProtocolParametersCallback {
     /// Called once with all proposals
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
@@ -1143,6 +1144,7 @@ impl StreamingSnapshotParser {
         let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?; // may be empty
 
         callbacks.on_gs_protocol_parameters(
+            epoch,
             gs_previous_pparams,
             gs_current_pparams,
             gs_future_pparams,
@@ -2004,10 +2006,12 @@ impl ProposalCallback for CollectingCallbacks {
 impl GovernanceProtocolParametersCallback for CollectingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
+        _epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
     ) -> Result<()> {
+        // epoch is already stored in metadata
         self.gs_protocol_previous_parameters = Some(gs_previous_params);
         self.gs_protocol_current_parameters = Some(gs_current_params);
         self.gs_protocol_future_parameters = Some(gs_future_params);
