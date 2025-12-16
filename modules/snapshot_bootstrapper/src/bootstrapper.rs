@@ -114,15 +114,11 @@ impl SnapshotBootstrapper {
             cfg.snapshot_topic.clone(),
             bootstrap_ctx.context(),
         );
-
+/*
         // Send Conway era "genesis" block before updating from snapshot
         // because some of the models, like protocol parameters, depend
         // on having a base state. This is synchronization of modules.
         if bootstrap_ctx.block_info.era == acropolis_common::Era::Conway {
-            let mut block_info = bootstrap_ctx.block_info.clone();
-            block_info.status = BlockStatus::Immutable;
-            block_info.intent = BlockIntent::Apply;
-            block_info.hash = BlockHash::default(); // Genesis block has no hash
             let raw_block = vec![]; // Genesis block has no body
             let header = vec![]; // Genesis block has no header
 
@@ -132,11 +128,15 @@ impl SnapshotBootstrapper {
                 body: raw_block,
             };
 
+            let block_info = bootstrap_ctx.block_info.clone();
             let message_enum =
-                Message::Cardano((block_info.clone(), CardanoMessage::BlockAvailable(message)));
+                Message::Cardano((block_info, CardanoMessage::BlockAvailable(message)));
 
             let block_publish_topic = DEFAULT_BLOCK_PUBLISH_TOPIC.1.to_string();
-            info!("Publishing Conway genesisblock on '{block_publish_topic}'");
+            info!(
+                "Publishing Conway genesis block with blockinfo {:?} to {}",
+                bootstrap_ctx.block_info, block_publish_topic
+            );
 
             context
                 .clone()
@@ -145,7 +145,7 @@ impl SnapshotBootstrapper {
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
         }
-
+*/
         // Download
         let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
         downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;

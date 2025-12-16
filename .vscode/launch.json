@@ -1,41 +1,11 @@
 {
   "version": "0.2.0",
   "configurations": [
-  
-    {
-        "type": "lldb",
-        "request": "launch",
-        "name": "Debug unit tests in library 'acropolis_common'",
-        "cargo": {
-          "args": [
-            "test",
-            "--no-run",
-            "--lib",
-            "--package=acropolis_common"
-          ]
-        },
-        "args": [],
-        "cwd": "${workspaceFolder}"
-      },
-      {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in library 'acropolis_module_utxo_state'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--lib",
-          "--package=acropolis_module_utxo_state"
-        ]
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
+    // ===== Executables =====
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug executable 'acropolis_process_omnibus'",
+      "name": "Debug: omnibus",
       "cargo": {
         "args": [
           "build",
@@ -48,28 +18,169 @@
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}/processes/omnibus"
+      "cwd": "${workspaceFolder}/processes/omnibus",
+      "sourceLanguages": ["rust"],
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
     },
     {
-        "type": "lldb",
-        "request": "launch",
-        "name": "Debug executable 'acropolis_process_omnibus' with debug log",
-        "cargo": {
-          "args": [
-            "build",
-            "--bin=acropolis_process_omnibus",
-            "--package=acropolis_process_omnibus"
-          ],
-          "filter": {
-            "name": "acropolis_process_omnibus",
-            "kind": "bin"
-          }
-        },
-        "args": [],
-        "cwd": "${workspaceFolder}/processes/omnibus",
-        "env": {
-          "RUST_LOG": "debug"
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: omnibus (debug log)",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=acropolis_process_omnibus",
+          "--package=acropolis_process_omnibus"
+        ],
+        "filter": {
+          "name": "acropolis_process_omnibus",
+          "kind": "bin"
         }
       },
-   ]
+      "args": [],
+      "cwd": "${workspaceFolder}/processes/omnibus",
+      "sourceLanguages": ["rust"],
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: replayer",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=acropolis_process_replayer",
+          "--package=acropolis_process_replayer"
+        ],
+        "filter": {
+          "name": "acropolis_process_replayer",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/processes/replayer",
+      "sourceLanguages": ["rust"],
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug: indexer",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=acropolis_process_indexer",
+          "--package=acropolis_process_indexer"
+        ],
+        "filter": {
+          "name": "acropolis_process_indexer",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/processes/indexer",
+      "sourceLanguages": ["rust"],
+      "env": {
+        "RUST_BACKTRACE": "1"
+      }
+    },
+    // ===== Module Tests =====
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: acropolis_common",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=acropolis_common"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: parameters_state",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=acropolis_module_parameters_state"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: drep_state",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=acropolis_module_drep_state"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: snapshot_bootstrapper",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=acropolis_module_snapshot_bootstrapper"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: utxo_state",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib",
+          "--package=acropolis_module_utxo_state"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    // ===== Current File =====
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Test: Current File",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--lib"
+        ]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
 }
