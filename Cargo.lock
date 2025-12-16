@@ -139,6 +139,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "hex",
  "pallas 0.33.0",
  "tracing",
 ]

@@ -362,13 +362,12 @@ impl State {
 
     fn handle_pool_retirement(
         &mut self,
+        vld: &mut ValidationOutcomes,
         block: &BlockInfo,
         ret: &PoolRetirement,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) -> ValidationOutcomes {
-        let mut vld = ValidationOutcomes::new();
-
+    ) {
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
@@ -416,8 +415,6 @@ impl State {
                 ));
             }
         }
-
-        vld
     }
 
     fn register_stake_address(&mut self, stake_address: &StakeAddress) {
@@ -555,6 +552,7 @@ impl State {
                 }
                 TxCertificate::PoolRetirement(ret) => {
                     self.handle_pool_retirement(
+                        vld,
                         block,
                         ret,
                         &tx_cert.tx_identifier,
