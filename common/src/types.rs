@@ -916,6 +916,12 @@ impl TxIdentifier {
     }
 }
 
+impl Display for TxIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.block_number(), self.tx_index())
+    }
+}
+
 // Full UTXO identifier as used in the outside world, with TX hash and output index
 #[derive(
     Debug,

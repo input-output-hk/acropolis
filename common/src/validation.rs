@@ -34,6 +34,18 @@ pub enum ValidationStatus {
     NoGo(ValidationError),
 }
 
+impl ValidationStatus {
+    pub fn is_go(&self) -> bool {
+        matches!(self, ValidationStatus::Go)
+    }
+
+    pub fn compose(&mut self, status: ValidationStatus) {
+        if self.is_go() {
+            *self = status;
+        }
+    }
+}
+
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
 pub enum ValidationError {
@@ -270,22 +282,6 @@ pub enum UTxOWValidationError {
         "Malformed address: address={}, reason={reason}", address.to_string().unwrap_or("Invalid address".to_string())
     )]
     MalformedAddress { address: Address, reason: String },
-}
-
-/*
-}
-     */
-
-impl ValidationStatus {
-    pub fn is_go(&self) -> bool {
-        matches!(self, ValidationStatus::Go)
-    }
-
-    pub fn compose(&mut self, status: ValidationStatus) {
-        if self.is_go() {
-            *self = status;
-        }
-    }
 }
 
 /// Reference
@@ -767,6 +763,16 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
+    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+        if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
+            self.outcomes.clear();
+        }
+    }
+
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
@@ -784,11 +790,8 @@ impl ValidationOutcomes {
             let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
-        } else if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+        } else {
+            self.print_errors(Some(block));
         }
         self.outcomes.clear();
         Ok(())
