@@ -142,6 +142,8 @@ pub fn validate(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
@@ -163,6 +165,11 @@ mod tests {
         matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 }) 
         if genesis_keys.len() == 4;
         "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
+    )]
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "invalid_witnesses_utxow") =>
+        matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
+        if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
+        "invalid_witnesses_utxow"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {

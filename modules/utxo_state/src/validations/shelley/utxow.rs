@@ -104,11 +104,6 @@ pub fn validate(
         utxos_needed,
     );
 
-    println!("vkey_hashes_needed: {:?}", vkey_hashes_needed);
-    println!("script_hashes_needed: {:?}", script_hashes_needed);
-    println!("vkey_hashes_provided: {:?}", vkey_hashes_provided);
-    println!("script_hashes_provided: {:?}", script_hashes_provided);
-
     // validate missing & extra scripts
     validate_missing_extra_scripts(script_hashes_needed, script_hashes_provided)?;
 
@@ -120,6 +115,8 @@ pub fn validate(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
     use acropolis_common::{
@@ -153,9 +150,18 @@ mod tests {
         }
     }
 
-    #[test_case(validation_fixture!("b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46") =>
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
         matches Ok(());
         "valid transaction 1"
+    )]
+    #[test_case(validation_fixture!("b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46") =>
+        matches Ok(());
+        "valid transaction 2 - with protocol update"
+    )]
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "missing_vkey_witnesses_utxow") =>
+        matches Err(UTxOWValidationError::MissingVKeyWitnessesUTxOW { key_hash })
+        if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
+        "missing_vkey_witnesses_utxow"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
