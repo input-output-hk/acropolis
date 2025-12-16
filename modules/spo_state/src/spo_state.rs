@@ -19,13 +19,14 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus, Era, PoolId,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+use acropolis_common::validation::ValidationOutcomes;
 
 mod epochs_history;
 mod historical_spo_state;
@@ -73,6 +74,9 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
     ("publish-spo-state-topic", "cardano.spo.state");
 
+const DEFAULT_VALIDATION_PUBLISH_TOPIC: (&str, &str) =
+    ("publish-validation-topic", "cardano.validation.spo");
+
 /// SPO State module
 #[module(
     message_type(Message),
@@ -81,6 +85,69 @@ const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
 )]
 pub struct SPOState;
 
+struct SPOStateImpl {
+    validation: ValidationOutcomes,
+    current_block: Option<BlockInfo>,
+    context: Arc<Context<Message>>,
+    validation_topic: String
+}
+
+impl SPOStateImpl {
+    pub fn new (context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
+        Self {
+            validation: ValidationOutcomes::new(),
+            current_block: None,
+            context: context.clone(),
+            validation_topic: validation_topic.to_owned(),
+        }
+    }
+
+    pub fn set_current_block(&mut self, block: &BlockInfo) {
+        self.current_block = Some(block.clone());
+    }
+
+    pub fn unexpected_message_type(&mut self, topic: &str, msg: &Message) {
+        self.validation.push_anyhow(anyhow!(
+            "Unexpected message type for {topic} topic: {msg:?}"
+        ));
+    }
+
+    pub fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
+        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
+    }
+
+    pub fn merge_handling(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
+        match outcome {
+            Err(e) => self.handling_error(handler, &e),
+            Ok(mut outcome) => self.validation.merge(&mut outcome)
+        }
+    }
+
+    pub async fn publish(&mut self) {
+        if let Some(blk) = &self.current_block {
+            if let Err(e) = self.validation.publish(
+                &self.context, &self.validation_topic, blk
+            ).await {
+                error!("Publish failed: {:?}", e);
+            }
+        }
+        else {
+            self.validation.print_errors(None);
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(&mut self, actual: &BlockInfo) {
+        if let Some(ref block) = self.current_block {
+            if block.number != actual.number {
+                self.validation.push_anyhow(anyhow!(
+                    "Messages out of sync: expected {}, actual {}", block.number, actual.number
+                ));
+            }
+        }
+    }
+}
+
 impl SPOState {
     /// Main async run loop
     #[allow(clippy::too_many_arguments)]
@@ -88,6 +155,7 @@ impl SPOState {
         history: Arc<Mutex<StateHistory<State>>>,
         epochs_history: EpochsHistoryState,
         retired_pools_history: RetiredPoolsHistoryState,
+        context: Arc<Context<Message>>,
         store_config: &StoreConfig,
         // subscribers
         mut certificates_subscription: Box<dyn Subscription<Message>>,
@@ -101,6 +169,7 @@ impl SPOState {
         mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         // publishers
         mut spo_state_publisher: SPOStatePublisher,
+        validation_publish_topic: String,
     ) -> Result<()> {
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
@@ -113,7 +182,7 @@ impl SPOState {
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
-            let mut current_block: Option<BlockInfo> = None;
+            let mut ctx = SPOStateImpl::new(&context, &validation_publish_topic);
 
             // Use certs_message as the synchroniser
             let (_, certs_message) = certificates_subscription.read().await?;
@@ -123,7 +192,7 @@ impl SPOState {
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    current_block = Some(block_info.clone());
+                    ctx.set_current_block(block_info);
 
                     // new_epoch?
                     block_info.new_epoch && block_info.epoch > 0
@@ -138,7 +207,7 @@ impl SPOState {
                 }
 
                 _ => {
-                    error!("Unexpected message type: {certs_message:?}");
+                    ctx.unexpected_message_type("certificates", &certs_message);
                     false
                 }
             };
@@ -172,12 +241,14 @@ impl SPOState {
                                 }
                             }
 
-                            Err(e) => error!("Can't decode header {}: {e}", block_info.slot),
+                            Err(e) => ctx.validation.push_anyhow(
+                                anyhow!("Can't decode header {}: {e}", block_info.slot)
+                            ),
                         }
                     });
                 }
 
-                _ => error!("Unexpected message type: {block_message:?}"),
+                _ => ctx.unexpected_message_type("block header", &block_message),
             }
 
             // handle tx certificates
@@ -185,10 +256,10 @@ impl SPOState {
                 Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
-                        Self::check_sync(&current_block, block_info);
+                        ctx.check_sync(block_info);
                         let maybe_message = state
-                            .handle_tx_certs(block_info, tx_certs_msg)
-                            .inspect_err(|e| error!("TxCerts Messages handling error: {e}"))
+                            .handle_tx_certs(block_info, tx_certs_msg, &mut ctx.validation)
+                            .inspect_err(|e| ctx.handling_error("TxCerts", e))
                             .ok();
 
                         if let Some(Some(message)) = maybe_message {
@@ -203,7 +274,9 @@ impl SPOState {
 
                             // publish spo message
                             if let Err(e) = spo_state_publisher.publish(message).await {
-                                error!("Error publishing SPO State: {e:#}")
+                                ctx.validation.push_anyhow(anyhow!(
+                                    "Error publishing SPO State: {e:#}"
+                                ))
                             }
                         }
                     }
@@ -218,7 +291,7 @@ impl SPOState {
                     // Do nothing, we handled rollback earlier
                 }
 
-                _ => error!("Unexpected message type: {certs_message:?}"),
+                _ => ctx.unexpected_message_type("tx certificates", &certs_message),
             };
 
             // read from epoch-boundary messages only when it's a new epoch
@@ -232,7 +305,7 @@ impl SPOState {
                 {
                     let span = info_span!("spo_state.handle_spdd", block = block_info.number);
                     span.in_scope(|| {
-                        Self::check_sync(&current_block, block_info);
+                        ctx.check_sync(block_info);
                         // update epochs_history
                         epochs_history.handle_spdd(block_info, spdd_message);
                     });
@@ -250,9 +323,11 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_spo_rewards", block = block_info.number);
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, block_info);
+                            ctx.check_sync(block_info);
                             // update epochs_history
-                            epochs_history.handle_spo_rewards(block_info, spo_rewards_message);
+                            ctx.validation.merge(&mut epochs_history.handle_spo_rewards(
+                                block_info, spo_rewards_message
+                            ));
                         });
                     }
                 }
@@ -273,12 +348,14 @@ impl SPOState {
                             block = block_info.number
                         );
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, block_info);
+                            ctx.check_sync(block_info);
                             // update epochs_history
-                            state
-                                .handle_stake_reward_deltas(block_info, stake_reward_deltas_message)
-                                .inspect_err(|e| error!("StakeRewardDeltas handling error: {e:#}"))
-                                .ok();
+                            ctx.merge_handling(
+                                "StakeRewardDeltas",
+                                state.handle_stake_reward_deltas(
+                                    block_info, stake_reward_deltas_message
+                                )
+                            );
                         });
                     }
                 }
@@ -293,7 +370,7 @@ impl SPOState {
                     let span =
                         info_span!("spo_state.handle_epoch_activity", block = block_info.number);
                     span.in_scope(|| {
-                        Self::check_sync(&current_block, block_info);
+                        ctx.check_sync(block_info);
                         // update epochs_history
                         let spos: Vec<(PoolId, usize)> = epoch_activity_message
                             .spo_blocks
@@ -320,17 +397,17 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_withdrawals", block = block_info.number);
                         async {
-                            Self::check_sync(&current_block, block_info);
+                            ctx.check_sync(block_info);
                             state
                                 .handle_withdrawals(withdrawals_msg)
-                                .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                                .inspect_err(|e| ctx.handling_error("Withdrawals", e))
                                 .ok();
                         }
                         .instrument(span)
                         .await;
                     }
 
-                    _ => error!("Unexpected message type: {message:?}"),
+                    _ => ctx.unexpected_message_type("spo state", &message),
                 }
             }
 
@@ -345,17 +422,17 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_stake_deltas", block = block_info.number);
                         async {
-                            Self::check_sync(&current_block, block_info);
+                            ctx.check_sync(block_info);
                             state
                                 .handle_stake_deltas(deltas_msg)
-                                .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                                .inspect_err(|e| ctx.handling_error("StakeAddressDeltas", e))
                                 .ok();
                         }
                         .instrument(span)
                         .await;
                     }
 
-                    _ => error!("Unexpected message type: {message:?}"),
+                    _ => ctx.unexpected_message_type("stake delta", &message),
                 }
             }
 
@@ -370,22 +447,24 @@ impl SPOState {
                         let span =
                             info_span!("spo_state.handle_governance", block = block_info.number);
                         span.in_scope(|| {
-                            Self::check_sync(&current_block, block_info);
+                            ctx.check_sync(block_info);
                             state
                                 .handle_governance(&governance_msg.voting_procedures)
-                                .inspect_err(|e| error!("Governance handling error: {e:#}"))
+                                .inspect_err(|e| ctx.handling_error("Governance", e))
                                 .ok();
                         });
                     }
 
-                    _ => error!("Unexpected message type: {message:?}"),
+                    _ => ctx.unexpected_message_type("governance", &message),
                 }
             }
 
-            // Commit the new state
-            if let Some(block_info) = current_block {
+            // Commit the new state, publish validation outcome
+            if let Some(block_info) = &ctx.current_block {
                 history.lock().await.commit(block_info.number, state);
             }
+
+            ctx.publish().await;
         }
     }
 
@@ -472,6 +551,11 @@ impl SPOState {
             .get_string(DEFAULT_SPO_STATE_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_SPO_STATE_PUBLISH_TOPIC.1.to_string());
         info!("Creating SPO state publisher on '{spo_state_publish_topic}'");
+
+        let validation_publish_topic = config
+            .get_string(DEFAULT_VALIDATION_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_VALIDATION_PUBLISH_TOPIC.1.to_string());
+        info!("Validation outcome topic publisher on '{validation_publish_topic}'");
 
         // query topic
         let pools_query_topic = config
@@ -840,12 +924,14 @@ impl SPOState {
 
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
+        let context_copy = context.clone();
 
         context.run(async move {
             Self::run(
                 history,
                 epochs_history,
                 retired_pools_history,
+                context_copy,
                 &store_config,
                 certificates_subscription,
                 block_subscription,
@@ -857,6 +943,7 @@ impl SPOState {
                 spo_rewards_subscription,
                 stake_reward_deltas_subscription,
                 spo_state_publisher,
+                validation_publish_topic
             )
             .await
             .unwrap_or_else(|e| error!("Failed to run SPO State: {e}"));
@@ -869,18 +956,5 @@ impl SPOState {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }

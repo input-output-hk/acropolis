@@ -721,6 +721,16 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
+    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+        if !self.outcomes.is_empty() {
+            error!(
+                "Error in validation, block {block:?}: outcomes {:?}",
+                self.outcomes
+            );
+            self.outcomes.clear();
+        }
+    }
+
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
@@ -738,11 +748,9 @@ impl ValidationOutcomes {
             let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
-        } else if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+        }
+        else {
+            self.print_errors(Some(block));
         }
         self.outcomes.clear();
         Ok(())
