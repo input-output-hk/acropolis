@@ -24,7 +24,7 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -35,14 +35,12 @@ pub use crate::hash::Hash;
 use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-use crate::{
-    Constitution, DRepChoice, DRepCredential, EpochBootstrapData, PoolBlockProduction, PoolId,
-    PoolMetadata, Pots, Relay,
-};
 pub use crate::{
-    Lovelace, MultiHostName, NetworkId, PoolRegistration, Ratio, SingleHostAddr, SingleHostName,
-    StakeAddress, StakeCredential,
+    Constitution, DRepChoice, DRepCredential, DRepRecord, EpochBootstrapData, Lovelace,
+    MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
+    SingleHostName, StakeAddress, StakeCredential,
 };
+use crate::{PoolBlockProduction, Pots};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 
@@ -539,34 +537,6 @@ pub struct UtxoEntry {
 // Ledger types for DState parsing
 // -----------------------------------------------------------------------------
 
-/// Local newtype wrapper for DRepCredential to provide custom CBOR decoding
-/// without conflicting with the main Credential type's Decode implementation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct LocalDRepCredential(DRepCredential);
-
-impl<'b, C> minicbor::Decode<'b, C> for LocalDRepCredential {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        let variant = d.u16()?;
-
-        match variant {
-            0 => Ok(LocalDRepCredential(DRepCredential::AddrKeyHash(
-                d.decode_with(ctx)?,
-            ))),
-            1 => Ok(LocalDRepCredential(DRepCredential::ScriptHash(
-                d.decode_with(ctx)?,
-            ))),
-            _ => Err(minicbor::decode::Error::message(
-                "invalid variant id for DRepCredential",
-            )),
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
 /// DRep information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
@@ -666,8 +636,8 @@ pub trait AccountsCallback {
 
 /// Callback invoked with bulk DRep data
 pub trait DRepCallback {
-    /// Called once with all DRep info
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()>;
+    /// Called once with all DRep data
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()>;
 }
 
 /// Callback invoked with bulk governance proposal data
@@ -1255,7 +1225,7 @@ impl StreamingSnapshotParser {
 
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
-            dreps.iter().map(|d| (d.drep_id.clone(), d.deposit)).collect();
+            dreps.iter().map(|(cred, record)| (cred.clone(), record.deposit)).collect();
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
@@ -1274,7 +1244,7 @@ impl StreamingSnapshotParser {
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
-        callbacks.on_dreps(dreps)?;
+        callbacks.on_dreps(epoch, dreps)?;
         callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
@@ -1646,7 +1616,7 @@ impl StreamingSnapshotParser {
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
-    fn parse_vstate(decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
+    fn parse_vstate(decoder: &mut Decoder) -> Result<HashMap<DRepCredential, DRepRecord>> {
         // Parse VState array
         let vstate_len = decoder
             .array()
@@ -1661,25 +1631,24 @@ impl StreamingSnapshotParser {
 
         // Parse DReps map [0]: StakeCredential -> DRepState
         // Using minicbor's Decode trait - much simpler than manual parsing!
-        let dreps_map: BTreeMap<LocalDRepCredential, DRepState> = decoder.decode()?;
-
-        // Convert to DRepInfo
-        let dreps = dreps_map
+        let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
+        let dreps: HashMap<DRepCredential, DRepRecord> = dreps_map
             .into_iter()
-            .map(|(LocalDRepCredential(drep_id), state)| {
+            .map(|(cred, state)| {
                 let anchor = match state.anchor {
-                    StrictMaybe::Just(a) => Some(AnchorInfo {
+                    StrictMaybe::Just(a) => Some(crate::Anchor {
                         url: a.url,
-                        data_hash: a.content_hash.to_string(),
+                        data_hash: a.content_hash.to_vec(),
                     }),
                     StrictMaybe::Nothing => None,
                 };
 
-                DRepInfo {
-                    drep_id,
+                let record = DRepRecord {
                     deposit: state.deposit,
                     anchor,
-                }
+                };
+
+                (cred, record)
             })
             .collect();
 
@@ -1981,7 +1950,7 @@ pub struct CollectingCallbacks {
     pub utxos: Vec<UtxoEntry>,
     pub pools: SPOState,
     pub accounts: Vec<AccountState>,
-    pub dreps: Vec<DRepInfo>,
+    pub dreps: HashMap<DRepCredential, DRepRecord>,
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
@@ -2019,7 +1988,7 @@ impl AccountsCallback for CollectingCallbacks {
 }
 
 impl DRepCallback for CollectingCallbacks {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
+    fn on_dreps(&mut self, _epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
         self.dreps = dreps;
         Ok(())
     }
