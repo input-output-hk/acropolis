@@ -20,7 +20,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info, info_span, warn, Instrument};
 
 mod alonzo_genesis;
 mod genesis_params;
@@ -229,7 +229,7 @@ impl ParametersState {
                                 let mut h = history.lock().await;
                                 h.commit(epoch, state);
                             } else {
-                                error!(
+                                warn!(
                                     "ParameterState: Unsupported slice in bootstrap: {:?}",
                                     msg.slice
                                 );
