@@ -19,6 +19,7 @@ use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
+use acropolis_module_fake_block_injector::FakeBlockInjector;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
@@ -126,6 +127,7 @@ pub async fn main() -> Result<()> {
     ChainStore::register(&mut process);
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
+    FakeBlockInjector::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);
