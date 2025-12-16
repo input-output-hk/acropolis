@@ -179,57 +179,6 @@ pub enum UTxOValidationError {
     },
 }
 
-/*
-<<<<<<< HEAD
-
-    /// **Cause:** The transaction size is too big.
-    #[error("Max tx size: supplied={supplied}, max={max}")]
-    MaxTxSizeUTxO { supplied: u32, max: u32 },
-
-    /// **Cause:** Malformed UTxO
-    #[error("Malformed UTxO: era={era}, reason={reason}")]
-    MalformedUTxO { era: Era, reason: String },
-}
-
-/// Validation error
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
-pub enum ValidationError {
-    #[error("Uncategorized validation error: {0}")]
-    Unclassified(String),
-
-    #[error("Governance failure: {0}")]
-    BadGovernance(#[from] GovernanceValidationError),
-
-    #[error("Invalid Transaction: tx-index={tx_index}, error={error}")]
-    BadTransaction {
-        tx_index: u16,
-        error: TransactionValidationError,
-    },
-
-    #[error("CBOR Decoding error")]
-    CborDecodeError(usize, String),
-
-    #[error("Malformed transaction")]
-    MalformedTransaction(u16, String),
-
-    #[error("Doubly spent UTXO: {0}")]
-    DoubleSpendUTXO(String),
-}
-
-/// Validation status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(clippy::large_enum_variant)]
-pub enum ValidationStatus {
-    /// All good
-    Go,
-
-    /// Error
-    NoGo(ValidationError),
-=======
->>>>>>> 3044df25822506dcc35c03367d554e40c4ef7bf4
-}
-     */
-
 impl ValidationStatus {
     pub fn is_go(&self) -> bool {
         matches!(self, ValidationStatus::Go)
