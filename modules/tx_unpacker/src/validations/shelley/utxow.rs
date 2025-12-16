@@ -162,7 +162,7 @@ mod tests {
         "valid transaction 3 - with mir certificates"
     )]
     #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0", "mir_insufficient_genesis_sigs_utxow") =>
-        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 }) 
+        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
         if genesis_keys.len() == 4;
         "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
