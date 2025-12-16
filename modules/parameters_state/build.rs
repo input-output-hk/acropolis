@@ -29,7 +29,7 @@ fn fetch_text(url: &str) -> Result<String, Box<dyn std::error::Error>> {
 
 /// Download a URL to a file in OUTPUT_DIR
 fn download(url_base: &str, epoch: &str, filename: &str, rename: &Vec<(&str, &str)>) {
-    let url = format!("{}/{}-genesis.json", url_base, epoch);
+    let url = format!("{url_base}/{epoch}-genesis.json");
     let mut data = fetch_text(&url).expect("Failed to fetch {url}");
 
     for (what, with) in rename.iter() {

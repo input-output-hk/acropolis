@@ -4,12 +4,10 @@ use crate::ParametersUpdater;
 use acropolis_common::{
     messages::{
         GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
-        GovernanceProtocolParametersSlice, ProtocolParamsMessage,
+        ProtocolParamsMessage,
     },
-    protocol_params::ProtocolVersion,
     snapshot::protocol_parameters::ProtocolParameters,
-    AlonzoBabbageVotingOutcome, BlockInfo, EnactStateElem, Era, GovernanceOutcome,
-    GovernanceOutcomeVariant, ProtocolParamUpdate, VotingOutcome,
+    AlonzoBabbageVotingOutcome, EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::Result;
 use std::ops::RangeInclusive;
@@ -63,8 +61,8 @@ impl State {
     pub fn apply_governance_outcomes(
         &mut self,
         new_era: &Era,
-        alonzo_gov: &Vec<AlonzoBabbageVotingOutcome>,
-        conway_gov: &Vec<GovernanceOutcomeVariant>,
+        alonzo_gov: &[AlonzoBabbageVotingOutcome],
+        conway_gov: &[GovernanceOutcomeVariant],
     ) -> Result<()> {
         info!("Current Era: {:?}", self.current_era);
         if self.current_era != Some(*new_era) {
@@ -79,11 +77,9 @@ impl State {
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
         info!("Era: {:?}, applying enact state", new_era);
-        self.apply_governance_outcomes(
-            new_era,
-            &msg.alonzo_babbage_outcomes,
-            &msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect(),
-        )?;
+        let conway_outcomes: Vec<_> =
+            msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect();
+        self.apply_governance_outcomes(new_era, &msg.alonzo_babbage_outcomes, &conway_outcomes)?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
         };
@@ -107,7 +103,7 @@ impl State {
     pub fn bootstrap(&mut self, param_msg: &GovernanceProtocolParametersBootstrapMessage) -> u64 {
         let outcomes = Self::mk_governance_outcomes(&param_msg.params);
         self.network_name = param_msg.network_name.clone();
-        if let Err(e) = self.apply_governance_outcomes(&Era::Conway, &vec![], &outcomes) {
+        if let Err(e) = self.apply_governance_outcomes(&Era::Conway, &[], &outcomes) {
             tracing::error!("Parameters application failed: {e}");
         }
 
@@ -126,16 +122,13 @@ impl State {
     /// Note: Constitution and committee are initialized as empty/placeholder values since they
     /// are not included in the ProtocolParameters from the snapshot.
     fn mk_governance_outcomes(params: &ProtocolParameters) -> Vec<GovernanceOutcomeVariant> {
-        use acropolis_common::{
-            protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
-            Constitution, CostModel,
-        };
+        use acropolis_common::{rational_number::RationalNumber, Anchor, Committee, Constitution};
         use std::collections::HashMap;
 
         let mut outcomes = Vec::new();
 
         // Create placeholder constitution (will be updated by governance events)
-        let constitution = Constitution {
+        let _constitution = Constitution {
             anchor: Anchor {
                 url: String::new(),
                 data_hash: Vec::new(),
@@ -144,7 +137,7 @@ impl State {
         };
 
         // Create empty committee (will be updated by governance events)
-        let committee = Committee {
+        let _committee = Committee {
             members: HashMap::new(),
             threshold: RationalNumber::ZERO,
         };
@@ -157,10 +150,12 @@ impl State {
             EnactStateElem::ProtVer(params.protocol_version.clone()),
         ));
 
-        let mut param_update = ProtocolParamUpdate::default();
-        param_update.minfee_a = Some(params.min_fee_a);
-        param_update.minfee_b = Some(params.min_fee_b);
-        param_update.collateral_percentage = Some(params.collateral_percentage as u64);
+        let param_update = ProtocolParamUpdate {
+            minfee_a: Some(params.min_fee_a),
+            minfee_b: Some(params.min_fee_b),
+            collateral_percentage: Some(params.collateral_percentage as u64),
+            ..ProtocolParamUpdate::default()
+        };
         // TODO: fill other parameters
 
         outcomes.push(GovernanceOutcomeVariant::EnactStateElem(

@@ -273,7 +273,7 @@ impl ParametersState {
                                     state.current_params.get_params(),
                                 ),
                                 None => ParametersStateQueryResponse::Error(QueryError::not_found(
-                                    format!("Epoch {} not found in history", epoch_number),
+                                    format!("Epoch {epoch_number} not found in history"),
                                 )),
                             }
                         }

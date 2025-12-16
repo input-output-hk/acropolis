@@ -3,7 +3,7 @@ use acropolis_common::protocol_params::{
     AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
 };
 use acropolis_common::{
-    AlonzoBabbageVotingOutcome, Committee, CommitteeChange, EnactStateElem, Era, GovernanceOutcome,
+    AlonzoBabbageVotingOutcome, Committee, CommitteeChange, EnactStateElem, Era,
     GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, bail, Result};
@@ -24,10 +24,6 @@ impl ParametersUpdater {
     //
     // Conway parameters update
     //
-
-    pub fn set_conway_params(&mut self, p: ConwayParams) {
-        self.params.conway = Some(p);
-    }
 
     fn cw_upd<T: Clone>(
         &mut self,
@@ -267,8 +263,8 @@ impl ParametersUpdater {
 
     pub fn apply_enact_state(
         &mut self,
-        alonzo: &Vec<AlonzoBabbageVotingOutcome>,
-        conway: &Vec<GovernanceOutcomeVariant>,
+        alonzo: &[AlonzoBabbageVotingOutcome],
+        conway: &[GovernanceOutcomeVariant],
     ) -> Result<()> {
         for outcome in alonzo.iter() {
             tracing::info!("Updating alonzo/babbage outcome {:?}", outcome);

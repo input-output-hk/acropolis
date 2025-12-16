@@ -10,12 +10,10 @@ use crate::configuration::BootstrapConfig;
 use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
-use acropolis_common::messages::RawBlockMessage;
 use acropolis_common::{
     configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
-    BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -24,9 +22,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::time::Instant;
 use tracing::{error, info, info_span, Instrument};
-
-const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
-    ("block-publish-topic", "cardano.block.available");
 
 #[derive(Debug, Error)]
 pub enum BootstrapError {
