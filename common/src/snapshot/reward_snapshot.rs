@@ -89,11 +89,9 @@ fn decode_likelihood_value(d: &mut Decoder) -> Result<RationalNumber, minicbor::
         }
     }
 
-    // Try as float or integer - convert to rational representation
     match d.datatype()? {
         Type::F16 | Type::F32 | Type::F64 => {
             // For floats, we approximate as a rational
-            // This is a fallback - ideally all values should be tag 30 rationals
             let f = d.f64()?;
             // Use a large denominator to preserve precision
             let scale = 1_000_000_000_000u64;
