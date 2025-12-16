@@ -111,6 +111,7 @@ impl DRepState {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
