@@ -4,6 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
+network = "mainnet"
 method = "mithril"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
@@ -22,7 +23,6 @@ pause = "none"
 
 [module.snapshot-bootstrapper]
 epoch = 507
-network = "mainnet"
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
 # ============================================================================
@@ -35,7 +35,6 @@ node-addresses = [
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-magic-number = 764824073
 
 [module.consensus]
 # List of validation result topics to listen on

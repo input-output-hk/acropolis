@@ -19,6 +19,7 @@ pub struct GenesisValues {
     pub shelley_epoch_len: u64,
     pub shelley_genesis_hash: Hash<32>,
     pub genesis_delegs: GenesisDelegates,
+    pub magic_number: u32,
 }
 
 impl GenesisValues {
@@ -80,6 +81,7 @@ impl GenesisValues {
                 ),
             ])
             .unwrap(),
+            magic_number: 764824073,
         }
     }
 

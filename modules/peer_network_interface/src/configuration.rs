@@ -11,7 +11,6 @@ pub enum SyncPoint {
     Tip,
     Cache,
     Snapshot,
-    Dynamic,
 }
 
 #[derive(serde::Deserialize)]
@@ -23,7 +22,6 @@ pub struct InterfaceConfig {
     pub genesis_completion_topic: String,
     pub sync_command_topic: String,
     pub node_addresses: Vec<String>,
-    pub magic_number: u64,
     pub cache_dir: PathBuf,
     #[serde(flatten)]
     pub genesis_values: Option<GenesisValues>,

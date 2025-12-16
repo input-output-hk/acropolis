@@ -1,7 +1,7 @@
 # The topic to publish blocks on
 block-topic = "cardano.block.available"
 # The topic to wait for when sync-point is "snapshot"
-snapshot-completion-topic = "cardano.snapshot.complete"
+snapshot-completion-topic = "cardano.sync.command"
 # The topic to wait for when listening for genesis values from another module
 genesis-completion-topic = "cardano.sequence.bootstrapped"
 # The topic to listen on for runtime sync commands
@@ -13,8 +13,6 @@ node-addresses = [
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-# The network magic for the chain to connect to
-magic-number = 764824073
 
 # The initial point to start syncing from. Options:
 # - "origin": sync from the very start of the chain
