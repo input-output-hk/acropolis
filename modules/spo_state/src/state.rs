@@ -370,7 +370,7 @@ impl State {
         let mut vld = ValidationOutcomes::new();
 
         debug!(
-            "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
+            "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
         );
         if ret.epoch <= self.epoch {
