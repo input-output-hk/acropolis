@@ -240,7 +240,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "serde",
- "serde_with 3.16.1",
  "tokio",
  "tracing",
 ]
