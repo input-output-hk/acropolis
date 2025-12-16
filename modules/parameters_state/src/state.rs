@@ -1,15 +1,11 @@
 //! Acropolis Protocol Params: State storage
 
 use crate::ParametersUpdater;
-use acropolis_common::{
-    messages::{
-        GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
-        GovernanceProtocolParametersSlice, ProtocolParamsMessage,
-    },
-    protocol_params::ConwayParams,
-    snapshot::protocol_parameters::ProtocolParameters,
-    BlockInfo, Era,
-};
+use acropolis_common::{messages::{
+    GovernanceOutcomesMessage,
+    GovernanceProtocolParametersBootstrapMessage,
+    GovernanceProtocolParametersSlice, ProtocolParamsMessage,
+}, protocol_params::ProtocolVersion, snapshot::protocol_parameters::ProtocolParameters, BlockInfo, Era, EnactStateElem, GovernanceOutcome, GovernanceOutcomeVariant, ProtocolParamUpdate, VotingOutcome, AlonzoBabbageVotingOutcome};
 use anyhow::Result;
 use std::ops::RangeInclusive;
 use tracing::info;
@@ -37,8 +33,8 @@ impl State {
         }
     }
 
-    pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
-        let to_apply = Self::genesis_era_range(self.current_era, new_block.era);
+    pub fn apply_genesis(&mut self, new_era: &Era) -> Result<()> {
+        let to_apply = Self::genesis_era_range(self.current_era, *new_era);
         if to_apply.is_empty() {
             return Ok(());
         }
@@ -52,24 +48,37 @@ impl State {
 
         info!(
             "Applied genesis up to {}, resulting params {:?}",
-            new_block.era,
+            new_era,
             self.current_params.get_params()
         );
-        self.current_era = Some(new_block.era);
+        self.current_era = Some(*new_era);
         Ok(())
+    }
+
+    pub fn apply_governance_outcomes(
+        &mut self,
+        new_era: &Era,
+        alonzo_gov: &Vec<AlonzoBabbageVotingOutcome>,
+        conway_gov: &Vec<GovernanceOutcomeVariant>
+    ) -> Result<()> {
+        info!("Current Era: {:?}", self.current_era);
+        if self.current_era != Some(*new_era) {
+            self.apply_genesis(new_era)?;
+        }
+        self.current_params.apply_enact_state(alonzo_gov, conway_gov)
     }
 
     pub async fn handle_enact_state(
         &mut self,
-        block: &BlockInfo,
+        new_era: &Era,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
-        info!("Era: {:?}, applying enact state", block.era);
-        info!("Current Era: {:?}", self.current_era);
-        if self.current_era != Some(block.era) {
-            self.apply_genesis(block)?;
-        }
-        self.current_params.apply_enact_state(msg)?;
+        info!("Era: {:?}, applying enact state", new_era);
+        self.apply_governance_outcomes(
+            new_era,
+            &msg.alonzo_babbage_outcomes,
+            &msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect()
+        )?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
         };
@@ -91,34 +100,19 @@ impl State {
     ///
     /// - Assumes Conway era as the current era
     pub fn bootstrap(&mut self, param_msg: &GovernanceProtocolParametersBootstrapMessage) -> u64 {
-        let epoch = param_msg.epoch;
-        let conway_params = Self::mk_conway_params(&param_msg.params);
-        let new_block = BlockInfo {
-            status: acropolis_common::BlockStatus::Bootstrap,
-            intent: acropolis_common::BlockIntent::Apply,
-            slot: 0,
-            number: 0,
-            hash: acropolis_common::BlockHash::default(),
-            epoch,
-            epoch_slot: 0,
-            new_epoch: false,
-            tip_slot: None,
-            timestamp: 0,
-            era: Era::Conway,
-        };
-        self.apply_genesis(&new_block).unwrap_or_else(|e| {
-            tracing::error!("Failed to apply genesis during bootstrap: {}", e);
-        });
-        self.current_params.set_conway_params(conway_params);
-        self.current_era = param_msg.era;
+        let outcomes = Self::mk_governance_outcomes(&param_msg.params);
         self.network_name = param_msg.network_name.clone();
+        if let Err(e) = self.apply_governance_outcomes(&Era::Conway, &vec![], &outcomes) {
+            tracing::error!("Parameters application failed: {e}");
+        }
 
         info!(
             "Bootstrapped ParametersState to era {:?} with params: {:?}",
             self.current_era,
             self.current_params.get_params()
         );
-        epoch
+
+        param_msg.epoch
     }
 
     /// This function transforms a `ProtocolParameters` struct (containing actual values from
@@ -126,12 +120,14 @@ impl State {
     ///
     /// Note: Constitution and committee are initialized as empty/placeholder values since they
     /// are not included in the ProtocolParameters from the snapshot.
-    fn mk_conway_params(params: &ProtocolParameters) -> ConwayParams {
+    fn mk_governance_outcomes(params: &ProtocolParameters) -> Vec<GovernanceOutcomeVariant> {
         use acropolis_common::{
             protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
             Constitution, CostModel,
         };
         use std::collections::HashMap;
+
+        let mut outcomes = Vec::new();
 
         // Create placeholder constitution (will be updated by governance events)
         let constitution = Constitution {
@@ -148,6 +144,22 @@ impl State {
             threshold: RationalNumber::ZERO,
         };
 
+        // TODO: I believe that we don't need to add these outcomes, if they're empty anyway; default is fine.
+        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Constitution(constitution)));
+        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Committee(committee)));
+
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::ProtVer(
+            params.protocol_version.clone()
+        )));
+
+        let mut param_update = ProtocolParamUpdate::default();
+        param_update.minfee_a = Some(params.min_fee_a);
+        param_update.minfee_b = Some(params.min_fee_b);
+        param_update.collateral_percentage = Some(params.collateral_percentage as u64);
+        // TODO: fill other parameters
+
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Params(Box::new(param_update))));
+/*
         // Get the plutus v3 cost model, or create empty one if not present
         let plutus_v3_cost_model =
             params.cost_models.plutus_v3.clone().unwrap_or_else(|| CostModel::new(Vec::new()));
@@ -169,6 +181,8 @@ impl State {
             constitution,
             committee,
         }
+*/
+        outcomes
     }
 
     #[allow(dead_code)]
