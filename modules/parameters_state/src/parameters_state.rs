@@ -236,6 +236,10 @@ impl ParametersState {
                                 continue;
                             }
                         }
+                        Message::Snapshot(SnapshotMessage::Complete) => {
+                            info!("Snapshot complete, exiting Parameters state bootstrap loop");
+                            break; // done processing snapshot messages
+                        }
                         // There will be other snapshot messages that we're not interested in
                         _ => (),
                     }
