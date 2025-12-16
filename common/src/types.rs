@@ -5,7 +5,7 @@
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
 use crate::{
-    address::{Address, ShelleyAddress, StakeAddress},
+    address::{Address, ShelleyAddress, ShelleyAddressDelegationPart, StakeAddress},
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
 };
@@ -675,40 +675,23 @@ impl UTXOValue {
 
     /// Extract the stake credential from the address, if present.
     ///
-    /// Returns `Some(StakeCredential)` for Shelley base addresses that have
-    /// a stake credential embedded. Returns `None` for:
+    /// Returns `Some(StakeCredential)` for Shelley addresses that have
+    /// a stake key or script hash delegation. Returns `None` for:
     /// - Byron addresses
-    /// - Enterprise addresses (no stake part)
-    /// - Pointer addresses (stake part is a pointer, not a credential)
-    /// - Reward/stake addresses
+    /// - Enterprise addresses (no delegation)
+    /// - Pointer addresses (delegation is a pointer, not a credential)
+    /// - Stake/reward addresses
     pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
         match &self.address {
-            Address::Shelley(shelley) => {
-                let bytes = shelley.to_bytes_key();
-
-                // Minimum length for base address: 1 (header) + 28 (payment) + 28 (stake) = 57
-                if bytes.len() < 57 {
-                    return None;
+            Address::Shelley(shelley) => match &shelley.delegation {
+                ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                    Some(StakeCredential::AddrKeyHash(*hash))
                 }
-
-                let header = bytes[0];
-                let addr_type = (header & 0xF0) >> 4;
-
-                // Only base addresses (types 0-3) have embedded stake credentials
-                match addr_type {
-                    0 | 1 => {
-                        // Base address with stake key hash
-                        let stake_bytes: [u8; 28] = bytes[29..57].try_into().ok()?;
-                        Some(StakeCredential::AddrKeyHash(stake_bytes.into()))
-                    }
-                    2 | 3 => {
-                        // Base address with stake script hash
-                        let stake_bytes: [u8; 28] = bytes[29..57].try_into().ok()?;
-                        Some(StakeCredential::ScriptHash(stake_bytes.into()))
-                    }
-                    _ => None,
+                ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                    Some(StakeCredential::ScriptHash(*hash))
                 }
-            }
+                _ => None,
+            },
             _ => None,
         }
     }
