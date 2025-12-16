@@ -1,6 +1,7 @@
 # Top-level configuration for Acropolis indexer process
 
 [global.startup]
+network = "mainnet"
 method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
@@ -8,13 +9,12 @@ topic = "cardano.sequence.start"
 
 [module.peer-network-interface]
 block-topic = "cardano.block.proposed" # Skip validation for indexer
-sync-point = "dynamic"
+sync-point = "snapshot"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-magic-number = 764824073
 
 [module.block-unpacker]
 

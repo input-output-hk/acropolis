@@ -77,7 +77,7 @@ impl PeerNetworkInterface {
             let mut sink = BlockSink {
                 context,
                 topic: cfg.block_topic.clone(),
-                genesis_values,
+                genesis_values: genesis_values.clone(),
                 upstream_cache,
                 last_epoch,
                 rolled_back: false,
@@ -86,13 +86,23 @@ impl PeerNetworkInterface {
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
                     tracing::info!("Starting sync from origin");
-                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
+                    let mut manager = Self::init_manager(
+                        cfg.node_addresses,
+                        genesis_values.magic_number,
+                        sink,
+                        command_subscription,
+                    );
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
                     tracing::info!("Starting sync from tip");
-                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
+                    let mut manager = Self::init_manager(
+                        cfg.node_addresses,
+                        genesis_values.magic_number,
+                        sink,
+                        command_subscription,
+                    );
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
                         return;
@@ -101,7 +111,12 @@ impl PeerNetworkInterface {
                 }
                 SyncPoint::Cache => {
                     tracing::info!("Starting sync from cache at {:?}", cache_sync_point);
-                    let mut manager = Self::init_manager(cfg, sink, command_subscription);
+                    let mut manager = Self::init_manager(
+                        cfg.node_addresses,
+                        genesis_values.magic_number,
+                        sink,
+                        command_subscription,
+                    );
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
@@ -119,7 +134,12 @@ impl PeerNetworkInterface {
                                     epoch,
                                 );
                             }
-                            let mut manager = Self::init_manager(cfg, sink, command_subscription);
+                            let mut manager = Self::init_manager(
+                                cfg.node_addresses,
+                                genesis_values.magic_number,
+                                sink,
+                                command_subscription,
+                            );
                             manager.sync_to_point(point);
                             manager
                         }
@@ -128,10 +148,6 @@ impl PeerNetworkInterface {
                             return;
                         }
                     }
-                }
-                SyncPoint::Dynamic => {
-                    tracing::info!("Starting sync in dynamic mode");
-                    Self::init_manager(cfg, sink, command_subscription)
                 }
             };
 
@@ -144,7 +160,8 @@ impl PeerNetworkInterface {
     }
 
     fn init_manager(
-        cfg: InterfaceConfig,
+        node_addresses: Vec<String>,
+        magic_number: u32,
         sink: BlockSink,
         command_subscription: Box<dyn Subscription<Message>>,
     ) -> NetworkManager {
@@ -153,8 +170,8 @@ impl PeerNetworkInterface {
             command_subscription,
             events_sender.clone(),
         ));
-        let mut manager = NetworkManager::new(cfg.magic_number, events, events_sender, sink);
-        for address in cfg.node_addresses {
+        let mut manager = NetworkManager::new(magic_number, events, events_sender, sink);
+        for address in node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
         manager
@@ -224,8 +241,13 @@ impl PeerNetworkInterface {
     ) -> Result<Point> {
         let (_, message) = subscription.read().await?;
         match message.as_ref() {
-            Message::Cardano((block, CardanoMessage::SnapshotComplete)) => {
-                Ok(Point::Specific(block.slot, block.hash.to_vec()))
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point))) => {
+                match point {
+                    acropolis_common::Point::Origin => Ok(Point::Origin),
+                    acropolis_common::Point::Specific { hash, slot } => {
+                        Ok(Point::Specific(*slot, hash.to_vec()))
+                    }
+                }
             }
             msg => bail!("Unexpected message in snapshot completion topic: {msg:?}"),
         }

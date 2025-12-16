@@ -15,7 +15,7 @@ use futures::StreamExt;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use config::Config;
 use tracing::{error, warn};
 
@@ -151,7 +151,9 @@ where
 
     async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = CustomIndexerConfig::try_load(&config)?;
-        let mut subscription = context.subscribe(&cfg.txs_subscribe_topic).await?;
+        let mut txs_subscription = context.subscribe(&cfg.txs_subscribe_topic).await?;
+        let mut genesis_complete_subscription =
+            context.subscribe(&cfg.genesis_complete_topic).await?;
         let run_context = context.clone();
 
         let senders = Arc::clone(&self.senders);
@@ -161,12 +163,17 @@ where
         let start_point = self.compute_start_point().await?;
 
         context.run(async move {
-            // Publish initial sync point
+            // Wait for genesis bootstrapping then publish initial sync point
+            let (_, message) = genesis_complete_subscription.read().await?;
+            match message.as_ref() {
+                Message::Cardano((_, CardanoMessage::GenesisComplete(_))) => { }
+                msg => bail!("Unexpected message in genesis completion topic: {msg:?}"),
+            }
             change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
 
             // Forward received txs and rollback notifications to index handlers
             loop {
-                match subscription.read().await {
+                match txs_subscription.read().await {
                     Ok((_, message)) => {
                         match message.as_ref() {
                             Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {

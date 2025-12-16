@@ -5,6 +5,7 @@ use config::Config;
 #[serde(rename_all = "kebab-case")]
 pub struct CustomIndexerConfig {
     pub sync_command_publisher_topic: String,
+    pub genesis_complete_topic: String,
     pub txs_subscribe_topic: String,
 }
 

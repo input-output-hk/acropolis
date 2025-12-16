@@ -2,10 +2,11 @@
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
 use acropolis_common::{
+    commands::chain_sync::ChainSyncCommand,
     configuration::StartupMethod,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
+    messages::{CardanoMessage, Command, Message, RawBlockMessage},
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
@@ -37,7 +38,7 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
-const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
+const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -386,8 +387,12 @@ impl MithrilSnapshotFetcher {
                 "Finished snapshot at block {}, epoch {}",
                 last_block_info.number, last_block_info.epoch
             );
-            let message_enum =
-                Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
+            let message_enum = Message::Command(Command::ChainSync(
+                ChainSyncCommand::FindIntersect(Point::Specific {
+                    hash: last_block_info.hash,
+                    slot: last_block_info.slot,
+                }),
+            ));
             context
                 .message_bus
                 .publish(&completion_topic, Arc::new(message_enum))
