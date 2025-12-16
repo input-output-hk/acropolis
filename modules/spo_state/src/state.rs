@@ -298,16 +298,14 @@ impl State {
             }
         }
 
-        let msg = Arc::new(Message::Cardano((
+        Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::SPOState(SPOStateMessage {
                 epoch: block.epoch - 1,
                 spos,
                 retired_spos,
             }),
-        )));
-
-        msg
+        )))
     }
 
     fn handle_pool_registration(
@@ -525,7 +523,7 @@ impl State {
         tx_certs_msg: &TxCertificatesMessage,
     ) -> Result<Option<Arc<Message>>> {
         let mut vld = ValidationOutcomes::new();
-        let res = self.handle_tx_certs(block, &tx_certs_msg, &mut vld)?;
+        let res = self.handle_tx_certs(block, tx_certs_msg, &mut vld)?;
         vld.as_result()?;
         Ok(res)
     }
