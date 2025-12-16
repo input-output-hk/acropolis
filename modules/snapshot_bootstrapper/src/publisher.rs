@@ -1,24 +1,21 @@
-use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::messages::DRepBootstrapMessage;
-use acropolis_common::protocol_params::{Nonces, PraosParams};
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
+use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::{
+    AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback,
+};
 use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
-        SnapshotStateMessage, UTxOPartialState,
+        AccountsBootstrapMessage, CardanoMessage, DRepBootstrapMessage, EpochBootstrapMessage,
+        Message, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
-    snapshot::streaming_snapshot::{
-        DRepCallback, DRepRecord, EpochCallback, GovernanceProposal,
-        GovernanceProtocolParametersCallback, PoolCallback, ProposalCallback, SnapshotCallbacks,
-        SnapshotMetadata, UtxoCallback,
-    },
+    protocol_params::{Nonces, PraosParams},
+    snapshot::{protocol_parameters::ProtocolParameters, utxo::UtxoEntry},
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -277,7 +274,7 @@ impl AccountsCallback for SnapshotPublisher {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some(),
+            !data.snapshots.mark.spos.is_empty(),
         );
 
         // Convert the parsed data to the message type
@@ -466,6 +463,11 @@ impl SnapshotsCallback for SnapshotPublisher {
 
 impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
+        let total_blocks_previous: u32 =
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+        let total_blocks_current: u32 =
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+
         info!("Snapshot metadata for epoch {}", metadata.epoch);
         info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
@@ -474,14 +476,8 @@ impl SnapshotCallbacks for SnapshotPublisher {
             metadata.pot_balances.reserves,
             metadata.pot_balances.deposits
         );
-        info!(
-            "  - Previous epoch blocks: {}",
-            metadata.blocks_previous_epoch.len()
-        );
-        info!(
-            "  - Current epoch blocks: {}",
-            metadata.blocks_current_epoch.len()
-        );
+        info!("  - Previous epoch blocks: {}", total_blocks_previous);
+        info!("  - Current epoch blocks: {}", total_blocks_current);
 
         self.metadata = Some(metadata);
         Ok(())
@@ -500,9 +496,6 @@ impl SnapshotCallbacks for SnapshotPublisher {
         info!("  - Accounts: {}", self.accounts.len());
         info!("  - DReps: {}", self.dreps_len);
         info!("  - Proposals: {}", self.proposals.len());
-
-        // Note: AccountsBootstrapMessage is now published via on_accounts callback
-
         Ok(())
     }
 }
