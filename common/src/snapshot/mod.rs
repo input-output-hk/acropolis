@@ -17,6 +17,7 @@ mod parser;
 pub mod protocol_parameters;
 pub mod reward_snapshot;
 pub mod streaming_snapshot;
+pub mod utxo;
 pub use error::SnapshotError;
 
 pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
@@ -24,7 +25,7 @@ pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrit
 pub use streaming_snapshot::{
     AccountState, AccountsBootstrapData, AccountsCallback, Anchor, DRepCallback, DRepInfo,
     EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
-    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback,
 };
 
 pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};
