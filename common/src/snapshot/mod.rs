@@ -23,9 +23,8 @@ pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrit
 
 pub use streaming_snapshot::{
     AccountState, AccountsBootstrapData, AccountsCallback, Anchor, DRepCallback, DRepInfo,
-    EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, PulsingRewardUpdateCallback,
-    SnapshotCallbacks, SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback,
-    UtxoEntry,
+    EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
+    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
 };
 
 pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};

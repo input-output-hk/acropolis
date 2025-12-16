@@ -75,7 +75,7 @@ impl RawSnapshot {
         ctx: &mut SnapshotContext,
         snapshot_name: &str,
     ) -> Result<RawSnapshot> {
-        info!("Parsing snapshot {}", snapshot_name);
+        info!("Parsing snapshot {snapshot_name}");
         match decoder.datatype().context("Failed to read snapshot datatype")? {
             minicbor::data::Type::Array => {
                 decoder.array().context("Failed to parse snapshot array")?;

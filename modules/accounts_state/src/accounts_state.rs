@@ -16,7 +16,7 @@ use anyhow::Result;
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
-use tokio::{join, sync::Mutex};
+use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
@@ -258,23 +258,53 @@ impl AccountsState {
             }
 
             // Read from epoch-boundary messages only when it's a new epoch
+            // NEWEPOCH ticks
             if new_epoch {
-                let spdd_store_guard = match spdd_store.as_ref() {
-                    Some(s) => Some(s.lock().await),
-                    None => None,
+                // Applies reewards from previous epoch
+                let previous_epoch_rewards_result = state
+                    .complete_previous_epoch_rewards_calculation(verifier)
+                    .await
+                    .inspect_err(|e| error!("Previous epoch rewards calculation error: {e:#}"))
+                    .ok();
+
+                let mut stake_reward_deltas = if let Some(block_info) = current_block.as_ref() {
+                    if let Some((spo_rewards, stake_reward_deltas)) = previous_epoch_rewards_result
+                    {
+                        // publish spo rewards
+                        spo_rewards_publisher
+                            .publish_spo_rewards(block_info, spo_rewards)
+                            .await
+                            .inspect_err(|e| error!("Error publishing SPO rewards: {e:#}"))
+                            .ok();
+                        stake_reward_deltas
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
                 };
 
-                // Publish SPDD message before anything else and store spdd history if enabled
+                // EPOCH rule
+                // a. SNAP: Take the snapshot and pool distribution
+                // rotate the snapshots (mark, set, go)
+                // b. POOLREAP: for any retiring pools, refund,
+                // remove from pool registry, clear delegations
+
                 if let Some(block_info) = current_block.as_ref() {
                     let spdd = state.generate_spdd();
+                    verifier.verify_spdd(block_info, &spdd);
                     if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
                         error!("Error publishing SPO stake distribution: {e:#}")
                     }
 
-                    // if we store spdd history
-                    let spdd_state = state.dump_spdd_state();
+                    // store spdd history if enabled
+                    let spdd_store_guard = match spdd_store.as_ref() {
+                        Some(s) => Some(s.lock().await),
+                        None => None,
+                    };
                     if let Some(mut spdd_store) = spdd_store_guard {
-                        // active stakes taken at beginning of epoch i is for epoch + 1
+                        let spdd_state = state.dump_spdd_state();
+                        // stakes distribution taken at beginning of epoch i is active for epoch + 1
                         if let Err(e) = spdd_store.store_spdd(block_info.epoch + 1, spdd_state) {
                             error!("Error storing SPDD state: {e:#}")
                         }
@@ -361,23 +391,16 @@ impl AccountsState {
                                 .await
                                 .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
                                 .ok();
-                            if let Some((spo_rewards, stake_reward_deltas)) = after_epoch_result {
-                                // SPO Rewards Future
-                                let spo_rewards_future = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards);
-                                // Stake Reward Deltas Future
-                                let stake_reward_deltas_future = stake_reward_deltas_publisher
-                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas);
-
-                                // publish in parallel
-                                let (spo_rewards_result, stake_reward_deltas_result) =
-                                    join!(spo_rewards_future, stake_reward_deltas_future);
-                                spo_rewards_result.unwrap_or_else(|e| {
-                                    error!("Error publishing SPO rewards: {e:#}")
-                                });
-                                stake_reward_deltas_result.unwrap_or_else(|e| {
-                                    error!("Error publishing stake reward deltas: {e:#}")
-                                });
+                            if let Some(refund_deltas) = after_epoch_result {
+                                // publish stake reward deltas
+                                stake_reward_deltas.extend(refund_deltas);
+                                stake_reward_deltas_publisher
+                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas)
+                                    .await
+                                    .inspect_err(|e| {
+                                        error!("Error publishing stake reward deltas: {e:#}")
+                                    })
+                                    .ok();
                             }
                         }
                         .instrument(span)
@@ -576,7 +599,12 @@ impl AccountsState {
 
         if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
             info!("Verifying rewards against '{verify_rewards_files}'");
-            verifier.read_rewards(&verify_rewards_files);
+            verifier.set_rewards_template(&verify_rewards_files);
+        }
+
+        if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
+            info!("Verifying rewards against '{verify_spdd_files}'");
+            verifier.set_spdd_template(&verify_spdd_files);
         }
 
         // History

@@ -21,7 +21,7 @@ download-max-age = "never"
 pause = "none"
 
 [module.snapshot-bootstrapper]
-epoch = 509
+epoch = 507
 network = "mainnet"
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
@@ -57,6 +57,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+publish-tx-validation-topic = "cardano.validation.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
@@ -143,6 +144,7 @@ spdd-clear-on-start = true
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
