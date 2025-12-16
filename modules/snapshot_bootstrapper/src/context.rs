@@ -43,7 +43,6 @@ pub struct BootstrapContext {
 impl BootstrapContext {
     /// Load all bootstrap data from the network directory.
     pub fn load(cfg: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
-        let target_epoch = cfg.epoch;
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
         let genesis = genesis_for_network(&cfg.network);
@@ -66,18 +65,17 @@ impl BootstrapContext {
             .unwrap_or_else(|| panic!("Origin point has no hash: {:?}", block_ctx.point));
         let slot = block_ctx.point.slot();
 
-        // Build nonce
-        let nonces = nonces_file.into_nonces(target_epoch, *hash);
+        let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
+        let nonces = nonces_file.into_nonces(epoch, *hash);
 
         // Build block info
-        let (_, epoch_slot) = genesis.slot_to_epoch(slot);
         let block_info = BlockInfo {
             status: BlockStatus::Immutable,
             intent: BlockIntent::Apply,
             slot,
             number: block_ctx.block_number,
             hash: *hash,
-            epoch: target_epoch,
+            epoch,
             epoch_slot,
             new_epoch: false,
             timestamp: genesis.slot_to_timestamp(slot),

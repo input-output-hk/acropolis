@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -31,11 +31,15 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 [module.peer-network-interface]
 sync-point = "snapshot"
 node-addresses = [
+    "backbone.mainnet.emurgornd.com:3001",
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
-    "backbone.mainnet.emurgornd.com:3001",
 ]
 magic-number = 764824073
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0    # every 5 seconds
 
 [module.consensus]
 # List of validation result topics to listen on
@@ -44,7 +48,7 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
-           "cardano.validation.spo"
+#           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -202,6 +206,7 @@ exchange = "caryatid"
 [message-bus.internal]
 class = "in-memory"
 workers = 50
+subscriber-queue-size = 2000
 dispatch-queue-size = 1000
 worker-queue-size = 100
 bulk-block-capacity = 50

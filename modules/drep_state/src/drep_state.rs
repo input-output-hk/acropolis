@@ -315,6 +315,7 @@ impl DRepState {
                             state.bootstrap(drep_msg);
                             // Commit the bootstrapped state to history to persist changes
                             history.lock().await.commit(drep_msg.epoch, state);
+                            break;
                         }
                         // There will be other snapshot messages that we're not interested in
                         _ => (),

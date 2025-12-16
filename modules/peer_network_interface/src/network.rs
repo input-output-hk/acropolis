@@ -79,10 +79,43 @@ impl NetworkManager {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        while let Some(event) = self.events.recv().await {
-            self.on_network_event(event).await?;
+        info!(
+            "NetworkManager: Starting run loop with {} peers",
+            self.peers.len()
+        );
+        let mut event_count = 0u64;
+        let mut last_log_time = std::time::Instant::now();
+        loop {
+            tokio::select! {
+                event = self.events.recv() => {
+                    let Some(event) = event else {
+                        info!("NetworkManager: Event channel closed, exiting run loop");
+                        break;
+                    };
+                    event_count += 1;
+                    if event_count <= 5 || event_count % 1000 == 0 {
+                        info!(
+                            "NetworkManager: Received event #{}: {:?}",
+                            event_count,
+                            std::mem::discriminant(&event)
+                        );
+                    }
+                    self.on_network_event(event).await?;
+                    last_log_time = std::time::Instant::now();
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                    let elapsed = last_log_time.elapsed().as_secs();
+                    info!(
+                        "NetworkManager: Heartbeat - {} events processed, {} peers, {}s since last event, {} blocks published",
+                        event_count, self.peers.len(), elapsed, self.published_blocks
+                    );
+                }
+            }
         }
-
+        info!(
+            "NetworkManager: Run loop ended after {} events",
+            event_count
+        );
         Ok(())
     }
 
@@ -251,21 +284,35 @@ impl NetworkManager {
     }
 
     async fn publish_events(&mut self) -> Result<()> {
+        let mut published_count = 0u64;
         while let Some(event) = self.chain.next_unpublished_event() {
             let tip = self.chain.preferred_upstream_tip();
             match event {
                 ChainEvent::RollForward { header, body } => {
                     self.block_sink.announce_roll_forward(header, body, tip).await?;
                     self.published_blocks += 1;
-                    if self.published_blocks.is_multiple_of(100) {
-                        info!("Published block {}", header.number);
+                    published_count += 1;
+                    if self.published_blocks <= 5 || self.published_blocks.is_multiple_of(100) {
+                        info!("Published block {} (slot {})", header.number, header.slot);
                     }
                 }
                 ChainEvent::RollBackward { header } => {
+                    info!(
+                        "Publishing rollback to block {} (slot {})",
+                        header.number, header.slot
+                    );
                     self.block_sink.announce_roll_backward(header, tip).await?;
                 }
             }
             self.chain.handle_event_published();
+        }
+        if published_count == 0 && self.published_blocks == 0 {
+            // Only log once at startup if nothing is being published
+            static LOGGED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                info!("NetworkManager: publish_events called but no events to publish yet");
+            }
         }
         Ok(())
     }

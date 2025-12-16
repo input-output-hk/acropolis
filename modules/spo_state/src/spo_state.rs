@@ -857,6 +857,7 @@ impl SPOState {
                             guard.clear();
                             guard.commit_forced(spo_state.clone().into());
                             info!("SPO state bootstrap complete");
+                            break;
                         }
                         Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
                             block_height,

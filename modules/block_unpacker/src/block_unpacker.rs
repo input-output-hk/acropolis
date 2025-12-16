@@ -37,6 +37,7 @@ impl BlockUnpacker {
         let mut subscription = context.subscribe(&subscribe_topic).await?;
 
         context.clone().run(async move {
+            info!("BlockUnpacker: Entering main loop, ready to receive blocks");
             loop {
                 let Ok((_, message)) = subscription.read().await else {
                     return;

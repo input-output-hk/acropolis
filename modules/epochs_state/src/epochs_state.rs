@@ -86,29 +86,38 @@ impl EpochsState {
             }
         };
 
-        info!("Waiting for snapshot bootstrap messages...");
+        info!("EpochsState: Waiting for snapshot bootstrap messages on cardano.snapshot topic...");
 
         loop {
             let (_, message) = snapshot_subscription.read().await?;
-
             match message.as_ref() {
                 Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                    info!(
+                        "EpochsState: Received snapshot startup signal, awaiting bootstrap data..."
+                    );
                 }
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::EpochState(epoch_data),
                 )) => {
+                    info!(
+                        "EpochsState: Received EpochState bootstrap message for epoch {}",
+                        epoch_data.epoch
+                    );
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
                     history.lock().await.commit(epoch_data.epoch, state);
-                    info!("Epoch state bootstrap complete");
+                    info!(
+                        "EpochsState: Epoch state bootstrap complete, exiting wait_for_bootstrap"
+                    );
                     return Ok(());
                 }
                 Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                    warn!("Snapshot complete without epoch bootstrap data, using default state");
+                    warn!("EpochsState: Snapshot complete without epoch bootstrap data, using default state");
                     return Ok(());
                 }
-                _ => {}
+                _ => {
+                    // info!("EpochsState: Ignoring message in wait_for_bootstrap loop");
+                }
             }
         }
     }
@@ -125,9 +134,11 @@ impl EpochsState {
         mut epoch_activity_publisher: EpochActivityPublisher,
         mut epoch_nonce_publisher: EpochNoncePublisher,
     ) -> Result<()> {
+        info!("EpochsState: Waiting for genesis complete message...");
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
             Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                info!("EpochsState: Received genesis complete message");
                 complete.values.clone()
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
@@ -137,7 +148,9 @@ impl EpochsState {
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
 
         // Consume initial protocol parameters
+        info!("EpochsState: Waiting for initial protocol parameters...");
         let _ = protocol_parameters_subscription.read().await?;
+        info!("EpochsState: Received initial protocol parameters, entering main loop");
 
         loop {
             // Get a mutable state

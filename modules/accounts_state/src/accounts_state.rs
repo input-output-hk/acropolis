@@ -115,6 +115,7 @@ impl AccountsState {
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
+                    panic!("Received AccountsState bootstrap message");
                     info!("Received AccountsState bootstrap message");
                     let epoch = accounts_data.epoch;
                     let mut state = history.lock().await.get_or_init_with(State::default);

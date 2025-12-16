@@ -451,7 +451,17 @@ pub enum SnapshotStateMessage {
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
+    UTxOBootstrapComplete(UTxOBootstrapComplete),
     DRepState(DRepBootstrapMessage),
+}
+
+/// Signals that all UTxO batches have been sent
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOBootstrapComplete {
+    /// Total number of UTxOs sent
+    pub total_utxos: u64,
+    /// Total number of batches sent
+    pub batch_count: u64,
 }
 
 // === Global message enum ===

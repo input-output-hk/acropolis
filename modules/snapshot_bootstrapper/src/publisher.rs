@@ -9,7 +9,7 @@ use acropolis_common::{
     ledger_state::SPOState,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
-        SnapshotStateMessage, UTxOPartialState,
+        SnapshotStateMessage, UTxOBootstrapComplete, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     snapshot::streaming_snapshot::{
@@ -168,6 +168,32 @@ impl SnapshotPublisher {
         if !self.utxo_batch.is_empty() {
             self.publish_utxo_batch();
         }
+        self.publish_utxo_bootstrap_complete();
+    }
+
+    fn publish_utxo_bootstrap_complete(&self) {
+        info!(
+            "Publishing UTxO bootstrap complete: {} UTxOs in {} batches",
+            self.utxo_count, self.utxo_batches_published
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::UTxOBootstrapComplete(UTxOBootstrapComplete {
+                total_utxos: self.utxo_count,
+                batch_count: self.utxo_batches_published,
+            }),
+        )));
+
+        let context = self.context.clone();
+        let snapshot_topic = self.snapshot_topic.clone();
+
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async move {
+                if let Err(e) = context.publish(&snapshot_topic, message).await {
+                    tracing::error!("Failed to publish UTxO bootstrap complete: {}", e);
+                }
+            })
+        });
     }
 
     fn publish_utxo_batch(&mut self) {

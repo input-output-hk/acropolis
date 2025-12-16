@@ -84,6 +84,12 @@ impl State {
         }
     }
 
+    /// Set the last block info (used after bootstrap)
+    pub fn set_block_info(&mut self, slot: u64, number: u64) {
+        self.last_slot = slot;
+        self.last_number = number;
+    }
+
     /// Get the total value of multiple utxos
     pub async fn get_utxos_sum(&self, utxo_identifiers: &Vec<UTxOIdentifier>) -> Result<Value> {
         let mut balance = Value::new(0, Vec::new());

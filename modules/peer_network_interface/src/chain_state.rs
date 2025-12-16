@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
+use tracing::{debug, warn};
 
 use crate::{connection::Header, network::PeerId};
 
@@ -119,15 +120,31 @@ impl ChainState {
         let is_preferred = self.preferred_upstream == Some(id);
         let slot = header.slot;
         let hash = header.hash;
+        let number = header.number;
         let slot_blocks = self.blocks.entry(header.slot).or_default();
         slot_blocks.track_announcement(id, header);
         if is_preferred {
             if self.waiting_for_first_message {
+                debug!(
+                    "ChainState: Preferred peer {:?} sent first message, block {} slot {}, switching head",
+                    id, number, slot
+                );
                 self.switch_head_to_peer(id);
             } else {
                 let point = SpecificPoint { slot, hash };
+                debug!(
+                    "ChainState: Adding block {} slot {} to unpublished_blocks (queue len: {})",
+                    number,
+                    slot,
+                    self.unpublished_blocks.len() + 1
+                );
                 self.unpublished_blocks.push_back(point);
             }
+        } else {
+            debug!(
+                "ChainState: Ignoring block {} slot {} from non-preferred peer {:?} (preferred: {:?})",
+                number, slot, id, self.preferred_upstream
+            );
         }
         self.block_announcers(slot, hash)
     }
@@ -206,8 +223,17 @@ impl ChainState {
 
     pub fn handle_body_fetched(&mut self, slot: u64, hash: BlockHash, body: Vec<u8>) {
         let Some(slot_blocks) = self.blocks.get_mut(&slot) else {
+            debug!(
+                "ChainState: handle_body_fetched - no slot_blocks for slot {}, ignoring body",
+                slot
+            );
             return;
         };
+        debug!(
+            "ChainState: handle_body_fetched - storing body for slot {} (body len: {})",
+            slot,
+            body.len()
+        );
         slot_blocks.track_body(hash, body);
     }
 
@@ -215,6 +241,10 @@ impl ChainState {
         if self.preferred_upstream == Some(id) {
             return;
         }
+        debug!(
+            "ChainState: Changing preferred upstream from {:?} to {:?}",
+            self.preferred_upstream, id
+        );
         self.preferred_upstream = Some(id);
         self.switch_head_to_peer(id);
     }
@@ -235,10 +265,17 @@ impl ChainState {
     }
 
     fn switch_head_to_peer(&mut self, id: PeerId) {
+        debug!(
+            "ChainState: switch_head_to_peer({:?}) - unpublished_blocks len: {}, published_blocks len: {}",
+            id,
+            self.unpublished_blocks.len(),
+            self.published_blocks.len()
+        );
         self.waiting_for_first_message = false;
 
         // If there are any blocks queued to be published which our preferred upstream never announced,
         // unqueue them now.
+        let mut removed_count = 0;
         while let Some(block) = self.unpublished_blocks.back() {
             if let Some(slot_blocks) = self.blocks.get(&block.slot)
                 && slot_blocks.was_hash_announced(id, block.hash)
@@ -246,7 +283,14 @@ impl ChainState {
                 break;
             } else {
                 self.unpublished_blocks.pop_back();
+                removed_count += 1;
             }
+        }
+        if removed_count > 0 {
+            debug!(
+                "ChainState: switch_head_to_peer - removed {} blocks not announced by new preferred peer",
+                removed_count
+            );
         }
 
         let mut peer_start = None;
@@ -259,9 +303,17 @@ impl ChainState {
 
         let Some(peer_start) = peer_start else {
             // We haven't seen any blocks from this peer yet, we don't know where to roll back to.
+            debug!(
+                "ChainState: switch_head_to_peer - no blocks from peer {:?} yet, waiting for first message",
+                id
+            );
             self.waiting_for_first_message = true;
             return;
         };
+        debug!(
+            "ChainState: switch_head_to_peer - peer {:?} starts at slot {}",
+            id, peer_start.slot
+        );
 
         let mut rolled_back = false;
         while let Some(published) = self.published_blocks.back() {
@@ -295,11 +347,37 @@ impl ChainState {
 
     pub fn next_unpublished_event(&self) -> Option<ChainEvent<'_>> {
         if let Some(header) = &self.rolled_back_to {
+            debug!(
+                "ChainState: next_unpublished_event returning RollBackward to block {} slot {}",
+                header.number, header.slot
+            );
             return Some(ChainEvent::RollBackward { header });
         }
         let block = self.unpublished_blocks.front()?;
-        let slot_blocks = self.blocks.get(&block.slot)?;
-        let (header, body) = slot_blocks.body(block.hash)?;
+        let slot_blocks = self.blocks.get(&block.slot);
+        if slot_blocks.is_none() {
+            warn!(
+                "ChainState: next_unpublished_event - no slot_blocks for slot {} (unpublished queue len: {})",
+                block.slot,
+                self.unpublished_blocks.len()
+            );
+            return None;
+        }
+        let slot_blocks = slot_blocks.unwrap();
+        let body_result = slot_blocks.body(block.hash);
+        if body_result.is_none() {
+            debug!(
+                "ChainState: next_unpublished_event - block at slot {} has no body yet (unpublished queue len: {})",
+                block.slot,
+                self.unpublished_blocks.len()
+            );
+            return None;
+        }
+        let (header, body) = body_result.unwrap();
+        debug!(
+            "ChainState: next_unpublished_event returning RollForward block {} slot {}",
+            header.number, header.slot
+        );
         Some(ChainEvent::RollForward { header, body })
     }
 

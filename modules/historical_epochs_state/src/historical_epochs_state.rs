@@ -51,8 +51,9 @@ impl HistoricalEpochsState {
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        info!("HistoricalEpochsState: Waiting for initial params...");
         let _ = params_subscription.read().await?;
-        info!("Consumed initial genesis params from params_subscription");
+        info!("HistoricalEpochsState: Received initial params, entering main loop");
 
         // Background task to persist epoch sequentially
         const MAX_PENDING_PERSISTS: usize = 1;

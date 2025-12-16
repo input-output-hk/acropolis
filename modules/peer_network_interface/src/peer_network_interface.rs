@@ -15,7 +15,7 @@ use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use std::{path::Path, sync::Arc, time::Duration};
 
@@ -106,21 +106,25 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Snapshot => {
+                    info!("PeerNetworkInterface: Waiting for snapshot completion...");
                     let mut subscription =
                         snapshot_complete.expect("Snapshot topic subscription missing");
                     match Self::wait_snapshot_completion(&mut subscription).await {
                         Ok(point) => {
-                            if let Point::Specific(slot, _) = &point {
+                            if let Point::Specific(slot, _hash) = &point {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
-                                tracing::info!(
-                                    "Starting sync from snapshot at slot {} epoch {}",
+                                info!(
+                                    "PeerNetworkInterface: Received snapshot completion at slot {} epoch {}",
                                     slot,
                                     epoch,
                                 );
                             }
+                            info!("PeerNetworkInterface: Initializing network manager...");
                             let mut manager = Self::init_manager(cfg, sink, command_subscription);
-                            manager.sync_to_point(point);
+                            info!("PeerNetworkInterface: Syncing to point {:?}", point);
+                            manager.sync_to_point(point.clone());
+                            info!("PeerNetworkInterface: Starting manager run loop");
                             manager
                         }
                         Err(error) => {
