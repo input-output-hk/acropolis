@@ -4,6 +4,7 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -26,7 +27,6 @@ use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn, Level};
-use acropolis_common::validation::ValidationOutcomes;
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -981,10 +981,15 @@ impl State {
     }
 
     /// Handle withdrawals
-    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage, vld: &mut ValidationOutcomes) -> Result<()> {
+    pub fn handle_withdrawals(
+        &mut self,
+        withdrawals_msg: &WithdrawalsMessage,
+        vld: &mut ValidationOutcomes,
+    ) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            info!("Withdrawal: from {}, tx {}, amount {}",
+            debug!(
+                "Withdrawal: from {}, tx {}, amount {}",
                 withdrawal.address, withdrawal.tx_identifier, withdrawal.value
             );
             if let Err(e) = stake_addresses.process_withdrawal(withdrawal) {
@@ -996,7 +1001,11 @@ impl State {
     }
 
     /// Handle stake deltas
-    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage, vld: &mut ValidationOutcomes) -> Result<()> {
+    pub fn handle_stake_deltas(
+        &mut self,
+        deltas_msg: &StakeAddressDeltasMessage,
+        vld: &mut ValidationOutcomes,
+    ) -> Result<()> {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1074,6 +1083,7 @@ mod tests {
     fn stake_addresses_initialise_to_first_delta_and_increment_subsequently() {
         let mut state = State::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
+        let mut vld = ValidationOutcomes::new();
 
         // Register first
         state.register_stake_address(&stake_address, None);
@@ -1093,19 +1103,21 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg).unwrap();
+        state.handle_stake_deltas(&msg, &mut vld).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
         }
 
-        state.handle_stake_deltas(&msg).unwrap();
+        state.handle_stake_deltas(&msg, &mut vld).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 84);
         }
+
+        vld.as_result().unwrap();
     }
 
     #[test]
@@ -1121,6 +1133,7 @@ mod tests {
     #[test]
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
+        let mut vld = ValidationOutcomes::new();
 
         let spo1 = test_keyhash(0x01).into();
         let spo2 = test_keyhash(0x02).into();
@@ -1185,7 +1198,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg1).unwrap();
+        state.handle_stake_deltas(&msg1, &mut vld).unwrap();
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1196,7 +1209,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg2).unwrap();
+        state.handle_stake_deltas(&msg2, &mut vld).unwrap();
 
         // Get the SPDD
         let spdd = state.generate_spdd();
@@ -1206,6 +1219,8 @@ mod tests {
         assert_eq!(stake1.active, 42);
         let stake2 = spdd.get(&spo2).unwrap();
         assert_eq!(stake2.active, 21);
+
+        vld.as_result().unwrap();
     }
 
     #[test]
@@ -1279,6 +1294,7 @@ mod tests {
     #[test]
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
+        let mut vld = ValidationOutcomes::new();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
@@ -1295,7 +1311,7 @@ mod tests {
                 delta: 99,
             }],
         };
-        state.handle_stake_deltas(&msg).unwrap();
+        state.handle_stake_deltas(&msg, &mut vld).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1323,11 +1339,13 @@ mod tests {
         let sas = stake_addresses.get(&stake_address).unwrap();
         assert_eq!(sas.utxo_value, 99);
         assert_eq!(sas.rewards, 42);
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
+        let mut vld = ValidationOutcomes::new();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
@@ -1344,7 +1362,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg).unwrap();
+        state.handle_stake_deltas(&msg, &mut vld).unwrap();
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1379,11 +1397,12 @@ mod tests {
             }],
         };
 
-        state.handle_withdrawals(&withdrawals).unwrap();
+        state.handle_withdrawals(&withdrawals, &mut vld).unwrap();
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&stake_address).unwrap();
         assert_eq!(sas.rewards, 3);
+        vld.as_result().unwrap();
     }
 
     #[test]
@@ -1417,6 +1436,7 @@ mod tests {
     #[test]
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
+        let mut vld = ValidationOutcomes::new();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         let drep_script_cred = DRepCredential::ScriptHash(test_keyhash_from_bytes(&DREP_HASH));
@@ -1528,7 +1548,7 @@ mod tests {
                 delta: 100_000,
             },
         ];
-        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas })?;
+        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut vld)?;
 
         let drdd = state.generate_drdd();
         assert_eq!(
@@ -1540,7 +1560,7 @@ mod tests {
             }
         );
 
-        Ok(())
+        vld.as_result()
     }
 
     #[test]

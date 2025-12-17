@@ -345,6 +345,18 @@ mod tests {
         let decoded = MultiEraBlock::decode(&RAW_4512070)?;
         let tx0 = decoded.txs().first().unwrap().clone();
         let withdr0 = tx0.withdrawals();
+        let wa = withdr0.as_alonzo().unwrap().clone().to_vec();
+        assert_eq!(wa.len(), 1);
+        let wa0 = wa.first().unwrap();
+        assert_eq!(
+            wa0.0.to_vec(),
+            [
+                0xe1, 0x55, 0x8f, 0x3e, 0xe0, 0x9b, 0x26, 0xd8, 0x8f, 0xac, 0x2e, 0xdd, 0xc7, 0x72,
+                0xa9, 0xed, 0xa9, 0x4c, 0xce, 0x6d, 0xba, 0xdb, 0xe9, 0xfe, 0xe4, 0x39, 0xbd, 0x60,
+                0x01
+            ]
+        );
+        assert_eq!(wa0.1, 0xff00036178a5ae);
         Ok(())
     }
 }

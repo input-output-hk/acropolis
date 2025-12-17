@@ -615,12 +615,14 @@ mod tests {
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
             // Create an entry but don't register
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 100,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 100,
+                })
+                .unwrap();
 
             assert!(!stake_addresses.deregister_stake_address(&stake_address));
         }
@@ -713,12 +715,14 @@ mod tests {
                 .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH)));
 
             // Create an unregistered entry with UTXO value
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 100,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 100,
+                })
+                .unwrap();
 
             // Delegation should still fail for unregistered address
             assert!(!stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
@@ -779,10 +783,10 @@ mod tests {
                 tx_count: 1,
                 delta: 42,
             };
-            stake_addresses.process_stake_delta(&delta);
+            stake_addresses.process_stake_delta(&delta).unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
 
-            stake_addresses.process_stake_delta(&delta);
+            stake_addresses.process_stake_delta(&delta).unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 84);
         }
 
@@ -793,19 +797,23 @@ mod tests {
 
             stake_addresses.register_stake_address(&stake_address);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 100,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 100,
+                })
+                .unwrap();
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: -30,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: -30,
+                })
+                .unwrap();
 
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 70);
         }
@@ -817,20 +825,24 @@ mod tests {
 
             stake_addresses.register_stake_address(&stake_address);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 50,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 50,
+                })
+                .unwrap();
 
-            // Try to subtract more than available
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: -100,
-            });
+            // Try to subtract more than available -- should result in error
+            assert!(stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: -100,
+                })
+                .is_err());
 
             // Value should remain unchanged after error
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 50);
@@ -847,12 +859,14 @@ mod tests {
 
             stake_addresses.register_stake_address(&stake_address);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: stake_address.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 42,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: stake_address.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 42,
+                })
+                .unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
 
             stake_addresses.add_to_reward(&stake_address, 12);
@@ -953,7 +967,7 @@ mod tests {
                 value: 24,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal)?;
+            assert!(stake_addresses.process_withdrawal(&withdrawal).is_err());
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
 
             // Withdraw less than reward (should succeed)
@@ -997,8 +1011,9 @@ mod tests {
                 tx_identifier: TxIdentifier::default(),
             };
 
-            // Should log error but not panic
-            stake_addresses.process_withdrawal(&withdrawal)
+            // Should return error, but not panic
+            assert!(stake_addresses.process_withdrawal(&withdrawal).is_err());
+            Ok(())
         }
     }
 
@@ -1062,20 +1077,24 @@ mod tests {
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 50);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr2, 100);
 
             let spdd = stake_addresses.generate_spdd();
@@ -1098,18 +1117,22 @@ mod tests {
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let spdd = stake_addresses.generate_spdd();
 
@@ -1124,12 +1147,14 @@ mod tests {
             let addr1 = create_stake_address(STAKE_KEY_HASH);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
 
             let spdd = stake_addresses.generate_spdd();
             assert!(spdd.is_empty());
@@ -1151,28 +1176,34 @@ mod tests {
             stake_addresses.record_drep_delegation(&addr2, &DRepChoice::NoConfidence);
             stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Key(DREP_HASH));
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 50);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr2, 100);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr3.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 3000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr3.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 3000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr3, 150);
 
             let dreps = vec![(DRepCredential::AddrKeyHash(DREP_HASH), 500)];
@@ -1208,20 +1239,24 @@ mod tests {
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 50);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr2, 100);
 
             let info = stake_addresses.get_pool_live_stake_info(&SPO_HASH);
@@ -1243,18 +1278,22 @@ mod tests {
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH_2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let pools = vec![SPO_HASH, SPO_HASH_2];
             let stakes = stake_addresses.get_pools_live_stakes(&pools);
@@ -1274,20 +1313,24 @@ mod tests {
             stake_addresses.record_stake_delegation(&addr1, &SPO_HASH);
             stake_addresses.record_stake_delegation(&addr2, &SPO_HASH);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 50);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let delegators = stake_addresses.get_pool_delegators(&SPO_HASH);
 
@@ -1310,20 +1353,24 @@ mod tests {
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 500);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let keys = vec![addr1.clone(), addr2.clone()];
             let map = stake_addresses.get_accounts_utxo_values_map(&keys).unwrap();
@@ -1340,12 +1387,14 @@ mod tests {
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
 
             let keys = vec![addr1, addr2];
 
@@ -1372,20 +1421,24 @@ mod tests {
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 500);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let keys = vec![addr1, addr2];
             let sum = stake_addresses.get_accounts_utxo_values_sum(&keys).unwrap();
@@ -1400,12 +1453,14 @@ mod tests {
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
 
             let keys = vec![addr1, addr2];
 
@@ -1436,20 +1491,24 @@ mod tests {
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 100);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let addresses = vec![addr1.clone(), addr2.clone()];
             let map = stake_addresses.get_accounts_balances_map(&addresses).unwrap();
@@ -1466,12 +1525,14 @@ mod tests {
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
 
             let addresses = vec![addr1, addr2];
 
@@ -1498,20 +1559,24 @@ mod tests {
             stake_addresses.register_stake_address(&addr1);
             stake_addresses.register_stake_address(&addr2);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
             stake_addresses.add_to_reward(&addr1, 100);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
 
             let addresses = vec![addr1, addr2];
             let sum = stake_addresses.get_account_balances_sum(&addresses).unwrap();
@@ -1526,12 +1591,14 @@ mod tests {
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
 
             let addresses = vec![addr1, addr2];
 
@@ -1617,24 +1684,30 @@ mod tests {
             stake_addresses.record_drep_delegation(&addr2, &drep_choice);
             stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Abstain);
 
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr1.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1000,
-            });
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr2.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 2000,
-            });
-            stake_addresses.process_stake_delta(&StakeAddressDelta {
-                stake_address: addr3.clone(),
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 3000,
-            });
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr1.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 1000,
+                })
+                .unwrap();
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr2.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 2000,
+                })
+                .unwrap();
+            stake_addresses
+                .process_stake_delta(&StakeAddressDelta {
+                    stake_address: addr3.clone(),
+                    addresses: Vec::new(),
+                    tx_count: 1,
+                    delta: 3000,
+                })
+                .unwrap();
 
             let delegators = stake_addresses.get_drep_delegators(&drep_choice);
 

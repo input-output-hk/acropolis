@@ -234,7 +234,9 @@ impl AccountsState {
                 let previous_epoch_rewards_result = state
                     .complete_previous_epoch_rewards_calculation(verifier)
                     .await
-                    .inspect_err(|e| vld.push_anyhow(anyhow!("Previous epoch rewards calculation error: {e:#}")))
+                    .inspect_err(|e| {
+                        vld.push_anyhow(anyhow!("Previous epoch rewards calculation error: {e:#}"))
+                    })
                     .ok();
 
                 let mut stake_reward_deltas = if let Some(block_info) = current_block.as_ref() {
@@ -244,7 +246,9 @@ impl AccountsState {
                         spo_rewards_publisher
                             .publish_spo_rewards(block_info, spo_rewards)
                             .await
-                            .inspect_err(|e| vld.push_anyhow(anyhow!("Error publishing SPO rewards: {e:#}")))
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("Error publishing SPO rewards: {e:#}"))
+                            })
                             .ok();
                         stake_reward_deltas
                     } else {
@@ -295,7 +299,9 @@ impl AccountsState {
 
                             let drdd = state.generate_drdd();
                             if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
-                                vld.push_anyhow(anyhow!("Error publishing drep voting stake distribution: {e:#}"))
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing drep voting stake distribution: {e:#}"
+                                ))
                             }
                         }
                         .instrument(span)
@@ -315,7 +321,9 @@ impl AccountsState {
                             Self::check_sync(&current_block, block_info);
                             state
                                 .handle_spo_state(spo_msg)
-                                .inspect_err(|e| vld.push_anyhow(anyhow!("SPOState handling error: {e:#}")))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("SPOState handling error: {e:#}"))
+                                })
                                 .ok();
                         }
                         .instrument(span)
@@ -336,7 +344,9 @@ impl AccountsState {
                             Self::check_sync(&current_block, block_info);
                             state
                                 .handle_parameters(params_msg)
-                                .inspect_err(|e| vld.push_anyhow(anyhow!("Messaging handling error: {e}")))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("Messaging handling error: {e}"))
+                                })
                                 .ok();
                         }
                         .instrument(span)
@@ -359,7 +369,9 @@ impl AccountsState {
                             let after_epoch_result = state
                                 .handle_epoch_activity(ea_msg, verifier)
                                 .await
-                                .inspect_err(|e| vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}")))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
+                                })
                                 .ok();
                             if let Some(refund_deltas) = after_epoch_result {
                                 // publish stake reward deltas
@@ -368,7 +380,9 @@ impl AccountsState {
                                     .publish_stake_reward_deltas(block_info, stake_reward_deltas)
                                     .await
                                     .inspect_err(|e| {
-                                        vld.push_anyhow(anyhow!("Error publishing stake reward deltas: {e:#}"))
+                                        vld.push_anyhow(anyhow!(
+                                            "Error publishing stake reward deltas: {e:#}"
+                                        ))
                                     })
                                     .ok();
                             }
@@ -389,7 +403,9 @@ impl AccountsState {
                         Self::check_sync(&current_block, block_info);
                         state
                             .handle_tx_certificates(tx_certs_msg)
-                            .inspect_err(|e| vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}")))
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -418,7 +434,9 @@ impl AccountsState {
                         Self::check_sync(&current_block, block_info);
                         state
                             .handle_withdrawals(withdrawals_msg, &mut vld)
-                            .inspect_err(|e| vld.push_anyhow(anyhow!("Withdrawals handling error: {e:#}")))
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("Withdrawals handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -440,7 +458,9 @@ impl AccountsState {
                         Self::check_sync(&current_block, block_info);
                         state
                             .handle_stake_deltas(deltas_msg, &mut vld)
-                            .inspect_err(|e| vld.push_anyhow(anyhow!("StakeAddressDeltas handling error: {e:#}")))
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("StakeAddressDeltas handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -454,8 +474,7 @@ impl AccountsState {
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
                 vld.publish(&context, &validation_outcomes_topic, &block_info).await?;
-            }
-            else {
+            } else {
                 vld.print_errors(None);
             }
         }
