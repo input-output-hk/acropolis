@@ -16,7 +16,6 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-pallas = { version = "0.32.0" }
 pallas-traverse = { workspace = true }
 tracing = { workspace = true }
 glob = "0.3.3"
