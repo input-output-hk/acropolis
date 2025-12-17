@@ -394,8 +394,6 @@ struct AddressTxMap {
 // -- Tests --
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
@@ -483,10 +481,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![],
                 outputs: vec![output.clone()],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 
@@ -857,10 +855,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![],
                 outputs: vec![output.clone()],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 
@@ -877,10 +875,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![input],
                 outputs: vec![],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 

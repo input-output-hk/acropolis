@@ -293,14 +293,14 @@ pub struct TxUTxODeltas {
 
     // State needed for validation
     // This is missing UTxO Authors
-    pub vkey_hashes_needed: HashSet<KeyHash>,
-    pub script_hashes_needed: HashSet<ScriptHash>,
+    pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
+    pub script_hashes_needed: Option<HashSet<ScriptHash>>,
     // From witnesses
-    pub vkey_hashes_provided: Vec<KeyHash>,
+    pub vkey_hashes_provided: Option<Vec<KeyHash>>,
     // NOTE:
     // This includes only native scripts
     // missing Plutus Scripts
-    pub script_hashes_provided: Vec<ScriptHash>,
+    pub script_hashes_provided: Option<Vec<ScriptHash>>,
 }
 
 /// Individual address balance change

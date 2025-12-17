@@ -150,15 +150,20 @@ impl TxUnpacker {
                                     let mut props = None;
                                     let mut votes = None;
 
-                                    let (vkey_hashes_needed, script_hashes_needed) = Self::get_vkey_script_needed(
-                                        &tx_certs,
-                                        &tx_withdrawals,
-                                        &tx_proposal_update,
-                                    );
-                                    let (vkey_hashes_provided, script_hashes_provided) = Self::get_vkey_script_provided(
-                                        &vkey_witnesses,
-                                        &native_scripts,
-                                    );
+                                    let (vkey_hashes_needed, script_hashes_needed, vkey_hashes_provided, script_hashes_provided) = if block.intent.do_validation() {
+                                        let (vkey_hashes_needed, script_hashes_needed) = Self::get_vkey_script_needed(
+                                            &tx_certs,
+                                            &tx_withdrawals,
+                                            &tx_proposal_update,
+                                        );
+                                        let (vkey_hashes_provided, script_hashes_provided) = Self::get_vkey_script_provided(
+                                            &vkey_witnesses,
+                                            &native_scripts,
+                                        );
+                                        (Some(vkey_hashes_needed), Some(script_hashes_needed), Some(vkey_hashes_provided), Some(script_hashes_provided))
+                                    } else {
+                                        (None, None, None, None)
+                                    };
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;

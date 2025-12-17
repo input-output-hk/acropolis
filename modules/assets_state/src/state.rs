@@ -682,7 +682,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
@@ -871,10 +871,10 @@ mod tests {
             tx_identifier,
             inputs,
             outputs,
-            vkey_hashes_needed: HashSet::new(),
-            script_hashes_needed: HashSet::new(),
-            vkey_hashes_provided: vec![],
-            script_hashes_provided: vec![],
+            vkey_hashes_needed: None,
+            script_hashes_needed: None,
+            vkey_hashes_provided: None,
+            script_hashes_provided: None,
         }
     }
 

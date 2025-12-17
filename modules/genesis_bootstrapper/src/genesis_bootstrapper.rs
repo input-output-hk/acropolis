@@ -21,7 +21,7 @@ use pallas::ledger::configs::{
     byron::{genesis_utxos, GenesisFile as ByronGenesisFile},
     shelley::GenesisFile as ShelleyGenesisFile,
 };
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_STARTUP_TOPIC: &str = "cardano.sequence.start";
@@ -175,10 +175,10 @@ impl GenesisBootstrapper {
                             tx_identifier,
                             inputs: Vec::new(),
                             outputs: vec![tx_output],
-                            vkey_hashes_needed: HashSet::new(),
-                            script_hashes_needed: HashSet::new(),
-                            vkey_hashes_provided: vec![],
-                            script_hashes_provided: vec![],
+                            vkey_hashes_needed: None,
+                            script_hashes_needed: None,
+                            vkey_hashes_provided: None,
+                            script_hashes_provided: None,
                         });
                         total_allocated += amount;
                     }
