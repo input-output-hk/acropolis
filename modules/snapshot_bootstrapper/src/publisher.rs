@@ -411,6 +411,9 @@ fn publish_gov_state(
             params,
             era: Some(Era::Conway),
             network_name: "mainnet".to_string(),
+            // NOTE: The era is hardcoded to Conway. This code is currently
+            // Conway-focused and has not been tested on other eras. And the
+            // network name is hardcoded to mainnet for the same reason.
         }),
     )));
 

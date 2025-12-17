@@ -132,7 +132,7 @@ impl ParametersState {
                             // Get current params
                             let current_params = state.current_params.get_params();
 
-                            // Process GovOutcomes message on epoch transition
+                            // Process GovOutcomes message on era transition
                             let new_params = state.handle_enact_state(&block.era, gov).await?;
 
                             // Publish protocol params message
