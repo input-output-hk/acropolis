@@ -47,6 +47,17 @@ use crate::{PoolBlockProduction, Pots};
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
 
+/// Result of parsing pulsing_rew_update, containing rewards and pot deltas
+#[derive(Debug, Default)]
+pub struct PulsingRewardResult {
+    /// Map of stake credentials to their total rewards
+    pub rewards: HashMap<StakeCredential, u64>,
+    /// Delta to apply to treasury (positive = increase)
+    pub delta_treasury: i64,
+    /// Delta to apply to reserves (positive = increase, but typically negative)
+    pub delta_reserves: i64,
+}
+
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
 // -----------------------------------------------------------------------------
@@ -1213,8 +1224,8 @@ impl StreamingSnapshotParser {
         remainder_decoder.skip()?;
 
         // Exit EpochState, now at NewEpochState level
-        // Parse pulsing_rew_update (NewEpochState[4]) to get reward snapshot
-        let reward_snapshot_rewards = Self::parse_pulsing_reward_update(&mut remainder_decoder)?;
+        // Parse pulsing_rew_update (NewEpochState[4]) to get reward snapshot and pot deltas
+        let pulsing_result = Self::parse_pulsing_reward_update(&mut remainder_decoder)?;
 
         // Convert block production data to HashMap<PoolId, usize> for snapshot processing
         let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
@@ -1222,12 +1233,31 @@ impl StreamingSnapshotParser {
         let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
             blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
 
-        // Build pots for snapshot conversion
-        let pots = Pots {
+        // Build pots for snapshot conversion (these are the "current epoch" pots from the snapshot)
+        let snapshot_pots = Pots {
             reserves,
             treasury,
             deposits,
         };
+
+        // Apply the pulsing reward update deltas to get "next epoch" pots
+        // The snapshot contains pots at the START of the current epoch, but we need
+        // the pots at the END of the epoch (after monetary expansion) for the next epoch.
+        // The pulsing_rew_update contains the deltas that will be applied at epoch boundary.
+        let pots = Pots {
+            reserves: (snapshot_pots.reserves as i64 + pulsing_result.delta_reserves) as u64,
+            treasury: (snapshot_pots.treasury as i64 + pulsing_result.delta_treasury) as u64,
+            deposits: snapshot_pots.deposits,
+        };
+
+        info!(
+            "Pots adjustment from pulsing_rew_update: delta_treasury={}, delta_reserves={}",
+            pulsing_result.delta_treasury, pulsing_result.delta_reserves
+        );
+        info!(
+            "Pots after adjustment: reserves={}, treasury={}, deposits={}",
+            pots.reserves, pots.treasury, pots.deposits
+        );
 
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
@@ -1288,7 +1318,7 @@ impl StreamingSnapshotParser {
                     account.address_state.utxo_value = utxo_value;
                 }
                 if let Some(&pulsing_reward) =
-                    reward_snapshot_rewards.get(&account.stake_address.credential)
+                    pulsing_result.rewards.get(&account.stake_address.credential)
                 {
                     account.address_state.rewards += pulsing_reward;
                     pulsing_rewards_total += pulsing_reward;
@@ -1770,16 +1800,16 @@ impl StreamingSnapshotParser {
         Ok(combined)
     }
 
-    /// Parse pulsing_rew_update to extract reward information.
+    /// Parse pulsing_rew_update to extract reward information and pot deltas.
     ///
     /// The pulsing_rew_update is wrapped in a StrictMaybe, so we first check if it's
     /// present before parsing using the PulsingRewardUpdate type.
     ///
-    /// Returns a map of stake credentials to their total rewards (sum of all reward entries).
-    fn parse_pulsing_reward_update(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+    /// Returns rewards map and pot deltas (treasury/reserves changes to apply).
+    fn parse_pulsing_reward_update(decoder: &mut Decoder) -> Result<PulsingRewardResult> {
         // Check if strict_maybe is empty or has content
         match decoder.array()? {
-            Some(0) => return Ok(HashMap::new()),
+            Some(0) => return Ok(PulsingRewardResult::default()),
             Some(1) => {}
             Some(other) => {
                 return Err(anyhow!(
@@ -1796,23 +1826,41 @@ impl StreamingSnapshotParser {
         let pulsing_update: PulsingRewardUpdate =
             decoder.decode().context("Failed to decode PulsingRewardUpdate")?;
 
-        // Extract rewards based on variant, summing all reward entries per credential
-        let rewards = match pulsing_update {
-            PulsingRewardUpdate::Pulsing { snapshot } => snapshot
-                .leaders
-                .0
-                .iter()
-                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
-                .collect(),
-            PulsingRewardUpdate::Complete { update } => update
-                .rewards
-                .0
-                .iter()
-                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
-                .collect(),
+        // Extract rewards and pot deltas based on variant
+        let result = match pulsing_update {
+            PulsingRewardUpdate::Pulsing { snapshot } => {
+                let rewards = snapshot
+                    .leaders
+                    .0
+                    .iter()
+                    .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                    .collect();
+                // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
+                // Both are positive values in RewardSnapshot
+                PulsingRewardResult {
+                    rewards,
+                    delta_treasury: snapshot.delta_t1 as i64,
+                    delta_reserves: -(snapshot.delta_r1 as i64), // Reserves decrease
+                }
+            }
+            PulsingRewardUpdate::Complete { update } => {
+                let rewards = update
+                    .rewards
+                    .0
+                    .iter()
+                    .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                    .collect();
+                // In RewardUpdate, delta_reserves is already inverted (negative means decrease)
+                // and delta_treasury is the actual change
+                PulsingRewardResult {
+                    rewards,
+                    delta_treasury: update.delta_treasury,
+                    delta_reserves: update.delta_reserves,
+                }
+            }
         };
 
-        Ok(rewards)
+        Ok(result)
     }
 
     /// Parse a single UTXO entry from the streaming buffer
