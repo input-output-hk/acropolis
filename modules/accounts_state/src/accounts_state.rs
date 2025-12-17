@@ -59,9 +59,6 @@ const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
-/// Topic signaling that the snapshot bootstrap is complete
-const DEFAULT_SNAPSHOT_COMPLETION_TOPIC: (&str, &str) =
-    ("snapshot-completion-topic", "cardano.snapshot.complete");
 
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
@@ -91,11 +88,9 @@ impl AccountsState {
     }
 
     /// Wait for and process snapshot bootstrap messages
-    /// Returns the BlockInfo from SnapshotComplete if bootstrap occurred, None otherwise
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut completion_subscription: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
         let snapshot_subscription = match snapshot_subscription.as_mut() {
             Some(sub) => sub,
@@ -123,38 +118,14 @@ impl AccountsState {
                     Self::handle_bootstrap(&mut state, accounts_data);
                     history.lock().await.commit(epoch, state);
                     info!("Accounts state bootstrap complete");
-                    break;
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting accounts state bootstrap loop");
+                    return Ok(());
                 }
                 _ => {
                     // Ignore other messages (e.g., EpochState, SPOState bootstrap messages)
                 }
-            }
-        }
-
-        let completion_subscription = match completion_subscription.as_mut() {
-            Some(sub) => sub,
-            None => {
-                info!("No completion subscription available");
-                return Ok(());
-            }
-        };
-
-        info!("Waiting for snapshot complete message...");
-        let (_, message) = completion_subscription.read().await?;
-        match message.as_ref() {
-            Message::Cardano((_, CardanoMessage::SnapshotComplete)) => {
-                info!("Received snapshot complete message");
-                Ok(())
-            }
-            other => {
-                error!(
-                    "Unexpected message on completion topic: {:?}",
-                    std::any::type_name_of_val(other)
-                );
-                Err(anyhow::anyhow!(format!(
-                    "Unexpected message on completion topic: {:?}",
-                    other
-                )))
             }
         }
     }
@@ -166,7 +137,6 @@ impl AccountsState {
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
         context: Arc<Context<Message>>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        completion_subscription: Option<Box<dyn Subscription<Message>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
@@ -183,12 +153,7 @@ impl AccountsState {
         verifier: &Verifier,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
-        Self::wait_for_bootstrap(
-            history.clone(),
-            snapshot_subscription,
-            completion_subscription,
-        )
-        .await?;
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
 
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
@@ -554,10 +519,6 @@ impl AccountsState {
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
-        let snapshot_completion_topic = config
-            .get_string(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_COMPLETION_TOPIC.1.to_string());
-
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
@@ -852,20 +813,13 @@ impl AccountsState {
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let (snapshot_subscription, completion_subscription) =
-            if StartupMethod::from_config(config.as_ref()).is_snapshot() {
-                info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
-                info!(
-                    "Creating subscriber for snapshot completion on '{snapshot_completion_topic}'"
-                );
-                (
-                    Some(context.subscribe(&snapshot_subscribe_topic).await?),
-                    Some(context.subscribe(&snapshot_completion_topic).await?),
-                )
-            } else {
-                info!("Skipping snapshot subscription (startup method is not snapshot)");
-                (None, None)
-            };
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
+            None
+        };
 
         let context_copy = context.clone();
         // Start run task
@@ -875,7 +829,6 @@ impl AccountsState {
                 spdd_store,
                 context_copy,
                 snapshot_subscription,
-                completion_subscription,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,

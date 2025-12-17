@@ -270,7 +270,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "glob",
- "pallas 0.32.1",
  "pallas-traverse 0.33.0",
  "tracing",
 ]

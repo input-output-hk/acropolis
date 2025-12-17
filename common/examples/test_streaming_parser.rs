@@ -1,27 +1,26 @@
 // Example: Test streaming snapshot parser with large snapshot
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
-
-use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::ledger_state::SPOState;
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::streaming_snapshot::{
-    AccountsCallback, DRepCallback, DRepRecord, GovernanceProtocolParametersCallback, UtxoCallback,
+use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
+    ledger_state::SPOState,
+    snapshot::{
+        protocol_parameters::ProtocolParameters,
+        streaming_snapshot::{AccountsCallback, GovernanceProtocolParametersCallback},
+        utxo::UtxoEntry,
+        AccountState, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+        StreamingSnapshotParser, UtxoCallback,
+    },
+    DRepCredential, NetworkId, PoolRegistration,
 };
-use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::EpochCallback;
-use acropolis_common::snapshot::{
-    AccountState, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
-    SnapshotMetadata, SnapshotsCallback, StreamingSnapshotParser,
-};
-use acropolis_common::{DRepCredential, NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 use tracing::info;
 
-use acropolis_common::EpochBootstrapData;
+use acropolis_common::{DRepRecord, EpochBootstrapData};
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
@@ -131,7 +130,7 @@ impl AccountsCallback for CountingCallbacks {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some()
+            data.snapshots
         );
 
         // Keep first 10 for summary

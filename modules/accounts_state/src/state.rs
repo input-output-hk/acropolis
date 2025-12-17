@@ -143,14 +143,15 @@ impl State {
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // Load mark/set/go snapshots if available
-        if let Some(snapshots) = bootstrap_msg.bootstrap_snapshots {
-            self.epoch_snapshots = EpochSnapshots {
-                mark: Arc::new(snapshots.mark),
-                set: Arc::new(snapshots.set),
-                go: Arc::new(snapshots.go),
-            };
+        // Load mark/set/go snapshots
+        let snapshots = bootstrap_msg.bootstrap_snapshots;
+        self.epoch_snapshots = EpochSnapshots {
+            mark: Arc::new(snapshots.mark),
+            set: Arc::new(snapshots.set),
+            go: Arc::new(snapshots.go),
+        };
 
+        if !self.epoch_snapshots.mark.spos.is_empty() {
             info!(
                 "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
                 self.epoch_snapshots.mark.epoch,
@@ -161,7 +162,7 @@ impl State {
                 self.epoch_snapshots.go.spos.len(),
             );
         } else {
-            info!("No bootstrap snapshot data available");
+            info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
         }
 
         info!(

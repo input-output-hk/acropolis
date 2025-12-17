@@ -609,8 +609,9 @@ pub struct AccountsBootstrapData {
     pub dreps: Vec<(DRepCredential, u64)>,
     /// Treasury, reserves, and deposits
     pub pots: Pots,
-    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation
-    pub snapshots: Option<SnapshotsContainer>,
+    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation.
+    /// Empty (default) for pre-Shelley eras.
+    pub snapshots: SnapshotsContainer,
 }
 
 /// Callback invoked with accounts bootstrap data
@@ -1193,11 +1194,12 @@ impl StreamingSnapshotParser {
                     processed.go.spos.len()
                 );
                 callbacks.on_snapshots(processed.clone())?;
-                Some(processed)
+                processed
             }
             Err(e) => {
-                info!("Failed to parse snapshots: {}, continuing without them", e);
-                None
+                info!("    Failed to parse snapshots: {}", e);
+                info!("    Using empty snapshots (pre-Shelley or parse error)...");
+                SnapshotsContainer::default()
             }
         };
 
