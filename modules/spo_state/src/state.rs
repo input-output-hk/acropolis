@@ -642,7 +642,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            stake_addresses.process_withdrawal(withdrawal);
+            stake_addresses.process_withdrawal(withdrawal)?;
         }
 
         Ok(())
@@ -655,7 +655,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for delta in deltas_msg.deltas.iter() {
-            stake_addresses.process_stake_delta(delta);
+            stake_addresses.process_stake_delta(delta)?;
         }
 
         Ok(())
