@@ -107,15 +107,65 @@ impl GovernanceState {
     );
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        state: Arc<Mutex<State>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for governance state snapshot bootstrap messages...");
+
+        loop {
+            let Ok((_, message)) = snapshot_subscription.read().await else {
+                info!("Snapshot subscription closed");
+                return Ok(());
+            };
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("GovernanceState: Snapshot Startup message received");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::GovernanceState(gov_msg),
+                )) => {
+                    let mut locked = state.lock().await;
+                    // Use a default voting length if conway params not yet available
+                    // The actual voting length will be set when protocol params arrive
+                    let voting_length = locked
+                        .get_conway_voting()
+                        .get_conway_params()
+                        .map(|p| p.gov_action_lifetime as u64)
+                        .unwrap_or(6); // Default to 6 epochs if not set
+
+                    locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                    info!(
+                        "GovernanceState: Snapshot Bootstrap message received, {} proposals loaded",
+                        gov_msg.proposals.len()
+                    );
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("GovernanceState: Snapshot complete, exiting bootstrap loop");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         state: Arc<Mutex<State>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_s: Box<dyn Subscription<Message>>,
         mut drep_s: Box<dyn Subscription<Message>>,
         mut spo_s: Box<dyn Subscription<Message>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        // Wait for snapshot bootstrap if subscription is provided
+        if let Some(subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(state.clone(), subscription).await?;
+        }
+
         // Ticker to log stats
         let state_tick = state.clone();
         let mut subscription = context.subscribe("clock.tick").await?;
@@ -292,46 +342,13 @@ impl GovernanceState {
             cfg.verification_output_file.clone(),
         )));
 
-        // Handle snapshot bootstrap if starting from snapshot
-        if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        // Subscribe for snapshot bootstrap if starting from snapshot
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber on '{snapshot_subscribe_topic}' for governance snapshot bootstrap");
-            let mut snapshot_subscription = context.subscribe(&snapshot_subscribe_topic).await?;
-            let state_snapshot = state.clone();
-
-            context.run(async move {
-                loop {
-                    let Ok((_, message)) = snapshot_subscription.read().await else {
-                        return;
-                    };
-
-                    match message.as_ref() {
-                        Message::Snapshot(SnapshotMessage::Startup) => {
-                            info!("GovernanceState: Snapshot Startup message received");
-                        }
-                        Message::Snapshot(SnapshotMessage::Bootstrap(
-                            SnapshotStateMessage::GovernanceState(gov_msg),
-                        )) => {
-                            let mut locked = state_snapshot.lock().await;
-                            // Use a default voting length if conway params not yet available
-                            // The actual voting length will be set when protocol params arrive
-                            let voting_length = locked
-                                .get_conway_voting()
-                                .get_conway_params()
-                                .map(|p| p.gov_action_lifetime as u64)
-                                .unwrap_or(6); // Default to 6 epochs if not set
-
-                            locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
-                            info!(
-                                "GovernanceState: Snapshot Bootstrap message received, {} proposals loaded",
-                                gov_msg.proposals.len()
-                            );
-                        }
-                        // Ignore other snapshot messages
-                        _ => (),
-                    }
-                }
-            });
-        }
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
 
         let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
         let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
@@ -340,9 +357,18 @@ impl GovernanceState {
 
         let state_run = state.clone();
         tokio::spawn(async move {
-            Self::run(context, cfg, state_run, gt, dt, st, pt)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                context,
+                cfg,
+                state_run,
+                snapshot_subscription,
+                gt,
+                dt,
+                st,
+                pt,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

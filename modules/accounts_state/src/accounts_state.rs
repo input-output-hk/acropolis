@@ -147,40 +147,45 @@ impl AccountsState {
         mut drep_state_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
 
-        // Get the stake address deltas from the genesis bootstrap, which we know
-        // don't contain any stake, plus an extra parameter state (!unexplained)
-        // !TODO this seems overly specific to our startup process
-        let _ = stake_subscription.read().await?;
-        let _ = parameters_subscription.read().await?;
+        // Skip genesis-specific initialization when starting from snapshot
+        // (pots are already loaded from snapshot bootstrap data)
+        if !is_snapshot_mode {
+            // Get the stake address deltas from the genesis bootstrap, which we know
+            // don't contain any stake, plus an extra parameter state (!unexplained)
+            // !TODO this seems overly specific to our startup process
+            let _ = stake_subscription.read().await?;
+            let _ = parameters_subscription.read().await?;
 
-        // Initialisation messages
-        {
-            let mut state = history.lock().await.get_current_state();
-            let mut current_block: Option<BlockInfo> = None;
+            // Initialisation messages
+            {
+                let mut state = history.lock().await.get_current_state();
+                let mut current_block: Option<BlockInfo> = None;
 
-            let pots_message_f = pots_subscription.read();
+                let pots_message_f = pots_subscription.read();
 
-            // Handle pots
-            let (_, message) = pots_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
-                    state
-                        .handle_pot_deltas(pot_deltas_msg)
-                        .inspect_err(|e| error!("Pots handling error: {e:#}"))
-                        .ok();
+                // Handle pots
+                let (_, message) = pots_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
+                        state
+                            .handle_pot_deltas(pot_deltas_msg)
+                            .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                            .ok();
 
-                    current_block = Some(block_info.clone());
+                        current_block = Some(block_info.clone());
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            if let Some(block_info) = current_block {
-                history.lock().await.commit(block_info.number, state);
+                if let Some(block_info) = current_block {
+                    history.lock().await.commit(block_info.number, state);
+                }
             }
         }
 
@@ -799,7 +804,8 @@ impl AccountsState {
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let snapshot_subscription = if is_snapshot_mode {
             info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
@@ -826,6 +832,7 @@ impl AccountsState {
                 drep_state_subscription,
                 parameters_subscription,
                 &verifier,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

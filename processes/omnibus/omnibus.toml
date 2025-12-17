@@ -44,7 +44,7 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
-           "cardano.validation.spo"
+#           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -85,7 +85,7 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = false
+store-spdd = true
 
 [module.historical-accounts-state]
 # Clear state on start up (default true)
@@ -191,6 +191,10 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.#"
 
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0    # every 5 seconds
+
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
@@ -201,9 +205,10 @@ exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 50
+workers = 100
 dispatch-queue-size = 1000
-worker-queue-size = 100
+subscriber-queue-size = 4000
+worker-queue-size = 200
 bulk-block-capacity = 50
 bulk-resume-capacity = 75
 
