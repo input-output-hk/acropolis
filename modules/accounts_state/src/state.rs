@@ -26,6 +26,7 @@ use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn, Level};
+use acropolis_common::validation::ValidationOutcomes;
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -979,21 +980,28 @@ impl State {
     }
 
     /// Handle withdrawals
-    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage) -> Result<()> {
+    pub fn handle_withdrawals(&mut self, withdrawals_msg: &WithdrawalsMessage, vld: &mut ValidationOutcomes) -> Result<()> {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.process_withdrawal(withdrawal);
+            info!("Withdrawal: from {}, tx {}, amount {}",
+                withdrawal.address, withdrawal.tx_identifier, withdrawal.value
+            );
+            if let Err(e) = stake_addresses.process_withdrawal(withdrawal) {
+                vld.push_anyhow(e);
+            }
         }
 
         Ok(())
     }
 
     /// Handle stake deltas
-    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage) -> Result<()> {
+    pub fn handle_stake_deltas(&mut self, deltas_msg: &StakeAddressDeltasMessage, vld: &mut ValidationOutcomes) -> Result<()> {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.process_stake_delta(delta);
+            if let Err(e) = stake_addresses.process_stake_delta(delta) {
+                vld.push_anyhow(e);
+            }
         }
 
         Ok(())

@@ -3,7 +3,7 @@ use crate::{
     DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
     StakeAddressDelta, Withdrawal,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
@@ -501,7 +501,7 @@ impl StakeAddressMap {
     }
 
     /// Stake Delta
-    pub fn process_stake_delta(&mut self, stake_delta: &StakeAddressDelta) {
+    pub fn process_stake_delta(&mut self, stake_delta: &StakeAddressDelta) -> Result<()> {
         // Use the full stake address directly - no need to extract hash!
         let stake_address = &stake_delta.stake_address;
 
@@ -509,12 +509,14 @@ impl StakeAddressMap {
         // stake or drep delegation, but we need to track them in case they are later
         let sas = self.entry(stake_address.clone()).or_default();
         if let Err(e) = update_value_with_delta(&mut sas.utxo_value, stake_delta.delta) {
-            error!("Applying delta to stake address {}: {e}", stake_address);
+            bail!("Applying delta to stake address {}: {e}", stake_address);
         }
+
+        Ok(())
     }
 
     /// Withdraw
-    pub fn process_withdrawal(&mut self, withdrawal: &Withdrawal) {
+    pub fn process_withdrawal(&mut self, withdrawal: &Withdrawal) -> Result<()> {
         let stake_address = &withdrawal.address;
 
         if let Some(sas) = self.get(stake_address) {
@@ -524,15 +526,16 @@ impl StakeAddressMap {
                 if let Err(e) =
                     update_value_with_delta(&mut sas.rewards, -(withdrawal.value as i64))
                 {
-                    error!("Withdrawing from stake address {}: {e}", stake_address);
+                    bail!("Withdrawing from stake address {}: {e}", stake_address);
                 } else {
                     // Update the stake address
                     self.insert(stake_address.clone(), sas);
                 }
             }
         } else {
-            error!("Unknown stake address in withdrawal: {}", stake_address);
+            bail!("Unknown stake address in withdrawal: {}", stake_address);
         }
+        Ok(())
     }
 
     /// Update reward with delta
@@ -918,7 +921,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_withdrawal_success() {
+        fn test_withdrawal_success() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
@@ -930,13 +933,14 @@ mod tests {
                 value: 40,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal)?;
 
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 60);
+            Ok(())
         }
 
         #[test]
-        fn test_withdrawal_prevents_underflow() {
+        fn test_withdrawal_prevents_underflow() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
@@ -949,7 +953,7 @@ mod tests {
                 value: 24,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal)?;
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 12);
 
             // Withdraw less than reward (should succeed)
@@ -958,12 +962,13 @@ mod tests {
                 value: 2,
                 tx_identifier: TxIdentifier::default(),
             };
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal)?;
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 10);
+            Ok(())
         }
 
         #[test]
-        fn test_zero_withdrawal() {
+        fn test_zero_withdrawal() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
@@ -976,12 +981,13 @@ mod tests {
                 tx_identifier: TxIdentifier::default(),
             };
 
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal)?;
             assert_eq!(stake_addresses.get(&stake_address).unwrap().rewards, 100);
+            Ok(())
         }
 
         #[test]
-        fn test_withdrawal_unknown_address() {
+        fn test_withdrawal_unknown_address() -> Result<()> {
             let mut stake_addresses = StakeAddressMap::new();
             let stake_address = create_stake_address(STAKE_KEY_HASH);
 
@@ -992,7 +998,7 @@ mod tests {
             };
 
             // Should log error but not panic
-            stake_addresses.process_withdrawal(&withdrawal);
+            stake_addresses.process_withdrawal(&withdrawal)
         }
     }
 
