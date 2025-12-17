@@ -1231,40 +1231,48 @@ impl StreamingSnapshotParser {
 
         // Extract governance deposit info before passing state to callback
         // Each enacted or expired governance action gets its deposit refunded
-        // Pending proposals have deposits that are included in us_deposited but should be excluded
-        let (enacted_proposal_count, expired_proposal_count, pending_proposal_deposits) =
-            governance_state
-                .as_ref()
-                .map(|s| {
-                    let pending_deposits: u64 =
-                        s.proposals.iter().map(|p| p.proposal_procedure.deposit).sum();
-                    (
-                        s.enacted_actions.len(),
-                        s.expired_action_ids.len(),
-                        pending_deposits,
-                    )
-                })
-                .unwrap_or((0, 0, 0));
+        // Pending and enacted proposals have deposits that are included in us_deposited but should be excluded
+        let (
+            enacted_proposal_count,
+            expired_proposal_count,
+            pending_proposal_deposits,
+            enacted_proposal_deposits,
+        ) = governance_state
+            .as_ref()
+            .map(|s| {
+                let pending_deposits: u64 =
+                    s.proposals.iter().map(|p| p.proposal_procedure.deposit).sum();
+                let enacted_deposits: u64 =
+                    s.enacted_actions.iter().map(|p| p.proposal_procedure.deposit).sum();
+                (
+                    s.enacted_actions.len(),
+                    s.expired_action_ids.len(),
+                    pending_deposits,
+                    enacted_deposits,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0));
 
-        // Subtract pending governance proposal deposits from us_deposited
+        // Subtract pending and enacted governance proposal deposits from us_deposited
         // The snapshot's us_deposited includes these, but they shouldn't be in our deposits pot
-        // since they're tracked separately in the governance state
-        let deposits = deposits.saturating_sub(pending_proposal_deposits);
+        // Enacted proposals will be refunded at epoch boundary, but snapshot is taken before that
+        let governance_deposits = pending_proposal_deposits + enacted_proposal_deposits;
+        let deposits = deposits.saturating_sub(governance_deposits);
 
-        if pending_proposal_deposits > 0 {
+        if governance_deposits > 0 {
             info!(
-                "Governance proposal deposits: {} pending proposals with {} ADA in deposits (subtracted from us_deposited)",
+                "Governance proposal deposits: {} pending ({} ADA) + {} enacted ({} ADA) = {} ADA (subtracted from us_deposited)",
                 governance_state.as_ref().map(|s| s.proposals.len()).unwrap_or(0),
-                pending_proposal_deposits / 1_000_000
+                pending_proposal_deposits / 1_000_000,
+                enacted_proposal_count,
+                enacted_proposal_deposits / 1_000_000,
+                governance_deposits / 1_000_000
             );
         }
 
         info!(
-            "Governance state: enacted={}, expired={} proposals (total {} = {} ADA in refunds)",
-            enacted_proposal_count,
-            expired_proposal_count,
-            enacted_proposal_count + expired_proposal_count,
-            (enacted_proposal_count + expired_proposal_count) * 100_000
+            "Governance state: enacted={}, expired={} proposals",
+            enacted_proposal_count, expired_proposal_count,
         );
 
         // Emit governance state callback if we successfully parsed it
