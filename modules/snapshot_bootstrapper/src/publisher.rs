@@ -402,7 +402,7 @@ fn publish_gov_state(
     epoch: u64,
     params: ProtocolParameters,
 ) {
-    info!("Received governance protocol parameters (current, previous, future)");
+    info!("Received governance protocol parameters for epoch {epoch} slice {:?}", slice);
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
