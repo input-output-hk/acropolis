@@ -1,5 +1,5 @@
 use acropolis_common::{
-    Era, GenesisDelegate, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
+    Era, GenesisDelegates, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
 };
 use anyhow::{Result, bail};
 use pallas_primitives::byron::BlockSig::DlgSig;
@@ -9,13 +9,14 @@ use std::collections::HashMap;
 pub fn map_to_block_issuer(
     header: &MultiEraHeader,
     byron_heavy_delegates: &HashMap<PoolId, HeavyDelegate>,
-    shelley_genesis_delegates: &HashMap<PoolId, GenesisDelegate>,
+    shelley_genesis_delegates: &GenesisDelegates,
 ) -> Option<BlockIssuer> {
     match header.issuer_vkey() {
         Some(vkey) => match header {
             MultiEraHeader::ShelleyCompatible(_) => {
                 let digest = keyhash_224(vkey);
                 if let Some(issuer) = shelley_genesis_delegates
+                    .as_ref()
                     .values()
                     .find(|v| v.delegate == digest)
                     .map(|i| BlockIssuer::GenesisDelegate(i.clone()))

@@ -5,15 +5,18 @@
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
 use acropolis_common::ledger_state::SPOState;
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::streaming_snapshot::{
+    AccountsCallback, DRepCallback, DRepRecord, GovernanceProtocolParametersCallback, UtxoCallback,
+};
+use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::EpochCallback;
 use acropolis_common::snapshot::{
-    AccountState, AccountsCallback, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback,
-    ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
-    StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+    AccountState, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
+    SnapshotMetadata, SnapshotsCallback, StreamingSnapshotParser,
 };
-use acropolis_common::{NetworkId, PoolRegistration};
+use acropolis_common::{DRepCredential, NetworkId, PoolRegistration};
 use anyhow::Result;
+use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 use tracing::info;
@@ -35,7 +38,7 @@ struct CountingCallbacks {
     sample_utxos: Vec<UtxoEntry>,
     sample_pools: Vec<PoolRegistration>,
     sample_accounts: Vec<AccountState>,
-    sample_dreps: Vec<DRepInfo>,
+    sample_dreps: Vec<(DRepCredential, DRepRecord)>,
     sample_proposals: Vec<GovernanceProposal>,
     gs_previous_params: Option<ProtocolParameters>,
     gs_current_params: Option<ProtocolParameters>,
@@ -49,12 +52,8 @@ impl UtxoCallback for CountingCallbacks {
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
                 eprintln!(
-                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
-                    self.utxo_count,
-                    &utxo.tx_hash[..16],
-                    utxo.output_index,
-                    &utxo.address[..utxo.address.len().min(32)],
-                    utxo.value
+                    "  UTXO #{}: {} → {:?}",
+                    self.utxo_count, utxo.id, utxo.value
                 );
             }
             self.sample_utxos.push(utxo);
@@ -137,26 +136,27 @@ impl AccountsCallback for CountingCallbacks {
 }
 
 impl DRepCallback for CountingCallbacks {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
         self.drep_count = dreps.len();
-        eprintln!("Parsed {} DReps", self.drep_count);
+        eprintln!("Parsed {} DReps for epoch {}", self.drep_count, epoch);
 
         // Show first 10 DReps
-        for (i, drep) in dreps.iter().take(10).enumerate() {
-            if let Some(anchor) = &drep.anchor {
+        for (i, (cred, record)) in dreps.iter().take(10).enumerate() {
+            let drep_id = cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
+            if let Some(anchor) = &record.anchor {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {}) - {}",
                     i + 1,
-                    drep.drep_id.to_drep_bech32().unwrap(),
-                    drep.deposit,
+                    drep_id,
+                    record.deposit,
                     anchor.url
                 );
             } else {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {})",
                     i + 1,
-                    drep.drep_id.to_drep_bech32().unwrap(),
-                    drep.deposit
+                    drep_id,
+                    record.deposit
                 );
             }
         }
@@ -502,14 +502,7 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
-                    println!(
-                        "  {}: {}:{} → {} ({} lovelace)",
-                        i + 1,
-                        &utxo.tx_hash[..16],
-                        utxo.output_index,
-                        &utxo.address[..32],
-                        utxo.value
-                    );
+                    println!("  {}: {} → {:?}", i + 1, utxo.id, utxo.value);
                 }
                 println!();
             }
@@ -548,14 +541,16 @@ fn main() {
             // Show sample DReps
             if !callbacks.sample_dreps.is_empty() {
                 println!("Sample DReps (first 10):");
-                for (i, drep) in callbacks.sample_dreps.iter().enumerate() {
+                for (i, (cred, record)) in callbacks.sample_dreps.iter().enumerate() {
+                    let drep_id =
+                        cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
                     print!(
                         "  {}: {} (deposit: {} lovelace)",
                         i + 1,
-                        drep.drep_id.to_drep_bech32().unwrap(),
-                        drep.deposit
+                        drep_id,
+                        record.deposit
                     );
-                    if let Some(anchor) = &drep.anchor {
+                    if let Some(anchor) = &record.anchor {
                         println!(" - {}", anchor.url);
                     } else {
                         println!();
