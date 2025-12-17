@@ -1,12 +1,27 @@
-use acropolis_common::{AddrKeyhash, NativeScript, VKeyWitness};
+use acropolis_common::{AddrKeyhash, NativeScript, Signature, VKey, VKeyWitness};
+use anyhow::{Result, anyhow};
 use pallas_primitives::{KeepRaw, alonzo};
 
-pub fn map_vkey_witness(vkey_witness: &alonzo::VKeyWitness) -> VKeyWitness {
-    VKeyWitness::new(vkey_witness.vkey.to_vec(), vkey_witness.signature.to_vec())
+fn map_vkey_witness(vkey_witness: &alonzo::VKeyWitness) -> Result<VKeyWitness> {
+    Ok(VKeyWitness::new(
+        VKey::try_from(vkey_witness.vkey.to_vec()).map_err(|_| anyhow!("Invalid vkey length"))?,
+        Signature::try_from(vkey_witness.signature.to_vec())
+            .map_err(|_| anyhow!("Invalid signature length"))?,
+    ))
 }
 
-pub fn map_vkey_witnesses(vkey_witnesses: &[alonzo::VKeyWitness]) -> Vec<VKeyWitness> {
-    vkey_witnesses.iter().map(map_vkey_witness).collect()
+pub fn map_vkey_witnesses(
+    vkey_witnesses: &[alonzo::VKeyWitness],
+) -> (Vec<VKeyWitness>, Vec<String>) {
+    let mut errors = Vec::new();
+    let mut wits = Vec::new();
+    for (index, vkey_witness) in vkey_witnesses.iter().enumerate() {
+        match map_vkey_witness(vkey_witness) {
+            Ok(vkey_witness) => wits.push(vkey_witness),
+            Err(e) => errors.push(format!("Invalid vkey witness {index}: {e}")),
+        }
+    }
+    (wits, errors)
 }
 
 pub fn map_native_script(script: &alonzo::NativeScript) -> NativeScript {

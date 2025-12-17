@@ -1010,8 +1010,8 @@ impl Display for UTxOIdentifier {
     }
 }
 
-pub type VKey = Vec<u8>;
-pub type Signature = Vec<u8>;
+pub type VKey = Hash<32>;
+pub type Signature = Hash<64>;
 
 /// VKey Witness
 #[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1026,18 +1026,13 @@ impl VKeyWitness {
     }
 
     pub fn key_hash(&self) -> KeyHash {
-        keyhash_224(&self.vkey)
+        keyhash_224(self.vkey.as_ref())
     }
 }
 
 impl Display for VKeyWitness {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "vkey={}, signature={}",
-            hex::encode(self.vkey.clone()),
-            hex::encode(self.signature.clone())
-        )
+        write!(f, "vkey={}, signature={}", self.vkey, self.signature)
     }
 }
 

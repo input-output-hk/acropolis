@@ -93,18 +93,14 @@ pub fn validate_mir_insufficient_genesis_sigs(
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
+    vkey_witnesses: &[VKeyWitness],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;
     let transaction_witness_set = &mtx.transaction_witness_set;
 
-    // extract vkey_witnesses and native_scripts
-    let vkey_witnesses = transaction_witness_set
-        .vkeywitness
-        .as_ref()
-        .map(|witnesses| acropolis_codec::map_vkey_witnesses(witnesses))
-        .unwrap_or_default();
+    // extract native scripts
     let native_scripts = transaction_witness_set
         .native_script
         .as_ref()
@@ -123,7 +119,7 @@ pub fn validate(
     )?;
 
     // validate vkey witnesses signatures
-    validate_verified_wits(&vkey_witnesses, tx_hash)?;
+    validate_verified_wits(vkey_witnesses, tx_hash)?;
 
     // NOTE:
     // need to validate metadata

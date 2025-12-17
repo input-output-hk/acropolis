@@ -77,7 +77,7 @@ pub fn map_transaction(
 ) -> Transaction {
     let (inputs, outputs, total_output, input_output_errors) = map_transaction_inputs_outputs(tx);
 
-    let mut errors = Vec::new();
+    let mut errors = input_output_errors;
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
@@ -135,10 +135,10 @@ pub fn map_transaction(
         _ => {}
     }
 
-    let vkey_witnesses = map_vkey_witnesses(tx.vkey_witnesses());
+    let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     let native_scripts = map_native_scripts(tx.native_scripts());
 
-    errors.extend(input_output_errors);
+    errors.extend(vkey_witness_errors);
 
     Transaction {
         inputs,

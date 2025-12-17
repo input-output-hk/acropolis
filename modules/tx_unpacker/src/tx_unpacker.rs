@@ -427,7 +427,7 @@ impl TxUnpacker {
                         if let Err(e) =
                             state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
                         {
-                            tx_errors.push((tx_index, e));
+                            tx_errors.push((tx_index, *e));
                         }
                     }
                     tx_validation_publisher

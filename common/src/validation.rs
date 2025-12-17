@@ -276,12 +276,6 @@ pub enum UTxOWValidationError {
         // hash of metadata included in tx body
         metadata_hash: DataHash,
     },
-
-    /// **Cause:** Address is malformed
-    #[error(
-        "Malformed address: address={}, reason={reason}", address.to_string().unwrap_or("Invalid address".to_string())
-    )]
-    MalformedAddress { address: Address, reason: String },
 }
 
 /// Reference

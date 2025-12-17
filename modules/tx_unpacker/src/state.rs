@@ -26,13 +26,13 @@ impl State {
         block_info: &BlockInfo,
         raw_tx: &[u8],
         genesis_delegs: &GenesisDelegates,
-    ) -> Result<(), TransactionValidationError> {
+    ) -> Result<(), Box<TransactionValidationError>> {
         match block_info.era {
             Era::Shelley => {
                 let Some(shelley_params) = self.protocol_params.shelley.as_ref() else {
-                    return Err(TransactionValidationError::Other(
+                    return Err(Box::new(TransactionValidationError::Other(
                         "Shelley params are not set".to_string(),
-                    ));
+                    )));
                 };
                 validations::validate_shelley_tx(
                     raw_tx,
