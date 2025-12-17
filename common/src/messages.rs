@@ -346,6 +346,7 @@ pub enum CardanoMessage {
 pub enum SnapshotMessage {
     Startup, // subscribers should listen for incremental snapshot data
     Bootstrap(SnapshotStateMessage),
+    Complete, // all bootstrap data has been sent on this topic
     DumpRequest(SnapshotDumpMessage),
     Dump(SnapshotStateMessage),
 }
@@ -432,8 +433,9 @@ pub struct AccountsBootstrapMessage {
     pub pots: Pots,
 
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
-    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state
-    pub bootstrap_snapshots: Option<SnapshotsContainer>,
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
+    /// Empty (default) for pre-Shelley eras.
+    pub bootstrap_snapshots: SnapshotsContainer,
 }
 
 /// UTxO bootstrap message containing partial UTxO state

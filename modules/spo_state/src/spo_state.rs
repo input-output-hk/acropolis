@@ -878,7 +878,10 @@ impl SPOState {
                                     .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
                             }
                         }
-                        // There will be other snapshot messages that we're not interested in
+                        Message::Snapshot(SnapshotMessage::Complete) => {
+                            info!("Snapshot complete, exiting SPO state bootstrap loop");
+                            return;
+                        }
                         _ => ()
                     }
                 }

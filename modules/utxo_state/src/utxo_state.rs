@@ -190,10 +190,11 @@ impl UTXOState {
                                 }
                             }
                         }
-                        other => {
-                            info!("UTXO state received other snapshot message: {:?} (total so far: {} UTxOs in {} batches)",
-                                  std::mem::discriminant(other), total_utxos_received, batch_count);
+                        Message::Snapshot(SnapshotMessage::Complete) => {
+                            info!("UTXO state snapshot complete: {} UTxOs in {} batches", total_utxos_received, batch_count);
+                            return;
                         }
+                        _ => {}
                     }
                 }
             });
