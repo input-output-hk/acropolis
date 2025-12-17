@@ -271,7 +271,7 @@ impl SPOState {
                             )) = message.as_ref()
                             {
                                 let pool_ids: Vec<PoolId> =
-                                    retired_spos.iter().map(|(spo, _sa)| spo.clone()).collect();
+                                    retired_spos.iter().map(|(spo, _sa)| *spo).collect();
                                 retired_pools_history.handle_deregistrations(block_info, &pool_ids);
                             }
 
