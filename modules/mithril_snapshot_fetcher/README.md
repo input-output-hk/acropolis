@@ -7,7 +7,7 @@ It will wait for
 a startup event before beginning to allow the
 [Genesis Bootstrapper](../genesis_bootstrapper) to complete.
 
-When it has finished it sends a snapshot complete event indicating the
+When it has finished it sends a ChainSync::FindIntersect command indicating the
 last block fetched, which is used by the
 [Peer Network Interface](../peer_network_interface) to synchronize ongoing 
 fetches.

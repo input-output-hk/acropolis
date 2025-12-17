@@ -10,7 +10,7 @@ pub enum SyncPoint {
     Origin,
     Tip,
     Cache,
-    Snapshot,
+    Dynamic,
 }
 
 #[derive(serde::Deserialize)]
@@ -18,7 +18,6 @@ pub enum SyncPoint {
 pub struct InterfaceConfig {
     pub block_topic: String,
     pub sync_point: SyncPoint,
-    pub snapshot_completion_topic: String,
     pub genesis_completion_topic: String,
     pub sync_command_topic: String,
     pub node_addresses: Vec<String>,

@@ -9,7 +9,7 @@ topic = "cardano.sequence.start"
 
 [module.peer-network-interface]
 block-topic = "cardano.block.proposed" # Skip validation for indexer
-sync-point = "snapshot"
+sync-point = "dynamic"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",

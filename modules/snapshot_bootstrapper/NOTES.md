@@ -169,4 +169,4 @@ The bootstrapper supports the following configuration options:
 - `data-dir`: Base directory for network data (default: "./data")
 - `snapshot-topic`: Topic to publish snapshot messages (default: "cardano.snapshot")
 - `bootstrapped-subscribe-topic`: Topic to receive genesis completion (default: "cardano.sequence.bootstrapped")
-- `completion-topic`: Topic to publish completion signal (default: "cardano.snapshot.complete")
+- `sync-command-topic`: Topic to publish completion signal (default: "cardano.sync.command")

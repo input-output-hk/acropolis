@@ -22,7 +22,6 @@ use tracing::{error, warn};
 use caryatid_sdk::{async_trait, Context, Module};
 
 use acropolis_common::{
-    configuration::StartupMethod,
     messages::{CardanoMessage, Message, StateTransitionMessage},
     Point,
 };
@@ -172,7 +171,7 @@ where
                 msg => bail!("Unexpected message in genesis completion topic: {msg:?}"),
             }
 
-            if cfg.startup_method() != StartupMethod::Mithril {
+            if !cfg.startup_method().is_mithril() {
                 change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
             }
 

@@ -40,11 +40,7 @@ impl PeerNetworkInterface {
         } else {
             None
         };
-        let snapshot_complete = match cfg.sync_point {
-            SyncPoint::Snapshot => Some(context.subscribe(&cfg.snapshot_completion_topic).await?),
-            _ => None,
-        };
-        let command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
+        let mut command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -120,10 +116,8 @@ impl PeerNetworkInterface {
                     manager.sync_to_point(cache_sync_point);
                     manager
                 }
-                SyncPoint::Snapshot => {
-                    let mut subscription =
-                        snapshot_complete.expect("Snapshot topic subscription missing");
-                    match Self::wait_snapshot_completion(&mut subscription).await {
+                SyncPoint::Dynamic => {
+                    match Self::wait_snapshot_completion(&mut command_subscription).await {
                         Ok(point) => {
                             if let Point::Specific(slot, _) = &point {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
