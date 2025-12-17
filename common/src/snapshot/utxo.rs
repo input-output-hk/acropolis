@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn decode_value_with_multiasset() {
-        let policy_id: [u8; 28] = [0x44; 28];
+        let policy_id = PolicyId::from([0x44; 28]);
         let asset_name = b"TestToken";
 
         let mut cbor = Vec::new();
@@ -738,7 +738,7 @@ mod tests {
         enc.array(2).unwrap();
         enc.u64(1_000_000).unwrap();
         enc.map(1).unwrap();
-        enc.bytes(&policy_id).unwrap();
+        enc.bytes(policy_id.as_ref()).unwrap();
         enc.map(1).unwrap();
         enc.bytes(asset_name).unwrap();
         enc.u64(100).unwrap();

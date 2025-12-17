@@ -375,7 +375,7 @@ impl fmt::Display for RewardType {
     }
 }
 
-pub type PolicyId = [u8; 28];
+pub type PolicyId = Hash<28>;
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
@@ -2665,8 +2665,8 @@ impl AddressTotals {
     }
 
     fn apply_asset(
-        target: &mut HashMap<[u8; 28], HashMap<AssetName, u64>>,
-        policy: [u8; 28],
+        target: &mut HashMap<PolicyId, HashMap<AssetName, u64>>,
+        policy: PolicyId,
         name: AssetName,
         amount: u64,
     ) {

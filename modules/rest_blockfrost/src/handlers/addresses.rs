@@ -679,9 +679,9 @@ pub fn extract_cip68_decimals(raw: &[u8]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{AssetName, NativeAsset, NativeAssets, Value};
+    use acropolis_common::{AssetName, NativeAsset, NativeAssets, PolicyId, Value};
 
-    fn make_value(policy_id: [u8; 28], name: Vec<u8>, amount: u64) -> Value {
+    fn make_value(policy_id: PolicyId, name: Vec<u8>, amount: u64) -> Value {
         let assets: NativeAssets = vec![(
             policy_id,
             vec![NativeAsset {
@@ -714,7 +714,7 @@ mod tests {
 
         let cbor = serde_cbor::to_vec(&vec![CborValue::Map(map), CborValue::Null]).unwrap();
 
-        let policy_id = [1u8; 28];
+        let policy_id = PolicyId::from([1u8; 28]);
         let value = make_value(policy_id, vec![0x41, 0x42], 100);
 
         let metadata = vec![make_metadata(Some(vec![1, 2, 3]), Some(cbor))];
@@ -739,7 +739,7 @@ mod tests {
 
         let cbor = serde_cbor::to_vec(&vec![CborValue::Map(map), CborValue::Null]).unwrap();
 
-        let policy_id = [3u8; 28];
+        let policy_id = PolicyId::from([3u8; 28]);
         let value = make_value(policy_id, b"\x99".to_vec(), 999);
 
         let metadata = vec![make_metadata(None, Some(cbor))];
