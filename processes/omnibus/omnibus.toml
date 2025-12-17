@@ -5,7 +5,7 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "snapshot"  # Options: "mithril" | "snapshot"
+method = "mithril"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
