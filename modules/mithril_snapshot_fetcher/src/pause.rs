@@ -28,7 +28,8 @@ impl PauseType {
         let parts: Vec<&str> = pause_str.split(':').collect();
 
         if parts.len() != 2 {
-            error!("Invalid pause format: {}. Expected format: 'type:value' (e.g., 'epoch:214', 'block:1200')", pause_str);
+            error!("Invalid {} format: {}. Expected format: 'type:value' (e.g., 'epoch:214', 'block:1200')",
+                   default_pause.0, pause_str);
             return None;
         }
 
@@ -38,14 +39,14 @@ impl PauseType {
 
         match pause_type {
             "epoch" => {
-                info!("Pausing enabled at epoch {value}");
+                info!("Will {} at epoch {value}", default_pause.0);
                 Some(PauseType::Epoch {
                     number: value,
                     start_time,
                 })
             }
             "block" => {
-                info!("Pausing enabled at block {value}");
+                info!("Will {} at block {value}", default_pause.0);
                 Some(PauseType::Block {
                     number: value,
                     start_time,
@@ -53,8 +54,8 @@ impl PauseType {
             }
             _ => {
                 error!(
-                    "Unknown pause type: {}. Supported types: epoch, block",
-                    pause_type
+                    "Unknown {} type: {}. Supported types: epoch, block",
+                    default_pause.0, pause_type
                 );
                 None
             }
