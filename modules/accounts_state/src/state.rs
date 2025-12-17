@@ -8,7 +8,7 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        EpochActivityMessage, PotDeltas, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
         StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
@@ -100,6 +100,10 @@ pub struct State {
     /// Flag to skip rewards calculation on first epoch after bootstrap
     /// When true, the first epoch transition will skip rewards and just rotate snapshots
     skip_first_epoch_rewards: bool,
+
+    /// Pot deltas to apply at first epoch boundary after bootstrap
+    /// These come from pulsing_rew_update and instantaneous_rewards in the snapshot
+    bootstrap_pot_deltas: Option<PotDeltas>,
 }
 
 impl State {
@@ -171,6 +175,16 @@ impl State {
         // Skip rewards calculation on first epoch transition after bootstrap
         // since there's no previous epoch rewards task to complete
         self.skip_first_epoch_rewards = true;
+
+        // Store pot deltas to apply at first epoch boundary
+        // These adjust pots from epoch N (snapshot) to epoch N+1 values
+        self.bootstrap_pot_deltas = Some(bootstrap_msg.pot_deltas);
+        info!(
+            "Stored pot deltas for epoch boundary: treasury={}, reserves={}, deposits={}",
+            self.bootstrap_pot_deltas.as_ref().unwrap().delta_treasury,
+            self.bootstrap_pot_deltas.as_ref().unwrap().delta_reserves,
+            self.bootstrap_pot_deltas.as_ref().unwrap().delta_deposits,
+        );
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
@@ -376,12 +390,39 @@ impl State {
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
 
-        // On first epoch after bootstrap, skip monetary changes and pots verification
-        // but still set up the rewards task for the next epoch
+        // On first epoch after bootstrap, apply the pot deltas from pulsing_rew_update
+        // and instantaneous_rewards before verification
         let monetary_change = if self.skip_first_epoch_rewards {
+            // Apply the stored pot deltas to adjust from epoch N to epoch N+1
+            if let Some(deltas) = self.bootstrap_pot_deltas.take() {
+                info!(
+                    epoch,
+                    delta_treasury = deltas.delta_treasury,
+                    delta_reserves = deltas.delta_reserves,
+                    delta_deposits = deltas.delta_deposits,
+                    "Applying bootstrap pot deltas"
+                );
+
+                // Apply deltas (using signed arithmetic)
+                self.pots.treasury = (self.pots.treasury as i64 + deltas.delta_treasury) as u64;
+                self.pots.reserves = (self.pots.reserves as i64 + deltas.delta_reserves) as u64;
+                self.pots.deposits = (self.pots.deposits as i64 + deltas.delta_deposits) as u64;
+
+                info!(
+                    epoch,
+                    reserves = self.pots.reserves,
+                    treasury = self.pots.treasury,
+                    deposits = self.pots.deposits,
+                    "After applying bootstrap pot deltas"
+                );
+            }
+
+            // Now verify pots after applying deltas
+            verifier.verify_pots(epoch, &self.pots);
+
             info!(
                 epoch,
-                "First epoch after bootstrap - skipping monetary change and pots verification"
+                "First epoch after bootstrap - skipping monetary change (deltas already applied)"
             );
 
             // Clear the skip flag - next epoch will do full processing
@@ -393,9 +434,9 @@ impl State {
                 stake_rewards: 0,
             }
         } else {
-            // Normal epoch transition: verify pots and do monetary change
+            // Normal epoch: verify pots first, then do monetary change
             verifier.verify_pots(epoch, &self.pots);
-
+            // Normal epoch transition: do monetary change
             let change = calculate_monetary_change(
                 &shelley_params,
                 &self.pots,

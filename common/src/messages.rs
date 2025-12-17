@@ -429,13 +429,28 @@ pub struct AccountsBootstrapMessage {
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
 
-    /// Pot balances (treasury, reserves, deposits)
+    /// Pot balances (treasury, reserves, deposits) for the snapshot epoch
     pub pots: Pots,
+
+    /// Pot deltas to apply at epoch boundary transition
+    /// These come from pulsing_rew_update and instantaneous_rewards in the snapshot
+    pub pot_deltas: PotDeltas,
 
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
+}
+
+/// Deltas to apply to pots at epoch boundary
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PotDeltas {
+    /// Delta to treasury (positive = increase)
+    pub delta_treasury: i64,
+    /// Delta to reserves (positive = increase, typically negative due to monetary expansion)
+    pub delta_reserves: i64,
+    /// Delta to deposits (from stake/pool registrations/deregistrations)
+    pub delta_deposits: i64,
 }
 
 /// UTxO bootstrap message containing partial UTxO state

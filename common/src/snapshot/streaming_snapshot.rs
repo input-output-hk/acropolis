@@ -56,6 +56,19 @@ pub struct PulsingRewardResult {
     pub delta_treasury: i64,
     /// Delta to apply to reserves (positive = increase, but typically negative)
     pub delta_reserves: i64,
+    /// Delta to apply to fees/deposits (stored inverted in CBOR)
+    pub delta_fees: i64,
+}
+
+/// Result of parsing instantaneous_rewards, containing rewards and pot deltas
+#[derive(Debug, Default)]
+pub struct InstantRewardsResult {
+    /// Map of stake credentials to their total instant rewards
+    pub rewards: HashMap<StakeCredential, u64>,
+    /// Delta to apply to treasury from MIR
+    pub delta_treasury: i64,
+    /// Delta to apply to reserves from MIR
+    pub delta_reserves: i64,
 }
 
 // -----------------------------------------------------------------------------
@@ -618,8 +631,10 @@ pub struct AccountsBootstrapData {
     pub retiring_pools: Vec<PoolId>,
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
-    /// Treasury, reserves, and deposits
+    /// Treasury, reserves, and deposits for the snapshot epoch
     pub pots: Pots,
+    /// Pot deltas to apply at epoch boundary transition
+    pub pot_deltas: crate::messages::PotDeltas,
     /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation.
     /// Empty (default) for pre-Shelley eras.
     pub snapshots: SnapshotsContainer,
@@ -815,6 +830,7 @@ impl StreamingSnapshotParser {
             pools,
             accounts,
             utxo_file_position,
+            instant_rewards_result,
         ) = {
             let mut decoder = Decoder::new(&metadata_buffer);
 
@@ -946,8 +962,14 @@ impl StreamingSnapshotParser {
             // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
             // Parse instant rewards (MIRs) and combine with regular rewards
             // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
-            let instant_rewards = Self::parse_instant_rewards(&mut decoder)
+            let instant_rewards_result = Self::parse_instant_rewards(&mut decoder)
                 .context("Failed to parse instant rewards")?;
+
+            // Log instant rewards deltas
+            info!(
+                "Instant rewards deltas: delta_treasury={}, delta_reserves={}",
+                instant_rewards_result.delta_treasury, instant_rewards_result.delta_reserves
+            );
 
             // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
@@ -963,7 +985,8 @@ impl StreamingSnapshotParser {
                     };
 
                     // Add instant rewards (MIRs) if any
-                    let mir_rewards = instant_rewards.get(&credential).copied().unwrap_or(0);
+                    let mir_rewards =
+                        instant_rewards_result.rewards.get(&credential).copied().unwrap_or(0);
                     let rewards = regular_rewards + mir_rewards;
 
                     // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
@@ -1023,6 +1046,7 @@ impl StreamingSnapshotParser {
                 pools,
                 accounts,
                 utxo_file_position,
+                instant_rewards_result,
             )
         }; // decoder goes out of scope here
 
@@ -1205,6 +1229,44 @@ impl StreamingSnapshotParser {
             gs_future_pparams,
         )?;
 
+        // Extract governance deposit info before passing state to callback
+        // Each enacted or expired governance action gets its deposit refunded
+        // Pending proposals have deposits that are included in us_deposited but should be excluded
+        let (enacted_proposal_count, expired_proposal_count, pending_proposal_deposits) =
+            governance_state
+                .as_ref()
+                .map(|s| {
+                    let pending_deposits: u64 =
+                        s.proposals.iter().map(|p| p.proposal_procedure.deposit).sum();
+                    (
+                        s.enacted_actions.len(),
+                        s.expired_action_ids.len(),
+                        pending_deposits,
+                    )
+                })
+                .unwrap_or((0, 0, 0));
+
+        // Subtract pending governance proposal deposits from us_deposited
+        // The snapshot's us_deposited includes these, but they shouldn't be in our deposits pot
+        // since they're tracked separately in the governance state
+        let deposits = deposits.saturating_sub(pending_proposal_deposits);
+
+        if pending_proposal_deposits > 0 {
+            info!(
+                "Governance proposal deposits: {} pending proposals with {} ADA in deposits (subtracted from us_deposited)",
+                governance_state.as_ref().map(|s| s.proposals.len()).unwrap_or(0),
+                pending_proposal_deposits / 1_000_000
+            );
+        }
+
+        info!(
+            "Governance state: enacted={}, expired={} proposals (total {} = {} ADA in refunds)",
+            enacted_proposal_count,
+            expired_proposal_count,
+            enacted_proposal_count + expired_proposal_count,
+            (enacted_proposal_count + expired_proposal_count) * 100_000
+        );
+
         // Emit governance state callback if we successfully parsed it
         if let Some(state) = governance_state {
             callbacks.on_governance_state(state)?;
@@ -1214,7 +1276,11 @@ impl StreamingSnapshotParser {
         remainder_decoder.skip()?;
 
         // Epoch State / Ledger State / UTxO State / utxosDonation
-        remainder_decoder.skip()?;
+        // Treasury donations accumulate during epoch and are added to treasury at epoch boundary
+        let donations: u64 = remainder_decoder.decode().unwrap_or(0);
+        if donations > 0 {
+            info!("Treasury donations: {} ADA", donations / 1_000_000);
+        }
 
         // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
@@ -1233,30 +1299,17 @@ impl StreamingSnapshotParser {
         let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
             blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
 
-        // Build pots for snapshot conversion (these are the "current epoch" pots from the snapshot)
-        let snapshot_pots = Pots {
+        // Build pots for snapshot conversion (these are the epoch N pots from the snapshot)
+        let pots = Pots {
             reserves,
             treasury,
             deposits,
         };
 
-        // Apply the pulsing reward update deltas to get "next epoch" pots
-        // The snapshot contains pots at the START of the current epoch, but we need
-        // the pots at the END of the epoch (after monetary expansion) for the next epoch.
-        // The pulsing_rew_update contains the deltas that will be applied at epoch boundary.
-        let pots = Pots {
-            reserves: (snapshot_pots.reserves as i64 + pulsing_result.delta_reserves) as u64,
-            treasury: (snapshot_pots.treasury as i64 + pulsing_result.delta_treasury) as u64,
-            deposits: snapshot_pots.deposits,
-        };
-
+        // Log the deltas from pulsing_rew_update (these will be applied at epoch boundary)
         info!(
-            "Pots adjustment from pulsing_rew_update: delta_treasury={}, delta_reserves={}",
+            "Pulsing reward update deltas: delta_treasury={}, delta_reserves={}",
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
-        );
-        info!(
-            "Pots after adjustment: reserves={}, treasury={}, deposits={}",
-            pots.reserves, pots.treasury, pots.deposits
         );
 
         let bootstrap_snapshots = match snapshots_result {
@@ -1300,6 +1353,23 @@ impl StreamingSnapshotParser {
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|(cred, record)| (cred.clone(), record.deposit)).collect();
+
+        // Calculate total DRep deposits
+        let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
+        let total_pool_deposits: u64 = (pool_registrations.len() as u64) * 500_000_000; // 500 ADA per pool
+
+        // Subtract DRep deposits from us_deposited
+        // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
+        let deposits = deposits.saturating_sub(total_drep_deposits);
+
+        info!(
+            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
+            deposits / 1_000_000,
+            total_drep_deposits / 1_000_000,
+            total_pool_deposits / 1_000_000,
+            pool_registrations.len(),
+            drep_deposits.len()
+        );
 
         // Merge UTXO values and pulsing reward update rewards into accounts
         // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
@@ -1372,6 +1442,91 @@ impl StreamingSnapshotParser {
             pulsing_rewards_total / 1_000_000
         );
 
+        // Calculate deposit refunds for deregistered accounts with pending rewards
+        // When rewards are paid to a deregistered account:
+        // 1. The reward goes to treasury instead
+        // 2. Their stake key deposit is refunded (reducing total deposits)
+        // TODO: Get actual key_deposit from protocol parameters (currently hardcoded to 2 ADA)
+        const KEY_DEPOSIT: u64 = 2_000_000; // 2 ADA
+
+        let mut unclaimed_rewards: u64 = 0;
+        let mut deregistered_with_rewards: u64 = 0;
+
+        // Check pulsing rewards for deregistered accounts
+        for (credential, &reward) in &pulsing_result.rewards {
+            if !registered_credentials.contains(credential) {
+                unclaimed_rewards += reward;
+                deregistered_with_rewards += 1;
+            }
+        }
+
+        // Also check instant rewards (MIRs) for deregistered accounts
+        for (credential, &reward) in &instant_rewards_result.rewards {
+            if !registered_credentials.contains(credential) {
+                unclaimed_rewards += reward;
+                // Only count unique deregistered accounts (avoid double counting)
+                if !pulsing_result.rewards.contains_key(credential) {
+                    deregistered_with_rewards += 1;
+                }
+            }
+        }
+
+        // Note: Stake key deposit refunds happen immediately when the deregistration tx is processed,
+        // not at epoch boundary. The snapshot's us_deposited already reflects these refunds.
+        // We only track deregistered_with_rewards for the unclaimed rewards -> treasury calculation.
+        let stake_key_deposit_refunds: u64 = 0;
+
+        if deregistered_with_rewards > 0 {
+            info!(
+                "Deregistered accounts with rewards: {} accounts, {} ADA unclaimed rewards -> treasury, {} ADA deposit refunds",
+                deregistered_with_rewards,
+                unclaimed_rewards / 1_000_000,
+                stake_key_deposit_refunds / 1_000_000
+            );
+        }
+
+        // Calculate governance proposal deposit refunds
+        // Each enacted or expired governance action gets its deposit (100,000 ADA) refunded
+        // TODO: Get actual gov_action_deposit from protocol parameters
+        const GOV_ACTION_DEPOSIT: u64 = 100_000_000_000; // 100,000 ADA
+        let total_gov_proposals_refunded = enacted_proposal_count + expired_proposal_count;
+        let gov_deposit_refunds = (total_gov_proposals_refunded as u64) * GOV_ACTION_DEPOSIT;
+
+        if total_gov_proposals_refunded > 0 {
+            info!(
+                "Governance deposit refunds: {} enacted + {} expired = {} proposals, {} ADA refunded",
+                enacted_proposal_count,
+                expired_proposal_count,
+                total_gov_proposals_refunded,
+                gov_deposit_refunds / 1_000_000
+            );
+        }
+
+        let total_deposit_refunds = stake_key_deposit_refunds + gov_deposit_refunds;
+
+        // Combine pot deltas from pulsing_rew_update and instant_rewards
+        // Plus adjustments for deregistered accounts with pending rewards
+        // Plus governance proposal deposit refunds
+        // Plus treasury donations
+        //
+        // Note: delta_fees affects the fees pot (us_fees), NOT deposits (us_deposited)
+        let pot_deltas = crate::messages::PotDeltas {
+            delta_treasury: pulsing_result.delta_treasury
+                + instant_rewards_result.delta_treasury
+                + unclaimed_rewards as i64 // Unclaimed rewards go to treasury
+                + donations as i64, // Treasury donations
+            delta_reserves: pulsing_result.delta_reserves + instant_rewards_result.delta_reserves,
+            delta_deposits: -(total_deposit_refunds as i64),
+        };
+
+        info!(
+            "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (stake_key={}, gov={}), delta_fees={}",
+            pot_deltas.delta_treasury, donations,
+            pot_deltas.delta_reserves, pot_deltas.delta_deposits,
+            stake_key_deposit_refunds, gov_deposit_refunds,
+            pulsing_result.delta_fees
+        );
+
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
             epoch,
@@ -1384,6 +1539,7 @@ impl StreamingSnapshotParser {
                 treasury,
                 deposits,
             },
+            pot_deltas,
             snapshots: bootstrap_snapshots,
         };
 
@@ -1770,8 +1926,8 @@ impl StreamingSnapshotParser {
     ///   ir_delta_treasury : delta_coin,
     /// ]
     ///
-    /// Returns a combined map of all instant rewards (from both reserves and treasury)
-    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+    /// Returns combined rewards map and pot deltas from MIR transfers
+    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<InstantRewardsResult> {
         let ir_len = decoder
             .array()
             .context("Failed to parse instant_rewards array")?
@@ -1787,9 +1943,9 @@ impl StreamingSnapshotParser {
         let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
         let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
 
-        // Skip ir_delta_reserves and ir_delta_treasury (not needed for account balances)
-        decoder.skip()?;
-        decoder.skip()?;
+        // Parse ir_delta_reserves and ir_delta_treasury
+        let delta_reserves: i64 = decoder.decode()?;
+        let delta_treasury: i64 = decoder.decode()?;
 
         // Combine rewards from both sources
         let mut combined = ir_reserves;
@@ -1797,7 +1953,11 @@ impl StreamingSnapshotParser {
             *combined.entry(credential).or_insert(0) += amount;
         }
 
-        Ok(combined)
+        Ok(InstantRewardsResult {
+            rewards: combined,
+            delta_treasury,
+            delta_reserves,
+        })
     }
 
     /// Parse pulsing_rew_update to extract reward information and pot deltas.
@@ -1837,10 +1997,15 @@ impl StreamingSnapshotParser {
                     .collect();
                 // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
                 // Both are positive values in RewardSnapshot
+                info!(
+                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}",
+                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r
+                );
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: snapshot.delta_t1 as i64,
                     delta_reserves: -(snapshot.delta_r1 as i64), // Reserves decrease
+                    delta_fees: 0, // Pulsing variant doesn't have delta_fees
                 }
             }
             PulsingRewardUpdate::Complete { update } => {
@@ -1850,12 +2015,17 @@ impl StreamingSnapshotParser {
                     .iter()
                     .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
                     .collect();
-                // In RewardUpdate, delta_reserves is already inverted (negative means decrease)
-                // and delta_treasury is the actual change
+                // In RewardUpdate: invert_dr and invert_df are stored inverted
+                // We need to negate them to get actual deltas
+                info!(
+                    "Complete reward update: delta_treasury={}, delta_reserves(inverted)={}, delta_fees(inverted)={}",
+                    update.delta_treasury, update.delta_reserves, update.delta_fees
+                );
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: update.delta_treasury,
-                    delta_reserves: update.delta_reserves,
+                    delta_reserves: -update.delta_reserves, // Negate because it's stored inverted
+                    delta_fees: -update.delta_fees,         // Negate because it's stored inverted
                 }
             }
         };

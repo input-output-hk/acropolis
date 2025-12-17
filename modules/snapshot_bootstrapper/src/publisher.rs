@@ -290,6 +290,7 @@ impl AccountsCallback for SnapshotPublisher {
             dreps: data.dreps,
             pots: data.pots,
             bootstrap_snapshots: data.snapshots,
+            pot_deltas: data.pot_deltas,
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
