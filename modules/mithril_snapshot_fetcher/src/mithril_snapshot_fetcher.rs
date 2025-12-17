@@ -6,7 +6,7 @@ use acropolis_common::{
     configuration::StartupMethod,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context};
@@ -388,10 +388,7 @@ impl MithrilSnapshotFetcher {
                 last_block_info.number, last_block_info.epoch
             );
             let message_enum = Message::Command(Command::ChainSync(
-                ChainSyncCommand::FindIntersect(Point::Specific {
-                    hash: last_block_info.hash,
-                    slot: last_block_info.slot,
-                }),
+                ChainSyncCommand::FindIntersect(last_block_info.to_point()),
             ));
             context
                 .message_bus

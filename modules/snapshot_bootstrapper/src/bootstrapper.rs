@@ -111,6 +111,7 @@ impl SnapshotBootstrapper {
             context,
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
+            cfg.sync_command_topic.clone(),
             bootstrap_ctx.context(),
         );
 
@@ -129,7 +130,8 @@ impl SnapshotBootstrapper {
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
-        publisher.publish_completion(bootstrap_ctx.block_info).await?;
+        publisher.publish_completion(bootstrap_ctx.block_info.clone()).await?;
+        publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
         info!("Snapshot bootstrap completed");
         Ok(())

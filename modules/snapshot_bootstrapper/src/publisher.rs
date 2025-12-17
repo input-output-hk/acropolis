@@ -1,9 +1,11 @@
+use acropolis_common::commands::chain_sync::ChainSyncCommand;
 use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::messages::DRepBootstrapMessage;
+use acropolis_common::messages::{Command, DRepBootstrapMessage};
 use acropolis_common::protocol_params::{Nonces, PraosParams};
 use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::{AccountsCallback, SnapshotsCallback};
+use acropolis_common::Point;
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
@@ -85,6 +87,7 @@ pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     completion_topic: String,
     snapshot_topic: String,
+    sync_command_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -101,12 +104,14 @@ impl SnapshotPublisher {
         context: Arc<Context<Message>>,
         completion_topic: String,
         snapshot_topic: String,
+        sync_command_topic: String,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
             completion_topic,
             snapshot_topic,
+            sync_command_topic,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -139,6 +144,20 @@ impl SnapshotPublisher {
         self.context.publish(&self.completion_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish bootstrap completion message: {}", e);
         });
+        Ok(())
+    }
+
+    pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
+        info!(
+            "Publishing sync command on {} for slot {}",
+            self.sync_command_topic,
+            point.slot()
+        );
+        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        self.context
+            .publish(&self.sync_command_topic, Arc::new(message))
+            .await
+            .unwrap_or_else(|e| tracing::error!("Failed to publish sync command message: {}", e));
         Ok(())
     }
 

@@ -25,6 +25,10 @@ bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 # blockchain state is ready for downstream consumers.
 completion-topic = "cardano.snapshot.complete"
 
+# Topic for publishing the command to start fetching and publishing
+# blocks from the peer network interface.
+sync-command-topic = "cardano.sync.command"
+
 [download]
 # Total request timeout in seconds (default: 5 minutes)
 timeout-secs = 300
