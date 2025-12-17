@@ -813,15 +813,12 @@ impl State {
 
         // Check for any SPOs that have retired this epoch and need deposit refunds
         self.pool_refunds = Vec::new();
-        for id in &spo_msg.retired_spos {
-            if let Some(retired_spo) = new_spos.get(id) {
-                debug!(
-                    "SPO {} has retired - refunding their deposit to {}",
-                    id, retired_spo.reward_account
-                );
-                self.pool_refunds.push((retired_spo.operator, retired_spo.reward_account.clone()));
-                // Store full StakeAddress
-            }
+        for (id, reward_account) in &spo_msg.retired_spos {
+            debug!(
+                "SPO {} has retired - refunding their deposit to {}",
+                id, reward_account
+            );
+            self.pool_refunds.push((*id, reward_account.clone()));
 
             // Schedule to retire - we need them to still be in place when we count
             // blocks for the previous epoch

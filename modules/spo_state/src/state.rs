@@ -272,14 +272,6 @@ impl State {
         self.epoch = block.epoch;
         debug!(epoch = self.epoch, "New epoch");
 
-        // Update any pending changes to existing SPOs before capturing list for
-        // the SPOState message
-        for (operator, reg) in &self.pending_updates {
-            if let Some(spo) = self.spos.get_mut(operator) {
-                *spo = reg.clone();
-            }
-        }
-
         // Flatten into vector of registrations, before retirement so retiring ones
         // are still included **
         let spos = self.spos.values().cloned().collect();
@@ -291,7 +283,7 @@ impl State {
         self.pending_updates.clear();
 
         // Deregister any pending
-        let mut retired_spos: Vec<PoolId> = Vec::new();
+        let mut retired_spos: Vec<(PoolId, StakeAddress)> = Vec::new();
         let deregistrations = self.pending_deregistrations.remove(&self.epoch);
         if let Some(deregistrations) = deregistrations {
             for dr in deregistrations {
@@ -299,8 +291,8 @@ impl State {
                 match self.spos.remove(&dr) {
                     None => vld
                         .push_anyhow(anyhow!("Retirement requested for unregistered SPO {}", dr,)),
-                    Some(_de_reg) => {
-                        retired_spos.push(dr);
+                    Some(de_reg) => {
+                        retired_spos.push((dr, de_reg.reward_account.clone()));
                     }
                 };
             }
@@ -310,7 +302,7 @@ impl State {
             block.clone(),
             CardanoMessage::SPOState(SPOStateMessage {
                 epoch: block.epoch - 1,
-                spos,               // Note - list captured at ** before creation and deletion
+                spos, // Note - list captured at ** before creation and deletion
                 retired_spos,
             }),
         )))
