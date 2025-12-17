@@ -185,6 +185,7 @@ impl RawSnapshotsContainer {
                 network.clone(),
             ),
             go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
+            fee: self.fee,
         }
     }
 }

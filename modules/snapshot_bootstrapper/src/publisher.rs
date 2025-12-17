@@ -93,6 +93,7 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
+    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -115,6 +116,7 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
+            snapshot_fee: 0,
         }
     }
 
@@ -165,7 +167,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: 0,
+            total_fees: self.snapshot_fee,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -458,6 +460,10 @@ impl SnapshotsCallback for SnapshotPublisher {
             go_delegators,
             go_stake / 1_000_000
         );
+
+        // Store the fee for use in epoch bootstrap message
+        self.snapshot_fee = snapshots.fee;
+        info!("  Snapshot fee: {} lovelace", self.snapshot_fee);
 
         Ok(())
     }
