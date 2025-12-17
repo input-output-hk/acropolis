@@ -1,5 +1,5 @@
 //! Acropolis AccountsState: State storage
-use crate::monetary::calculate_monetary_change;
+use crate::monetary::{calculate_monetary_change, MonetaryResult};
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
@@ -96,6 +96,10 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
+
+    /// Flag to skip rewards calculation on first epoch after bootstrap
+    /// When true, the first epoch transition will skip rewards and just rotate snapshots
+    skip_first_epoch_rewards: bool,
 }
 
 impl State {
@@ -163,6 +167,10 @@ impl State {
         } else {
             info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
         }
+
+        // Skip rewards calculation on first epoch transition after bootstrap
+        // since there's no previous epoch rewards task to complete
+        self.skip_first_epoch_rewards = true;
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
@@ -361,31 +369,50 @@ impl State {
             // Take and clear registration changes
             std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
-            self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
+            self.epoch_snapshots.set.clone(),
         );
         self.epoch_snapshots.push(snapshot);
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
 
-        // Verify pots state
-        verifier.verify_pots(epoch, &self.pots);
+        // On first epoch after bootstrap, skip monetary changes and pots verification
+        // but still set up the rewards task for the next epoch
+        let monetary_change = if self.skip_first_epoch_rewards {
+            info!(
+                epoch,
+                "First epoch after bootstrap - skipping monetary change and pots verification"
+            );
 
-        // Update the reserves and treasury (monetary.rs)
-        let monetary_change = calculate_monetary_change(
-            &shelley_params,
-            &self.pots,
-            total_fees,
-            total_non_obft_blocks,
-        )?;
-        self.pots = monetary_change.pots;
+            // Clear the skip flag - next epoch will do full processing
+            self.skip_first_epoch_rewards = false;
 
-        info!(
-            epoch,
-            reserves = self.pots.reserves,
-            treasury = self.pots.treasury,
-            "After monetary change"
-        );
+            // Use zero stake_rewards since we're not doing monetary expansion
+            MonetaryResult {
+                pots: self.pots.clone(),
+                stake_rewards: 0,
+            }
+        } else {
+            // Normal epoch transition: verify pots and do monetary change
+            verifier.verify_pots(epoch, &self.pots);
+
+            let change = calculate_monetary_change(
+                &shelley_params,
+                &self.pots,
+                total_fees,
+                total_non_obft_blocks,
+            )?;
+            self.pots = change.pots.clone();
+
+            info!(
+                epoch,
+                reserves = self.pots.reserves,
+                treasury = self.pots.treasury,
+                "After monetary change"
+            );
+
+            change
+        };
 
         // Set up background task for rewards, capturing and emptying current deregistrations
         let performance = self.epoch_snapshots.mark.clone();
@@ -652,6 +679,12 @@ impl State {
         // Collect stake addresses reward deltas
         let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
+        // Skip rewards calculation on first epoch after bootstrap
+        if self.skip_first_epoch_rewards {
+            info!("Skipping rewards calculation on first epoch after bootstrap");
+            return Ok((spo_rewards, reward_deltas));
+        }
 
         // Check previous epoch rewards calculation is done
         let mut task = {

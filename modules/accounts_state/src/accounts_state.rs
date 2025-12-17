@@ -17,7 +17,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
@@ -438,6 +438,16 @@ impl AccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, block_info);
+                        // Debug: log block info for stake deltas to help diagnose underflows
+                        if !deltas_msg.deltas.is_empty() {
+                            debug!(
+                                block = block_info.number,
+                                epoch = block_info.epoch,
+                                epoch_slot = block_info.epoch_slot,
+                                num_deltas = deltas_msg.deltas.len(),
+                                "Processing stake address deltas"
+                            );
+                        }
                         state
                             .handle_stake_deltas(deltas_msg)
                             .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
