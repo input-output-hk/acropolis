@@ -14,7 +14,8 @@ use crate::{
 use anyhow::bail;
 use caryatid_sdk::Context;
 use std::{
-    array::TryFromSliceError,
+    array::TryFromSliceError, 
+    collections::HashSet,
     fmt::{Debug, Display, Formatter},
     sync::Arc,
 };
@@ -520,17 +521,23 @@ impl Display for MismatchRelation {
 /// Partial formalization of validation outcome errors: what's wrong with relation of two entities
 /// See Haskell Node, Cardano.Ledger.BaseTypes: Cardano/Src/Ledger/BaseTypes.hs
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct Mismatch<T: Debug + Display> {
+pub struct Mismatch<T: Debug> {
     supplied: T,
     expected: T,
     expected_rel: MismatchRelation,
 }
 
-impl<T: Debug + Display> Display for Mismatch<T> {
+impl <T: Debug> Mismatch <T> {
+    pub fn new(suppl: T, exp: T, rel: MismatchRelation) -> Self {
+        Self { supplied: suppl, expected: exp, expected_rel: rel }
+    }
+}
+
+impl<T: Debug> Display for Mismatch<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Supplied: {}, expected: {} {}",
+            "Supplied: {:?}, expected: {} {:?}",
             self.supplied, self.expected_rel, self.expected
         )
     }
@@ -547,15 +554,15 @@ pub enum GovernanceValidationError {
     /// An update was proposed by a key hash that is not one of the genesis keys.
     /// `mismatchSupplied` ~ key hashes which were a part of the update.
     /// `mismatchExpected` ~ key hashes of the genesis keys.
-    #[error("Parameter update from non-genesis key hash")]
-    NonGenesisUpdatePPUP(Mismatch<KeyHash>),
+    #[error("Parameter update from non-genesis key hash: {0}")]
+    NonGenesisUpdatePPUP(Mismatch<HashSet<GenesisKeyhash>>),
 
     /// | An update was proposed for the wrong epoch.
     /// The first 'EpochNo' is the current epoch.
     /// The second 'EpochNo' is the epoch listed in the update.
     /// The last parameter indicates if the update was intended
     /// for the current (true) or the next epoch (false).
-    #[error("Parameter update for wrong epoch: current {0}, requested {1}, requested epoch is current {2}")]
+    #[error("Parameter update for wrong epoch: current {0}, requested {1}, requested epoch = current {2}")]
     PPUpdateWrongEpoch(u64, u64, bool),
 
     /// | An update was proposed which contains an invalid protocol version.

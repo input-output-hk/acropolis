@@ -76,7 +76,9 @@ impl State {
         message: &ProtocolParamsMessage,
     ) -> Result<()> {
         if let Some(ps) = &message.params.shelley {
-            self.alonzo_babbage_voting.update_parameters(ps.epoch_length, ps.update_quorum);
+            self.alonzo_babbage_voting.update_parameters(
+                ps.epoch_length, ps.update_quorum, &ps.protocol_params.protocol_version
+            );
 
             if message.params.conway.is_some() {
                 let bootstrap = ps.protocol_params.protocol_version.is_chang()?;
@@ -109,12 +111,12 @@ impl State {
         block: &BlockInfo,
         governance_message: &GovernanceProceduresMessage,
     ) -> Result<ValidationOutcomes> {
+        let mut outcomes = ValidationOutcomes::new();
         if block.era < Era::Conway {
             // Alonzo-Babbage governance
             if !(governance_message.proposal_procedures.is_empty()
                 && governance_message.voting_procedures.is_empty())
             {
-                let mut outcomes = ValidationOutcomes::new();
                 outcomes.push(ValidationError::BadGovernance(
                     GovernanceValidationError::WrongProtocolForGovernance(ProtocolVersion::chang()),
                 ));
@@ -122,15 +124,14 @@ impl State {
             }
 
             if !governance_message.alonzo_babbage_updates.is_empty() {
-                self.alonzo_babbage_voting
+                outcomes.merge(&mut self.alonzo_babbage_voting
                     .process_update_proposals(block, &governance_message.alonzo_babbage_updates)
-                    .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"))?;
+                    .map_err(|e| anyhow!("Error handling Babbage governance_message: '{e}'"))?);
             }
 
-            Ok(ValidationOutcomes::new())
+            Ok(outcomes)
         } else {
             // Conway governance
-            let mut outcomes = ValidationOutcomes::new();
             for pproc in &governance_message.proposal_procedures {
                 outcomes.merge(
                     &mut self

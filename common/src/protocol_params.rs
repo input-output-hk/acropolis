@@ -255,6 +255,10 @@ pub struct ProtocolVersion {
     pub minor: u64,
 }
 
+impl Default for ProtocolVersion {
+    fn default() -> Self { Self::new(1,0) }
+}
+
 impl Display for ProtocolVersion {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}", self.major, self.minor)
@@ -278,6 +282,14 @@ impl ProtocolVersion {
             return Ok(true);
         }
         Ok(false)
+    }
+    
+    pub fn inc_major(&self) -> Self {
+        Self { major: self.major + 1, minor: 0 }
+    }
+    
+    pub fn inc_minor(&self) -> Self {
+        Self { major: self.major, minor: self.minor + 1 }
     }
 }
 

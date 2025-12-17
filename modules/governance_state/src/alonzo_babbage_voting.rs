@@ -1,9 +1,12 @@
 use acropolis_common::{
     AlonzoBabbageUpdateProposal, AlonzoBabbageVotingOutcome, BlockInfo, Era, GenesisKeyhash,
-    ProtocolParamUpdate,
+    GenesisDelegates, ProtocolParamUpdate,
+    calculations::epoch_to_first_slot_with_shelley_params
 };
 use anyhow::{bail, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use acropolis_common::protocol_params::{ProtocolVersion, ShelleyParams};
+use acropolis_common::validation::{GovernanceValidationError, Mismatch, MismatchRelation, ValidationError, ValidationOutcomes};
 
 // (vote epoch, vote slot, proposal)
 type VoteData = (u64, u64, Box<ProtocolParamUpdate>);
@@ -16,28 +19,42 @@ pub struct AlonzoBabbageVoting {
     proposals: HashMap<u64, HashMap<GenesisKeyhash, VoteData>>,
     slots_per_epoch: u32,
     update_quorum: u32,
+    protocol_version: ProtocolVersion,
 }
 
 impl AlonzoBabbageVoting {
     /// Vote is counted for the new epoch if cast in previous epoch
     /// before 4/10 of its start (not too fresh).
     /// Here is it: [!++++++++++!++++------!]
-    fn is_timely_vote(&self, slot: u64, new_block: &BlockInfo) -> bool {
-        slot + (6 * self.slots_per_epoch as u64 / 10) < new_block.slot
+    fn is_timely_vote(&self, slot: u64, slot_border: u64) -> bool {
+        slot + (6 * self.slots_per_epoch as u64 / 10) < slot_border
     }
 
-    pub fn update_parameters(&mut self, slots_per_epoch: u32, update_quorum: u32) {
+    /// Checks that new protocol version is next to old one:
+    /// (*) either new minor greater by one, major is the same;
+    /// (**) new minor is zero, major is greater by one.
+    fn protocol_version_follows(&self, new_prot_ver: &ProtocolVersion) -> bool {
+        let cur = &self.protocol_version;
+        (&cur.inc_major() == new_prot_ver) || (&cur.inc_minor() == new_prot_ver)
+    }
+
+    pub fn update_parameters(
+        &mut self,
+        slots_per_epoch: u32, update_quorum: u32, protocol_version: &ProtocolVersion,
+    ) {
         self.slots_per_epoch = slots_per_epoch;
         self.update_quorum = update_quorum;
+        self.protocol_version = protocol_version.clone();
     }
 
     pub fn process_update_proposals(
         &mut self,
         block_info: &BlockInfo,
         updates: &[AlonzoBabbageUpdateProposal],
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
+        let mut vld = ValidationOutcomes::new();
         if updates.is_empty() {
-            return Ok(());
+            return Ok(vld);
         }
 
         if block_info.era < Era::Shelley {
@@ -48,15 +65,36 @@ impl AlonzoBabbageVoting {
             bail!("Processing Alonzo/Babbage update proposals with unknown protocol parameters");
         }
 
+        let for_this_epoch = self.is_timely_vote(
+            block_info.slot, block_info.slot - block_info.epoch_slot + self.slots_per_epoch as u64
+        );
+
         for pp in updates.iter() {
-            let entry = self.proposals.entry(pp.enactment_epoch + 1).or_default();
+            if pp.enactment_epoch != block_info.epoch + (!for_this_epoch as u64) {
+                vld.push(ValidationError::BadGovernance(
+                    GovernanceValidationError::PPUpdateWrongEpoch(
+                        block_info.epoch, pp.enactment_epoch,for_this_epoch
+                    )
+                ))
+            }
+
             for (k, p) in &pp.proposals {
+                if let Some(protver) = &p.protocol_version {
+                    if !self.protocol_version_follows(&protver) {
+                        vld.push(ValidationError::BadGovernance(
+                            GovernanceValidationError::PVCannotFollowPPUP(protver.clone())
+                        ));
+                        continue; // Invalid proposal, must be skipped
+                    }
+                }
+
                 // A new proposal for key k always replaces the old one
+                let entry = self.proposals.entry(pp.enactment_epoch + 1).or_default();
                 entry.insert(*k, (block_info.epoch, block_info.slot, p.clone()));
             }
         }
 
-        Ok(())
+        Ok(vld)
     }
 
     pub fn finalize_voting(
@@ -70,7 +108,7 @@ impl AlonzoBabbageVoting {
 
         let proposals = proposals_for_new_epoch
             .iter()
-            .filter(|(_k, (_epoch, slot, _proposal))| self.is_timely_vote(*slot, new_blk))
+            .filter(|(_k, (_epoch, slot, _proposal))| self.is_timely_vote(*slot, new_blk.slot))
             .map(|(k, (_e, _s, proposal))| (*k, proposal.clone()))
             .collect::<Vec<_>>();
 
@@ -126,6 +164,7 @@ mod tests {
     };
     use anyhow::Result;
     use serde_with::{base64::Base64, serde_as};
+    use acropolis_common::protocol_params::ProtocolVersion;
 
     #[serde_as]
     #[derive(serde::Deserialize, Debug)]
@@ -138,9 +177,10 @@ mod tests {
         update_quorum: u32,
         slots_per_epoch: u32,
         update_proposal_json: &[u8],
+        protocol_version: &ProtocolVersion,
     ) -> Result<Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)>> {
         let mut voting = AlonzoBabbageVoting::default();
-        voting.update_parameters(update_quorum, slots_per_epoch);
+        voting.update_parameters(update_quorum, slots_per_epoch, protocol_version);
 
         let update_proposal_msgs = serde_json::from_slice::<
             Vec<(
@@ -153,15 +193,19 @@ mod tests {
         >(update_proposal_json)?;
 
         let mut voting_outcomes: Vec<(BlockInfo, Vec<AlonzoBabbageVotingOutcome>)> = Vec::new();
+        let mut epoch_start = 0;
         for (slot, epoch, era, new_epoch, proposals) in update_proposal_msgs {
             let mut proposal = Vec::new();
+            if new_epoch != 0 {
+                epoch_start = slot;
+            }
             let blk = BlockInfo {
                 status: BlockStatus::Immutable,
                 intent: BlockIntent::Apply,
                 slot,
                 number: slot,
                 epoch,
-                epoch_slot: 0,
+                epoch_slot: slot - epoch_start,
                 era: era.try_into()?,
                 new_epoch: new_epoch != 0,
                 timestamp: 0,
@@ -179,12 +223,19 @@ mod tests {
                 proposal.push(update_prop)
             }
 
-            voting.process_update_proposals(&blk, &proposal)?;
+            voting.process_update_proposals(&blk, &proposal)?.as_result()?;
 
             if blk.new_epoch {
                 let outcome = voting.finalize_voting(&blk)?;
                 voting.advance_epoch(&blk);
                 if !outcome.is_empty() {
+                    for oc in outcome.iter() {
+                        if oc.accepted {
+                            if let Some(pv) = &oc.parameter_update.protocol_version {
+                                voting.protocol_version = pv.clone();
+                            }
+                        }
+                    }
                     voting_outcomes.push((blk, outcome));
                 }
             }
@@ -197,9 +248,12 @@ mod tests {
         update_quorum: u32,
         slots_per_epoch: u32,
         update_proposals_json: &[u8],
+        protocol_version: &ProtocolVersion,
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        let updates = run_voting(slots_per_epoch, update_quorum, update_proposals_json)?;
+        let updates = run_voting(
+            slots_per_epoch, update_quorum, update_proposals_json, protocol_version,
+        )?;
         let mut dcu = Vec::new();
 
         for (blk, upd) in updates {
@@ -225,7 +279,9 @@ mod tests {
     fn extract_mainnet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        extract_parameter(5, 432_000, MAINNET_PROPOSALS_JSON, f)
+        extract_parameter(
+            5, 432_000, MAINNET_PROPOSALS_JSON, &ProtocolVersion::new(2,0), f
+        )
     }
 
     const DECENTRALISATION: [(u64, f32); 39] = [
@@ -324,7 +380,9 @@ mod tests {
     fn extract_sanchonet_parameter<T: Clone>(
         f: impl Fn(&ProtocolParamUpdate) -> Option<T>,
     ) -> Result<Vec<(u64, T)>> {
-        extract_parameter(3, 86_400, SANCHONET_PROPOSALS_JSON, f)
+        extract_parameter(
+            3, 86_400, SANCHONET_PROPOSALS_JSON, &ProtocolVersion::new(6,0), f
+        )
     }
 
     const SANCHONET_PROTOCOL_VERSION: [(u64, (u64, u64)); 3] =
