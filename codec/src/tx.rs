@@ -68,25 +68,13 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
 }
 
 /// Map a Pallas Transaction to extract
-/// inputs, outputs, total_output, certs, withdrawals, proposal_update, vkey_witnesses, native_scripts and errors
-#[allow(clippy::type_complexity)]
 pub fn map_transaction(
     tx: &MultiEraTx,
     raw_tx: &[u8],
     tx_identifier: TxIdentifier,
     network_id: NetworkId,
     era: Era,
-) -> (
-    Vec<UTxOIdentifier>,
-    Vec<TxOutput>,
-    u128,
-    Vec<TxCertificateWithPos>,
-    Vec<Withdrawal>,
-    Option<AlonzoBabbageUpdateProposal>,
-    Vec<VKeyWitness>,
-    Vec<NativeScript>,
-    Option<Phase1ValidationError>,
-) {
+) -> Transaction {
     let (inputs, outputs, total_output, input_output_errors) = map_transaction_inputs_outputs(tx);
 
     let mut errors = Vec::new();
@@ -152,19 +140,19 @@ pub fn map_transaction(
 
     errors.extend(input_output_errors);
 
-    (
+    Transaction {
         inputs,
         outputs,
         total_output,
         certs,
         withdrawals,
-        alonzo_babbage_update_proposal,
+        proposal_update: alonzo_babbage_update_proposal,
         vkey_witnesses,
         native_scripts,
-        if errors.is_empty() {
+        error: if errors.is_empty() {
             None
         } else {
             Some(Phase1ValidationError::MalformedTransaction { errors })
         },
-    )
+    }
 }
