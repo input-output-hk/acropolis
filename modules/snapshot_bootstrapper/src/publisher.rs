@@ -14,12 +14,12 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
+        AccountsBootstrapMessage, EpochBootstrapMessage, Message, SnapshotMessage,
         SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 use caryatid_sdk::Context;
@@ -84,7 +84,6 @@ impl EpochContext {
 /// External context (nonces, timing) can be added via `with_bootstrap_context()`.
 pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
-    completion_topic: String,
     snapshot_topic: String,
     sync_command_topic: String,
     metadata: Option<SnapshotMetadata>,
@@ -101,14 +100,12 @@ pub struct SnapshotPublisher {
 impl SnapshotPublisher {
     pub fn new(
         context: Arc<Context<Message>>,
-        completion_topic: String,
         snapshot_topic: String,
         sync_command_topic: String,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
-            completion_topic,
             snapshot_topic,
             sync_command_topic,
             metadata: None,
@@ -136,21 +133,6 @@ impl SnapshotPublisher {
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Complete));
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish snapshot complete message: {}", e);
-        });
-        Ok(())
-    }
-
-    pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
-        info!(
-            "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",
-            self.completion_topic, block_info.number, block_info.slot, block_info.epoch
-        );
-        let message = Arc::new(Message::Cardano((
-            block_info,
-            CardanoMessage::SnapshotComplete,
-        )));
-        self.context.publish(&self.completion_topic, message).await.unwrap_or_else(|e| {
-            tracing::error!("Failed to publish bootstrap completion message: {}", e);
         });
         Ok(())
     }

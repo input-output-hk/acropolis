@@ -20,11 +20,6 @@ snapshot-topic = "cardano.snapshot"
 # before proceeding with snapshot processing.
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 
-# Topic for publishing the final SnapshotComplete message.
-# Signals that all snapshots have been fully processed and the
-# blockchain state is ready for downstream consumers.
-completion-topic = "cardano.snapshot.complete"
-
 # Topic for publishing the command to start fetching and publishing
 # blocks from the peer network interface.
 sync-command-topic = "cardano.sync.command"

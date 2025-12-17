@@ -27,7 +27,6 @@ pub struct BootstrapConfig {
     pub epoch: u64, // The target epoch, straight from TOML
     pub snapshot_topic: String,
     pub bootstrapped_subscribe_topic: String,
-    pub completion_topic: String,
     pub sync_command_topic: String,
     #[serde(default)]
     pub download: DownloadConfig,

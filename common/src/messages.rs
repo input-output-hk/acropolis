@@ -53,13 +53,6 @@ pub enum StateTransitionMessage {
     Rollback(Point),
 }
 
-/// Snapshot completion message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SnapshotCompleteMessage {
-    /// Last block in snapshot data
-    pub last_block: BlockInfo,
-}
-
 /// Transactions message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RawTxsMessage {
@@ -313,7 +306,6 @@ pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
     StateTransition(StateTransitionMessage), // Our position on the chain has changed
     BlockValidation(ValidationStatus),       // Result of a block validation
-    SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers

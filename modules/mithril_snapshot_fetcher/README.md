@@ -93,13 +93,13 @@ pub struct BlockBodyMessage {
 ```
 
 When the snapshot has been fully replayed, it sends a
-`cardano.snapshot.complete` message with details of the last block in
+`cardano.sync.command` message with details of the last point in
 the snapshot:
 
 ```
-pub struct SnapshotCompleteMessage {
-    /// Last block in snapshot data
-    pub last_block: BlockInfo,
+pub enum ChainSyncCommand {
+    // The point from which to begin fetching blocks from
+    FindIntersect(Point),
 }
 ```
 

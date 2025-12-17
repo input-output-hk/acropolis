@@ -3,8 +3,9 @@
 
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{
+    commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
+    messages::{CardanoMessage, Command, Message, RawBlockMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
 use anyhow::{anyhow, Result};
@@ -22,7 +23,7 @@ const CONFIG_BOOTSTRAPPED_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
-const CONFIG_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
+const CONFIG_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
 const CONFIG_BLOCK_PUBLISH_TOPIC: (&str, &str) = ("block-publish-topic", "cardano.block.available");
 
 /// Fake block injector module
@@ -161,16 +162,13 @@ impl FakeBlockInjector {
                 return;
             };
             info!("Received completion message");
-            let block_info = match completion_message.as_ref() {
-                Message::Cardano((block, CardanoMessage::SnapshotComplete)) => block,
+            let point = match completion_message.as_ref() {
+                Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point))) => {
+                    point
+                }
                 x => panic!("unexpected completion message: {x:?}"),
             };
-            info!(
-                epoch = block_info.epoch,
-                block = block_info.number,
-                slot = block_info.slot,
-                "Snapshot completed"
-            );
+            info!(slot = point.slot(), "Snapshot completed");
 
             // Send out the blocks
             if let Err(e) = Self::process_blocks(context, config, &genesis).await {
