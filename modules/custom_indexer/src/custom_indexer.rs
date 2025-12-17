@@ -22,6 +22,7 @@ use tracing::{error, warn};
 use caryatid_sdk::{async_trait, Context, Module};
 
 use acropolis_common::{
+    configuration::StartupMethod,
     messages::{CardanoMessage, Message, StateTransitionMessage},
     Point,
 };
@@ -154,6 +155,7 @@ where
         let mut txs_subscription = context.subscribe(&cfg.txs_subscribe_topic).await?;
         let mut genesis_complete_subscription =
             context.subscribe(&cfg.genesis_complete_topic).await?;
+
         let run_context = context.clone();
 
         let senders = Arc::clone(&self.senders);
@@ -163,13 +165,16 @@ where
         let start_point = self.compute_start_point().await?;
 
         context.run(async move {
-            // Wait for genesis bootstrapping then publish initial sync point
+            // Wait for genesis bootstrapping then publish initial sync point if not using mithril
             let (_, message) = genesis_complete_subscription.read().await?;
             match message.as_ref() {
                 Message::Cardano((_, CardanoMessage::GenesisComplete(_))) => { }
                 msg => bail!("Unexpected message in genesis completion topic: {msg:?}"),
             }
-            change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
+
+            if cfg.startup_method() != StartupMethod::Mithril {
+                change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
+            }
 
             // Forward received txs and rollback notifications to index handlers
             loop {
