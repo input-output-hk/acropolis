@@ -129,7 +129,6 @@ impl SnapshotPublisher {
     }
 
     pub async fn publish_snapshot_complete(&self) -> Result<()> {
-        info!("Publishing Snapshot Complete on '{}'", self.snapshot_topic);
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Complete));
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish snapshot complete message: {}", e);
@@ -138,10 +137,6 @@ impl SnapshotPublisher {
     }
 
     pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
-        info!(
-            "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",
-            self.completion_topic, block_info.number, block_info.slot, block_info.epoch
-        );
         let message = Arc::new(Message::Cardano((
             block_info,
             CardanoMessage::SnapshotComplete,
@@ -181,20 +176,7 @@ impl SnapshotPublisher {
     }
 
     fn publish_utxo_batch(&mut self) {
-        let batch_size = self.utxo_batch.len();
         self.utxo_batches_published += 1;
-
-        if self.utxo_batches_published == 1 {
-            info!(
-                "Publishing first UTXO batch with {} UTXOs to topic '{}'",
-                batch_size, self.snapshot_topic
-            );
-        } else if self.utxo_batches_published.is_multiple_of(100) {
-            info!(
-                "Published {} UTXO batches ({} UTXOs total)",
-                self.utxo_batches_published, self.utxo_count
-            );
-        }
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
             SnapshotStateMessage::UTxOPartialState(UTxOPartialState {
@@ -221,12 +203,6 @@ impl SnapshotPublisher {
 impl UtxoCallback for SnapshotPublisher {
     fn on_utxo(&mut self, utxo: UtxoEntry) -> Result<()> {
         self.utxo_count += 1;
-
-        // Log progress every million UTXOs
-        if self.utxo_count.is_multiple_of(1_000_000) {
-            info!("Processed {} UTXOs", self.utxo_count);
-        }
-
         self.utxo_batch.push((utxo.id, utxo.value));
         if self.utxo_batch.len() >= UTXO_BATCH_SIZE {
             self.publish_utxo_batch();
@@ -237,12 +213,6 @@ impl UtxoCallback for SnapshotPublisher {
 
 impl PoolCallback for SnapshotPublisher {
     fn on_pools(&mut self, pools: SPOState) -> Result<()> {
-        info!(
-            "Received pools (current: {}, future: {}, retiring: {})",
-            pools.pools.len(),
-            pools.updates.len(),
-            pools.retiring.len()
-        );
         self.pools.extend(&pools);
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -252,8 +222,6 @@ impl PoolCallback for SnapshotPublisher {
         let context = self.context.clone();
         let snapshot_topic = self.snapshot_topic.clone();
 
-        // IMPORTANT: We use block_in_place + block_on to ensure each publish completes
-        // before the callback returns. This guarantees message ordering. See on_accounts() for details.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
                 context.publish(&snapshot_topic, message).await.unwrap_or_else(|e| {
@@ -272,13 +240,13 @@ impl AccountsCallback for SnapshotPublisher {
         data: acropolis_common::snapshot::AccountsBootstrapData,
     ) -> Result<()> {
         info!(
-            "Publishing accounts bootstrap for epoch {} with {} accounts, {} pools ({} retiring), {} dreps, snapshots: {}",
-            data.epoch,
-            data.accounts.len(),
-            data.pools.len(),
-            data.retiring_pools.len(),
-            data.dreps.len(),
-            !data.snapshots.mark.spos.is_empty(),
+            epoch = data.epoch,
+            accounts = data.accounts.len(),
+            pools = data.pools.len(),
+            retiring = data.retiring_pools.len(),
+            dreps = data.dreps.len(),
+            has_snapshots = !data.snapshots.mark.spos.is_empty(),
+            "Publishing accounts bootstrap"
         );
 
         // Convert the parsed data to the message type
@@ -339,7 +307,7 @@ impl AccountsCallback for SnapshotPublisher {
 
 impl DRepCallback for SnapshotPublisher {
     fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
-        info!("Received {} DReps for epoch {}", dreps.len(), epoch);
+        info!(epoch = epoch, dreps = dreps.len(), "Received dreps");
         self.dreps_len += dreps.len();
         // Send a message to the DRepState
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -364,7 +332,7 @@ impl DRepCallback for SnapshotPublisher {
 
 impl ProposalCallback for SnapshotPublisher {
     fn on_proposals(&mut self, proposals: Vec<GovernanceProposal>) -> Result<()> {
-        info!("Received {} proposals", proposals.len());
+        info!(proposals = proposals.len(), "Received proposals");
         self.proposals.extend(proposals);
         Ok(())
     }
@@ -377,7 +345,7 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
         _gs_current_params: ProtocolParameters,
         _gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        info!("Received governance protocol parameters (current, previous, future)");
+        info!("Received governance protocol parameters");
         // TODO: Publish protocol parameters to appropriate message bus topics
         // This could involve publishing messages for:
         // - CurrentProtocolParameters → ParametersState processor
@@ -390,19 +358,19 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
 impl EpochCallback for SnapshotPublisher {
     fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
         info!(
-            "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
-            data.epoch,
-            data.total_blocks_current,
-            data.total_blocks_previous
+            epoch = data.epoch,
+            current_blocks = data.total_blocks_current,
+            previous_blocks = data.total_blocks_previous,
+            "Received epoch bootstrap data"
         );
 
         let epoch_bootstrap_data = self.build_epoch_bootstrap_message(&data);
 
         let spo_blocks = epoch_bootstrap_data.spo_blocks.clone();
         info!(
-            "Publishing epoch bootstrap for epoch {} with {} SPO entries",
-            data.epoch,
-            spo_blocks.len(),
+            epoch = data.epoch,
+            spo_entries = spo_blocks.len(),
+            "Publishing epoch bootstrap"
         );
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -439,32 +407,31 @@ impl SnapshotsCallback for SnapshotPublisher {
         let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
         let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
 
-        info!("Snapshots Data:");
         info!(
-            "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.mark.epoch,
-            snapshots.mark.spos.len(),
-            mark_delegators,
-            mark_stake / 1_000_000
+            epoch = snapshots.mark.epoch,
+            spos = snapshots.mark.spos.len(),
+            delegators = mark_delegators,
+            stake_ada = mark_stake / 1_000_000,
+            "Mark snapshot"
         );
         info!(
-            "  Set snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.set.epoch,
-            snapshots.set.spos.len(),
-            set_delegators,
-            set_stake / 1_000_000
+            epoch = snapshots.set.epoch,
+            spos = snapshots.set.spos.len(),
+            delegators = set_delegators,
+            stake_ada = set_stake / 1_000_000,
+            "Set snapshot"
         );
         info!(
-            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.go.epoch,
-            snapshots.go.spos.len(),
-            go_delegators,
-            go_stake / 1_000_000
+            epoch = snapshots.go.epoch,
+            spos = snapshots.go.spos.len(),
+            delegators = go_delegators,
+            stake_ada = go_stake / 1_000_000,
+            "Go snapshot"
         );
 
         // Store the fee for use in epoch bootstrap message
         self.snapshot_fee = snapshots.fee;
-        info!("  Snapshot fee: {} lovelace", self.snapshot_fee);
+        info!(fee_lovelace = self.snapshot_fee, "Snapshot fee");
 
         Ok(())
     }
@@ -478,10 +445,10 @@ impl GovernanceStateCallback for SnapshotPublisher {
         let epoch = state.epoch;
 
         info!(
-            "Received governance state for epoch {}: {} proposals, {} vote records",
-            epoch,
-            state.proposals.len(),
-            state.votes.len()
+            epoch = epoch,
+            proposals = state.proposals.len(),
+            vote_records = state.votes.len(),
+            "Received governance state"
         );
 
         // Convert GovernanceState to ConwayVoting-compatible data
@@ -512,10 +479,10 @@ impl GovernanceStateCallback for SnapshotPublisher {
         };
 
         info!(
-            "Publishing governance bootstrap: {} proposals, {} committee members, constitution: {}",
-            message.proposals.len(),
-            message.committee.as_ref().map(|c| c.members.len()).unwrap_or(0),
-            message.constitution.anchor.url,
+            proposals = message.proposals.len(),
+            committee_members = message.committee.as_ref().map(|c| c.members.len()).unwrap_or(0),
+            constitution = %message.constitution.anchor.url,
+            "Publishing governance bootstrap"
         );
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -545,34 +512,32 @@ impl SnapshotCallbacks for SnapshotPublisher {
         let total_blocks_current: u32 =
             metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
 
-        info!("Snapshot metadata for epoch {}", metadata.epoch);
-        info!("  UTXOs: {:?}", metadata.utxo_count);
         info!(
-            "  Pot balances: treasury={}, reserves={}, deposits={}",
-            metadata.pot_balances.treasury,
-            metadata.pot_balances.reserves,
-            metadata.pot_balances.deposits
+            epoch = metadata.epoch,
+            utxos = ?metadata.utxo_count,
+            treasury = metadata.pot_balances.treasury,
+            reserves = metadata.pot_balances.reserves,
+            deposits = metadata.pot_balances.deposits,
+            previous_blocks = total_blocks_previous,
+            current_blocks = total_blocks_current,
+            "Snapshot metadata"
         );
-        info!("  - Previous epoch blocks: {}", total_blocks_previous);
-        info!("  - Current epoch blocks: {}", total_blocks_current);
 
         self.metadata = Some(metadata);
         Ok(())
     }
 
     fn on_complete(&mut self) -> Result<()> {
-        info!("Snapshot parsing completed");
-        info!("Final statistics:");
-        info!("  - UTXOs processed: {}", self.utxo_count);
         info!(
-            "  - Pools: {} (future: {}, retiring: {})",
-            self.pools.pools.len(),
-            self.pools.updates.len(),
-            self.pools.retiring.len()
+            utxos = self.utxo_count,
+            pools = self.pools.pools.len(),
+            future_pools = self.pools.updates.len(),
+            retiring_pools = self.pools.retiring.len(),
+            accounts = self.accounts.len(),
+            dreps = self.dreps_len,
+            proposals = self.proposals.len(),
+            "Snapshot parsing completed"
         );
-        info!("  - Accounts: {}", self.accounts.len());
-        info!("  - DReps: {}", self.dreps_len);
-        info!("  - Proposals: {}", self.proposals.len());
         Ok(())
     }
 }

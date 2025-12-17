@@ -39,13 +39,16 @@ impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for ProgressReader<R>
             if let Some(total) = self.total_size {
                 let percent = (self.bytes_read as f64 / total as f64) * 100.0;
                 info!(
-                    "Download progress: {:.1}% ({} MB / {} MB)",
-                    percent,
-                    self.bytes_read / (1024 * 1024),
-                    total / (1024 * 1024)
+                    percent = format!("{:.1}", percent),
+                    downloaded_mb = self.bytes_read / (1024 * 1024),
+                    total_mb = total / (1024 * 1024),
+                    "Download progress"
                 );
             } else {
-                info!("Downloaded {} MB", self.bytes_read / (1024 * 1024));
+                info!(
+                    downloaded_mb = self.bytes_read / (1024 * 1024),
+                    "Download progress"
+                );
             }
             self.last_log = self.bytes_read;
         }

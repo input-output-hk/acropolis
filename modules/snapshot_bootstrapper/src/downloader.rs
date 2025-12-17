@@ -65,14 +65,11 @@ impl SnapshotDownloader {
     /// and then renamed to the final output path upon successful completion.
     async fn download_from_url(&self, url: &str, output_path: &Path) -> Result<(), DownloadError> {
         if output_path.exists() {
-            info!(
-                "Snapshot already exists, skipping: {}",
-                output_path.display()
-            );
+            info!(path = %output_path.display(), "Snapshot already exists, skipping");
             return Ok(());
         }
 
-        info!("Downloading snapshot from {}", url);
+        info!(url = %url, "Downloading snapshot");
 
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -112,10 +109,7 @@ impl SnapshotDownloader {
             file.sync_all().await?;
             tokio::fs::rename(&tmp_path, output_path).await?;
 
-            info!(
-                "Downloaded and decompressed snapshot to {}",
-                output_path.display()
-            );
+            info!(path = %output_path.display(), "Downloaded and decompressed snapshot");
             Ok(())
         }
         .await;

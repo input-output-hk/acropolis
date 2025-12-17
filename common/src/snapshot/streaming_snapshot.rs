@@ -848,7 +848,7 @@ impl StreamingSnapshotParser {
 
             // Extract epoch number [0]
             let epoch = decoder.u64().context("Failed to parse epoch number")?;
-            info!("Parsing snapshot for epoch {}", epoch);
+            info!("Parsing snapshot: epoch={}", epoch);
 
             // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
             let blocks_previous_epoch =
@@ -965,12 +965,6 @@ impl StreamingSnapshotParser {
             let instant_rewards_result = Self::parse_instant_rewards(&mut decoder)
                 .context("Failed to parse instant rewards")?;
 
-            // Log instant rewards deltas
-            info!(
-                "Instant rewards deltas: delta_treasury={}, delta_reserves={}",
-                instant_rewards_result.delta_treasury, instant_rewards_result.delta_reserves
-            );
-
             // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
                 .into_iter()
@@ -1067,50 +1061,14 @@ impl StreamingSnapshotParser {
         let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
         utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
 
-        info!(
-            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
-            position_after_utxos
-        );
-
-        // ========================================================================
-        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
-        // ========================================================================
-        // After extensive analysis, the remaining snapshot data (deposits, fees,
-        // protocol parameters, and mark/set/go snapshots) can be efficiently
-        // parsed by reading the entire remainder of the file into memory (~500MB)
-        // rather than streaming. This is much smaller than the full 2.5GB file.
-        //
-        // The CBOR structure from this point:
-        // UTxOState[1] = deposits
-        // UTxOState[2] = fees
-        // UTxOState[3] = gov_state
-        // UTxOState[4] = donations
-        // EpochState[2] = PParams (100-300MB)
-        // EpochState[3] = PParamsPrev (100-300MB)
-        // EpochState[4] = SnapShots (100+ MB stake distribution)
-        //
-        // This hybrid approach allows us to:
-        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
-        // 2. Parse remaining sections using snapshot.rs functions
-        // 3. Access mark/set/go snapshots that were previously unreachable
-        // ========================================================================
-
-        // Calculate remaining file size from current position
+        // Read remainder of file into memory for parsing governance, pparams, snapshots
         let current_file_size = utxo_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
-
-        info!(
-            "    Reading remainder of file into memory: {:.1} MB from position {}",
-            remaining_bytes as f64 / 1024.0 / 1024.0,
-            position_after_utxos
-        );
-
-        // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
         utxo_file.read_to_end(&mut remainder_buffer)?;
 
         info!(
-            "    Successfully loaded {:.1} MB remainder buffer for parsing",
+            "Parsing remainder: size={:.1}mb",
             remainder_buffer.len() as f64 / 1024.0 / 1024.0
         );
 
@@ -1133,19 +1091,8 @@ impl StreamingSnapshotParser {
         // gov_state = [proposals, committee, constitution, current_pparams, previous_pparams, future_pparams, drep_pulsing_state]
         let governance_state =
             match super::governance::parse_gov_state(&mut remainder_decoder, epoch) {
-                Ok(state) => {
-                    info!(
-                        "    Successfully parsed governance state: {} proposals, {} votes",
-                        state.proposals.len(),
-                        state.votes.len()
-                    );
-                    Some(state)
-                }
-                Err(e) => {
-                    info!(
-                        "    Failed to parse governance state: {}, attempting fallback parsing",
-                        e
-                    );
+                Ok(state) => Some(state),
+                Err(_) => {
                     // Reset decoder position and try fallback parsing
                     remainder_decoder = Decoder::new(&remainder_buffer[gov_state_position..]);
                     None
@@ -1259,20 +1206,11 @@ impl StreamingSnapshotParser {
         let governance_deposits = pending_proposal_deposits + enacted_proposal_deposits;
         let deposits = deposits.saturating_sub(governance_deposits);
 
-        if governance_deposits > 0 {
-            info!(
-                "Governance proposal deposits: {} pending ({} ADA) + {} enacted ({} ADA) = {} ADA (subtracted from us_deposited)",
-                governance_state.as_ref().map(|s| s.proposals.len()).unwrap_or(0),
-                pending_proposal_deposits / 1_000_000,
-                enacted_proposal_count,
-                enacted_proposal_deposits / 1_000_000,
-                governance_deposits / 1_000_000
-            );
-        }
-
         info!(
-            "Governance state: enacted={}, expired={} proposals",
-            enacted_proposal_count, expired_proposal_count,
+            "Parsed governance: proposals={}, enacted={}, expired={}",
+            governance_state.as_ref().map(|s| s.proposals.len()).unwrap_or(0),
+            enacted_proposal_count,
+            expired_proposal_count,
         );
 
         // Emit governance state callback if we successfully parsed it
@@ -1286,9 +1224,6 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         // Treasury donations accumulate during epoch and are added to treasury at epoch boundary
         let donations: u64 = remainder_decoder.decode().unwrap_or(0);
-        if donations > 0 {
-            info!("Treasury donations: {} ADA", donations / 1_000_000);
-        }
 
         // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
@@ -1314,16 +1249,8 @@ impl StreamingSnapshotParser {
             deposits,
         };
 
-        // Log the deltas from pulsing_rew_update (these will be applied at epoch boundary)
-        info!(
-            "Pulsing reward update deltas: delta_treasury={}, delta_reserves={}",
-            pulsing_result.delta_treasury, pulsing_result.delta_reserves
-        );
-
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
-                info!("Successfully parsed mark/set/go snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
                     &blocks_prev_map,
@@ -1332,7 +1259,7 @@ impl StreamingSnapshotParser {
                     network.clone(),
                 );
                 info!(
-                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+                    "Parsed stake snapshots: mark_spos={}, set_spos={}, go_spos={}",
                     processed.mark.spos.len(),
                     processed.set.spos.len(),
                     processed.go.spos.len()
@@ -1340,11 +1267,7 @@ impl StreamingSnapshotParser {
                 callbacks.on_snapshots(processed.clone())?;
                 processed
             }
-            Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Using empty snapshots (pre-Shelley or parse error)...");
-                SnapshotsContainer::default()
-            }
+            Err(_) => SnapshotsContainer::default(),
         };
 
         // Build pool registrations list for AccountsBootstrapMessage
@@ -1352,7 +1275,7 @@ impl StreamingSnapshotParser {
         let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
 
         info!(
-            "Pools: {} registered, {} retiring, {} DReps",
+            "Parsed pools: registered={}, retiring={}, dreps={}",
             pool_registrations.len(),
             retiring_pools.len(),
             dreps.len()
@@ -1364,20 +1287,10 @@ impl StreamingSnapshotParser {
 
         // Calculate total DRep deposits
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
-        let total_pool_deposits: u64 = (pool_registrations.len() as u64) * 500_000_000; // 500 ADA per pool
 
         // Subtract DRep deposits from us_deposited
         // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
         let deposits = deposits.saturating_sub(total_drep_deposits);
-
-        info!(
-            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
-            deposits / 1_000_000,
-            total_drep_deposits / 1_000_000,
-            total_pool_deposits / 1_000_000,
-            pool_registrations.len(),
-            drep_deposits.len()
-        );
 
         // Merge UTXO values and pulsing reward update rewards into accounts
         // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
@@ -1407,7 +1320,6 @@ impl StreamingSnapshotParser {
 
         // Add accounts for stake addresses that have UTXOs but aren't registered in DState
         // These are addresses that received funds but were never registered for staking
-        let mut unregistered_utxo_count = 0;
         for (credential, &utxo_value) in &stake_utxo_values {
             if !registered_credentials.contains(credential) {
                 let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
@@ -1421,33 +1333,21 @@ impl StreamingSnapshotParser {
                         delegated_drep: None,
                     },
                 });
-                unregistered_utxo_count += 1;
             }
-        }
-
-        if unregistered_utxo_count > 0 {
-            info!(
-                "Added {} unregistered stake addresses with UTXOs to bootstrap",
-                unregistered_utxo_count
-            );
         }
 
         // Calculate summary statistics
         let total_utxo_value: u64 = stake_utxo_values.values().sum();
-        let total_rewards: u64 =
-            accounts_with_utxo_values.iter().map(|a| a.address_state.rewards).sum();
         let delegated_count = accounts_with_utxo_values
             .iter()
             .filter(|a| a.address_state.delegated_spo.is_some())
             .count();
 
         info!(
-            "Accounts: {} total, {} delegated, {} ADA in UTXOs, {} ADA rewards ({} ADA from pulsing update)",
+            "Parsed accounts: total={}, delegated={}, utxo_value={} ada",
             accounts_with_utxo_values.len(),
             delegated_count,
             total_utxo_value / 1_000_000,
-            total_rewards / 1_000_000,
-            pulsing_rewards_total / 1_000_000
         );
 
         // Calculate deposit refunds for deregistered accounts with pending rewards
@@ -1455,13 +1355,10 @@ impl StreamingSnapshotParser {
         // 1. The reward goes to treasury instead
         // 2. Their stake key deposit is refunded (reducing total deposits)
         let mut unclaimed_rewards: u64 = 0;
-        let mut deregistered_with_rewards: u64 = 0;
-
         // Check pulsing rewards for deregistered accounts
         for (credential, &reward) in &pulsing_result.rewards {
             if !registered_credentials.contains(credential) {
                 unclaimed_rewards += reward;
-                deregistered_with_rewards += 1;
             }
         }
 
@@ -1470,9 +1367,6 @@ impl StreamingSnapshotParser {
             if !registered_credentials.contains(credential) {
                 unclaimed_rewards += reward;
                 // Only count unique deregistered accounts (avoid double counting)
-                if !pulsing_result.rewards.contains_key(credential) {
-                    deregistered_with_rewards += 1;
-                }
             }
         }
 
@@ -1481,32 +1375,11 @@ impl StreamingSnapshotParser {
         // We only track deregistered_with_rewards for the unclaimed rewards -> treasury calculation.
         let stake_key_deposit_refunds: u64 = 0;
 
-        if deregistered_with_rewards > 0 {
-            info!(
-                "Deregistered accounts with rewards: {} accounts, {} ADA unclaimed rewards -> treasury, {} ADA deposit refunds",
-                deregistered_with_rewards,
-                unclaimed_rewards / 1_000_000,
-                stake_key_deposit_refunds / 1_000_000
-            );
-        }
-
         // Calculate governance proposal deposit refunds
         // Each enacted or expired governance action gets its deposit (100,000 ADA) refunded
-        // TODO: Get actual gov_action_deposit from protocol parameters
         const GOV_ACTION_DEPOSIT: u64 = 100_000_000_000; // 100,000 ADA
         let total_gov_proposals_refunded = enacted_proposal_count + expired_proposal_count;
         let gov_deposit_refunds = (total_gov_proposals_refunded as u64) * GOV_ACTION_DEPOSIT;
-
-        if total_gov_proposals_refunded > 0 {
-            info!(
-                "Governance deposit refunds: {} enacted + {} expired = {} proposals, {} ADA refunded",
-                enacted_proposal_count,
-                expired_proposal_count,
-                total_gov_proposals_refunded,
-                gov_deposit_refunds / 1_000_000
-            );
-        }
-
         let total_deposit_refunds = stake_key_deposit_refunds + gov_deposit_refunds;
 
         // Combine pot deltas from pulsing_rew_update and instant_rewards
@@ -1523,14 +1396,6 @@ impl StreamingSnapshotParser {
             delta_reserves: pulsing_result.delta_reserves + instant_rewards_result.delta_reserves,
             delta_deposits: -(total_deposit_refunds as i64),
         };
-
-        info!(
-            "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (stake_key={}, gov={}), delta_fees={}",
-            pot_deltas.delta_treasury, donations,
-            pot_deltas.delta_reserves, pot_deltas.delta_deposits,
-            stake_key_deposit_refunds, gov_deposit_refunds,
-            pulsing_result.delta_fees
-        );
 
         // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {

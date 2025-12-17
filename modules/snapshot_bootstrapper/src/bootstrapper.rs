@@ -59,13 +59,13 @@ impl SnapshotBootstrapper {
 
         let cfg = BootstrapConfig::try_load(&config)?;
 
-        info!("Snapshot bootstrapper initializing");
-        info!("  Network: {}", cfg.network);
-        info!("  Data directory: {}", cfg.data_dir.display());
-        info!("  Publishing on '{}'", cfg.snapshot_topic);
         info!(
-            "  Download timeouts: {}s total, {}s connect",
-            cfg.download.timeout_secs, cfg.download.connect_timeout_secs
+            network = %cfg.network,
+            data_dir = %cfg.data_dir.display(),
+            topic = %cfg.snapshot_topic,
+            timeout_secs = cfg.download.timeout_secs,
+            connect_timeout_secs = cfg.download.connect_timeout_secs,
+            "Initializing"
         );
 
         let bootstrapped_sub = context.subscribe(&cfg.bootstrapped_subscribe_topic).await?;
@@ -91,22 +91,20 @@ impl SnapshotBootstrapper {
     ) -> Result<(), BootstrapError> {
         Self::wait_for_genesis(bootstrapped_sub).await?;
 
+        let total_start = Instant::now();
         let bootstrap_ctx = BootstrapContext::load(&cfg)?;
         info!(
-            "Loaded bootstrap data for epoch {}",
-            bootstrap_ctx.block_info.epoch
-        );
-        info!("  Snapshot: {}", bootstrap_ctx.snapshot.url);
-        info!(
-            "  Block: slot={}, number={}",
-            bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
+            epoch = bootstrap_ctx.block_info.epoch,
+            slot = bootstrap_ctx.block_info.slot,
+            block = bootstrap_ctx.block_info.number,
+            "Starting bootstrap"
         );
 
-        // Download
+        let download_start = Instant::now();
         let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
         downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
+        info!(elapsed = ?download_start.elapsed(), "Snapshot downloaded");
 
-        // Publish
         let mut publisher = SnapshotPublisher::new(
             context,
             cfg.completion_topic.clone(),
@@ -116,23 +114,19 @@ impl SnapshotBootstrapper {
 
         publisher.publish_start().await?;
 
-        info!(
-            "Parsing snapshot: {}",
-            bootstrap_ctx.snapshot_path().display()
-        );
-        let start = Instant::now();
+        let parse_start = Instant::now();
         let parser = StreamingSnapshotParser::new(
             bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
         );
         parser
             .parse(&mut publisher, cfg.network.into())
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
-        info!("Parsed snapshot in {:.2?}", start.elapsed());
+        info!(elapsed = ?parse_start.elapsed(), "Snapshot parsed");
 
         publisher.publish_snapshot_complete().await?;
         publisher.publish_completion(bootstrap_ctx.block_info).await?;
 
-        info!("Snapshot bootstrap completed");
+        info!(elapsed = ?total_start.elapsed(), "Bootstrap complete");
         Ok(())
     }
 
