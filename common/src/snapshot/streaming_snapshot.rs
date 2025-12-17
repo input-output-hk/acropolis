@@ -1454,9 +1454,6 @@ impl StreamingSnapshotParser {
         // When rewards are paid to a deregistered account:
         // 1. The reward goes to treasury instead
         // 2. Their stake key deposit is refunded (reducing total deposits)
-        // TODO: Get actual key_deposit from protocol parameters (currently hardcoded to 2 ADA)
-        const KEY_DEPOSIT: u64 = 2_000_000; // 2 ADA
-
         let mut unclaimed_rewards: u64 = 0;
         let mut deregistered_with_rewards: u64 = 0;
 

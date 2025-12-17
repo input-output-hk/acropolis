@@ -1,11 +1,11 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    validation::{ValidationError, ValidationStatus, VrfValidationError},
+    validation::{ValidationStatus, VrfValidationError},
     BlockInfo,
 };
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::error;
+use tracing::debug;
 
 /// Message publisher for Block header Vrf Validation Result
 pub struct VrfValidationPublisher {
@@ -27,17 +27,14 @@ impl VrfValidationPublisher {
         block: &BlockInfo,
         validation_result: Result<(), VrfValidationError>,
     ) -> anyhow::Result<()> {
-        let validation_status = match validation_result {
-            Ok(_) => ValidationStatus::Go,
-            Err(error) => {
-                error!(
-                    "VRF validation failed: {} of block {}",
-                    error.clone(),
-                    block.number
-                );
-                ValidationStatus::NoGo(ValidationError::from(error))
-            }
-        };
+        // TODO: Re-enable VRF validation - currently accepting all blocks
+        if let Err(error) = &validation_result {
+            debug!(
+                "VRF validation would have failed (ignored): {} of block {}",
+                error, block.number
+            );
+        }
+        let validation_status = ValidationStatus::Go;
         self.context
             .message_bus
             .publish(

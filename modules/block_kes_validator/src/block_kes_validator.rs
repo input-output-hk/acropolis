@@ -3,6 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
+    configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -54,6 +55,7 @@ impl BlockKesValidator {
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -63,8 +65,29 @@ impl BlockKesValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
+        // Consume initial protocol parameters and SPO state
+        if !is_snapshot_mode {
+            let _ = protocol_parameters_subscription.read().await?;
+        } else {
+            // In snapshot mode, we need to consume the initial protocol parameters and SPO state
+            let (_, protocol_params_msg) =
+                protocol_parameters_subscription.read_ignoring_rollbacks().await?;
+            let (_, spo_state_msg) = spo_state_subscription.read_ignoring_rollbacks().await?;
+            let mut state = history.lock().await.get_or_init_with(State::new);
+            if let Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) =
+                protocol_params_msg.as_ref()
+            {
+                state.handle_protocol_parameters(msg);
+            }
+            if let Message::Cardano((_, CardanoMessage::SPOState(msg))) = spo_state_msg.as_ref() {
+                state.handle_spo_state(msg);
+            }
+            history.lock().await.commit(0, state);
+            info!("Consumed initial protocol parameters and SPO state for snapshot mode");
+        }
+
+        // Track whether we've already consumed epoch boundary messages during snapshot init
+        let mut skip_first_epoch_boundary = is_snapshot_mode;
 
         loop {
             // Get a mutable state
@@ -81,7 +104,11 @@ impl BlockKesValidator {
                     current_block = Some(block_info.clone());
                     let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
-                    if is_new_epoch {
+                    // In snapshot mode, skip reading epoch boundary messages for the first new_epoch
+                    // block since we already consumed them during initialization
+                    if is_new_epoch && skip_first_epoch_boundary {
+                        skip_first_epoch_boundary = false;
+                    } else if is_new_epoch {
                         // read epoch boundary messages
                         let (_, protocol_parameters_msg) =
                             protocol_parameters_subscription.read_ignoring_rollbacks().await?;
@@ -192,6 +219,9 @@ impl BlockKesValidator {
             StateHistoryStore::default_block_store(),
         )));
 
+        // Check if we're in snapshot mode
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+
         // Start run task
         context.run(async move {
             Self::run(
@@ -201,6 +231,7 @@ impl BlockKesValidator {
                 block_subscription,
                 protocol_parameters_subscription,
                 spo_state_subscription,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

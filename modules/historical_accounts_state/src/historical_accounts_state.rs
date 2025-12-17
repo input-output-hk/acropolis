@@ -2,6 +2,7 @@
 //! Manages optional state data needed for Blockfrost alignment
 
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
@@ -64,11 +65,15 @@ impl HistoricalAccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut stake_address_deltas_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
-        let _ = params_subscription.read().await?;
-        info!("Consumed initial genesis params from params_subscription");
-        let _ = stake_address_deltas_subscription.read().await?;
-        info!("Consumed initial stake deltas from stake_address_deltas_subscription");
+        // Consume initial protocol parameters and stake deltas (only needed for genesis bootstrap)
+        if !is_snapshot_mode {
+            let _ = params_subscription.read().await?;
+            info!("Consumed initial genesis params from params_subscription");
+            let _ = stake_address_deltas_subscription.read().await?;
+            info!("Consumed initial stake deltas from stake_address_deltas_subscription");
+        }
 
         // Background task to persist epochs sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
@@ -418,6 +423,9 @@ impl HistoricalAccountsState {
         let address_deltas_subscription = context.subscribe(&address_deltas_topic).await?;
         let params_subscription = context.subscribe(&params_topic).await?;
 
+        // Check if we're in snapshot mode
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+
         // Start run task
         context.run(async move {
             Self::run(
@@ -427,6 +435,7 @@ impl HistoricalAccountsState {
                 withdrawals_subscription,
                 address_deltas_subscription,
                 params_subscription,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
