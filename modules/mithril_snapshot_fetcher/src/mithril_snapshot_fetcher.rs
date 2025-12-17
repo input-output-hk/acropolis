@@ -1,13 +1,14 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
+use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     configuration::StartupMethod,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context};
 use chrono::{Duration, Utc};
 use config::Config;
@@ -15,10 +16,8 @@ use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     ClientBuilder, MessageBuilder, Snapshot,
 };
-use pallas::{
-    ledger::traverse::{Era as PallasEra, MultiEraBlock},
-    storage::hardano,
-};
+use pallas::storage::hardano;
+use pallas_traverse::MultiEraBlock;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -318,19 +317,7 @@ impl MithrilSnapshotFetcher {
                         }
 
                         let timestamp = genesis.slot_to_timestamp(slot);
-
-                        let era = match block.era() {
-                            PallasEra::Byron => Era::Byron,
-                            PallasEra::Shelley => Era::Shelley,
-                            PallasEra::Allegra => Era::Allegra,
-                            PallasEra::Mary => Era::Mary,
-                            PallasEra::Alonzo => Era::Alonzo,
-                            PallasEra::Babbage => Era::Babbage,
-                            PallasEra::Conway => Era::Conway,
-                            x => bail!(
-                                "Block slot {slot}, number {number} has impossible era: {x:?}"
-                            ),
-                        };
+                        let era = map_to_block_era(&block)?;
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,

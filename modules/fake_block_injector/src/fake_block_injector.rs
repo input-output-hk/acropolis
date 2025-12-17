@@ -1,16 +1,17 @@
 //! Acropolis fake block injector module for Caryatid
 //! Posts test blocks into the Acropolis system after bootstrapping
 
+use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context};
 use config::Config;
 use glob::glob;
-use pallas::ledger::traverse::{Era as PallasEra, MultiEraBlock};
+use pallas_traverse::MultiEraBlock;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -48,17 +49,7 @@ impl FakeBlockInjector {
         let (epoch, epoch_slot) = genesis.slot_to_epoch(slot);
         let new_epoch = false; // TODO
         let timestamp = genesis.slot_to_timestamp(slot);
-
-        let era = match block.era() {
-            PallasEra::Byron => Era::Byron,
-            PallasEra::Shelley => Era::Shelley,
-            PallasEra::Allegra => Era::Allegra,
-            PallasEra::Mary => Era::Mary,
-            PallasEra::Alonzo => Era::Alonzo,
-            PallasEra::Babbage => Era::Babbage,
-            PallasEra::Conway => Era::Conway,
-            x => bail!("Block slot {slot}, number {number} has impossible era: {x:?}"),
-        };
+        let era = map_to_block_era(&block)?;
 
         let block_info = BlockInfo {
             status: BlockStatus::Volatile,

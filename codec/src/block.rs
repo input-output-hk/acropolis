@@ -1,8 +1,9 @@
 use acropolis_common::{
-    GenesisDelegate, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
+    Era, GenesisDelegate, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
 };
+use anyhow::{Result, bail};
 use pallas_primitives::byron::BlockSig::DlgSig;
-use pallas_traverse::MultiEraHeader;
+use pallas_traverse::{Era as PallasEra, MultiEraBlock, MultiEraHeader};
 use std::collections::HashMap;
 
 pub fn map_to_block_issuer(
@@ -40,4 +41,21 @@ pub fn map_to_block_issuer(
             _ => None,
         },
     }
+}
+
+pub fn map_to_block_era(block: &MultiEraBlock) -> Result<Era> {
+    Ok(match block.era() {
+        PallasEra::Byron => Era::Byron,
+        PallasEra::Shelley => Era::Shelley,
+        PallasEra::Allegra => Era::Allegra,
+        PallasEra::Mary => Era::Mary,
+        PallasEra::Alonzo => Era::Alonzo,
+        PallasEra::Babbage => Era::Babbage,
+        PallasEra::Conway => Era::Conway,
+        x => bail!(
+            "Block slot {}, number {} has impossible era: {x:?}",
+            block.slot(),
+            block.number()
+        ),
+    })
 }
