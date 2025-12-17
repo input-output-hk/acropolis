@@ -23,6 +23,7 @@ compose the Acropolis Architecture
 * [Governance State](governance_state) - tracks Governance Actions and voting
 * [Stake Delta Filter](stake_delta_filter) - filters out stake address changes and handles stake pointer references
 * [Accounts State](accounts_state) - stake and reward accounts tracker
+* [Fake Block Injector](fake_block_injector) - test harness to inject blocks instead of network
 
 ## How to add a new module
 

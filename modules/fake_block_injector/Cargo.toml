@@ -1,23 +1,24 @@
-# Acropolis block unpacker module
+# Fake block injector module
 
 [package]
-name = "acropolis_module_block_unpacker"
-version = "0.2.0"
+name = "acropolis_module_fake_block_injector"
+version = "0.1.0"
 edition = "2021"
 authors = ["Paul Clark <paul.clark@iohk.io>"]
-description = "Block unpacker Caryatid module for Acropolis"
+description = "Fake block injector Caryatid module for Acropolis"
 license = "Apache-2.0"
 
 [dependencies]
 acropolis_common = { path = "../../common" }
+acropolis_codec = { path = "../../codec" }
 
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-pallas = { workspace = true }
+pallas-traverse = { workspace = true }
 tracing = { workspace = true }
-hex = { workspace = true }
+glob = "0.3.3"
 
 [lib]
-path = "src/block_unpacker.rs"
+path = "src/fake_block_injector.rs"

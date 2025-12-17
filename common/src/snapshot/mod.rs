@@ -15,6 +15,7 @@ mod error;
 pub mod mark_set_go;
 mod parser;
 pub mod protocol_parameters;
+pub mod reward_snapshot;
 pub mod streaming_snapshot;
 pub mod utxo;
 pub use error::SnapshotError;
@@ -28,3 +29,6 @@ pub use streaming_snapshot::{
 };
 
 pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};
+pub use reward_snapshot::{
+    Likelihood, NonMyopic, PulsingRewardUpdate, Reward, RewardSnapshot, RewardType, RewardUpdate,
+};

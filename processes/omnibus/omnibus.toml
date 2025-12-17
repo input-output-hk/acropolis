@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -19,6 +19,8 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
+# Stop constraint likewise
+stop = "none"
 
 [module.snapshot-bootstrapper]
 epoch = 507
@@ -43,7 +45,8 @@ validators = [
 # Add these once they are actually being sent
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
-#           "cardano.validation.utxo"
+#           "cardano.validation.utxo",
+           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -183,7 +186,7 @@ store-transactions = false
 [module.clock]
 
 [module.rest-server]
-address = "127.0.0.1"
+address = "0.0.0.0"
 port = 4340
 
 [module.spy]

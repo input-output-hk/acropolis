@@ -9,7 +9,7 @@ use crate::drep::{
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
 use crate::{
-    address::{Address, ShelleyAddress, StakeAddress},
+    address::{Address, ShelleyAddress, ShelleyAddressDelegationPart, StakeAddress},
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
 };
@@ -832,6 +832,46 @@ pub struct UTXOValue {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl UTXOValue {
+    /// Get the coin (lovelace) value
+    pub fn coin(&self) -> u64 {
+        self.value.lovelace
+    }
+
+    /// Get the address as raw bytes
+    pub fn address_bytes(&self) -> Vec<u8> {
+        match &self.address {
+            Address::Shelley(shelley) => shelley.to_bytes_key(),
+            Address::Byron(byron) => byron.payload.clone(),
+            Address::Stake(stake) => stake.to_binary(),
+            Address::None => Vec::new(),
+        }
+    }
+
+    /// Extract the stake credential from the address, if present.
+    ///
+    /// Returns `Some(StakeCredential)` for Shelley addresses that have
+    /// a stake key or script hash delegation. Returns `None` for:
+    /// - Byron addresses
+    /// - Enterprise addresses (no delegation)
+    /// - Pointer addresses (delegation is a pointer, not a credential)
+    /// - Stake/reward addresses
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        match &self.address {
+            Address::Shelley(shelley) => match &shelley.delegation {
+                ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                    Some(StakeCredential::AddrKeyHash(*hash))
+                }
+                ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                    Some(StakeCredential::ScriptHash(*hash))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -917,6 +957,12 @@ impl TxIdentifier {
     }
 }
 
+impl Display for TxIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.block_number(), self.tx_index())
+    }
+}
+
 // Full UTXO identifier as used in the outside world, with TX hash and output index
 #[derive(
     Debug,
@@ -944,6 +990,11 @@ impl UTxOIdentifier {
             tx_hash,
             output_index,
         }
+    }
+
+    /// Get the transaction hash as a hex string
+    pub fn tx_hash_hex(&self) -> String {
+        self.tx_hash.to_string()
     }
 
     pub fn to_bytes(&self) -> [u8; 34] {

@@ -1,5 +1,7 @@
 //! Acropolis SPOState: State storage
 
+use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
+use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     crypto::keyhash_224,
     ledger_state::SPOState,
@@ -13,12 +15,10 @@ use acropolis_common::{
     BlockInfo, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
     StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, error, info};
-
-use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
+use tracing::{debug, info};
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
@@ -264,7 +264,11 @@ impl State {
         true
     }
 
-    fn handle_new_epoch(&mut self, block: &BlockInfo) -> Arc<Message> {
+    fn handle_new_epoch(
+        &mut self,
+        block: &BlockInfo,
+        vld: &mut ValidationOutcomes,
+    ) -> Arc<Message> {
         self.epoch = block.epoch;
         debug!(epoch = self.epoch, "New epoch");
 
@@ -285,7 +289,8 @@ impl State {
             for dr in deregistrations {
                 debug!("Retiring SPO {}", dr);
                 match self.spos.remove(&dr) {
-                    None => error!("Retirement requested for unregistered SPO {}", dr,),
+                    None => vld
+                        .push_anyhow(anyhow!("Retirement requested for unregistered SPO {}", dr,)),
                     Some(_de_reg) => {
                         retired_spos.push(dr);
                     }
@@ -357,25 +362,28 @@ impl State {
 
     fn handle_pool_retirement(
         &mut self,
+        vld: &mut ValidationOutcomes,
         block: &BlockInfo,
         ret: &PoolRetirement,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
     ) {
         debug!(
-            "SPO {} wants to retire at the end of epoch {} (cert in block number {})",
+            "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
         );
         if ret.epoch <= self.epoch {
-            error!(
+            vld.push_anyhow(anyhow!(
                 "SPO retirement received for current or past epoch {} for SPO {}",
-                ret.epoch, ret.operator
-            );
+                ret.epoch,
+                ret.operator
+            ));
         } else if ret.epoch > self.epoch + TECHNICAL_PARAMETER_POOL_RETIRE_MAX_EPOCH {
-            error!(
+            vld.push_anyhow(anyhow!(
                 "SPO retirement received for epoch {} that exceeds future limit for SPO {}",
-                ret.epoch, ret.operator
-            );
+                ret.epoch,
+                ret.operator
+            ));
         } else {
             // Replace any existing queued deregistrations
             for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
@@ -401,10 +409,10 @@ impl State {
                 historical_spo
                     .add_pool_updates(PoolUpdateEvent::retire_event(*tx_identifier, *cert_index));
             } else {
-                error!(
+                vld.push_anyhow(anyhow!(
                     "Historical SPO for {} not registered when try to retire it",
                     ret.operator
-                );
+                ));
             }
         }
     }
@@ -417,9 +425,10 @@ impl State {
         stake_addresses.register_stake_address(stake_address);
     }
 
-    fn deregister_stake_address(&mut self, stake_address: &StakeAddress) {
+    fn deregister_stake_address(&mut self, stake_address: &StakeAddress) -> ValidationOutcomes {
+        let mut vld = ValidationOutcomes::new();
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
-            return;
+            return vld;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
@@ -432,23 +441,30 @@ impl State {
                     if let Some(historical_spo) = historical_spos.get_mut(old_spo) {
                         if let Some(removed) = historical_spo.remove_delegator(stake_address) {
                             if !removed {
-                                error!(
+                                vld.push_anyhow(anyhow!(
                                     "Historical SPO state for {} does not contain delegator {}",
-                                    old_spo, stake_address
-                                );
+                                    old_spo,
+                                    stake_address
+                                ));
                             }
                         }
                     }
                 }
             }
         }
+        vld
     }
 
     /// Record a stake delegation
     /// Update historical_spo_state's delegators
-    fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
+    fn record_stake_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        spo: &PoolId,
+    ) -> ValidationOutcomes {
+        let mut vld = ValidationOutcomes::default();
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
-            return;
+            return vld;
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         let old_spo = stake_addresses.get(stake_address).and_then(|s| s.delegated_spo);
@@ -462,15 +478,19 @@ impl State {
                         Some(historical_spo) => {
                             if let Some(removed) = historical_spo.remove_delegator(stake_address) {
                                 if !removed {
-                                    error!(
+                                    vld.push_anyhow(anyhow!(
                                         "Historical SPO state for {} does not contain delegator {}",
-                                        old_spo, stake_address
-                                    );
+                                        old_spo,
+                                        stake_address
+                                    ));
                                 }
                             }
                         }
                         _ => {
-                            error!("Missing Historical SPO state for {}", old_spo);
+                            vld.push_anyhow(anyhow!(
+                                "Missing Historical SPO state for {}",
+                                old_spo
+                            ));
                         }
                     }
                 }
@@ -481,14 +501,28 @@ impl State {
                     .or_insert_with(|| HistoricalSPOState::new(&self.store_config));
                 if let Some(added) = historical_spo.add_delegator(stake_address) {
                     if !added {
-                        error!(
+                        vld.push_anyhow(anyhow!(
                             "Historical SPO state for {} already contains delegator {}",
-                            spo, stake_address
-                        );
+                            spo,
+                            stake_address
+                        ));
                     }
                 }
             }
         }
+
+        vld
+    }
+
+    pub fn handle_tx_certs_no_errors(
+        &mut self,
+        block: &BlockInfo,
+        tx_certs_msg: &TxCertificatesMessage,
+    ) -> Result<Option<Arc<Message>>> {
+        let mut vld = ValidationOutcomes::new();
+        let res = self.handle_tx_certs(block, tx_certs_msg, &mut vld)?;
+        vld.as_result()?;
+        Ok(res)
     }
 
     /// Handle TxCertificates with SPO registrations / de-registrations
@@ -497,11 +531,12 @@ impl State {
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
+        vld: &mut ValidationOutcomes,
     ) -> Result<Option<Arc<Message>>> {
         let mut maybe_message: Option<Arc<Message>> = None;
         if block.epoch > self.epoch {
             // handle new epoch
-            maybe_message = Some(self.handle_new_epoch(block));
+            maybe_message = Some(self.handle_new_epoch(block, vld));
         }
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
@@ -517,6 +552,7 @@ impl State {
                 }
                 TxCertificate::PoolRetirement(ret) => {
                     self.handle_pool_retirement(
+                        vld,
                         block,
                         ret,
                         &tx_cert.tx_identifier,
@@ -630,20 +666,24 @@ impl State {
         &mut self,
         _block_info: &BlockInfo,
         reward_deltas_msg: &StakeRewardDeltasMessage,
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
+        let mut vld = ValidationOutcomes::default();
         let Some(stake_addresses) = self.stake_addresses.as_ref() else {
-            return Ok(());
+            return Ok(vld);
         };
 
         // Handle deltas
         for delta in reward_deltas_msg.deltas.iter() {
             let mut stake_addresses = stake_addresses.lock().unwrap();
             if let Err(e) = stake_addresses.pay_reward(&delta.stake_address, delta.delta) {
-                error!("Updating reward account {}: {e}", delta.stake_address);
+                vld.push_anyhow(anyhow!(
+                    "Updating reward account {}: {e}",
+                    delta.stake_address
+                ));
             }
         }
 
-        Ok(())
+        Ok(vld)
     }
 
     pub fn dump(&self) -> SPOState {
@@ -708,7 +748,7 @@ mod tests {
         let mut state = State::default();
         let msg = new_certs_msg();
         let block = new_block(1);
-        let maybe_message = state.handle_tx_certs(&block, &msg).unwrap();
+        let maybe_message = state.handle_tx_certs_no_errors(&block, &msg).unwrap();
         assert!(maybe_message.is_some());
     }
 
@@ -723,7 +763,7 @@ mod tests {
             cert_index: 1,
         });
         let block = new_block(1);
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&pool_id);
         assert!(spo.is_some());
@@ -743,7 +783,7 @@ mod tests {
             cert_index: 0,
         });
         let block = new_block(0);
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&1);
         assert!(drs.is_some());
@@ -768,7 +808,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         block.number = 1;
         msg = new_certs_msg();
@@ -780,7 +820,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&2);
@@ -812,7 +852,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
@@ -826,13 +866,13 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
         block.number = 1;
         let mut state = history.lock().await.get_rolled_back_state(block.number);
         msg = new_certs_msg();
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert_eq!(1, state.pending_deregistrations.len());
         let drs = state.pending_deregistrations.get(&2);
         assert!(drs.is_some());
@@ -853,7 +893,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&pool_id);
@@ -869,12 +909,12 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         block.epoch = 1; // SPO get retired at the start of the epoch it requests
         block.number = 2;
         let msg = new_certs_msg();
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert!(state.spos.is_empty());
     }
 
@@ -894,7 +934,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&pool_id);
         assert!(spo.is_some());
@@ -911,14 +951,14 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         history.lock().await.commit(block.number, state);
 
         let mut state = history.lock().await.get_current_state();
         block.epoch = 1;
         block.number = 2;
         msg = new_certs_msg();
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert!(state.spos.is_empty());
         history.lock().await.commit(block.number, state);
 
@@ -926,7 +966,7 @@ mod tests {
         block.epoch = 0;
         let msg = new_certs_msg();
         let mut state = history.lock().await.get_rolled_back_state(block.number);
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         assert_eq!(1, state.spos.len());
         let spo = state.spos.get(&pool_id);
         assert!(spo.is_some());
@@ -954,7 +994,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         block.number = 1;
         msg = new_certs_msg();
@@ -966,7 +1006,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         let mut retiring_pools = state.get_retiring_pools();
         retiring_pools.sort_by_key(|p| p.epoch);
         assert_eq!(2, retiring_pools.len());
@@ -996,7 +1036,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
 
         block = new_block(2);
         assert!(state.handle_mint(&block, &[1]));
@@ -1039,7 +1079,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         });
-        assert!(state.handle_tx_certs(&block, &msg).is_ok());
+        assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
         block = new_block(2);
         assert!(state.handle_mint(&block, &[1])); // Note raw issuer_vkey
         let blocks = state.get_blocks_by_pool(&spo_id).unwrap();

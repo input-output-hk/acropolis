@@ -2,6 +2,7 @@ downloads
 cache
 upstream-cache
 spdd_db
+omnibus.local.toml
 
 # DB files
 fjall-*/

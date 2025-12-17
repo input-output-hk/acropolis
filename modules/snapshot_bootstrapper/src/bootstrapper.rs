@@ -129,6 +129,7 @@ impl SnapshotBootstrapper {
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
+        publisher.publish_snapshot_complete().await?;
         publisher.publish_completion(bootstrap_ctx.block_info).await?;
 
         info!("Snapshot bootstrap completed");
