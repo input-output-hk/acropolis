@@ -102,17 +102,16 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
         );
 
-        // Download
-        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
-        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
-
         // Publish
         let mut publisher = SnapshotPublisher::new(
-            context,
+            context.clone(),
             cfg.snapshot_topic.clone(),
             cfg.sync_command_topic.clone(),
             bootstrap_ctx.context(),
         );
+        // Download
+        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
+        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         publisher.publish_start().await?;
 

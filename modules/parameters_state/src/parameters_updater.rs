@@ -3,8 +3,8 @@ use acropolis_common::protocol_params::{
     AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
 };
 use acropolis_common::{
-    messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, Committee, CommitteeChange,
-    EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
+    AlonzoBabbageVotingOutcome, Committee, CommitteeChange, EnactStateElem, Era,
+    GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
@@ -261,14 +261,18 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    pub fn apply_enact_state(&mut self, u: &GovernanceOutcomesMessage) -> Result<()> {
-        for outcome in u.alonzo_babbage_outcomes.iter() {
+    pub fn apply_enact_state(
+        &mut self,
+        alonzo: &[AlonzoBabbageVotingOutcome],
+        conway: &[GovernanceOutcomeVariant],
+    ) -> Result<()> {
+        for outcome in alonzo.iter() {
             tracing::info!("Updating alonzo/babbage outcome {:?}", outcome);
             self.apply_alonzo_babbage_outcome_elem(outcome)?;
         }
 
-        for outcome in u.conway_outcomes.iter() {
-            if let GovernanceOutcomeVariant::EnactStateElem(elem) = &outcome.action_to_perform {
+        for outcome in conway.iter() {
+            if let GovernanceOutcomeVariant::EnactStateElem(elem) = &outcome {
                 self.apply_enact_state_elem(elem)?;
             }
         }
