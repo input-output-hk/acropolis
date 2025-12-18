@@ -3,7 +3,6 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -62,7 +61,6 @@ impl BlockVrfValidator {
         mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -72,43 +70,8 @@ impl BlockVrfValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters and epoch data
-        if !is_snapshot_mode {
-            let _ = protocol_parameters_subscription.read().await?;
-        } else {
-            // In snapshot mode, we need to consume the initial protocol parameters,
-            // epoch nonce, SPO state and stake distribution before validating
-            let (_, protocol_params_msg) =
-                protocol_parameters_subscription.read_ignoring_rollbacks().await?;
-            let (_, epoch_nonce_msg) = epoch_nonce_subscription.read_ignoring_rollbacks().await?;
-            let (_, spo_state_msg) = spo_state_subscription.read_ignoring_rollbacks().await?;
-            let (_, spdd_msg) = spdd_subscription.read_ignoring_rollbacks().await?;
-            let mut state = history.lock().await.get_or_init_with(State::new);
-            if let Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) =
-                protocol_params_msg.as_ref()
-            {
-                state.handle_protocol_parameters(msg);
-            }
-            if let Message::Cardano((_, CardanoMessage::EpochNonce(active_nonce))) =
-                epoch_nonce_msg.as_ref()
-            {
-                state.handle_epoch_nonce(active_nonce);
-            }
-            if let (
-                Message::Cardano((_, CardanoMessage::SPOState(spo_state_msg))),
-                Message::Cardano((_, CardanoMessage::SPOStakeDistribution(spdd_msg))),
-            ) = (spo_state_msg.as_ref(), spdd_msg.as_ref())
-            {
-                state.handle_new_snapshot(spo_state_msg, spdd_msg);
-            }
-            history.lock().await.commit(0, state);
-            info!(
-                "Consumed initial protocol parameters, epoch nonce, SPO state and stake distribution for snapshot mode"
-            );
-        }
-
-        // Track whether we've already consumed epoch boundary messages during snapshot init
-        let mut skip_first_epoch_boundary = is_snapshot_mode;
+        // Consume initial protocol parameters
+        let _ = protocol_parameters_subscription.read().await?;
 
         loop {
             // Get a mutable state
@@ -125,11 +88,7 @@ impl BlockVrfValidator {
                     current_block = Some(block_info.clone());
                     let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
-                    // In snapshot mode, skip reading epoch boundary messages for the first new_epoch
-                    // block since we already consumed them during initialization
-                    if is_new_epoch && skip_first_epoch_boundary {
-                        skip_first_epoch_boundary = false;
-                    } else if is_new_epoch {
+                    if is_new_epoch {
                         // read epoch boundary messages
                         let protocol_parameters_message_f = protocol_parameters_subscription.read();
                         let epoch_nonce_message_f = epoch_nonce_subscription.read();
@@ -273,9 +232,6 @@ impl BlockVrfValidator {
             StateHistoryStore::default_block_store(),
         )));
 
-        // Check if we're in snapshot mode
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
-
         // Start run task
         context.run(async move {
             Self::run(
@@ -287,7 +243,6 @@ impl BlockVrfValidator {
                 epoch_nonce_subscription,
                 spo_state_subscription,
                 spdd_subscription,
-                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

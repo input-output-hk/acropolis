@@ -1,11 +1,11 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message},
-    validation::{KesValidationError, ValidationStatus},
+    validation::{KesValidationError, ValidationError, ValidationStatus},
     BlockInfo, PoolId,
 };
 use caryatid_sdk::Context;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::error;
 
 /// Message publisher for Block header KES Validation Result
 pub struct KesValidationPublisher {
@@ -27,14 +27,17 @@ impl KesValidationPublisher {
         block: &BlockInfo,
         validation_result: Result<Option<(PoolId, u64)>, KesValidationError>,
     ) -> anyhow::Result<()> {
-        // TODO: Re-enable KES validation - currently accepting all blocks
-        if let Err(error) = &validation_result {
-            debug!(
-                "KES validation would have failed (ignored): {} of block {}",
-                error, block.number
-            );
-        }
-        let validation_status = ValidationStatus::Go;
+        let validation_status = match validation_result {
+            Ok(_) => ValidationStatus::Go,
+            Err(error) => {
+                error!(
+                    "KES validation failed: {} of block {}",
+                    error.clone(),
+                    block.number
+                );
+                ValidationStatus::NoGo(ValidationError::from(error))
+            }
+        };
         self.context
             .message_bus
             .publish(

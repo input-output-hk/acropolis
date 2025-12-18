@@ -4,7 +4,6 @@
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
 use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
@@ -51,13 +50,9 @@ impl HistoricalEpochsState {
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
-        // Consume initial protocol parameters (only needed for genesis bootstrap)
-        if !is_snapshot_mode {
-            let _ = params_subscription.read().await?;
-            info!("Consumed initial genesis params from params_subscription");
-        }
+        let _ = params_subscription.read().await?;
+        info!("Consumed initial genesis params from params_subscription");
 
         // Background task to persist epoch sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
@@ -170,8 +165,7 @@ impl HistoricalEpochsState {
 
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // Check if we're in snapshot mode (before config is shadowed)
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        // Get configuration
 
         // Subscription topics
         let blocks_subscribe_topic = config
@@ -290,7 +284,6 @@ impl HistoricalEpochsState {
                 blocks_subscription,
                 epoch_activity_subscription,
                 params_subscription,
-                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
