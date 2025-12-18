@@ -279,6 +279,13 @@ impl BlockInfo {
         // and we can receive and propagate blocks which have not yet been validated.
         self.tip_slot.is_some_and(|s| s <= self.slot)
     }
+
+    pub fn to_point(&self) -> Point {
+        Point::Specific {
+            hash: self.hash,
+            slot: self.slot,
+        }
+    }
 }
 
 // Individual transaction UTxO deltas

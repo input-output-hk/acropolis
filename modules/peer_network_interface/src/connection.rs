@@ -25,7 +25,7 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-    pub fn new(address: String, magic: u64, sender: PeerMessageSender, delay: Duration) -> Self {
+    pub fn new(address: String, magic: u32, sender: PeerMessageSender, delay: Duration) -> Self {
         let worker = PeerConnectionWorker {
             address: address.clone(),
             magic,
@@ -93,7 +93,7 @@ pub struct BlockFetched {
 
 struct PeerConnectionWorker {
     address: String,
-    magic: u64,
+    magic: u32,
     sender: PeerMessageSender,
 }
 
@@ -114,7 +114,7 @@ impl PeerConnectionWorker {
         chainsync: mpsc::UnboundedReceiver<ChainsyncCommand>,
         blockfetch: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) -> Result<()> {
-        let client = PeerClient::connect(self.address.clone(), self.magic).await?;
+        let client = PeerClient::connect(self.address.clone(), self.magic.into()).await?;
         select! {
             res = self.run_chainsync(client.chainsync, chainsync) => res,
             res = self.run_blockfetch(client.blockfetch, blockfetch) => res,
