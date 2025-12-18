@@ -1,14 +1,11 @@
 //! Shelley era UTxOW Rules
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
-#![allow(dead_code)]
-
-use std::collections::{HashMap, HashSet};
-
 use acropolis_common::{
     validation::UTxOWValidationError, KeyHash, ScriptHash, ShelleyAddressPaymentPart, UTXOValue,
     UTxOIdentifier,
 };
 use anyhow::Result;
+use std::collections::{HashMap, HashSet};
 
 fn get_vkey_script_needed_from_inputs(
     inputs: &[UTxOIdentifier],
@@ -120,8 +117,8 @@ mod tests {
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
     use acropolis_common::{
-        AlonzoBabbageUpdateProposal, Era, GenesisDelegates, NetworkId, TxCertificateWithPos,
-        TxIdentifier, Withdrawal,
+        AlonzoBabbageUpdateProposal, Era, GenesisDelegates, NetworkId, Transaction,
+        TxCertificateWithPos, TxIdentifier, Withdrawal,
     };
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use test_case::test_case;
@@ -168,17 +165,16 @@ mod tests {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let raw_tx = tx.encode();
         let tx_identifier = TxIdentifier::new(4533644, 1);
-        let (
-            tx_inputs,
-            _,
-            _,
-            tx_certs,
-            tx_withdrawals,
-            tx_proposal_update,
+        let Transaction {
+            inputs: tx_inputs,
+            certs: tx_certs,
+            withdrawals: tx_withdrawals,
+            proposal_update: tx_proposal_update,
             vkey_witnesses,
             native_scripts,
-            tx_error,
-        ) = acropolis_codec::map_transaction(
+            error: tx_error,
+            ..
+        } = acropolis_codec::map_transaction(
             &tx,
             &raw_tx,
             tx_identifier,

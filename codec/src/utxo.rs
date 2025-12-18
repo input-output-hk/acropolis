@@ -1,4 +1,4 @@
-use crate::witness::map_native_script;
+use crate::{utils::to_hash, witness::map_native_script};
 use acropolis_common::*;
 use pallas_primitives::conway;
 use pallas_traverse::{MultiEraPolicyAssets, MultiEraValue};
@@ -94,16 +94,7 @@ pub fn map_mint_burn(
 ) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
     match policy_group {
         MultiEraPolicyAssets::AlonzoCompatibleMint(policy, kvps) => {
-            let policy_id: PolicyId = match policy.as_ref().try_into() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::error!(
-                        "Invalid policy id length: expected 28 bytes, got {}",
-                        policy.len()
-                    );
-                    return None;
-                }
-            };
+            let policy_id: PolicyId = to_hash(*policy);
 
             let deltas = kvps
                 .iter()
@@ -119,16 +110,7 @@ pub fn map_mint_burn(
         }
 
         MultiEraPolicyAssets::ConwayMint(policy, kvps) => {
-            let policy_id: PolicyId = match policy.as_ref().try_into() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::error!(
-                        "Invalid policy id length: expected 28 bytes, got {}",
-                        policy.len()
-                    );
-                    return None;
-                }
-            };
+            let policy_id: PolicyId = to_hash(*policy);
 
             let deltas = kvps
                 .iter()

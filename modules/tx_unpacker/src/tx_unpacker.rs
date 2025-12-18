@@ -137,32 +137,47 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                    let (
-                                        tx_inputs,
-                                        tx_outputs,
-                                        tx_total_output,
-                                        tx_certs,
-                                        tx_withdrawals,
-                                        tx_proposal_update,
+                                    let Transaction {
+                                        inputs: tx_inputs,
+                                        outputs: tx_outputs,
+                                        total_output: tx_total_output,
+                                        certs: tx_certs,
+                                        withdrawals: tx_withdrawals,
+                                        proposal_update: tx_proposal_update,
                                         vkey_witnesses,
                                         native_scripts,
-                                        tx_error
-                                    ) = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                        error: tx_error,
+                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
                                     let mut props = None;
                                     let mut votes = None;
 
-                                    let mut vkey_hashes_needed = HashSet::new();
-                                    let mut script_hashes_needed = HashSet::new();
-                                    Self::get_vkey_script_needed(
-                                        &tx_certs,
-                                        &tx_withdrawals,
-                                        &tx_proposal_update,
-                                        &state.protocol_params,
-                                        &mut vkey_hashes_needed,
-                                        &mut script_hashes_needed,
-                                    );
-                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
-                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
+                                    let (
+                                        vkey_hashes_needed,
+                                        script_hashes_needed,
+                                        vkey_hashes_provided,
+                                        script_hashes_provided,
+                                    ) = if block.intent.do_validation() {
+                                        let mut vkey_needed = HashSet::new();
+                                        let mut script_needed = HashSet::new();
+                                        Self::get_vkey_script_needed(
+                                            &tx_certs,
+                                            &tx_withdrawals,
+                                            &tx_proposal_update,
+                                            &state.protocol_params,
+                                            &mut vkey_needed,
+                                            &mut script_needed,
+                                        );
+                                        let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+                                        let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
+                                        (
+                                            Some(vkey_needed),
+                                            Some(script_needed),
+                                            Some(vkey_hashes_provided),
+                                            Some(script_hashes_provided),
+                                        )
+                                    } else {
+                                        (None, None, None, None)
+                                    };
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
@@ -431,7 +446,7 @@ impl TxUnpacker {
                         if let Err(e) =
                             state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
                         {
-                            tx_errors.push((tx_index, e));
+                            tx_errors.push((tx_index, *e));
                         }
                     }
                     if !tx_errors.is_empty() {

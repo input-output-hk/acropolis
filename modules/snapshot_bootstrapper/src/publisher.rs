@@ -1,22 +1,29 @@
+use acropolis_common::epoch_snapshot::SnapshotsContainer;
+use acropolis_common::messages::{
+    DRepBootstrapMessage, GovernanceProtocolParametersBootstrapMessage,
+    GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
+};
+use acropolis_common::protocol_params::{Nonces, PraosParams};
+use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
 use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::utxo::UtxoEntry;
 use acropolis_common::snapshot::{
     AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
     ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback,
 };
+use acropolis_common::DRepRecord;
 use acropolis_common::{
-    epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        Message, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
+        SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
-    protocol_params::{Nonces, PraosParams},
-    snapshot::{protocol_parameters::ProtocolParameters, utxo::UtxoEntry},
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    BlockInfo, DRepCredential, EpochBootstrapData, Era, UTXOValue, UTxOIdentifier,
 };
+
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::collections::HashMap;
@@ -368,18 +375,61 @@ impl ProposalCallback for SnapshotPublisher {
 impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
-        _gs_previous_params: ProtocolParameters,
-        _gs_current_params: ProtocolParameters,
-        _gs_future_params: ProtocolParameters,
+        epoch: u64,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        info!("Received governance protocol parameters (current, previous, future)");
-        // TODO: Publish protocol parameters to appropriate message bus topics
-        // This could involve publishing messages for:
-        // - CurrentProtocolParameters → ParametersState processor
-        // - PreviousProtocolParameters → ParametersState processor
-        // - FutureProtocolParameters → ParametersState processor
+        // Separate publish for each slice so that the messages enum is not too large
+        [
+            (Previous, gs_previous_params),
+            (Current, gs_current_params),
+            (Future, gs_future_params),
+        ]
+        .into_iter()
+        .for_each(|(slice, params)| {
+            publish_gov_state(&self.context, &self.snapshot_topic, slice, epoch, params)
+        });
+
         Ok(())
     }
+}
+
+fn publish_gov_state(
+    context: &Arc<Context<Message>>,
+    topic: &str,
+    slice: GovernanceProtocolParametersSlice,
+    epoch: u64,
+    params: ProtocolParameters,
+) {
+    info!(
+        "Received governance protocol parameters for epoch {epoch} slice {:?}",
+        slice
+    );
+    // Send a message to the protocol parameters state, one per slice
+    let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+        SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+            epoch,
+            slice,
+            params,
+            era: Some(Era::Conway),
+            network_name: "mainnet".to_string(),
+            // NOTE: The era is hardcoded to Conway. This code is currently
+            // Conway-focused and has not been tested on other eras. And the
+            // network name is hardcoded to mainnet for the same reason.
+        }),
+    )));
+
+    // Clone what we need for the async task
+    let context = context.clone();
+    let topic = topic.to_owned();
+
+    // Spawn async publish task since this callback is synchronous
+    tokio::spawn(async move {
+        if let Err(e) = context.publish(&topic, message).await {
+            tracing::error!("Failed to publish DRepBootstrap message: {e}");
+        }
+    });
 }
 
 impl EpochCallback for SnapshotPublisher {

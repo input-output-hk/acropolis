@@ -294,14 +294,14 @@ pub struct TxUTxODeltas {
 
     // State needed for validation
     // This is missing UTxO Authors
-    pub vkey_hashes_needed: HashSet<KeyHash>,
-    pub script_hashes_needed: HashSet<ScriptHash>,
+    pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
+    pub script_hashes_needed: Option<HashSet<ScriptHash>>,
     // From witnesses
-    pub vkey_hashes_provided: Vec<KeyHash>,
+    pub vkey_hashes_provided: Option<Vec<KeyHash>>,
     // NOTE:
     // This includes only native scripts
     // missing Plutus Scripts
-    pub script_hashes_provided: Vec<ScriptHash>,
+    pub script_hashes_provided: Option<Vec<ScriptHash>>,
 }
 
 /// Individual address balance change
@@ -376,7 +376,7 @@ impl fmt::Display for RewardType {
     }
 }
 
-pub type PolicyId = [u8; 28];
+pub type PolicyId = Hash<28>;
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
@@ -1011,8 +1011,8 @@ impl Display for UTxOIdentifier {
     }
 }
 
-pub type VKey = Vec<u8>;
-pub type Signature = Vec<u8>;
+pub type VKey = Hash<32>;
+pub type Signature = Hash<64>;
 
 /// VKey Witness
 #[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1027,18 +1027,13 @@ impl VKeyWitness {
     }
 
     pub fn key_hash(&self) -> KeyHash {
-        keyhash_224(&self.vkey)
+        keyhash_224(self.vkey.as_ref())
     }
 }
 
 impl Display for VKeyWitness {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "vkey={}, signature={}",
-            hex::encode(self.vkey.clone()),
-            hex::encode(self.signature.clone())
-        )
+        write!(f, "vkey={}, signature={}", self.vkey, self.signature)
     }
 }
 
@@ -2704,8 +2699,8 @@ impl AddressTotals {
     }
 
     fn apply_asset(
-        target: &mut HashMap<[u8; 28], HashMap<AssetName, u64>>,
-        policy: [u8; 28],
+        target: &mut HashMap<PolicyId, HashMap<AssetName, u64>>,
+        policy: PolicyId,
         name: AssetName,
         amount: u64,
     ) {

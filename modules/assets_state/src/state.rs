@@ -682,7 +682,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use crate::{
         asset_registry::{AssetId, AssetRegistry},
@@ -696,7 +696,7 @@ mod tests {
     use serde_cbor::Value as CborValue;
 
     fn dummy_policy(byte: u8) -> PolicyId {
-        [byte; 28]
+        PolicyId::from([byte; 28])
     }
 
     fn asset_name_from_str(s: &str) -> AssetName {
@@ -871,10 +871,10 @@ mod tests {
             tx_identifier,
             inputs,
             outputs,
-            vkey_hashes_needed: HashSet::new(),
-            script_hashes_needed: HashSet::new(),
-            vkey_hashes_provided: vec![],
-            script_hashes_provided: vec![],
+            vkey_hashes_needed: None,
+            script_hashes_needed: None,
+            vkey_hashes_provided: None,
+            script_hashes_provided: None,
         }
     }
 
@@ -1052,7 +1052,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_updates_correct_asset() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [0u8; 28];
+        let policy_id = PolicyId::from([0u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1081,7 +1081,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_version_field_sets_v2() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28];
+        let policy_id = PolicyId::from([1u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1111,7 +1111,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_unknown_asset_is_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28];
+        let policy_id = PolicyId::from([2u8; 28]);
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1139,7 +1139,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_invalid_cbor_is_skipped() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28];
+        let policy_id = PolicyId::from([3u8; 28]);
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1171,7 +1171,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_updates_onchain_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, reference_id, reference_name) = setup_state_with_asset(
             &mut registry,
@@ -1198,7 +1198,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_non_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, normal_id, normal_name) = setup_state_with_asset(
             &mut registry,
@@ -1226,7 +1226,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_unknown_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1256,7 +1256,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_inputs_and_outputs_without_datum() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [7u8; 28];
+        let policy_id = PolicyId::from([7u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1287,7 +1287,7 @@ mod tests {
     #[test]
     fn handle_cip68_version_detection() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [7u8; 28];
+        let policy_id = PolicyId::from([7u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1323,7 +1323,7 @@ mod tests {
     #[test]
     fn get_asset_info_reference_nft_strips_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (mut state, ref_id, _) = setup_state_with_asset(
             &mut registry,
@@ -1357,7 +1357,7 @@ mod tests {
     #[test]
     fn get_asset_info_resolves_user_token_metadata_from_reference_nft() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [5u8; 28];
+        let policy_id = PolicyId::from([5u8; 28]);
         let asset_name = [0x53, 0x4E, 0x45, 0x4B];
 
         let mut user_name = CIP67_LABEL_222.to_vec();
@@ -1405,7 +1405,7 @@ mod tests {
     #[test]
     fn handle_transactions_duplicate_tx_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28];
+        let policy_id = PolicyId::from([1u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1434,7 +1434,7 @@ mod tests {
     #[test]
     fn handle_transactions_updates_asset_transactions() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28];
+        let policy_id = PolicyId::from([2u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1465,7 +1465,7 @@ mod tests {
     #[test]
     fn handle_transactions_prunes_on_store_transactions_config() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28];
+        let policy_id = PolicyId::from([3u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1495,7 +1495,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_accumulates_address_balance() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [4u8; 28];
+        let policy_id = PolicyId::from([4u8; 28]);
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1527,7 +1527,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_removes_zero_balance_addresses() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [5u8; 28];
+        let policy_id = PolicyId::from([5u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,

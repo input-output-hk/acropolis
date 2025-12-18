@@ -419,16 +419,22 @@ impl State {
         let utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
+            let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
+            let mut script_hashes_needed =
+                tx_deltas.script_hashes_needed.clone().unwrap_or_default();
+            let vkey_hashes_provided = tx_deltas.vkey_hashes_provided.clone().unwrap_or_default();
+            let script_hashes_provided =
+                tx_deltas.script_hashes_provided.clone().unwrap_or_default();
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
                     &tx_deltas.inputs,
-                    &mut tx_deltas.vkey_hashes_needed.clone(),
-                    &mut tx_deltas.script_hashes_needed.clone(),
-                    &tx_deltas.vkey_hashes_provided,
-                    &tx_deltas.script_hashes_provided,
+                    &mut vkey_hashes_needed,
+                    &mut script_hashes_needed,
+                    &vkey_hashes_provided,
+                    &script_hashes_provided,
                     &utxos_needed,
                 ) {
-                    invalid_transactions.push((tx_deltas.tx_identifier.tx_index(), e));
+                    invalid_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
         }
@@ -455,13 +461,11 @@ struct AddressTxMap {
 // -- Tests --
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        ReferenceScript, TxHash, TxUTxODeltas, Value,
+        PolicyId, ReferenceScript, TxHash, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -494,6 +498,10 @@ mod tests {
         State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)))
     }
 
+    fn policy_id() -> PolicyId {
+        PolicyId::from([1u8; 28])
+    }
+
     #[tokio::test]
     async fn new_state_is_empty() {
         let state = new_state();
@@ -516,7 +524,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -540,10 +548,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![],
                 outputs: vec![output.clone()],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 
@@ -561,8 +569,8 @@ mod tests {
                 assert_eq!(42, value.value.lovelace);
 
                 assert_eq!(1, value.value.assets.len());
-                let (policy_id, assets) = &value.value.assets[0];
-                assert_eq!([1u8; 28], *policy_id);
+                let (policy, assets) = &value.value.assets[0];
+                assert_eq!(policy_id(), *policy);
                 assert_eq!(2, assets.len());
 
                 assert!(assets
@@ -594,7 +602,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -633,7 +641,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -674,7 +682,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -724,7 +732,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -772,7 +780,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -819,7 +827,7 @@ mod tests {
 
     struct TestDeltaObserver {
         balance: Mutex<i64>,
-        asset_balances: Mutex<HashMap<([u8; 28], AssetName), i64>>,
+        asset_balances: Mutex<HashMap<(PolicyId, AssetName), i64>>,
     }
 
     impl TestDeltaObserver {
@@ -848,7 +856,7 @@ mod tests {
             let mut asset_balances = self.asset_balances.lock().await;
 
             for (policy, assets) in &delta.received.assets {
-                assert_eq!([1u8; 28], *policy);
+                assert_eq!(policy_id(), *policy);
                 for asset in assets {
                     assert!(
                         (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
@@ -861,7 +869,7 @@ mod tests {
             }
 
             for (policy, assets) in &delta.sent.assets {
-                assert_eq!([1u8; 28], *policy);
+                assert_eq!(policy_id(), *policy);
                 for asset in assets {
                     assert!(
                         (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
@@ -891,7 +899,7 @@ mod tests {
             value: Value::new(
                 42,
                 vec![(
-                    [1u8; 28],
+                    policy_id(),
                     vec![
                         NativeAsset {
                             name: AssetName::new(b"TEST").unwrap(),
@@ -914,10 +922,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![],
                 outputs: vec![output.clone()],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 
@@ -934,10 +942,10 @@ mod tests {
                 tx_identifier: Default::default(),
                 inputs: vec![input],
                 outputs: vec![],
-                vkey_hashes_needed: HashSet::new(),
-                script_hashes_needed: HashSet::new(),
-                vkey_hashes_provided: vec![],
-                script_hashes_provided: vec![],
+                vkey_hashes_needed: None,
+                script_hashes_needed: None,
+                vkey_hashes_provided: None,
+                script_hashes_provided: None,
             }],
         };
 
@@ -948,11 +956,11 @@ mod tests {
         assert_eq!(0, *observer.balance.lock().await);
         let ab = observer.asset_balances.lock().await;
         assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"TEST").unwrap())).unwrap(),
+            *ab.get(&(policy_id(), AssetName::new(b"TEST").unwrap())).unwrap(),
             0
         );
         assert_eq!(
-            *ab.get(&([1u8; 28], AssetName::new(b"FOO").unwrap())).unwrap(),
+            *ab.get(&(policy_id(), AssetName::new(b"FOO").unwrap())).unwrap(),
             0
         );
     }

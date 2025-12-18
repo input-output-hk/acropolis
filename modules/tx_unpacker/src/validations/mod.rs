@@ -12,7 +12,7 @@ pub fn validate_shelley_tx(
     genesis_delegs: &GenesisDelegates,
     shelley_params: &ShelleyParams,
     current_slot: u64,
-) -> Result<(), TransactionValidationError> {
+) -> Result<(), Box<TransactionValidationError>> {
     let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, raw_tx).map_err(|e| {
         TransactionValidationError::CborDecodeError {
             era: Era::Shelley,
@@ -28,11 +28,25 @@ pub fn validate_shelley_tx(
         reason: "Not Alonzo-compatible".to_string(),
     })?;
 
-    shelley::tx::validate(mtx, tx_size, shelley_params, current_slot).map_err(|e| *e)?;
+    let (vkey_witnesses, errors) = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses());
+    if !errors.is_empty() {
+        return Err(Box::new(
+            (Phase1ValidationError::MalformedTransaction { errors }).into(),
+        ));
+    }
+
+    shelley::tx::validate(mtx, tx_size, shelley_params, current_slot)
+        .map_err(|e| Box::new((*e).into()))?;
     shelley::utxo::validate(mtx, shelley_params)
-        .map_err(|e| Phase1ValidationError::UTxOValidationError(*e))?;
-    shelley::utxow::validate(mtx, tx_hash, genesis_delegs, shelley_params.update_quorum)
-        .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;
+    shelley::utxow::validate(
+        mtx,
+        tx_hash,
+        &vkey_witnesses,
+        genesis_delegs,
+        shelley_params.update_quorum,
+    )
+    .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
     Ok(())
 }

@@ -7,7 +7,6 @@ use acropolis_common::{
 use anyhow::Result;
 mod shelley;
 
-#[allow(dead_code)]
 pub fn validate_shelley_tx(
     inputs: &[UTxOIdentifier],
     vkey_hashes_needed: &mut HashSet<KeyHash>,
@@ -15,9 +14,9 @@ pub fn validate_shelley_tx(
     vkey_hashes_provided: &[KeyHash],
     script_hashes_provided: &[ScriptHash],
     utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> Result<(), TransactionValidationError> {
+) -> Result<(), Box<TransactionValidationError>> {
     shelley::utxo::validate(inputs, utxos_needed)
-        .map_err(|e| Phase1ValidationError::UTxOValidationError(*e))?;
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;
     shelley::utxow::validate(
         inputs,
         vkey_hashes_needed,
@@ -26,7 +25,7 @@ pub fn validate_shelley_tx(
         script_hashes_provided,
         utxos_needed,
     )
-    .map_err(|e| Phase1ValidationError::UTxOWValidationError(*e))?;
+    .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
     Ok(())
 }

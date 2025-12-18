@@ -9,17 +9,14 @@ use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
 use pallas_traverse::{Era as PallasEra, MultiEraInput, MultiEraTx};
 
-pub fn map_transaction_inputs(inputs: &Vec<MultiEraInput>) -> Vec<UTxOIdentifier> {
-    let mut parsed_inputs = Vec::new();
-    for input in inputs {
-        // MultiEraInput
-        let oref = input.output_ref();
-        let utxo = UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-        parsed_inputs.push(utxo);
-    }
-
-    parsed_inputs
+pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
+    inputs
+        .iter()
+        .map(|input| {
+            let oref = input.output_ref();
+            UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16)
+        })
+        .collect()
 }
 
 /// Parse transaction inputs and outputs, and return the parsed inputs, outputs, total output lovelace, and errors
@@ -28,31 +25,20 @@ pub fn map_transaction_inputs_outputs(
 ) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, u128, Vec<String>) {
     let mut parsed_inputs = Vec::new();
     let mut parsed_outputs = Vec::new();
+    let mut total_output = 0;
     let mut errors = Vec::new();
 
-    let Ok(tx_hash) = tx.hash().to_vec().try_into() else {
-        errors.push(format!(
-            "Tx has incorrect hash length ({:?})",
-            tx.hash().to_vec()
-        ));
-        return (parsed_inputs, parsed_outputs, 0, errors);
-    };
+    let tx_hash = TxHash::from(*tx.hash());
 
-    let inputs = tx.consumes();
-    let outputs = tx.produces();
+    for input in tx.inputs() {
+        let oref = input.output_ref();
+        let utxo = UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
-    for input in inputs {
-        let utxo = UTxOIdentifier::new(
-            TxHash::from(**input.output_ref().hash()),
-            input.output_ref().index() as u16,
-        );
         parsed_inputs.push(utxo);
     }
 
-    let mut total_output = 0;
-    for (index, output) in outputs {
+    for (index, output) in tx.outputs().iter().enumerate() {
         let utxo = UTxOIdentifier::new(tx_hash, index as u16);
-
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
@@ -92,28 +78,16 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
 }
 
 /// Map a Pallas Transaction to extract
-/// inputs, outputs, total_output, certs, withdrawals, proposal_update, vkey_witnesses, native_scripts and errors
-#[allow(clippy::type_complexity)]
 pub fn map_transaction(
     tx: &MultiEraTx,
     raw_tx: &[u8],
     tx_identifier: TxIdentifier,
     network_id: NetworkId,
     era: Era,
-) -> (
-    Vec<UTxOIdentifier>,
-    Vec<TxOutput>,
-    u128,
-    Vec<TxCertificateWithPos>,
-    Vec<Withdrawal>,
-    Option<AlonzoBabbageUpdateProposal>,
-    Vec<VKeyWitness>,
-    Vec<NativeScript>,
-    Option<Phase1ValidationError>,
-) {
+) -> Transaction {
     let (inputs, outputs, total_output, input_output_errors) = map_transaction_inputs_outputs(tx);
 
-    let mut errors = Vec::new();
+    let mut errors = input_output_errors;
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
@@ -141,50 +115,54 @@ pub fn map_transaction(
         }
     }
 
-    if era >= Era::Shelley && era < Era::Babbage {
-        if let Ok(alonzo) = MultiEraTx::decode_for_era(PallasEra::Alonzo, raw_tx)
-            && let Some(update) = alonzo.update()
-            && let Some(alonzo_update) = update.as_alonzo()
-        {
-            match map_alonzo_update(alonzo_update) {
-                Ok(p) => {
-                    alonzo_babbage_update_proposal = Some(p);
+    match era {
+        Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo => {
+            if let Ok(alonzo) = MultiEraTx::decode_for_era(PallasEra::Alonzo, raw_tx)
+                && let Some(update) = alonzo.update()
+                && let Some(alonzo_update) = update.as_alonzo()
+            {
+                match map_alonzo_update(alonzo_update) {
+                    Ok(p) => {
+                        alonzo_babbage_update_proposal = Some(p);
+                    }
+                    Err(e) => errors.push(format!("Cannot decode alonzo update: {e}")),
                 }
-                Err(e) => errors.push(format!("Cannot decode alonzo update: {e}")),
             }
         }
-    } else if era >= Era::Babbage
-        && era < Era::Conway
-        && let Ok(babbage) = MultiEraTx::decode_for_era(PallasEra::Babbage, raw_tx)
-        && let Some(update) = babbage.update()
-        && let Some(babbage_update) = update.as_babbage()
-    {
-        match map_babbage_update(babbage_update) {
-            Ok(p) => {
-                alonzo_babbage_update_proposal = Some(p);
+        Era::Babbage => {
+            if let Ok(babbage) = MultiEraTx::decode_for_era(PallasEra::Babbage, raw_tx)
+                && let Some(update) = babbage.update()
+                && let Some(babbage_update) = update.as_babbage()
+            {
+                match map_babbage_update(babbage_update) {
+                    Ok(p) => {
+                        alonzo_babbage_update_proposal = Some(p);
+                    }
+                    Err(e) => errors.push(format!("Cannot decode babbage update: {e}")),
+                }
             }
-            Err(e) => errors.push(format!("Cannot decode babbage update: {e}")),
         }
+        _ => {}
     }
 
-    let vkey_witnesses = map_vkey_witnesses(tx.vkey_witnesses());
+    let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     let native_scripts = map_native_scripts(tx.native_scripts());
 
-    errors.extend(input_output_errors);
+    errors.extend(vkey_witness_errors);
 
-    (
+    Transaction {
         inputs,
         outputs,
         total_output,
         certs,
         withdrawals,
-        alonzo_babbage_update_proposal,
+        proposal_update: alonzo_babbage_update_proposal,
         vkey_witnesses,
         native_scripts,
-        if errors.is_empty() {
+        error: if errors.is_empty() {
             None
         } else {
             Some(Phase1ValidationError::MalformedTransaction { errors })
         },
-    )
+    }
 }

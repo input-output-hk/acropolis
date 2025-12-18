@@ -1,5 +1,6 @@
 //! Definition of Acropolis messages
 
+use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -23,6 +24,7 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::AccountState;
 use crate::Pots;
 use std::collections::HashMap;
@@ -303,7 +305,8 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<PoolId>,
+    /// and the reward account to pay the deposit refund to
+    pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
 /// Cardano message enum
@@ -355,6 +358,22 @@ pub enum SnapshotMessage {
 pub struct DRepBootstrapMessage {
     pub epoch: u64,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum GovernanceProtocolParametersSlice {
+    Previous,
+    Current,
+    Future,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProtocolParametersBootstrapMessage {
+    pub network_name: String,
+    pub era: Option<Era>,
+    pub slice: GovernanceProtocolParametersSlice,
+    pub params: ProtocolParameters,
+    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -454,6 +473,7 @@ pub enum SnapshotStateMessage {
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
+    ParametersState(GovernanceProtocolParametersBootstrapMessage),
 }
 
 // === Global message enum ===

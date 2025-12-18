@@ -22,7 +22,7 @@ download-max-age = "never"
 pause = "none"
 # Stop constraint likewise
 # Get enough into Shelley to get parameters
-stop = "epoch:210"
+stop = "epoch:209"
 
 # ============================================================================
 # Core Module Configurations
@@ -37,6 +37,9 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo"
+           "cardano.validation.governance",
+           "cardano.validation.spo",
+           "cardano.validation.accounts"
 ]
 
 [module.block-unpacker]
