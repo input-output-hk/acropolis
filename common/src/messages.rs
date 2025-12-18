@@ -1,5 +1,6 @@
 //! Definition of Acropolis messages
 
+use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -52,13 +53,6 @@ pub struct RawBlockMessage {
 pub enum StateTransitionMessage {
     /// The chain has been rolled back to a specific point
     Rollback(Point),
-}
-
-/// Snapshot completion message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SnapshotCompleteMessage {
-    /// Last block in snapshot data
-    pub last_block: BlockInfo,
 }
 
 /// Transactions message
@@ -304,7 +298,8 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<PoolId>,
+    /// and the reward account to pay the deposit refund to
+    pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
 /// Cardano message enum
@@ -314,7 +309,6 @@ pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
     StateTransition(StateTransitionMessage), // Our position on the chain has changed
     BlockValidation(ValidationStatus),       // Result of a block validation
-    SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers

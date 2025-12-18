@@ -105,8 +105,8 @@ impl SnapshotBootstrapper {
         // Publish
         let mut publisher = SnapshotPublisher::new(
             context.clone(),
-            cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
+            cfg.sync_command_topic.clone(),
             bootstrap_ctx.context(),
         );
         // Download
@@ -129,7 +129,7 @@ impl SnapshotBootstrapper {
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
         publisher.publish_snapshot_complete().await?;
-        publisher.publish_completion(bootstrap_ctx.block_info).await?;
+        publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
         info!("Snapshot bootstrap completed");
         Ok(())

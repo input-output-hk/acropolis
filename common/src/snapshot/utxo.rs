@@ -30,8 +30,9 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, PolicyId, ReferenceScript,
-    ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue, UTxOIdentifier, Value,
+    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, NativeScript, PolicyId,
+    ReferenceScript, ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue,
+    UTxOIdentifier, Value,
 };
 
 // =============================================================================
@@ -340,7 +341,7 @@ fn decode_script_ref(d: &mut Decoder) -> Result<Option<ReferenceScript>, minicbo
     };
 
     let reference_script = match script_type {
-        0 => ReferenceScript::Native(script_bytes),
+        0 => ReferenceScript::Native(minicbor::decode::<NativeScript>(&script_bytes)?),
         1 => ReferenceScript::PlutusV1(script_bytes),
         2 => ReferenceScript::PlutusV2(script_bytes),
         3 => ReferenceScript::PlutusV3(script_bytes),
@@ -729,7 +730,7 @@ mod tests {
 
     #[test]
     fn decode_value_with_multiasset() {
-        let policy_id: [u8; 28] = [0x44; 28];
+        let policy_id = PolicyId::from([0x44; 28]);
         let asset_name = b"TestToken";
 
         let mut cbor = Vec::new();
@@ -737,7 +738,7 @@ mod tests {
         enc.array(2).unwrap();
         enc.u64(1_000_000).unwrap();
         enc.map(1).unwrap();
-        enc.bytes(&policy_id).unwrap();
+        enc.bytes(policy_id.as_ref()).unwrap();
         enc.map(1).unwrap();
         enc.bytes(asset_name).unwrap();
         enc.u64(100).unwrap();

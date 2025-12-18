@@ -1,6 +1,7 @@
 # Top-level configuration for Acropolis indexer process
 
 [global.startup]
+network = "mainnet"
 method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
@@ -14,7 +15,6 @@ node-addresses = [
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-magic-number = 764824073
 
 [module.block-unpacker]
 

@@ -18,7 +18,7 @@ The snapshot bootstrapper:
 
 - **Subscribes to** `cardano.sequence.bootstrapped` - Waits for genesis completion
 - **Publishes to** `cardano.snapshot` - Streams snapshot data during processing
-- **Publishes to** `cardano.snapshot.complete` - Signals completion with block info
+- **Publishes to** `cardano.sync.command` - Signals completion with point to begin sync from
 
 ## Default Configuration
 
@@ -35,7 +35,7 @@ data-dir = "./data"
 # Message topics
 snapshot-topic = "cardano.snapshot"
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
-completion-topic = "cardano.snapshot.complete"
+sync-command-topic = "cardano.sync.command"
 
 # Download settings
 [download]

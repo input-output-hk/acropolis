@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use acropolis_common::{
     messages::{
@@ -16,7 +16,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
-use pallas::ledger::{traverse, traverse::MultiEraTx};
+use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span};
 
@@ -25,12 +25,21 @@ mod state;
 mod tx_validation_publisher;
 mod validations;
 use tx_validation_publisher::TxValidationPublisher;
+mod crypto;
 
 #[cfg(test)]
 mod test_utils;
 
-const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
-const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("transactions-subscribe-topic", "cardano.txs");
+const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
+const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+);
 
 const CIP25_METADATA_LABEL: u64 = 721;
 
@@ -59,8 +68,17 @@ impl TxUnpacker {
         tx_validation_publisher: Option<TxValidationPublisher>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
+        mut bootstrapped_sub: Box<dyn Subscription<Message>>,
         mut protocol_params_sub: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        let (_, bootstrapped_message) = bootstrapped_sub.read().await?;
+        let genesis = match bootstrapped_message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                complete.values.clone()
+            }
+            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+        };
+
         loop {
             let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
@@ -118,22 +136,44 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                    let (inputs, outputs, tx_total_output, error) =
-                                        acropolis_codec::map_transaction_inputs_outputs( &tx);
-                                    let certs = tx.certs();
-                                    let tx_withdrawals = tx.withdrawals_sorted_set();
+                                    let Transaction {
+                                        inputs: tx_inputs,
+                                        outputs: tx_outputs,
+                                        total_output: tx_total_output,
+                                        certs: tx_certs,
+                                        withdrawals: tx_withdrawals,
+                                        proposal_update: tx_proposal_update,
+                                        vkey_witnesses,
+                                        native_scripts,
+                                        error: tx_error,
+                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
                                     let mut props = None;
                                     let mut votes = None;
+
+                                    let (vkey_hashes_needed, script_hashes_needed, vkey_hashes_provided, script_hashes_provided) = if block.intent.do_validation() {
+                                        let (vkey_hashes_needed, script_hashes_needed) = Self::get_vkey_script_needed(
+                                            &tx_certs,
+                                            &tx_withdrawals,
+                                            &tx_proposal_update,
+                                        );
+                                        let (vkey_hashes_provided, script_hashes_provided) = Self::get_vkey_script_provided(
+                                            &vkey_witnesses,
+                                            &native_scripts,
+                                        );
+                                        (Some(vkey_hashes_needed), Some(script_hashes_needed), Some(vkey_hashes_provided), Some(script_hashes_provided))
+                                    } else {
+                                        (None, None, None, None)
+                                    };
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               inputs.len(), outputs.len(), certs.len(), total_output);
+                                               tx_inputs.len(), tx_outputs.len(), tx_certs.len(), tx_total_output);
                                     }
 
-                                    if let Some(error) = error {
+                                    if let Some(error) = tx_error {
                                         error!(
                                             "Errors decoding transaction {tx_hash}: {error}"
                                         );
@@ -143,8 +183,12 @@ impl TxUnpacker {
                                         // Group deltas by tx
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
-                                            inputs,
-                                            outputs,
+                                            inputs: tx_inputs,
+                                            outputs: tx_outputs,
+                                            vkey_hashes_needed,
+                                            script_hashes_needed,
+                                            vkey_hashes_provided,
+                                            script_hashes_provided,
                                         });
                                     }
 
@@ -180,84 +224,17 @@ impl TxUnpacker {
                                     }
 
                                     if publish_certificates_topic.is_some() {
-                                        for (cert_index, cert) in certs.iter().enumerate() {
-                                            match acropolis_codec::map_certificate(
-                                                cert,
-                                                tx_identifier,
-                                                cert_index,
-                                                network_id.clone(),
-                                            ) {
-                                                Ok(tx_cert) => {
-                                                    certificates.push(tx_cert);
-                                                }
-                                                Err(_e) => {
-                                                    // TODO error unexpected
-                                                    //error!("{e}");
-                                                }
-                                            }
-                                        }
+                                        certificates.extend(tx_certs);
                                     }
 
                                     if publish_withdrawals_topic.is_some() {
-                                        for (key, value) in tx_withdrawals {
-                                            match StakeAddress::from_binary(key) {
-                                                Ok(stake_address) => {
-                                                    withdrawals.push(Withdrawal {
-                                                        address: stake_address,
-                                                        value,
-                                                        tx_identifier,
-                                                    });
-                                                }
-                                                Err(e) => error!("Bad stake address: {e:#}"),
-                                            }
-                                        }
+                                        withdrawals.extend(tx_withdrawals);
                                     }
 
-                                    if publish_governance_procedures_topic.is_some() {
-                                        //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
-                                        if block.era >= Era::Shelley && block.era < Era::Babbage {
-                                            if let Ok(alonzo) = MultiEraTx::decode_for_era(
-                                                traverse::Era::Alonzo,
-                                                raw_tx,
-                                            ) {
-                                                if let Some(update) = alonzo.update() {
-                                                    if let Some(alonzo_update) = update.as_alonzo() {
-                                                        match acropolis_codec::map_alonzo_update(
-                                                            alonzo_update,
-                                                        ) {
-                                                            Ok(proposals) => {
-                                                                alonzo_babbage_update_proposals
-                                                                    .push(proposals)
-                                                            }
-                                                            Err(e) => error!(
-                                                                "Cannot decode alonzo update: {e}"
-                                                            ),
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else if block.era >= Era::Babbage && block.era < Era::Conway {
-                                            if let Ok(babbage) = MultiEraTx::decode_for_era(
-                                                traverse::Era::Babbage,
-                                                raw_tx,
-                                            ) {
-                                                if let Some(update) = babbage.update() {
-                                                    if let Some(babbage_update) = update.as_babbage() {
-                                                        match acropolis_codec::map_babbage_update(
-                                                            babbage_update,
-                                                        ) {
-                                                            Ok(proposals) => {
-                                                                alonzo_babbage_update_proposals
-                                                                    .push(proposals)
-                                                            }
-                                                            Err(e) => error!(
-                                                                "Cannot decode babbage update: {e}"
-                                                            ),
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                   if publish_governance_procedures_topic.is_some() {
+                                    if let Some(proposal_update) = tx_proposal_update {
+                                        alonzo_babbage_update_proposals.push(proposal_update);
+                                    }
                                     }
 
                                     if let Some(conway) = tx.as_conway() {
@@ -452,8 +429,10 @@ impl TxUnpacker {
                         let tx_index = tx_index as u16;
 
                         // Validate transaction
-                        if let Err(e) = state.validate_transaction(block, raw_tx) {
-                            tx_errors.push((tx_index, e));
+                        if let Err(e) =
+                            state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
+                        {
+                            tx_errors.push((tx_index, *e));
                         }
                     }
                     tx_validation_publisher
@@ -514,16 +493,22 @@ impl TxUnpacker {
 
         // Subscribers
         let transactions_subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
+            .get_string(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
+        let bootstrapped_subscribe_topic = config
+            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{bootstrapped_subscribe_topic}'");
+
         let protocol_params_subscribe_topic = config
-            .get_string("protocol-params-subscribe-topic")
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.to_string());
+            .get_string(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{protocol_params_subscribe_topic}'");
 
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
+        let bootstrapped_sub = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_params_sub = context.subscribe(&protocol_params_subscribe_topic).await?;
 
         let network_id: NetworkId =
@@ -549,6 +534,7 @@ impl TxUnpacker {
                 publish_block_txs_topic,
                 tx_validation_publisher,
                 txs_sub,
+                bootstrapped_sub,
                 protocol_params_sub,
             )
             .await
@@ -556,6 +542,82 @@ impl TxUnpacker {
         });
 
         Ok(())
+    }
+
+    /// Get VKey Witnesses needed for transaction
+    /// Get Scripts needed for transaction
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L274
+    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L226
+    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L103
+    ///
+    /// VKey Witnesses needed
+    /// 1. UTxO authors: keys that own the UTxO being spent
+    /// 2. Certificate authors: keys authorizing certificates
+    /// 3. Pool owners: owners that must sign pool registration
+    /// 4. Withdrawal authors: keys authorizing reward withdrawals
+    /// 5. Governance authors: keys authorizing governance actions (e.g. protocol update)
+    ///
+    /// Script Witnesses needed
+    /// 1. Input scripts: scripts locking UTxO being spent
+    /// 2. Withdrawal scripts: scripts controlling reward accounts
+    /// 3. Certificate scripts: scripts in certificate credentials.
+    ///
+    /// NOTE:
+    /// This doesn't count `inputs`
+    /// which will be considered in the utxos_state
+    fn get_vkey_script_needed(
+        certs: &[TxCertificateWithPos],
+        withdrawals: &[Withdrawal],
+        proposal_update: &Option<AlonzoBabbageUpdateProposal>,
+    ) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
+        let mut vkey_hashes = HashSet::new();
+        let mut script_hashes = HashSet::new();
+
+        // for each certificate, get the required vkey and script hashes
+        for cert_with_pos in certs.iter() {
+            let (v, s) = cert_with_pos.cert.get_cert_authors();
+            vkey_hashes.extend(v);
+            script_hashes.extend(s);
+        }
+
+        // for each withdrawal, get the required vkey and script hashes
+        for withdrawal in withdrawals.iter() {
+            match withdrawal.address.credential {
+                StakeCredential::AddrKeyHash(vkey_hash) => {
+                    vkey_hashes.insert(vkey_hash);
+                }
+                StakeCredential::ScriptHash(script_hash) => {
+                    script_hashes.insert(script_hash);
+                }
+            }
+        }
+
+        // for each governance action, get the required vkey hashes
+        if let Some(proposal_update) = proposal_update.as_ref() {
+            for (genesis_key, _) in proposal_update.proposals.iter() {
+                vkey_hashes.insert(*genesis_key);
+            }
+        }
+
+        (vkey_hashes, script_hashes)
+    }
+
+    fn get_vkey_script_provided(
+        vkey_witnesses: &[VKeyWitness],
+        native_scripts: &[NativeScript],
+    ) -> (Vec<KeyHash>, Vec<ScriptHash>) {
+        let mut vkey_hashes = Vec::new();
+        let mut script_hashes = Vec::new();
+
+        for vkey_witness in vkey_witnesses.iter() {
+            vkey_hashes.push(vkey_witness.key_hash());
+        }
+
+        for native_script in native_scripts.iter() {
+            script_hashes.push(native_script.compute_hash());
+        }
+
+        (vkey_hashes, script_hashes)
     }
 
     /// Check for synchronisation

@@ -16,6 +16,7 @@ version = "0.1.0"
 dependencies = [
  "acropolis_common",
  "anyhow",
+ "hex",
  "pallas 0.33.0",
  "pallas-primitives 0.33.0",
  "pallas-traverse 0.33.0",
@@ -512,6 +513,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "cryptoxide 0.5.1",
  "futures",
  "hex",
  "pallas 0.33.0",

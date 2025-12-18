@@ -4,22 +4,47 @@
 #![allow(dead_code)]
 
 use crate::{
+    hash::Hash,
     messages::{CardanoMessage::BlockValidation, Message},
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
-    Address, BlockInfo, CommitteeCredential, GenesisKeyhash, GovActionId, KeyHash, Lovelace,
-    NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier, Value,
-    Voter, VrfKeyHash,
+    Address, BlockInfo, CommitteeCredential, DataHash, Era, GenesisKeyhash, GovActionId, KeyHash,
+    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
+    VKeyWitness, Value, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
 use std::{
     array::TryFromSliceError,
+    collections::HashSet,
     fmt::{Debug, Display, Formatter},
     sync::Arc,
 };
 use thiserror::Error;
 use tracing::error;
+
+/// Validation status
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ValidationStatus {
+    /// All good
+    Go,
+
+    /// Error
+    NoGo(ValidationError),
+}
+
+impl ValidationStatus {
+    pub fn is_go(&self) -> bool {
+        matches!(self, ValidationStatus::Go)
+    }
+
+    pub fn compose(&mut self, status: ValidationStatus) {
+        if self.is_go() {
+            *self = status;
+        }
+    }
+}
 
 /// Validation error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error)]
@@ -54,27 +79,12 @@ pub enum ValidationError {
     BadGovernance(#[from] GovernanceValidationError),
 }
 
-/// Validation status
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum ValidationStatus {
-    /// All good
-    Go,
-
-    /// Error
-    NoGo(ValidationError),
-}
-
 /// Transaction Validation Error
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum TransactionValidationError {
     /// **Cause**: Raw Transaction CBOR is invalid
-    #[error("CBOR Decoding error: {0}")]
-    CborDecodeError(String),
-
-    /// **Cause**: Transaction is not in correct form.
-    #[error("Malformed Transaction: {0}")]
-    MalformedTransaction(String),
+    #[error("CBOR Decoding error: era={era}, reason={reason}")]
+    CborDecodeError { era: Era, reason: String },
 
     /// **Cause**: Phase 1 Validation Error
     #[error("Phase 1 Validation Failed: {0}")]
@@ -87,6 +97,13 @@ pub enum TransactionValidationError {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum Phase1ValidationError {
+    /// **Cause**: Transaction is not in correct form.
+    #[error(
+        "Malformed Transaction: {}",
+         errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")
+    )]
+    MalformedTransaction { errors: Vec<String> },
+
     /// **Cause:** The UTXO has expired (Shelley only)
     #[error("Expired UTXO: ttl={ttl}, current_slot={current_slot}")]
     ExpiredUTxO { ttl: Slot, current_slot: Slot },
@@ -106,16 +123,16 @@ pub enum Phase1ValidationError {
     #[error("{0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
-    /// **Cause:** Other errors (e.g. missing required field)
+    /// **Cause:** UTxOW rules failure
     #[error("{0}")]
-    Other(String),
+    UTxOWValidationError(#[from] UTxOWValidationError),
 }
 
-/// UTxO rules failure
-/// Shelley Era Errors:
+/// UTxO Rules Failure
+/// Shelley Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 ///
-/// Allegra Era Errors:
+/// Allegra Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/allegra/impl/src/Cardano/Ledger/Allegra/Rules/Utxo.hs#L160
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOValidationError {
@@ -177,18 +194,88 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
+
+    /// **Cause:** The transaction size is too big.
+    #[error("Max tx size: supplied={supplied}, max={max}")]
+    MaxTxSizeUTxO { supplied: u32, max: u32 },
+
+    /// **Cause:** Malformed UTxO
+    #[error("Malformed UTxO: era={era}, reason={reason}")]
+    MalformedUTxO { era: Era, reason: String },
 }
 
-impl ValidationStatus {
-    pub fn is_go(&self) -> bool {
-        matches!(self, ValidationStatus::Go)
-    }
+/// UTxOW Rules Failure
+/// Shelley Era:
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum UTxOWValidationError {
+    /// **Cause:** The VKey witness has invalid signature
+    #[error("Invalid VKey witness: key_hash={key_hash}, witness={witness}")]
+    InvalidWitnessesUTxOW {
+        key_hash: KeyHash,
+        witness: VKeyWitness,
+    },
 
-    pub fn compose(&mut self, status: ValidationStatus) {
-        if self.is_go() {
-            *self = status;
-        }
-    }
+    /// **Cause:** Required VKey witness missing
+    #[error("Missing VKey witness: key_hash={key_hash}")]
+    MissingVKeyWitnessesUTxOW { key_hash: KeyHash },
+
+    /// **Cause:** Required script witness missing
+    #[error("Missing script witness: script_hash={script_hash}")]
+    MissingScriptWitnessesUTxOW { script_hash: ScriptHash },
+
+    /// **Cause:** Native script validation failed
+    #[error("Native script validation failed: script_hash={script_hash}")]
+    ScriptWitnessNotValidatingUTXOW { script_hash: ScriptHash },
+
+    /// **Cause:** Extraneous script witness is provided
+    #[error("Script provided but not used: script_hash={script_hash}")]
+    ExtraneousScriptWitnessesUTXOW { script_hash: ScriptHash },
+
+    /// **Cause:** Insufficient genesis signatures for MIR Tx
+    #[error(
+        "Insufficient Genesis Signatures for MIR: genesis_keys={}, count={}, quorum={}", 
+        genesis_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(","), 
+        genesis_keys.len(),
+        quorum
+    )]
+    MIRInsufficientGenesisSigsUTXOW {
+        genesis_keys: HashSet<Hash<28>>,
+        quorum: u32,
+    },
+
+    /// **Cause:** Metadata without metadata hash
+    #[error(
+        "Metadata without metadata hash: full_hash={}",
+        hex::encode(metadata_hash)
+    )]
+    MissingTxBodyMetadataHash { metadata_hash: DataHash },
+
+    /// **Cause:** Metadata hash mismatch
+    #[error(
+        "Metadata hash mismatch: expected={}, actual={}",
+        hex::encode(expected),
+        hex::encode(actual)
+    )]
+    ConflictingMetadataHash {
+        expected: DataHash,
+        actual: DataHash,
+    },
+
+    /// **Cause:** Invalid metadata
+    /// metadata - bytes, text - size (0..64)
+    #[error("Invalid metadata: reason={reason}")]
+    InvalidMetadata { reason: String },
+
+    /// **Cause:** Metadata hash without actual metadata
+    #[error(
+        "Metadata hash without actual metadata: hash={}",
+        hex::encode(metadata_hash)
+    )]
+    MissingTxMetadata {
+        // hash of metadata included in tx body
+        metadata_hash: DataHash,
+    },
 }
 
 /// Reference

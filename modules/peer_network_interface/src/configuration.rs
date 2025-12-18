@@ -10,7 +10,6 @@ pub enum SyncPoint {
     Origin,
     Tip,
     Cache,
-    Snapshot,
     Dynamic,
 }
 
@@ -19,11 +18,9 @@ pub enum SyncPoint {
 pub struct InterfaceConfig {
     pub block_topic: String,
     pub sync_point: SyncPoint,
-    pub snapshot_completion_topic: String,
     pub genesis_completion_topic: String,
     pub sync_command_topic: String,
     pub node_addresses: Vec<String>,
-    pub magic_number: u64,
     pub cache_dir: PathBuf,
     #[serde(flatten)]
     pub genesis_values: Option<GenesisValues>,

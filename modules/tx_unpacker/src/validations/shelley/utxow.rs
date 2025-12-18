@@ -1,0 +1,137 @@
+//! Shelley era UTxOW Rules
+//! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+#![allow(dead_code)]
+
+use std::collections::HashSet;
+
+use crate::crypto::verify_ed25519_signature;
+use acropolis_common::{
+    validation::UTxOWValidationError, GenesisDelegates, KeyHash, NativeScript, TxHash, VKeyWitness,
+};
+use anyhow::Result;
+use pallas::ledger::primitives::alonzo;
+
+fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
+    mtx.transaction_body
+        .certificates
+        .as_ref()
+        .map(|certs| {
+            certs
+                .iter()
+                .any(|cert| matches!(cert, alonzo::Certificate::MoveInstantaneousRewardsCert(_)))
+        })
+        .unwrap_or(false)
+}
+
+/// Validate Native Scripts from Transaction witnesses
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L373
+pub fn validate_failed_native_scripts(
+    native_scripts: &[NativeScript],
+    vkey_hashes_provided: &HashSet<KeyHash>,
+    low_bnd: Option<u64>,
+    upp_bnd: Option<u64>,
+) -> Result<(), Box<UTxOWValidationError>> {
+    for native_script in native_scripts {
+        if !native_script.eval(vkey_hashes_provided, low_bnd, upp_bnd) {
+            return Err(Box::new(
+                UTxOWValidationError::ScriptWitnessNotValidatingUTXOW {
+                    script_hash: native_script.compute_hash(),
+                },
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate that all vkey witnesses signatures
+/// are verified
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
+pub fn validate_verified_wits(
+    vkey_witnesses: &[VKeyWitness],
+    tx_hash: TxHash,
+) -> Result<(), Box<UTxOWValidationError>> {
+    for vkey_witness in vkey_witnesses.iter() {
+        if !verify_ed25519_signature(vkey_witness, tx_hash.as_ref()) {
+            return Err(Box::new(UTxOWValidationError::InvalidWitnessesUTxOW {
+                key_hash: vkey_witness.key_hash(),
+                witness: vkey_witness.clone(),
+            }));
+        }
+    }
+    Ok(())
+}
+
+/// Validate genesis keys signatures for MIR certificate
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L463
+pub fn validate_mir_insufficient_genesis_sigs(
+    vkey_hashes_provided: &HashSet<KeyHash>,
+    genesis_delegs: &GenesisDelegates,
+    update_quorum: u32,
+) -> Result<(), Box<UTxOWValidationError>> {
+    let genesis_delegate_hashes =
+        genesis_delegs.as_ref().values().map(|delegate| delegate.delegate).collect::<HashSet<_>>();
+
+    // genSig := genDelegates ∩ witsKeyHashes
+    let genesis_sigs =
+        genesis_delegate_hashes.intersection(vkey_hashes_provided).copied().collect::<HashSet<_>>();
+
+    // Check: |genSig| ≥ Quorum
+    // If insufficient, report the signatures that were found (not the missing ones)
+    if genesis_sigs.len() < update_quorum as usize {
+        return Err(Box::new(
+            UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW {
+                genesis_keys: genesis_sigs,
+                quorum: update_quorum,
+            },
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn validate(
+    mtx: &alonzo::MintedTx,
+    tx_hash: TxHash,
+    vkey_witnesses: &[VKeyWitness],
+    genesis_delegs: &GenesisDelegates,
+    update_quorum: u32,
+) -> Result<(), Box<UTxOWValidationError>> {
+    let transaction_body = &mtx.transaction_body;
+    let transaction_witness_set = &mtx.transaction_witness_set;
+
+    // extract native scripts
+    let native_scripts = transaction_witness_set
+        .native_script
+        .as_ref()
+        .map(|scripts| acropolis_codec::map_native_scripts(scripts))
+        .unwrap_or_default();
+
+    // Extract vkey hashes from vkey_witnesses
+    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
+
+    // validate native scripts
+    validate_failed_native_scripts(
+        &native_scripts,
+        &vkey_hashes_provided,
+        transaction_body.validity_interval_start,
+        transaction_body.ttl,
+    )?;
+
+    // validate vkey witnesses signatures
+    validate_verified_wits(vkey_witnesses, tx_hash)?;
+
+    // NOTE:
+    // need to validate metadata
+
+    // validate mir certificate genesis sig
+    if has_mir_certificate(mtx) {
+        validate_mir_insufficient_genesis_sigs(
+            &vkey_hashes_provided,
+            genesis_delegs,
+            update_quorum,
+        )?;
+    }
+
+    Ok(())
+}

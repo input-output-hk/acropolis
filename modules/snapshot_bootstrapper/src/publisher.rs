@@ -1,17 +1,12 @@
-use acropolis_common::{
-    epoch_snapshot::SnapshotsContainer,
-    messages::{
-        DRepBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots,
-        GovernanceProtocolParametersBootstrapMessage,
-        GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
-    },
-    protocol_params::{Nonces, PraosParams},
-    snapshot::{
-        protocol_parameters::ProtocolParameters,
-        streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
-        GovernanceStateCallback,
-    },
-};
+use acropolis_common::{epoch_snapshot::SnapshotsContainer, messages::{
+    DRepBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots,
+    GovernanceProtocolParametersBootstrapMessage,
+    GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
+}, protocol_params::{Nonces, PraosParams}, snapshot::{
+    protocol_parameters::ProtocolParameters,
+    streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
+    GovernanceStateCallback,
+}, Point};
 use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
@@ -33,6 +28,8 @@ use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+use acropolis_common::commands::chain_sync::ChainSyncCommand;
+use acropolis_common::messages::Command;
 
 const UTXO_BATCH_SIZE: usize = 10_000;
 
@@ -91,8 +88,8 @@ impl EpochContext {
 /// External context (nonces, timing) can be added via `with_bootstrap_context()`.
 pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
-    completion_topic: String,
     snapshot_topic: String,
+    sync_command_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -107,14 +104,14 @@ pub struct SnapshotPublisher {
 impl SnapshotPublisher {
     pub fn new(
         context: Arc<Context<Message>>,
-        completion_topic: String,
         snapshot_topic: String,
+        sync_command_topic: String,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
-            completion_topic,
             snapshot_topic,
+            sync_command_topic,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -144,18 +141,17 @@ impl SnapshotPublisher {
         Ok(())
     }
 
-    pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
+    pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
         info!(
-            "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",
-            self.completion_topic, block_info.number, block_info.slot, block_info.epoch
+            "Publishing sync command on {} for slot {}",
+            self.sync_command_topic,
+            point.slot()
         );
-        let message = Arc::new(Message::Cardano((
-            block_info,
-            CardanoMessage::SnapshotComplete,
-        )));
-        self.context.publish(&self.completion_topic, message).await.unwrap_or_else(|e| {
-            tracing::error!("Failed to publish bootstrap completion message: {}", e);
-        });
+        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        self.context
+            .publish(&self.sync_command_topic, Arc::new(message))
+            .await
+            .unwrap_or_else(|e| tracing::error!("Failed to publish sync command message: {}", e));
         Ok(())
     }
 

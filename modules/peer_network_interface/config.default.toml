@@ -1,7 +1,5 @@
 # The topic to publish blocks on
 block-topic = "cardano.block.available"
-# The topic to wait for when sync-point is "snapshot"
-snapshot-completion-topic = "cardano.snapshot.complete"
 # The topic to wait for when listening for genesis values from another module
 genesis-completion-topic = "cardano.sequence.bootstrapped"
 # The topic to listen on for runtime sync commands
@@ -13,15 +11,12 @@ node-addresses = [
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-# The network magic for the chain to connect to
-magic-number = 764824073
 
 # The initial point to start syncing from. Options:
 # - "origin": sync from the very start of the chain
 # - "tip": sync from the very end of the chain
 # - "cache": replay messages from a local filesystem cache, then sync from the point right after that cache.
-# - "snapshot": wait for another module to restore from a snapshot, then sync from the point right after that snapshot.
 # - "dynamic": awaits a sync command to begin fetching blocks, can change sync point at runtime. 
-sync-point = "snapshot"
+sync-point = "dynamic"
 # The cache dir to use when sync-point is "cache"
 cache-dir = "upstream-cache"

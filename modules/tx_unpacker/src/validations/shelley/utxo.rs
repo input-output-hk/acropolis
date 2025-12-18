@@ -37,10 +37,7 @@ fn compute_min_lovelace(value: &alonzo::Value, shelley_params: &ShelleyParams) -
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
 
-pub fn validate_shelley_tx(
-    mtx: &alonzo::MintedTx,
-    shelley_params: &ShelleyParams,
-) -> UTxOValidationResult {
+pub fn validate(mtx: &alonzo::MintedTx, shelley_params: &ShelleyParams) -> UTxOValidationResult {
     let network_id = shelley_params.network_id.clone();
     let transaction_body = &mtx.transaction_body;
 
@@ -220,6 +217,6 @@ mod tests {
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
-        validate_shelley_tx(mtx, &ctx.shelley_params).map_err(|e| *e)
+        validate(mtx, &ctx.shelley_params).map_err(|e| *e)
     }
 }
