@@ -261,6 +261,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_fake_block_injector"
+version = "0.1.0"
+dependencies = [
+ "acropolis_codec",
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "glob",
+ "pallas-traverse 0.33.0",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_genesis_bootstrapper"
 version = "0.1.0"
 dependencies = [
@@ -329,6 +343,7 @@ dependencies = [
 name = "acropolis_module_mithril_snapshot_fetcher"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "async-trait",
@@ -338,6 +353,7 @@ dependencies = [
  "mithril-client",
  "mithril-common",
  "pallas 0.32.1",
+ "pallas-traverse 0.33.0",
  "serde_json",
  "tokio",
  "tracing",
@@ -402,6 +418,7 @@ dependencies = [
 name = "acropolis_module_snapshot_bootstrapper"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "async-compression",
@@ -561,6 +578,7 @@ dependencies = [
  "acropolis_module_drdd_state",
  "acropolis_module_drep_state",
  "acropolis_module_epochs_state",
+ "acropolis_module_fake_block_injector",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_governance_state",
  "acropolis_module_historical_accounts_state",
