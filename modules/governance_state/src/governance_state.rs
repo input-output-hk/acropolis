@@ -66,6 +66,7 @@ pub struct GovernanceStateConfig {
     enact_state_topic: String,
     governance_query_topic: String,
     validation_outcome_topic: String,
+    snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
 }
 
@@ -85,6 +86,7 @@ impl GovernanceStateConfig {
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             validation_outcome_topic: Self::conf(config, DEFAULT_VALIDATION_OUTCOME_TOPIC),
+            snapshot_subscribe_topic: Self::conf(config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
@@ -154,13 +156,18 @@ impl GovernanceState {
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
-        state: Arc<Mutex<State>>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_s: Box<dyn Subscription<Message>>,
         mut drep_s: Box<dyn Subscription<Message>>,
         mut spo_s: Box<dyn Subscription<Message>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        let state = Arc::new(Mutex::new(State::new(
+            context.clone(),
+            config.enact_state_topic.clone(),
+            config.verification_output_file.clone(),
+        )));
+
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(state.clone(), subscription).await?;
@@ -331,21 +338,9 @@ impl GovernanceState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
 
-        // Subscribe for snapshot messages, if allowed
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
-
-        let state = Arc::new(Mutex::new(State::new(
-            context.clone(),
-            cfg.enact_state_topic.clone(),
-            cfg.verification_output_file.clone(),
-        )));
-
         // Subscribe for snapshot bootstrap if starting from snapshot
         let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
-            info!("Creating subscriber on '{snapshot_subscribe_topic}' for governance snapshot bootstrap");
-            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+            Some(context.subscribe(&cfg.snapshot_subscribe_topic).await?)
         } else {
             None
         };
@@ -355,20 +350,10 @@ impl GovernanceState {
         let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
-        let state_run = state.clone();
         tokio::spawn(async move {
-            Self::run(
-                context,
-                cfg,
-                state_run,
-                snapshot_subscription,
-                gt,
-                dt,
-                st,
-                pt,
-            )
-            .await
-            .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, snapshot_subscription, gt, dt, st, pt)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
