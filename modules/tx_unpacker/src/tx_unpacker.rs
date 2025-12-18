@@ -8,8 +8,8 @@ use acropolis_common::{
         AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
-    protocol_params::ProtocolParams,
     state_history::{StateHistory, StateHistoryStore},
+    validation::{ValidationError, ValidationOutcomes},
     *,
 };
 use anyhow::Result;
@@ -22,11 +22,10 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, info_span};
 
 use crate::state::State;
-mod state;
-mod tx_validation_publisher;
-mod validations;
-use tx_validation_publisher::TxValidationPublisher;
 mod crypto;
+mod state;
+mod utils;
+mod validations;
 
 #[cfg(test)]
 mod test_utils;
@@ -66,7 +65,7 @@ impl TxUnpacker {
         publish_certificates_topic: Option<String>,
         publish_governance_procedures_topic: Option<String>,
         publish_block_txs_topic: Option<String>,
-        tx_validation_publisher: Option<TxValidationPublisher>,
+        publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
         mut bootstrapped_sub: Box<dyn Subscription<Message>>,
@@ -159,7 +158,7 @@ impl TxUnpacker {
                                     ) = if block.intent.do_validation() {
                                         let mut vkey_needed = HashSet::new();
                                         let mut script_needed = HashSet::new();
-                                        Self::get_vkey_script_needed(
+                                        utils::get_vkey_script_needed(
                                             &tx_certs,
                                             &tx_withdrawals,
                                             &tx_proposal_update,
@@ -434,11 +433,12 @@ impl TxUnpacker {
                 }
             }
 
-            if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
+            if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
                 if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
                     message.as_ref()
                 {
-                    let mut tx_errors = Vec::new();
+                    let mut validation_outcomes = ValidationOutcomes::new();
+                    let mut bad_transactions = Vec::new();
                     for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                         let tx_index = tx_index as u16;
 
@@ -446,26 +446,14 @@ impl TxUnpacker {
                         if let Err(e) =
                             state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
                         {
-                            tx_errors.push((tx_index, *e));
+                            bad_transactions.push((tx_index, *e));
                         }
                     }
-                    if !tx_errors.is_empty() {
-                        error!(
-                            "Validation failed: block={}, bad_transactions={}",
-                            block.number,
-                            tx_errors
-                                .iter()
-                                .map(|(tx_index, error)| format!(
-                                    "tx-index={tx_index}, error={error}"
-                                ))
-                                .collect::<Vec<_>>()
-                                .join("; "),
-                        );
-                    }
-                    tx_validation_publisher
-                        .publish_tx_validation(block, tx_errors)
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+
+                    validation_outcomes.push(ValidationError::BadTransactions { bad_transactions });
+                    validation_outcomes
+                        .publish(&context, publish_tx_validation_topic, block)
+                        .await?;
                 }
             }
 
@@ -511,12 +499,6 @@ impl TxUnpacker {
         }
 
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
-        let tx_validation_publisher = if let Some(ref topic) = publish_tx_validation_topic {
-            info!("Publishing tx validation on '{topic}'");
-            Some(TxValidationPublisher::new(context.clone(), topic.clone()))
-        } else {
-            None
-        };
 
         // Subscribers
         let transactions_subscribe_topic = config
@@ -559,7 +541,7 @@ impl TxUnpacker {
                 publish_certificates_topic,
                 publish_governance_procedures_topic,
                 publish_block_txs_topic,
-                tx_validation_publisher,
+                publish_tx_validation_topic,
                 txs_sub,
                 bootstrapped_sub,
                 protocol_params_sub,
@@ -569,57 +551,6 @@ impl TxUnpacker {
         });
 
         Ok(())
-    }
-
-    /// Get VKey Witnesses needed for transaction
-    /// Get Scripts needed for transaction
-    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L274
-    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L226
-    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L103
-    ///
-    /// VKey Witnesses needed
-    /// 1. UTxO authors: keys that own the UTxO being spent
-    /// 2. Certificate authors: keys authorizing certificates
-    /// 3. Pool owners: owners that must sign pool registration
-    /// 4. Withdrawal authors: keys authorizing reward withdrawals
-    /// 5. Governance authors: keys authorizing governance actions (e.g. protocol update)
-    ///
-    /// Script Witnesses needed
-    /// 1. Input scripts: scripts locking UTxO being spent
-    /// 2. Withdrawal scripts: scripts controlling reward accounts
-    /// 3. Certificate scripts: scripts in certificate credentials.
-    ///
-    /// NOTE:
-    /// This doesn't count `inputs`
-    /// which will be considered in the utxos_state
-    fn get_vkey_script_needed(
-        certs: &[TxCertificateWithPos],
-        withdrawals: &[Withdrawal],
-        proposal_update: &Option<AlonzoBabbageUpdateProposal>,
-        protocol_params: &ProtocolParams,
-        vkey_hashes: &mut HashSet<KeyHash>,
-        script_hashes: &mut HashSet<ScriptHash>,
-    ) {
-        let genesis_delegs =
-            protocol_params.shelley.as_ref().map(|shelley_params| &shelley_params.gen_delegs);
-        // for each certificate, get the required vkey and script hashes
-        for cert_with_pos in certs.iter() {
-            cert_with_pos.cert.get_cert_authors(vkey_hashes, script_hashes);
-        }
-
-        // for each withdrawal, get the required vkey and script hashes
-        for withdrawal in withdrawals.iter() {
-            withdrawal.get_withdrawal_authors(vkey_hashes, script_hashes);
-        }
-
-        // for each governance action, get the required vkey hashes
-        if let Some(proposal_update) = proposal_update.as_ref() {
-            if let Some(genesis_delegs) = genesis_delegs {
-                proposal_update.get_governance_authors(vkey_hashes, genesis_delegs);
-            } else {
-                error!("Genesis delegates not found in protocol parameters");
-            }
-        }
     }
 
     /// Check for synchronisation
