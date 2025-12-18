@@ -1,16 +1,31 @@
 use acropolis_common::{
-    genesis_values::GenesisValues, ledger_state::SPOState, messages::{
-        AccountsBootstrapMessage, CardanoMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots,
-        GovernanceProtocolParametersBootstrapMessage, GovernanceProtocolParametersSlice, Message,
-        SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
-    }, params::EPOCH_LENGTH, protocol_params::{Nonces, PraosParams}, snapshot::{
+    epoch_snapshot::SnapshotsContainer,
+    messages::{
+        DRepBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots,
+        GovernanceProtocolParametersBootstrapMessage,
+        GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
+    },
+    protocol_params::{Nonces, PraosParams},
+    snapshot::{
         protocol_parameters::ProtocolParameters,
         streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
-        AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback,
-        PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
-        UtxoCallback,
-    }, stake_addresses::AccountState, BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, Era, UTXOValue, UTxOIdentifier
+        GovernanceStateCallback,
+    },
+};
+use acropolis_common::{
+    genesis_values::GenesisValues,
+    ledger_state::SPOState,
+    messages::{
+        AccountsBootstrapMessage, CardanoMessage, EpochBootstrapMessage, Message, SnapshotMessage,
+        SnapshotStateMessage, UTxOPartialState,
+    },
+    params::EPOCH_LENGTH,
+    snapshot::{
+        AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback,
+    },
+    stake_addresses::AccountState,
+    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, Era, UTXOValue, UTxOIdentifier,
 };
 
 use anyhow::Result;
