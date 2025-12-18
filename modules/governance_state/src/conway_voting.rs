@@ -82,11 +82,6 @@ impl ConwayVoting {
         msg: &GovernanceBootstrapMessage,
         voting_length: u64,
     ) {
-        // Clear existing state
-        self.proposals.clear();
-        self.votes.clear();
-        self.action_status.clear();
-
         // Populate proposals and action_status
         for (proposed_epoch, proposal) in &msg.proposals {
             let action_id = proposal.gov_action_id.clone();
