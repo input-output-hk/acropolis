@@ -416,7 +416,7 @@ impl State {
         // Also consider collateral inputs and reference inputs
         let all_inputs =
             deltas.deltas.iter().flat_map(|tx_deltas| tx_deltas.inputs.iter()).collect::<Vec<_>>();
-        let utxos_needed = self.collect_utxos(&all_inputs).await;
+        let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
             let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
@@ -436,6 +436,11 @@ impl State {
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
+            }
+
+            // add this transaction's outputs to the utxos needed
+            for output in &tx_deltas.outputs {
+                utxos_needed.insert(output.utxo_identifier, output.utxo_value());
             }
         }
 

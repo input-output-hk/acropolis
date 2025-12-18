@@ -891,6 +891,17 @@ pub struct TxOutput {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl TxOutput {
+    pub fn utxo_value(&self) -> UTXOValue {
+        UTXOValue {
+            address: self.address.clone(),
+            value: self.value.clone(),
+            datum: self.datum.clone(),
+            reference_script: self.reference_script.clone(),
+        }
+    }
+}
+
 /// Key hash
 pub type KeyHash = Hash<28>;
 
