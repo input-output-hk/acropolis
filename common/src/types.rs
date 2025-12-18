@@ -2,6 +2,7 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::crypto::keyhash_224;
 use crate::drep::{
     Anchor, DRepChoice, DRepDeregistration, DRepRegistration, DRepUpdate, DRepVotingThresholds,
 };
@@ -289,6 +290,17 @@ pub struct TxUTxODeltas {
     // Created and spent UTxOs
     pub inputs: Vec<UTxOIdentifier>,
     pub outputs: Vec<TxOutput>,
+
+    // State needed for validation
+    // This is missing UTxO Authors
+    pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
+    pub script_hashes_needed: Option<HashSet<ScriptHash>>,
+    // From witnesses
+    pub vkey_hashes_provided: Option<Vec<KeyHash>>,
+    // NOTE:
+    // This includes only native scripts
+    // missing Plutus Scripts
+    pub script_hashes_provided: Option<Vec<ScriptHash>>,
 }
 
 /// Individual address balance change
@@ -363,7 +375,7 @@ impl fmt::Display for RewardType {
     }
 }
 
-pub type PolicyId = [u8; 28];
+pub type PolicyId = Hash<28>;
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
@@ -451,10 +463,169 @@ pub enum Datum {
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum ReferenceScript {
-    Native(Vec<u8>),
+    Native(NativeScript),
     PlutusV1(Vec<u8>),
     PlutusV2(Vec<u8>),
     PlutusV3(Vec<u8>),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum NativeScript {
+    ScriptPubkey(AddrKeyhash),
+    ScriptAll(Vec<NativeScript>),
+    ScriptAny(Vec<NativeScript>),
+    ScriptNOfK(u32, Vec<NativeScript>),
+    InvalidBefore(u64),
+    InvalidHereafter(u64),
+}
+
+impl<'b, C> minicbor::decode::Decode<'b, C> for NativeScript {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let size = d.array()?;
+
+        let assert_size = |expected| {
+            // NOTE: unwrap_or allows for indefinite arrays.
+            if expected != size.unwrap_or(expected) {
+                return Err(minicbor::decode::Error::message(
+                    "unexpected array size in NativeScript",
+                ));
+            }
+            Ok(())
+        };
+
+        let variant = d.u32()?;
+
+        let script = match variant {
+            0 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptPubkey(d.decode_with(ctx)?))
+            }
+            1 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAll(d.decode_with(ctx)?))
+            }
+            2 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAny(d.decode_with(ctx)?))
+            }
+            3 => {
+                assert_size(3)?;
+                Ok(NativeScript::ScriptNOfK(
+                    d.decode_with(ctx)?,
+                    d.decode_with(ctx)?,
+                ))
+            }
+            4 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidBefore(d.decode_with(ctx)?))
+            }
+            5 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidHereafter(d.decode_with(ctx)?))
+            }
+            _ => Err(minicbor::decode::Error::message(
+                "unknown variant id for native script",
+            )),
+        }?;
+
+        if size.is_none() {
+            let next = d.datatype()?;
+            if next != minicbor::data::Type::Break {
+                return Err(minicbor::decode::Error::type_mismatch(next));
+            }
+        }
+
+        Ok(script)
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for NativeScript {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            NativeScript::ScriptPubkey(v) => {
+                e.array(2)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAll(v) => {
+                e.array(2)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAny(v) => {
+                e.array(2)?;
+                e.encode_with(2, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptNOfK(a, b) => {
+                e.array(3)?;
+                e.encode_with(3, ctx)?;
+                e.encode_with(a, ctx)?;
+                e.encode_with(b, ctx)?;
+            }
+            NativeScript::InvalidBefore(v) => {
+                e.array(2)?;
+                e.encode_with(4, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::InvalidHereafter(v) => {
+                e.array(2)?;
+                e.encode_with(5, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl NativeScript {
+    pub fn compute_hash(&self) -> ScriptHash {
+        let mut data = vec![0u8];
+        let raw_bytes = minicbor::to_vec(self).expect("Failed to encode NativeScript to CBOR");
+        data.extend_from_slice(raw_bytes.as_slice());
+        ScriptHash::from(keyhash_224(&data))
+    }
+
+    pub fn eval(
+        &self,
+        vkey_hashes_provided: &HashSet<KeyHash>,
+        low_bnd: Option<u64>,
+        upp_bnd: Option<u64>,
+    ) -> bool {
+        match self {
+            Self::ScriptAll(scripts) => {
+                scripts.iter().all(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptAny(scripts) => {
+                scripts.iter().any(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptPubkey(hash) => vkey_hashes_provided.contains(hash),
+            Self::ScriptNOfK(val, scripts) => {
+                let count = scripts
+                    .iter()
+                    .map(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+                    .fold(0, |x, y| x + y as u32);
+                count >= *val
+            }
+            Self::InvalidBefore(val) => {
+                match low_bnd {
+                    Some(time) => *val <= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+            Self::InvalidHereafter(val) => {
+                match upp_bnd {
+                    Some(time) => *val >= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+        }
+    }
 }
 
 /// Value (lovelace + multiasset)
@@ -836,6 +1007,32 @@ impl UTxOIdentifier {
 impl Display for UTxOIdentifier {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{}", self.tx_hash, self.output_index)
+    }
+}
+
+pub type VKey = Hash<32>;
+pub type Signature = Hash<64>;
+
+/// VKey Witness
+#[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct VKeyWitness {
+    pub vkey: VKey,
+    pub signature: Signature,
+}
+
+impl VKeyWitness {
+    pub fn new(vkey: VKey, signature: Signature) -> Self {
+        Self { vkey, signature }
+    }
+
+    pub fn key_hash(&self) -> KeyHash {
+        keyhash_224(self.vkey.as_ref())
+    }
+}
+
+impl Display for VKeyWitness {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "vkey={}, signature={}", self.vkey, self.signature)
     }
 }
 
@@ -2315,6 +2512,56 @@ pub enum TxCertificate {
     DRepUpdate(DRepUpdate),
 }
 
+impl TxCertificate {
+    /// This function extracts required VKey Hashes
+    /// from TxCertificate
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    ///
+    /// returns (vkey_hashes, script_hashes)
+    pub fn get_cert_authors(&self) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
+        let mut vkey_hashes = HashSet::new();
+        let mut script_hashes = HashSet::new();
+
+        let mut parse_cred = |cred: &StakeCredential| match cred {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(*vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(*script_hash);
+            }
+        };
+
+        match self {
+            // Deregistration requires witness from stake credential
+            Self::StakeDeregistration(addr) => {
+                parse_cred(&addr.credential);
+            }
+            // Delegation requries witness from delegator
+            Self::StakeDelegation(deleg) => {
+                parse_cred(&deleg.stake_address.credential);
+            }
+            // Pool registration requires witness from pool cold key and owners
+            Self::PoolRegistration(pool_reg) => {
+                vkey_hashes.insert(*pool_reg.operator);
+                vkey_hashes.extend(
+                    pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>(),
+                );
+            }
+            // Pool retirement requires witness from pool cold key
+            Self::PoolRetirement(retirement) => {
+                vkey_hashes.insert(*retirement.operator);
+            }
+            // Genesis delegation requires witness from genesis key
+            Self::GenesisKeyDelegation(gen_deleg) => {
+                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
+            }
+            _ => {}
+        }
+
+        (vkey_hashes, script_hashes)
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificateWithPos {
     pub cert: TxCertificate,
@@ -2413,8 +2660,8 @@ impl AddressTotals {
     }
 
     fn apply_asset(
-        target: &mut HashMap<[u8; 28], HashMap<AssetName, u64>>,
-        policy: [u8; 28],
+        target: &mut HashMap<PolicyId, HashMap<AssetName, u64>>,
+        policy: PolicyId,
         name: AssetName,
         amount: u64,
     ) {
@@ -2588,5 +2835,19 @@ mod tests {
         assert_eq!(serialized_back, serialized);
 
         Ok(())
+    }
+
+    #[test]
+    fn resolve_hash_correctly() {
+        let native_script = NativeScript::ScriptPubkey(
+            AddrKeyhash::from_str("976ec349c3a14f58959088e13e98f6cd5a1e8f27f6f3160b25e415ca")
+                .unwrap(),
+        );
+        let script_hash = native_script.compute_hash();
+        assert_eq!(
+            script_hash,
+            ScriptHash::from_str("c3a33acb8903cf42611e26b15c7731f537867c6469f5bf69c837e4a3")
+                .unwrap()
+        );
     }
 }

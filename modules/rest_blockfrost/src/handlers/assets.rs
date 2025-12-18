@@ -266,7 +266,7 @@ pub async fn handle_policy_assets_blockfrost(
     params: Vec<String>,
     handlers_config: Arc<HandlersConfig>,
 ) -> Result<RESTResponse, RESTError> {
-    let policy: PolicyId = <[u8; 28]>::from_hex(&params[0])
+    let policy: PolicyId = PolicyId::from_hex(&params[0])
         .map_err(|_| RESTError::invalid_param("policy_id", "invalid hex"))?;
 
     let asset_query_msg = Arc::new(Message::StateQuery(StateQuery::Assets(

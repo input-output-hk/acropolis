@@ -23,6 +23,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 test-case = "3.3.1"
 tokio = { workspace = true }
+cryptoxide = "0.5.1"
 
 [lib]
 path = "src/tx_unpacker.rs"

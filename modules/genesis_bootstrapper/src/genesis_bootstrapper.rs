@@ -175,6 +175,10 @@ impl GenesisBootstrapper {
                             tx_identifier,
                             inputs: Vec::new(),
                             outputs: vec![tx_output],
+                            vkey_hashes_needed: None,
+                            script_hashes_needed: None,
+                            vkey_hashes_provided: None,
+                            script_hashes_provided: None,
                         });
                         total_allocated += amount;
                     }
