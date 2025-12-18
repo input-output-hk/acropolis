@@ -150,33 +150,18 @@ impl TxUnpacker {
                                     let mut props = None;
                                     let mut votes = None;
 
-                                    let (
-                                        vkey_hashes_needed,
-                                        script_hashes_needed,
-                                        vkey_hashes_provided,
-                                        script_hashes_provided,
-                                    ) = if block.intent.do_validation() {
-                                        let mut vkey_needed = HashSet::new();
-                                        let mut script_needed = HashSet::new();
-                                        utils::get_vkey_script_needed(
-                                            &tx_certs,
-                                            &tx_withdrawals,
-                                            &tx_proposal_update,
-                                            &state.protocol_params,
-                                            &mut vkey_needed,
-                                            &mut script_needed,
-                                        );
-                                        let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
-                                        let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
-                                        (
-                                            Some(vkey_needed),
-                                            Some(script_needed),
-                                            Some(vkey_hashes_provided),
-                                            Some(script_hashes_provided),
-                                        )
-                                    } else {
-                                        (None, None, None, None)
-                                    };
+                                    let mut vkey_needed = HashSet::new();
+                                    let mut script_needed = HashSet::new();
+                                    utils::get_vkey_script_needed(
+                                        &tx_certs,
+                                        &tx_withdrawals,
+                                        &tx_proposal_update,
+                                        &state.protocol_params,
+                                        &mut vkey_needed,
+                                        &mut script_needed,
+                                    );
+                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
@@ -198,10 +183,10 @@ impl TxUnpacker {
                                             tx_identifier,
                                             inputs: tx_inputs,
                                             outputs: tx_outputs,
-                                            vkey_hashes_needed,
-                                            script_hashes_needed,
-                                            vkey_hashes_provided,
-                                            script_hashes_provided,
+                                            vkey_hashes_needed: Some(vkey_needed),
+                                            script_hashes_needed: Some(script_needed),
+                                            vkey_hashes_provided: Some(vkey_hashes_provided),
+                                            script_hashes_provided: Some(script_hashes_provided),
                                         });
                                     }
 
