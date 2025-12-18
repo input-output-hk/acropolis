@@ -117,13 +117,13 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Dynamic => {
-                    match Self::wait_snapshot_completion(&mut command_subscription).await {
+                    match Self::wait_initial_command(&mut command_subscription).await {
                         Ok(point) => {
                             if let Point::Specific(slot, _) = &point {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
                                 tracing::info!(
-                                    "Starting sync from snapshot at slot {} epoch {}",
+                                    "Starting sync from slot {} in epoch {}",
                                     slot,
                                     epoch,
                                 );
@@ -138,7 +138,7 @@ impl PeerNetworkInterface {
                             manager
                         }
                         Err(error) => {
-                            warn!("snapshot restoration never completed: {error:#}");
+                            warn!("sync command never received: {error:#}");
                             return;
                         }
                     }
@@ -230,7 +230,7 @@ impl PeerNetworkInterface {
         }
     }
 
-    async fn wait_snapshot_completion(
+    async fn wait_initial_command(
         subscription: &mut Box<dyn Subscription<Message>>,
     ) -> Result<Point> {
         let (_, message) = subscription.read().await?;
@@ -243,7 +243,7 @@ impl PeerNetworkInterface {
                     }
                 }
             }
-            msg => bail!("Unexpected message in snapshot completion topic: {msg:?}"),
+            msg => bail!("Unexpected message in sync command topic: {msg:?}"),
         }
     }
 }
