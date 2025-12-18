@@ -1287,7 +1287,7 @@ impl StreamingSnapshotParser {
 
         // Collect credentials of registered accounts so we can identify unregistered ones
         let registered_credentials: std::collections::HashSet<_> =
-            accounts.iter().map(|a| a.stake_address.credential.clone()).collect();
+            accounts.iter().map(|a| &a.stake_address.credential).collect();
 
         let mut accounts_with_utxo_values: Vec<AccountState> = accounts
             .into_iter()
@@ -1308,30 +1308,28 @@ impl StreamingSnapshotParser {
 
         // Add accounts for stake addresses that have UTXOs but aren't registered in DState
         // These are addresses that received funds but were never registered for staking
-        let mut unregistered_utxo_count = 0;
-        for (credential, &utxo_value) in &stake_utxo_values {
-            if !registered_credentials.contains(credential) {
-                let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
-                accounts_with_utxo_values.push(AccountState {
-                    stake_address,
-                    address_state: StakeAddressState {
-                        registered: false,
-                        utxo_value,
-                        rewards: 0,
-                        delegated_spo: None,
-                        delegated_drep: None,
-                    },
-                });
-                unregistered_utxo_count += 1;
-            }
-        }
+        let unregistered_accounts: Vec<_> = stake_utxo_values
+            .iter()
+            .filter(|(credential, _)| !registered_credentials.contains(credential))
+            .map(|(credential, &utxo_value)| AccountState {
+                stake_address: StakeAddress::new(credential.clone(), NetworkId::Mainnet),
+                address_state: StakeAddressState {
+                    registered: false,
+                    utxo_value,
+                    rewards: 0,
+                    delegated_spo: None,
+                    delegated_drep: None,
+                },
+            })
+            .collect();
 
-        if unregistered_utxo_count > 0 {
+        if !unregistered_accounts.is_empty() {
             info!(
                 "Added {} unregistered stake addresses with UTXOs to bootstrap",
-                unregistered_utxo_count
+                unregistered_accounts.len()
             );
         }
+        accounts_with_utxo_values.extend(unregistered_accounts);
 
         // Calculate summary statistics
         let total_utxo_value: u64 = stake_utxo_values.values().sum();
