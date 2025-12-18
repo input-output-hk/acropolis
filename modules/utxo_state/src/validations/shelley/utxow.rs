@@ -166,7 +166,7 @@ mod tests {
         let raw_tx = tx.encode();
         let tx_identifier = TxIdentifier::new(4533644, 1);
         let Transaction {
-            inputs: tx_inputs,
+            consumes: tx_consumes,
             certs: tx_certs,
             withdrawals: tx_withdrawals,
             proposal_update: tx_proposal_update,
@@ -198,7 +198,7 @@ mod tests {
             native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
         validate(
-            &tx_inputs,
+            &tx_consumes,
             &mut vkey_hashes_needed,
             &mut script_hashes_needed,
             &vkey_hashes_provided,

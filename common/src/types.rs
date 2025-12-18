@@ -289,8 +289,8 @@ pub struct TxUTxODeltas {
     pub tx_identifier: TxIdentifier,
 
     // Created and spent UTxOs
-    pub inputs: Vec<UTxOIdentifier>,
-    pub outputs: Vec<TxOutput>,
+    pub consumes: Vec<UTxOIdentifier>,
+    pub produces: Vec<TxOutput>,
 
     // State needed for validation
     // This is missing UTxO Authors

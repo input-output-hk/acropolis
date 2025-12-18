@@ -19,23 +19,16 @@ pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
         .collect()
 }
 
-/// Parse transaction inputs and outputs, and return the parsed inputs, outputs, total output lovelace, and errors
-pub fn map_transaction_inputs_outputs(
+/// Parse transaction consumes and produces, and return the parsed consumes, produces, total output lovelace, and errors
+pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
 ) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, u128, Vec<String>) {
-    let mut parsed_inputs = Vec::new();
-    let mut parsed_outputs = Vec::new();
+    let parsed_consumes = map_transaction_inputs(&tx.consumes());
+    let mut parsed_produces = Vec::new();
     let mut total_output = 0;
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
-
-    for input in tx.consumes() {
-        let oref = input.output_ref();
-        let utxo = UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16);
-
-        parsed_inputs.push(utxo);
-    }
 
     for (index, output) in tx.outputs().iter().enumerate() {
         let utxo = UTxOIdentifier::new(tx_hash, index as u16);
@@ -43,7 +36,7 @@ pub fn map_transaction_inputs_outputs(
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
                     // Add TxOutput to utxo_deltas
-                    parsed_outputs.push(TxOutput {
+                    parsed_produces.push(TxOutput {
                         utxo_identifier: utxo,
                         address,
                         value: map_value(&output.value()),
@@ -62,7 +55,7 @@ pub fn map_transaction_inputs_outputs(
         }
     }
 
-    (parsed_inputs, parsed_outputs, total_output, errors)
+    (parsed_consumes, parsed_produces, total_output, errors)
 }
 
 pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
@@ -85,7 +78,8 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (inputs, outputs, total_output, input_output_errors) = map_transaction_inputs_outputs(tx);
+    let (consumes, produces, total_output, input_output_errors) =
+        map_transaction_consumes_produces(tx);
 
     let mut errors = input_output_errors;
     let mut certs = Vec::new();
@@ -151,8 +145,8 @@ pub fn map_transaction(
     errors.extend(vkey_witness_errors);
 
     Transaction {
-        inputs,
-        outputs,
+        consumes,
+        produces,
         total_output,
         certs,
         withdrawals,

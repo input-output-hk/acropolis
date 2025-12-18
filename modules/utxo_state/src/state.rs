@@ -330,7 +330,7 @@ impl State {
             // Temporary map to sum UTxO deltas efficiently
             let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
 
-            for input in &tx.inputs {
+            for input in &tx.consumes {
                 if let Some(utxo) = self.lookup_utxo(input).await? {
                     // Remove or mark spent
                     self.observe_input(input, block).await?;
@@ -343,7 +343,7 @@ impl State {
                 }
             }
 
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 self.observe_output(output, block).await?;
 
                 let addr = output.address.clone();
@@ -414,8 +414,11 @@ impl State {
         // collect utxos needed for validation
         // NOTE:
         // Also consider collateral inputs and reference inputs
-        let all_inputs =
-            deltas.deltas.iter().flat_map(|tx_deltas| tx_deltas.inputs.iter()).collect::<Vec<_>>();
+        let all_inputs = deltas
+            .deltas
+            .iter()
+            .flat_map(|tx_deltas| tx_deltas.consumes.iter())
+            .collect::<Vec<_>>();
         let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
@@ -427,7 +430,7 @@ impl State {
                 tx_deltas.script_hashes_provided.clone().unwrap_or_default();
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
-                    &tx_deltas.inputs,
+                    &tx_deltas.consumes,
                     &mut vkey_hashes_needed,
                     &mut script_hashes_needed,
                     &vkey_hashes_provided,
@@ -439,7 +442,7 @@ impl State {
             }
 
             // add this transaction's outputs to the utxos needed
-            for output in &tx_deltas.outputs {
+            for output in &tx_deltas.produces {
                 utxos_needed.insert(output.utxo_identifier, output.utxo_value());
             }
         }
@@ -551,8 +554,8 @@ mod tests {
         let deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![],
-                outputs: vec![output.clone()],
+                consumes: vec![],
+                produces: vec![output.clone()],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -925,8 +928,8 @@ mod tests {
         let deltas1 = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![],
-                outputs: vec![output.clone()],
+                consumes: vec![],
+                produces: vec![output.clone()],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -945,8 +948,8 @@ mod tests {
         let deltas2 = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![input],
-                outputs: vec![],
+                consumes: vec![input],
+                produces: vec![],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

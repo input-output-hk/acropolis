@@ -173,8 +173,8 @@ impl GenesisBootstrapper {
 
                         utxo_deltas_message.deltas.push(TxUTxODeltas {
                             tx_identifier,
-                            inputs: Vec::new(),
-                            outputs: vec![tx_output],
+                            consumes: Vec::new(),
+                            produces: vec![tx_output],
                             vkey_hashes_needed: None,
                             script_hashes_needed: None,
                             vkey_hashes_provided: None,

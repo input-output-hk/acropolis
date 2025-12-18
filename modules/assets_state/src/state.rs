@@ -412,7 +412,7 @@ impl State {
 
         for tx in deltas {
             let mut tx_asset_ids = HashSet::new();
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 for (policy_id, assets) in &output.value.assets {
                     for asset in assets {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
@@ -589,7 +589,7 @@ impl State {
         let mut new_info = self.info.clone();
 
         for tx in deltas {
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 let Some(Datum::Inline(blob)) = &output.datum else {
                     continue;
                 };
@@ -864,13 +864,13 @@ mod tests {
 
     fn make_tx_utxo_deltas(
         tx_identifier: TxIdentifier,
-        inputs: Vec<UTxOIdentifier>,
-        outputs: Vec<TxOutput>,
+        consumes: Vec<UTxOIdentifier>,
+        produces: Vec<TxOutput>,
     ) -> TxUTxODeltas {
         TxUTxODeltas {
             tx_identifier,
-            inputs,
-            outputs,
+            consumes,
+            produces,
             vkey_hashes_needed: None,
             script_hashes_needed: None,
             vkey_hashes_provided: None,

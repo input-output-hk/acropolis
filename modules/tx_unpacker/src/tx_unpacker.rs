@@ -137,8 +137,8 @@ impl TxUnpacker {
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
                                     let Transaction {
-                                        inputs: tx_inputs,
-                                        outputs: tx_outputs,
+                                        consumes: tx_consumes,
+                                        produces: tx_produces,
                                         total_output: tx_total_output,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
@@ -168,7 +168,7 @@ impl TxUnpacker {
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               tx_inputs.len(), tx_outputs.len(), tx_certs.len(), tx_total_output);
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
                                     }
 
                                     if let Some(error) = tx_error {
@@ -181,8 +181,8 @@ impl TxUnpacker {
                                         // Group deltas by tx
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
-                                            inputs: tx_inputs,
-                                            outputs: tx_outputs,
+                                            consumes: tx_consumes,
+                                            produces: tx_produces,
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),
