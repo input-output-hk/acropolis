@@ -30,7 +30,7 @@ pub fn map_transaction_consumes_produces(
 
     let tx_hash = TxHash::from(*tx.hash());
 
-    for (index, output) in tx.outputs().iter().enumerate() {
+    for (index, output) in tx.produces() {
         let utxo = UTxOIdentifier::new(tx_hash, index as u16);
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
