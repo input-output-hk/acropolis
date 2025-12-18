@@ -1285,10 +1285,6 @@ impl StreamingSnapshotParser {
         // added to DState rewards (accumulated rewards from previous epochs).
         let mut pulsing_rewards_total: u64 = 0;
 
-        // Collect credentials of registered accounts so we can identify unregistered ones
-        let registered_credentials: std::collections::HashSet<_> =
-            accounts.iter().map(|a| &a.stake_address.credential).collect();
-
         let mut accounts_with_utxo_values: Vec<AccountState> = accounts
             .into_iter()
             .map(|mut account| {
@@ -1308,6 +1304,9 @@ impl StreamingSnapshotParser {
 
         // Add accounts for stake addresses that have UTXOs but aren't registered in DState
         // These are addresses that received funds but were never registered for staking
+        let registered_credentials: std::collections::HashSet<_> =
+            accounts_with_utxo_values.iter().map(|a| a.stake_address.credential.clone()).collect();
+
         let unregistered_accounts: Vec<_> = stake_utxo_values
             .iter()
             .filter(|(credential, _)| !registered_credentials.contains(credential))
