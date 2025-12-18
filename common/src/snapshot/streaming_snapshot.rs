@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
@@ -1108,11 +1108,10 @@ impl StreamingSnapshotParser {
                     Some(state)
                 }
                 Err(e) => {
-                    info!(
+                    warn!(
                         "    Failed to parse governance state: {}, attempting fallback parsing",
                         e
                     );
-                    // Reset decoder position and try fallback parsing
                     remainder_decoder = Decoder::new(&remainder_buffer[gov_state_position..]);
                     None
                 }
@@ -1178,13 +1177,12 @@ impl StreamingSnapshotParser {
 
             (gs_current_pparams, gs_previous_pparams, gs_future_pparams)
         } else {
-            // Governance parsing succeeded, use default pparams (they were parsed but skipped in governance module)
-            // We need to re-parse pparams from the gov_state - this is a limitation that could be improved
-            // For now, use defaults and rely on the protocol_parameters callback from earlier parsing
+            // Governance parsing succeeded, extract pparams from the parsed state
+            let state = governance_state.as_ref().unwrap();
             (
-                ProtocolParameters::default(),
-                ProtocolParameters::default(),
-                ProtocolParameters::default(),
+                state.current_pparams.clone(),
+                state.previous_pparams.clone(),
+                state.future_pparams.clone(),
             )
         };
 

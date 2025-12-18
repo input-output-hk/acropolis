@@ -23,6 +23,7 @@ use tracing::info;
 
 use crate::hash::Hash;
 use crate::protocol_params::ProtocolVersion;
+use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::streaming_snapshot::Anchor;
 use crate::{
     CommitteeChange, CommitteeCredential, Constitution, Credential, GovActionId, GovernanceAction,
@@ -65,6 +66,12 @@ pub struct GovernanceState {
     pub committee: Option<Committee>,
     /// Current constitution
     pub constitution: Constitution,
+    /// Current protocol parameters
+    pub current_pparams: ProtocolParameters,
+    /// Previous protocol parameters
+    pub previous_pparams: ProtocolParameters,
+    /// Future protocol parameters
+    pub future_pparams: ProtocolParameters,
     /// Votes cast on proposals (from drep_pulsing_state)
     pub votes: HashMap<GovActionId, HashMap<Voter, VotingProcedure>>,
     /// Actions that have been ratified but not yet enacted
@@ -152,11 +159,13 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
     let constitution = parse_constitution(decoder).context("Failed to parse constitution")?;
     info!("      Parsed constitution: {}", constitution.anchor.url);
 
-    // Skip current_pparams [3], previous_pparams [4], future_pparams [5]
-    // These are handled separately by protocol_parameters.rs
-    decoder.skip().context("Failed to skip gs_current_pparams")?;
-    decoder.skip().context("Failed to skip gs_previous_pparams")?;
-    decoder.skip().context("Failed to skip gs_future_pparams")?;
+    // Parse current_pparams [3], previous_pparams [4], future_pparams [5]
+    let current_pparams: ProtocolParameters =
+        decoder.decode().context("Failed to decode gs_current_pparams")?;
+    let previous_pparams: ProtocolParameters =
+        decoder.decode().context("Failed to decode gs_previous_pparams")?;
+    let future_pparams: ProtocolParameters =
+        decoder.decode().context("Failed to decode gs_future_pparams")?;
 
     // Parse drep_pulsing_state [6]
     let (votes, enacted_actions, expired_action_ids) =
@@ -174,6 +183,9 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
         proposal_roots,
         committee,
         constitution,
+        current_pparams,
+        previous_pparams,
+        future_pparams,
         votes,
         enacted_actions,
         expired_action_ids,
@@ -200,16 +212,9 @@ fn parse_proposals(decoder: &mut Decoder) -> Result<(Vec<GovActionState>, GovRel
     match props_len {
         Some(len) => {
             for i in 0..len {
-                match parse_gov_action_state(decoder) {
-                    Ok(state) => proposals.push(state),
-                    Err(e) => {
-                        info!("      Warning: Failed to parse proposal #{i}: {e}");
-                        // Try to skip this entry and continue
-                        if decoder.skip().is_err() {
-                            break;
-                        }
-                    }
-                }
+                let state = parse_gov_action_state(decoder)
+                    .with_context(|| format!("Failed to parse proposal #{i}"))?;
+                proposals.push(state);
             }
         }
         None => {
@@ -220,13 +225,11 @@ fn parse_proposals(decoder: &mut Decoder) -> Result<(Vec<GovActionState>, GovRel
                         decoder.skip()?;
                         break;
                     }
-                    _ => match parse_gov_action_state(decoder) {
-                        Ok(state) => proposals.push(state),
-                        Err(e) => {
-                            info!("      Warning: Failed to parse proposal: {e}");
-                            decoder.skip()?;
-                        }
-                    },
+                    _ => {
+                        let state =
+                            parse_gov_action_state(decoder).context("Failed to parse proposal")?;
+                        proposals.push(state);
+                    }
                 }
             }
         }
