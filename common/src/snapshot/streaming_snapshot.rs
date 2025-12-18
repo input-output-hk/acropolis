@@ -644,6 +644,12 @@ pub trait GovernanceProtocolParametersCallback {
     ) -> Result<()>;
 }
 
+/// Callback invoked with full governance state from the snapshot
+pub trait GovernanceStateCallback {
+    /// Called once with the full governance state (proposals, votes, committee, constitution)
+    fn on_governance_state(&mut self, state: super::governance::GovernanceState) -> Result<()>;
+}
+
 /// Combined callback handler for all snapshot data
 pub trait SnapshotCallbacks:
     UtxoCallback
@@ -651,6 +657,7 @@ pub trait SnapshotCallbacks:
     + AccountsCallback
     + DRepCallback
     + GovernanceProtocolParametersCallback
+    + GovernanceStateCallback
     + ProposalCallback
     + SnapshotsCallback
     + EpochCallback
@@ -1085,68 +1092,27 @@ impl StreamingSnapshotParser {
         // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
         let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        let (_root_params, _root_hard_fork, _root_cc, _root_constitution) = {
-            // Epoch State / Ledger State / UTxO State / utxosGovState
-            remainder_decoder.array()?;
+        // Parse governance state using the governance module
+        // gov_state = [proposals, committee, constitution, current_pparams, previous_pparams, future_pparams, drep_pulsing_state]
+        let governance_state = super::governance::parse_gov_state(&mut remainder_decoder, epoch)
+            .context("Failed to parse governance state")?;
 
-            // Proposals
-            remainder_decoder.array()?;
-            remainder_decoder.array()?;
-            (
-                remainder_decoder.skip()?,
-                remainder_decoder.skip()?,
-                remainder_decoder.skip()?,
-                remainder_decoder.skip()?,
-            )
-        };
+        info!(
+            "    Successfully parsed governance state: {} proposals, {} votes",
+            governance_state.proposals.len(),
+            governance_state.votes.len()
+        );
 
-        // skip ProposalState
-        remainder_decoder.skip()?;
-
-        // skip ConstitutionalCommittee
-        remainder_decoder.skip()?;
-
-        // Decode Constitution (unused currently, but serves as a "correctness" checkpoint while parsing)
-        let _constitution: Constitution = remainder_decoder.decode()?;
-
-        // Governance State from epoch_state/ledger_state/utxo_state/gov_state
-        let gs_current_pparams: ProtocolParameters = remainder_decoder.decode()?;
-        let gs_previous_pparams: ProtocolParameters = remainder_decoder.decode()?;
-        let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?; // may be empty
-
+        // Emit governance protocol parameters callback
         callbacks.on_gs_protocol_parameters(
             epoch,
-            gs_previous_pparams,
-            gs_current_pparams,
-            gs_future_pparams,
+            governance_state.previous_pparams.clone(),
+            governance_state.current_pparams.clone(),
+            governance_state.future_pparams.clone(),
         )?;
 
-        {
-            remainder_decoder.array()?; // DRep Pulsing State
-            remainder_decoder.array()?; // Pulsing Snapshot
-            remainder_decoder.skip()?; // Last epoch votes
-        }
-        remainder_decoder.skip()?; // DRep distr
-        remainder_decoder.skip()?; // DRep state
-        remainder_decoder.skip()?; // Pool distr
-        {
-            remainder_decoder.array()?; // Ratify State
-            remainder_decoder.skip()?; // Enact State
-        }
-
-        {
-            // skip GovActionState
-            remainder_decoder.skip()?;
-            remainder_decoder.tag()?;
-            // skip expired ProposalId
-            remainder_decoder.skip()?;
-            // check for delayed as a way to know we're parsing correctly up to here.
-            let delayed: bool = remainder_decoder.decode()?;
-            assert!(
-                !delayed,
-                "unimplemented import scenario: snapshot contains a ratified delaying governance action"
-            );
-        }
+        // Emit governance state callback
+        callbacks.on_governance_state(governance_state)?;
 
         // Epoch State / Ledger State / UTxO State / utxosStakeDistr
         remainder_decoder.skip()?;
@@ -1927,6 +1893,7 @@ pub struct CollectingCallbacks {
     pub gs_protocol_previous_parameters: Option<ProtocolParameters>,
     pub gs_protocol_current_parameters: Option<ProtocolParameters>,
     pub gs_protocol_future_parameters: Option<ProtocolParameters>,
+    pub governance_state: Option<super::governance::GovernanceState>,
 }
 
 impl UtxoCallback for CollectingCallbacks {
@@ -1983,6 +1950,17 @@ impl GovernanceProtocolParametersCallback for CollectingCallbacks {
         self.gs_protocol_previous_parameters = Some(gs_previous_params);
         self.gs_protocol_current_parameters = Some(gs_current_params);
         self.gs_protocol_future_parameters = Some(gs_future_params);
+        Ok(())
+    }
+}
+
+impl GovernanceStateCallback for CollectingCallbacks {
+    fn on_governance_state(&mut self, state: super::governance::GovernanceState) -> Result<()> {
+        info!(
+            "CollectingCallbacks: Received governance state with {} proposals",
+            state.proposals.len()
+        );
+        self.governance_state = Some(state);
         Ok(())
     }
 }

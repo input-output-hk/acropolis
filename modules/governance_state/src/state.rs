@@ -277,4 +277,14 @@ impl State {
         self.log_stats();
         Ok(())
     }
+
+    /// Get a reference to the conway voting state
+    pub fn get_conway_voting(&self) -> &ConwayVoting {
+        &self.conway_voting
+    }
+
+    /// Get a mutable reference to the conway voting state
+    pub fn get_conway_voting_mut(&mut self) -> &mut ConwayVoting {
+        &mut self.conway_voting
+    }
 }
