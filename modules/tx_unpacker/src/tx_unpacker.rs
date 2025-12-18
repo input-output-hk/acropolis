@@ -9,7 +9,7 @@ use acropolis_common::{
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
-    validation::{ValidationError, ValidationOutcomes},
+    validation::ValidationOutcomes,
     *,
 };
 use anyhow::Result;
@@ -438,22 +438,15 @@ impl TxUnpacker {
                     message.as_ref()
                 {
                     let mut validation_outcomes = ValidationOutcomes::new();
-                    let mut bad_transactions = Vec::new();
-                    for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
-                        let tx_index = tx_index as u16;
-
-                        // Validate transaction
-                        if let Err(e) =
-                            state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
-                        {
-                            bad_transactions.push((tx_index, *e));
-                        }
+                    if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
+                        validation_outcomes.push(*e);
                     }
-
-                    validation_outcomes.push(ValidationError::BadTransactions { bad_transactions });
-                    validation_outcomes
+                    if let Err(e) = validation_outcomes
                         .publish(&context, publish_tx_validation_topic, block)
-                        .await?;
+                        .await
+                    {
+                        error!("Failed to publish tx validation: {e}");
+                    }
                 }
             }
 

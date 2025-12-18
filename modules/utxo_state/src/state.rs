@@ -408,8 +408,8 @@ impl State {
         &mut self,
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
-    ) -> Result<(), ValidationError> {
-        let mut invalid_transactions = Vec::new();
+    ) -> Result<(), Box<ValidationError>> {
+        let mut bad_transactions = Vec::new();
 
         // collect utxos needed for validation
         // NOTE:
@@ -434,17 +434,17 @@ impl State {
                     &script_hashes_provided,
                     &utxos_needed,
                 ) {
-                    invalid_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
+                    bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
         }
 
-        if invalid_transactions.is_empty() {
+        if bad_transactions.is_empty() {
             Ok(())
         } else {
-            Err(ValidationError::BadTransactions {
-                bad_transactions: invalid_transactions,
-            })
+            Err(Box::new(ValidationError::BadTransactions {
+                bad_transactions,
+            }))
         }
     }
 }
