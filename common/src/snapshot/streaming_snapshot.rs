@@ -977,7 +977,7 @@ impl StreamingSnapshotParser {
                 .into_iter()
                 .map(|(credential, account)| {
                     // Convert StakeCredential to stake address representation
-                    let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
+                    let stake_address = StakeAddress::new(credential.clone(), network.clone());
 
                     // Extract rewards from rewards_and_deposit (first element of tuple)
                     let regular_rewards = match &account.rewards_and_deposit {
@@ -1312,7 +1312,7 @@ impl StreamingSnapshotParser {
             .iter()
             .filter(|(credential, _)| !registered_credentials.contains(credential))
             .map(|(credential, &utxo_value)| AccountState {
-                stake_address: StakeAddress::new(credential.clone(), NetworkId::Mainnet),
+                stake_address: StakeAddress::new(credential.clone(), network.clone()),
                 address_state: StakeAddressState {
                     registered: false,
                     utxo_value,
