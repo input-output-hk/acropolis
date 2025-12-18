@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
@@ -1092,112 +1092,27 @@ impl StreamingSnapshotParser {
         // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
         let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Record position before gov_state for governance parsing
-        let gov_state_position = remainder_decoder.position();
-
         // Parse governance state using the governance module
         // gov_state = [proposals, committee, constitution, current_pparams, previous_pparams, future_pparams, drep_pulsing_state]
-        let governance_state =
-            match super::governance::parse_gov_state(&mut remainder_decoder, epoch) {
-                Ok(state) => {
-                    info!(
-                        "    Successfully parsed governance state: {} proposals, {} votes",
-                        state.proposals.len(),
-                        state.votes.len()
-                    );
-                    Some(state)
-                }
-                Err(e) => {
-                    warn!(
-                        "    Failed to parse governance state: {}, attempting fallback parsing",
-                        e
-                    );
-                    remainder_decoder = Decoder::new(&remainder_buffer[gov_state_position..]);
-                    None
-                }
-            };
+        let governance_state = super::governance::parse_gov_state(&mut remainder_decoder, epoch)
+            .context("Failed to parse governance state")?;
 
-        // If governance parsing failed, use fallback parsing for pparams
-        let (gs_current_pparams, gs_previous_pparams, gs_future_pparams) = if governance_state
-            .is_none()
-        {
-            // Fallback: skip through gov_state manually to get pparams
-            // Epoch State / Ledger State / UTxO State / utxosGovState
-            remainder_decoder.array()?;
-
-            // Proposals
-            remainder_decoder.array()?;
-            remainder_decoder.array()?;
-            remainder_decoder.skip()?; // proposal_roots pparam
-            remainder_decoder.skip()?; // proposal_roots hard_fork
-            remainder_decoder.skip()?; // proposal_roots committee
-            remainder_decoder.skip()?; // proposal_roots constitution
-
-            // skip ProposalState
-            remainder_decoder.skip()?;
-
-            // skip ConstitutionalCommittee
-            remainder_decoder.skip()?;
-
-            // Decode Constitution (unused currently, but serves as a "correctness" checkpoint while parsing)
-            let _constitution: Constitution = remainder_decoder.decode()?;
-
-            // Governance State from epoch_state/ledger_state/utxo_state/gov_state
-            let gs_current_pparams: ProtocolParameters = remainder_decoder.decode()?;
-            let gs_previous_pparams: ProtocolParameters = remainder_decoder.decode()?;
-            let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?;
-
-            // Skip drep_pulsing_state
-            {
-                remainder_decoder.array()?; // DRep Pulsing State
-                remainder_decoder.array()?; // Pulsing Snapshot
-                remainder_decoder.skip()?; // Last epoch votes
-            }
-            remainder_decoder.skip()?; // DRep distr
-            remainder_decoder.skip()?; // DRep state
-            remainder_decoder.skip()?; // Pool distr
-            {
-                remainder_decoder.array()?; // Ratify State
-                remainder_decoder.skip()?; // Enact State
-            }
-
-            {
-                // skip GovActionState
-                remainder_decoder.skip()?;
-                remainder_decoder.tag()?;
-                // skip expired ProposalId
-                remainder_decoder.skip()?;
-                // check for delayed as a way to know we're parsing correctly up to here.
-                let delayed: bool = remainder_decoder.decode()?;
-                assert!(
-                    !delayed,
-                    "unimplemented import scenario: snapshot contains a ratified delaying governance action"
-                );
-            }
-
-            (gs_current_pparams, gs_previous_pparams, gs_future_pparams)
-        } else {
-            // Governance parsing succeeded, extract pparams from the parsed state
-            let state = governance_state.as_ref().unwrap();
-            (
-                state.current_pparams.clone(),
-                state.previous_pparams.clone(),
-                state.future_pparams.clone(),
-            )
-        };
+        info!(
+            "    Successfully parsed governance state: {} proposals, {} votes",
+            governance_state.proposals.len(),
+            governance_state.votes.len()
+        );
 
         // Emit governance protocol parameters callback
         callbacks.on_gs_protocol_parameters(
             epoch,
-            gs_previous_pparams,
-            gs_current_pparams,
-            gs_future_pparams,
+            governance_state.previous_pparams.clone(),
+            governance_state.current_pparams.clone(),
+            governance_state.future_pparams.clone(),
         )?;
 
-        // Emit governance state callback if we successfully parsed it
-        if let Some(state) = governance_state {
-            callbacks.on_governance_state(state)?;
-        }
+        // Emit governance state callback
+        callbacks.on_governance_state(governance_state)?;
 
         // Epoch State / Ledger State / UTxO State / utxosStakeDistr
         remainder_decoder.skip()?;

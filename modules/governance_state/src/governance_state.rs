@@ -124,7 +124,7 @@ impl GovernanceState {
 
             match message.as_ref() {
                 Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("GovernanceState: Snapshot Startup message received");
+                    info!("Snapshot Startup message received");
                 }
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::GovernanceState(gov_msg),
@@ -140,12 +140,12 @@ impl GovernanceState {
 
                     locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
                     info!(
-                        "GovernanceState: Snapshot Bootstrap message received, {} proposals loaded",
+                        "Snapshot Bootstrap message received, {} proposals loaded",
                         gov_msg.proposals.len()
                     );
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("GovernanceState: Snapshot complete, exiting bootstrap loop");
+                    info!("Snapshot complete, exiting bootstrap loop");
                     return Ok(());
                 }
                 _ => {}
