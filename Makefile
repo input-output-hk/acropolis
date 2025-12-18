@@ -31,7 +31,7 @@ help:
 	@echo "  all                      Format, lint, and test"
 	@echo "  build                    Build the omnibus process"
 	@echo "  run                      Run the omnibus"
-	@echo "  run-bootstrap            Run the omnibus with bootstrap config (mithril sync)"
+	@echo "  run-bootstrap            Run the omnibus with bootstrap config (snapshot)"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
