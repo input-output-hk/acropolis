@@ -192,10 +192,6 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.#"
 
-[monitor]
-output = "monitor.json" # Write to a file named monitor.json
-frequency_secs = 5.0    # every 5 seconds
-
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
@@ -206,10 +202,9 @@ exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 100
+workers = 50
 dispatch-queue-size = 1000
-subscriber-queue-size = 4000
-worker-queue-size = 200
+worker-queue-size = 100
 bulk-block-capacity = 50
 bulk-resume-capacity = 75
 
