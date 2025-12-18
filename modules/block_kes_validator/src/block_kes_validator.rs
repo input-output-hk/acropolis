@@ -5,6 +5,7 @@ use acropolis_common::{
     caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -15,9 +16,6 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 mod state;
 use state::State;
-
-use crate::kes_validation_publisher::KesValidationPublisher;
-mod kes_validation_publisher;
 mod ouroboros;
 
 const DEFAULT_VALIDATION_KES_PUBLISHER_TOPIC: (&str, &str) =
@@ -48,12 +46,13 @@ pub struct BlockKesValidator;
 impl BlockKesValidator {
     #[allow(clippy::too_many_arguments)]
     async fn run(
+        context: Arc<Context<Message>>,
         history: Arc<Mutex<StateHistory<State>>>,
-        kes_validation_publisher: KesValidationPublisher,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
+        kes_validation_publisher_topic: String,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -115,24 +114,27 @@ impl BlockKesValidator {
                     let span =
                         info_span!("block_kes_validator.validate", block = block_info.number);
                     async {
-                        let result = state
-                            .validate_block_kes(block_info, &block_msg.header, &genesis)
-                            .map_err(|e| *e);
-
-                        // Update the operational certificate counter
-                        // When block is validated successfully
-                        // Reference
-                        // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
-                        if let Ok(Some((pool_id, updated_sequence_number))) = result.as_ref() {
-                            state.update_ocert_counter(*pool_id, *updated_sequence_number);
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        let result =
+                            state.validate(block_info, &block_msg.header, &genesis).map_err(|e| *e);
+                        match result {
+                            Ok(Some((pool_id, updated_sequence_number))) => {
+                                // Update the operational certificate counter
+                                // When block is validated successfully
+                                // Reference
+                                // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
+                                state.update_ocert_counter(pool_id, updated_sequence_number);
+                            }
+                            Err(e) => {
+                                validation_outcomes.push(e);
+                            }
+                            _ => {}
                         }
 
-                        if let Err(e) = kes_validation_publisher
-                            .publish_kes_validation(block_info, result)
+                        validation_outcomes
+                            .publish(&context, &kes_validation_publisher_topic, block_info)
                             .await
-                        {
-                            error!("Failed to publish KES validation: {e}")
-                        }
+                            .unwrap_or_else(|e| error!("Failed to publish KES validation: {e}"));
                     }
                     .instrument(span)
                     .await;
@@ -175,10 +177,6 @@ impl BlockKesValidator {
             .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
-        // publishers
-        let kes_validation_publisher =
-            KesValidationPublisher::new(context.clone(), validation_kes_publisher_topic);
-
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let block_subscription = context.subscribe(&block_subscribe_topic).await?;
@@ -193,14 +191,16 @@ impl BlockKesValidator {
         )));
 
         // Start run task
+        let context_run = context.clone();
         context.run(async move {
             Self::run(
+                context_run,
                 history,
-                kes_validation_publisher,
                 bootstrapped_subscription,
                 block_subscription,
                 protocol_parameters_subscription,
                 spo_state_subscription,
+                validation_kes_publisher_topic,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

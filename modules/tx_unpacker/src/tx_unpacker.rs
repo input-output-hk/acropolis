@@ -19,7 +19,7 @@ use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::state::State;
 mod crypto;
@@ -437,16 +437,20 @@ impl TxUnpacker {
                 if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
                     message.as_ref()
                 {
-                    let mut validation_outcomes = ValidationOutcomes::new();
-                    if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
-                        validation_outcomes.push(*e);
+                    let span = info_span!("tx_unpacker.validate", block = block.number);
+                    async {
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
+                            validation_outcomes.push(*e);
+                        }
+
+                        validation_outcomes
+                            .publish(&context, publish_tx_validation_topic, block)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                     }
-                    if let Err(e) = validation_outcomes
-                        .publish(&context, publish_tx_validation_topic, block)
-                        .await
-                    {
-                        error!("Failed to publish tx validation: {e}");
-                    }
+                    .instrument(span)
+                    .await;
                 }
             }
 

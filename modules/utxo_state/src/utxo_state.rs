@@ -77,25 +77,21 @@ impl UTXOState {
             // before applying them
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                    if block.intent.do_validation() {
+                    let span = info_span!("utxo_state.validate", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
                         let mut validation_outcomes = ValidationOutcomes::new();
-                        let span = info_span!("utxo_state.validate", block = block.number);
-                        async {
-                            let mut state = state.lock().await;
-                            if let Err(e) = state.validate(block, deltas_msg).await {
-                                validation_outcomes.push(*e);
-                            }
-
-                            validation_outcomes
-                                .publish(&context, &publish_tx_validation_topic, block)
-                                .await
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to publish UTxO validation: {e}")
-                                });
+                        if let Err(e) = state.validate(block, deltas_msg).await {
+                            validation_outcomes.push(*e);
                         }
-                        .instrument(span)
-                        .await;
+
+                        validation_outcomes
+                            .publish(&context, &publish_tx_validation_topic, block)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
                     }
+                    .instrument(span)
+                    .await;
 
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
