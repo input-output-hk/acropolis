@@ -58,7 +58,7 @@ mod tests {
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
-        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.inputs());
+        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
 
         validate(&tx_inputs, &ctx.utxos).map_err(|e| *e)
     }

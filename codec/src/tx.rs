@@ -30,7 +30,7 @@ pub fn map_transaction_inputs_outputs(
 
     let tx_hash = TxHash::from(*tx.hash());
 
-    for input in tx.inputs() {
+    for input in tx.consumes() {
         let oref = input.output_ref();
         let utxo = UTxOIdentifier::new(TxHash::from(**oref.hash()), oref.index() as u16);
 
