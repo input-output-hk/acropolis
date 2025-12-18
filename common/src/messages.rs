@@ -1,5 +1,6 @@
 //! Definition of Acropolis messages
 
+use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -304,7 +305,8 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<PoolId>,
+    /// and the reward account to pay the deposit refund to
+    pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
 /// Cardano message enum
