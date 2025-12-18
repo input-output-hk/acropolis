@@ -10,7 +10,7 @@ pub type DRepCredential = Credential;
 /// typically metadata that describes a DRep's identity, platform, or governance
 /// philosophy.
 #[serde_as]
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Anchor {
     /// Metadata URL
     pub url: String,
@@ -113,7 +113,9 @@ pub struct DRepUpdate {
 }
 
 /// DRep voting thresholds for governance actions
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+#[derive(
+    Default, serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode,
+)]
 pub struct DRepVotingThresholds {
     #[n(0)]
     pub motion_no_confidence: RationalNumber,

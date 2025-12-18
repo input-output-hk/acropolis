@@ -6,8 +6,7 @@ use acropolis_common::{
         GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
         ProtocolParamsMessage,
     },
-    snapshot::protocol_parameters::ProtocolParameters,
-    AlonzoBabbageVotingOutcome, EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
+    AlonzoBabbageVotingOutcome, Era, GovernanceOutcomeVariant,
 };
 use anyhow::Result;
 use std::ops::RangeInclusive;
@@ -100,12 +99,14 @@ impl State {
     /// # Behavior
     ///
     /// - Assumes Conway era as the current era
-    pub fn bootstrap(&mut self, param_msg: &GovernanceProtocolParametersBootstrapMessage) -> u64 {
-        let outcomes = Self::mk_governance_outcomes(&param_msg.params);
+    pub fn bootstrap(
+        &mut self,
+        param_msg: &GovernanceProtocolParametersBootstrapMessage,
+    ) -> Result<u64> {
         self.network_name = param_msg.network_name.clone();
-        if let Err(e) = self.apply_governance_outcomes(&Era::Conway, &[], &outcomes) {
-            tracing::error!("Parameters application failed: {e}");
-        }
+        self.current_era = Some(param_msg.era);
+
+        self.current_params.apply_bootstrap(param_msg.params.clone())?;
 
         info!(
             "Bootstrapped ParametersState to era {:?} with params: {:?}",
@@ -113,55 +114,7 @@ impl State {
             self.current_params.get_params()
         );
 
-        param_msg.epoch
-    }
-
-    /// This function transforms a `ProtocolParameters` struct (containing actual values from
-    /// a snapshot) into a `ConwayParams` struct used by the parameters updater.
-    ///
-    /// Note: Constitution and committee are initialized as empty/placeholder values since they
-    /// are not included in the ProtocolParameters from the snapshot.
-    fn mk_governance_outcomes(params: &ProtocolParameters) -> Vec<GovernanceOutcomeVariant> {
-        use acropolis_common::{rational_number::RationalNumber, Anchor, Committee, Constitution};
-        use std::collections::HashMap;
-
-        let mut outcomes = Vec::new();
-
-        // Create placeholder constitution (will be updated by governance events)
-        let _constitution = Constitution {
-            anchor: Anchor {
-                url: String::new(),
-                data_hash: Vec::new(),
-            },
-            guardrail_script: None,
-        };
-
-        // Create empty committee (will be updated by governance events)
-        let _committee = Committee {
-            members: HashMap::new(),
-            threshold: RationalNumber::ZERO,
-        };
-
-        // TODO: I believe that we don't need to add these outcomes, if they're empty anyway; default is fine.
-        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Constitution(constitution)));
-        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Committee(committee)));
-
-        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
-            EnactStateElem::ProtVer(params.protocol_version.clone()),
-        ));
-
-        let param_update = ProtocolParamUpdate {
-            minfee_a: Some(params.min_fee_a),
-            minfee_b: Some(params.min_fee_b),
-            collateral_percentage: Some(params.collateral_percentage as u64),
-            ..ProtocolParamUpdate::default()
-        };
-        // TODO: fill other parameters
-
-        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
-            EnactStateElem::Params(Box::new(param_update)),
-        ));
-        outcomes
+        Ok(param_msg.epoch)
     }
 
     #[allow(dead_code)]

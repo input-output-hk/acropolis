@@ -33,7 +33,7 @@ use tracing::info;
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
 use crate::ledger_state::SPOState;
-use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::protocol_parameters::{CurrentParams, FutureParams};
 use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
@@ -42,7 +42,7 @@ pub use crate::{
     MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
     SingleHostName, StakeAddress, StakeCredential,
 };
-use crate::{PoolBlockProduction, Pots};
+use crate::{PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
@@ -638,9 +638,9 @@ pub trait GovernanceProtocolParametersCallback {
     fn on_gs_protocol_parameters(
         &mut self,
         epoch: u64,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()>;
 }
 
@@ -1110,15 +1110,22 @@ impl StreamingSnapshotParser {
         let _constitution: Constitution = remainder_decoder.decode()?;
 
         // Governance State from epoch_state/ledger_state/utxo_state/gov_state
-        let gs_current_pparams: ProtocolParameters = remainder_decoder.decode()?;
-        let gs_previous_pparams: ProtocolParameters = remainder_decoder.decode()?;
-        let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?; // may be empty
+        let current_params: ProtocolParamUpdate = remainder_decoder.decode()?;
+        let current_reward_params = current_params.to_reward_params()?;
+
+        let previous_params: ProtocolParamUpdate = remainder_decoder.decode()?;
+        let previous_reward_params = previous_params.to_reward_params()?;
+
+        let protocol_parameters: FutureParams =
+            remainder_decoder.decode_with(&mut CurrentParams {
+                current: &current_params,
+            })?;
 
         callbacks.on_gs_protocol_parameters(
             epoch,
-            gs_previous_pparams,
-            gs_current_pparams,
-            gs_future_pparams,
+            previous_reward_params,
+            current_reward_params,
+            protocol_parameters.0,
         )?;
 
         {
@@ -1924,9 +1931,9 @@ pub struct CollectingCallbacks {
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
-    pub gs_protocol_previous_parameters: Option<ProtocolParameters>,
-    pub gs_protocol_current_parameters: Option<ProtocolParameters>,
-    pub gs_protocol_future_parameters: Option<ProtocolParameters>,
+    pub previous_reward_params: RewardParams,
+    pub current_reward_params: RewardParams,
+    pub protocol_parameters: ProtocolParamUpdate,
 }
 
 impl UtxoCallback for CollectingCallbacks {
@@ -1975,14 +1982,14 @@ impl GovernanceProtocolParametersCallback for CollectingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
         _epoch: u64,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()> {
         // epoch is already stored in metadata
-        self.gs_protocol_previous_parameters = Some(gs_previous_params);
-        self.gs_protocol_current_parameters = Some(gs_current_params);
-        self.gs_protocol_future_parameters = Some(gs_future_params);
+        self.previous_reward_params = previous_reward_params;
+        self.current_reward_params = current_reward_params;
+        self.protocol_parameters = params;
         Ok(())
     }
 }

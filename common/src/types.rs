@@ -1671,7 +1671,15 @@ pub struct ResignCommitteeCold {
 /// Governance actions data structures
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy, minicbor::Decode,
+    serde::Serialize,
+    Default,
+    serde::Deserialize,
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    minicbor::Decode,
 )]
 pub struct ExUnits {
     #[n(0)]
@@ -1680,7 +1688,7 @@ pub struct ExUnits {
     pub steps: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, Default, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct ExUnitPrices {
     pub mem_price: RationalNumber,
     pub step_price: RationalNumber,
@@ -1772,7 +1780,7 @@ impl Display for GovActionId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct CostModel(#[n(0)] Vec<i64>);
 
 impl CostModel {
@@ -1792,7 +1800,9 @@ pub struct CostModels {
     pub plutus_v3: Option<CostModel>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+#[derive(
+    Default, serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode,
+)]
 pub struct PoolVotingThresholds {
     #[n(0)]
     pub motion_no_confidence: RationalNumber,
@@ -1806,20 +1816,20 @@ pub struct PoolVotingThresholds {
     pub security_voting_threshold: RationalNumber,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SoftForkRule {
     pub init_thd: u64,
     pub min_thd: u64,
     pub thd_decrement: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TxFeePolicy {
     pub multiplier: u64,
     pub summand: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BlockVersionData {
     pub script_version: u16,
     pub heavy_del_thd: u64,
@@ -1887,7 +1897,7 @@ impl AsRef<BTreeMap<GenesisKeyhash, GenesisDelegate>> for GenesisDelegates {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
     pub protocol_magic: u32,
@@ -1903,6 +1913,15 @@ pub enum ProtocolParamType {
     TechnicalGroup,
     GovernanceGroup,
     SecurityProperty,
+}
+
+#[derive(Debug, Default)]
+pub struct RewardParams {
+    pub expansion_rate: RationalNumber,
+    pub treasury_growth_rate: RationalNumber,
+    pub desired_number_of_stake_pools: u64,
+    pub pool_pledge_influence: RationalNumber,
+    pub min_pool_cost: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2088,7 +2107,7 @@ pub struct AlonzoBabbageUpdateProposal {
     pub enactment_epoch: u64,
 }
 
-#[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
@@ -2136,7 +2155,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Constitution {
 }
 
 #[serde_as]
-#[derive(Serialize, PartialEq, Debug, Deserialize, Clone)]
+#[derive(Default, Serialize, PartialEq, Debug, Deserialize, Clone)]
 pub struct Committee {
     #[serde_as(as = "Vec<(_, _)>")]
     pub members: HashMap<CommitteeCredential, u64>,
