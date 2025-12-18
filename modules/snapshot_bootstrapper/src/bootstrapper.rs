@@ -1,7 +1,7 @@
+mod block;
 mod configuration;
 mod context;
 mod downloader;
-mod header;
 mod nonces;
 mod progress_reader;
 mod publisher;
@@ -102,17 +102,16 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
         );
 
-        // Download
-        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
-        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
-
         // Publish
         let mut publisher = SnapshotPublisher::new(
-            context,
+            context.clone(),
             cfg.completion_topic.clone(),
             cfg.snapshot_topic.clone(),
             bootstrap_ctx.context(),
         );
+        // Download
+        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
+        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         publisher.publish_start().await?;
 
@@ -124,9 +123,12 @@ impl SnapshotBootstrapper {
         let parser = StreamingSnapshotParser::new(
             bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
         );
-        parser.parse(&mut publisher).map_err(|e| BootstrapError::Parse(e.to_string()))?;
+        parser
+            .parse(&mut publisher, cfg.network.into())
+            .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
+        publisher.publish_snapshot_complete().await?;
         publisher.publish_completion(bootstrap_ctx.block_info).await?;
 
         info!("Snapshot bootstrap completed");

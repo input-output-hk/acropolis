@@ -1,17 +1,14 @@
-use acropolis_common::messages::EpochActivityMessage;
-use acropolis_common::messages::SPORewardsMessage;
-use acropolis_common::messages::SPOStakeDistributionMessage;
-use acropolis_common::rational_number::RationalNumber;
-use acropolis_common::KeyHash;
-use acropolis_common::PoolEpochState;
-use acropolis_common::{BlockInfo, PoolId};
+use crate::store_config::StoreConfig;
+use acropolis_common::{
+    messages::{EpochActivityMessage, SPORewardsMessage, SPOStakeDistributionMessage},
+    rational_number::RationalNumber,
+    validation::ValidationOutcomes,
+    BlockInfo, KeyHash, PoolEpochState, PoolId,
+};
+use anyhow::anyhow;
 use dashmap::DashMap;
 use rayon::prelude::*;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use tracing::error;
-
-use crate::store_config::StoreConfig;
+use std::{collections::BTreeMap, sync::Arc};
 
 /// Epoch State for certain pool
 /// Store active_stake, delegators_count, rewards
@@ -141,16 +138,22 @@ impl EpochsHistoryState {
     /// Handle SPO rewards data calculated from accounts-state
     /// NOTE:
     /// The calculated result is one epoch off against blockfrost's response.
-    pub fn handle_spo_rewards(&self, block: &BlockInfo, spo_rewards_message: &SPORewardsMessage) {
+    pub fn handle_spo_rewards(
+        &self,
+        block: &BlockInfo,
+        spo_rewards_message: &SPORewardsMessage,
+    ) -> ValidationOutcomes {
+        let mut vld = ValidationOutcomes::new();
         let Some(epochs_history) = self.epochs_history.as_ref() else {
-            return;
+            return vld;
         };
         let SPORewardsMessage { epoch, spos } = spo_rewards_message;
         if *epoch != block.epoch - 1 {
-            error!(
+            vld.push_anyhow(anyhow!(
                 "SPO Rewards Message's epoch {} is wrong against current block's epoch {}",
-                *epoch, block.epoch
-            )
+                *epoch,
+                block.epoch
+            ))
         }
 
         // update epochs history if set
@@ -160,6 +163,8 @@ impl EpochsHistoryState {
                 epoch_state.spo_reward = Some(value.operator_rewards);
             });
         });
+
+        vld
     }
 
     /// Handle Epoch Activity
@@ -221,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn get_pool_history_returns_data() {
+    fn get_pool_history_returns_data() -> anyhow::Result<()> {
         let epochs_history = EpochsHistoryState::new(save_history_store_config());
         let pool_id = [1; 28].into();
         let spo_block_key_hash = [2; 28].into();
@@ -252,7 +257,7 @@ mod tests {
                 operator_rewards: 10,
             },
         )];
-        epochs_history.handle_spo_rewards(&block, &spo_rewards_msg);
+        epochs_history.handle_spo_rewards(&block, &spo_rewards_msg).as_result()?;
 
         let pool_history = epochs_history.get_pool_history(&pool_id).unwrap();
         assert_eq!(2, pool_history.len());
@@ -266,5 +271,7 @@ mod tests {
         assert_eq!(1, third_epoch.delegators_count);
         assert_eq!(100, first_epoch.pool_reward);
         assert_eq!(10, first_epoch.spo_reward);
+
+        Ok(())
     }
 }

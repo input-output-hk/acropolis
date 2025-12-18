@@ -1,4 +1,4 @@
-name: Run tests on push to main
+name: Run tests on push/PR to main
 
 on:
   push:
@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Remove packages to free up disk space
+        run:  |
+          sudo dpkg -P ant ant-optional azure-cli firefox google-chrome-stable \
+            google-cloud-cli google-cloud-cli-anthoscli kubectl \
+            microsoft-edge-stable mysql-server mysql-server-8.0 \
+            mysql-server-core-8.0 powershell temurin-11-jdk temurin-17-jdk \
+            temurin-21-jdk temurin-25-jdk temurin-8-jdk > /dev/null
+
       - name: Checkout code
         uses: actions/checkout@v4
 

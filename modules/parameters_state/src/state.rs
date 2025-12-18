@@ -2,8 +2,12 @@
 
 use crate::ParametersUpdater;
 use acropolis_common::{
-    messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
-    BlockInfo, Era,
+    messages::{
+        GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
+        ProtocolParamsMessage,
+    },
+    snapshot::protocol_parameters::ProtocolParameters,
+    AlonzoBabbageVotingOutcome, EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::Result;
 use std::ops::RangeInclusive;
@@ -32,8 +36,8 @@ impl State {
         }
     }
 
-    pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
-        let to_apply = Self::genesis_era_range(self.current_era, new_block.era);
+    pub fn apply_genesis(&mut self, new_era: &Era) -> Result<()> {
+        let to_apply = Self::genesis_era_range(self.current_era, *new_era);
         if to_apply.is_empty() {
             return Ok(());
         }
@@ -47,27 +51,117 @@ impl State {
 
         info!(
             "Applied genesis up to {}, resulting params {:?}",
-            new_block.era,
+            new_era,
             self.current_params.get_params()
         );
-        self.current_era = Some(new_block.era);
+        self.current_era = Some(*new_era);
         Ok(())
+    }
+
+    pub fn apply_governance_outcomes(
+        &mut self,
+        new_era: &Era,
+        alonzo_gov: &[AlonzoBabbageVotingOutcome],
+        conway_gov: &[GovernanceOutcomeVariant],
+    ) -> Result<()> {
+        info!("Current Era: {:?}", self.current_era);
+        if self.current_era != Some(*new_era) {
+            self.apply_genesis(new_era)?;
+        }
+        self.current_params.apply_enact_state(alonzo_gov, conway_gov)
     }
 
     pub async fn handle_enact_state(
         &mut self,
-        block: &BlockInfo,
+        new_era: &Era,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
-        if self.current_era != Some(block.era) {
-            self.apply_genesis(block)?;
-        }
-        self.current_params.apply_enact_state(msg)?;
+        info!("Era: {:?}, applying enact state", new_era);
+        let conway_outcomes: Vec<_> =
+            msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect();
+        self.apply_governance_outcomes(new_era, &msg.alonzo_babbage_outcomes, &conway_outcomes)?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
         };
 
         Ok(params_message)
+    }
+
+    /// Initialize state from Conway snapshot data
+    ///
+    /// This method bootstraps the protocol parameters state from a snapshot message.
+    /// It converts the protocol parameters from the snapshot into the internal representation
+    /// used for tracking parameter changes.
+    ///
+    /// # Arguments
+    ///
+    /// * `param_msg` - The bootstrap message containing protocol parameters from the snapshot
+    ///
+    /// # Behavior
+    ///
+    /// - Assumes Conway era as the current era
+    pub fn bootstrap(&mut self, param_msg: &GovernanceProtocolParametersBootstrapMessage) -> u64 {
+        let outcomes = Self::mk_governance_outcomes(&param_msg.params);
+        self.network_name = param_msg.network_name.clone();
+        if let Err(e) = self.apply_governance_outcomes(&Era::Conway, &[], &outcomes) {
+            tracing::error!("Parameters application failed: {e}");
+        }
+
+        info!(
+            "Bootstrapped ParametersState to era {:?} with params: {:?}",
+            self.current_era,
+            self.current_params.get_params()
+        );
+
+        param_msg.epoch
+    }
+
+    /// This function transforms a `ProtocolParameters` struct (containing actual values from
+    /// a snapshot) into a `ConwayParams` struct used by the parameters updater.
+    ///
+    /// Note: Constitution and committee are initialized as empty/placeholder values since they
+    /// are not included in the ProtocolParameters from the snapshot.
+    fn mk_governance_outcomes(params: &ProtocolParameters) -> Vec<GovernanceOutcomeVariant> {
+        use acropolis_common::{rational_number::RationalNumber, Anchor, Committee, Constitution};
+        use std::collections::HashMap;
+
+        let mut outcomes = Vec::new();
+
+        // Create placeholder constitution (will be updated by governance events)
+        let _constitution = Constitution {
+            anchor: Anchor {
+                url: String::new(),
+                data_hash: Vec::new(),
+            },
+            guardrail_script: None,
+        };
+
+        // Create empty committee (will be updated by governance events)
+        let _committee = Committee {
+            members: HashMap::new(),
+            threshold: RationalNumber::ZERO,
+        };
+
+        // TODO: I believe that we don't need to add these outcomes, if they're empty anyway; default is fine.
+        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Constitution(constitution)));
+        //outcome.push(GovernanceOutcomeVariant::EnactStateElem(EnactStateElem::Committee(committee)));
+
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
+            EnactStateElem::ProtVer(params.protocol_version.clone()),
+        ));
+
+        let param_update = ProtocolParamUpdate {
+            minfee_a: Some(params.min_fee_a),
+            minfee_b: Some(params.min_fee_b),
+            collateral_percentage: Some(params.collateral_percentage as u64),
+            ..ProtocolParamUpdate::default()
+        };
+        // TODO: fill other parameters
+
+        outcomes.push(GovernanceOutcomeVariant::EnactStateElem(
+            EnactStateElem::Params(Box::new(param_update)),
+        ));
+        outcomes
     }
 
     #[allow(dead_code)]

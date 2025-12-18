@@ -5,7 +5,7 @@ mod tests {
     use acropolis_common::{
         protocol_params::ProtocolParams, rational_number::RationalNumber,
         ConstitutionalCommitteeKeyHash, ConstitutionalCommitteeScriptHash, Credential,
-        DRepCredential, DRepScriptHash, DelegatedStake, DrepKeyHash, GovActionId, KeyHash,
+        DRepCredential, DRepKeyHash, DRepScriptHash, DelegatedStake, GovActionId, KeyHash,
         Lovelace, PoolId, ProposalProcedure, SingleVoterVotes, TxHash, Vote, VoteCount, VoteResult,
         Voter, VotingProcedure,
     };
@@ -58,7 +58,7 @@ mod tests {
         pub fn to_voter(&self) -> Result<Voter> {
             let key = self.1;
             match &self.0 {
-                0 => Ok(Voter::DRepKey(DrepKeyHash::from(key))),
+                0 => Ok(Voter::DRepKey(DRepKeyHash::from(key))),
                 1 => Ok(Voter::DRepScript(DRepScriptHash::from(key))),
                 2 => Ok(Voter::StakePoolKey(PoolId::from(key))),
                 3 => Ok(Voter::ConstitutionalCommitteeKey(
@@ -229,7 +229,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_voting_mainnet_up_573() -> Result<()> {
         let fmt_layer = fmt::layer()
             .with_filter(
@@ -293,14 +292,16 @@ mod tests {
                     for (voter, voteproc) in votes {
                         let procs =
                             HashMap::from_iter([(record.action_id.clone(), voteproc.clone())]);
-                        conway_voting.insert_voting_procedure(
-                            epoch,
-                            voter,
-                            &TxHash::default(),
-                            &SingleVoterVotes {
-                                voting_procedures: procs,
-                            },
-                        )?
+                        conway_voting
+                            .insert_voting_procedure(
+                                epoch,
+                                voter,
+                                &TxHash::default(),
+                                &SingleVoterVotes {
+                                    voting_procedures: procs,
+                                },
+                            )?
+                            .as_result()?
                     }
                 }
 

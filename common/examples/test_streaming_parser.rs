@@ -1,21 +1,26 @@
 // Example: Test streaming snapshot parser with large snapshot
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
-
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
-use acropolis_common::snapshot::EpochCallback;
-use acropolis_common::snapshot::{
-    AccountState, DRepCallback, DRepInfo, GovernanceProposal, PoolCallback, PoolInfo,
-    ProposalCallback, RawSnapshotsContainer, SnapshotCallbacks, SnapshotMetadata,
-    SnapshotsCallback, StakeCallback, StreamingSnapshotParser, UtxoCallback, UtxoEntry,
+use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
+    ledger_state::SPOState,
+    snapshot::{
+        protocol_parameters::ProtocolParameters,
+        streaming_snapshot::{AccountsCallback, GovernanceProtocolParametersCallback},
+        utxo::UtxoEntry,
+        AccountState, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+        StreamingSnapshotParser, UtxoCallback,
+    },
+    DRepCredential, NetworkId, PoolRegistration,
 };
 use anyhow::Result;
+use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 use tracing::info;
 
-use acropolis_common::EpochBootstrapData;
+use acropolis_common::{DRepRecord, EpochBootstrapData};
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
@@ -24,13 +29,15 @@ struct CountingCallbacks {
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     pool_count: usize,
+    future_pool_count: usize,
+    retiring_pool_count: usize,
     account_count: usize,
     drep_count: usize,
     proposal_count: usize,
     sample_utxos: Vec<UtxoEntry>,
-    sample_pools: Vec<PoolInfo>,
+    sample_pools: Vec<PoolRegistration>,
     sample_accounts: Vec<AccountState>,
-    sample_dreps: Vec<DRepInfo>,
+    sample_dreps: Vec<(DRepCredential, DRepRecord)>,
     sample_proposals: Vec<GovernanceProposal>,
     gs_previous_params: Option<ProtocolParameters>,
     gs_current_params: Option<ProtocolParameters>,
@@ -43,13 +50,14 @@ impl UtxoCallback for CountingCallbacks {
         // Keep first 10 for display
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
+                let addr_bytes = utxo.address_bytes();
                 eprintln!(
                     "  UTXO #{}: {}:{} → {} ({} lovelace)",
                     self.utxo_count,
-                    &utxo.tx_hash[..16],
-                    utxo.output_index,
-                    &utxo.address[..utxo.address.len().min(32)],
-                    utxo.value
+                    &utxo.tx_hash_hex()[..16],
+                    utxo.output_index(),
+                    hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                    utxo.coin()
                 );
             }
             self.sample_utxos.push(utxo);
@@ -63,40 +71,51 @@ impl UtxoCallback for CountingCallbacks {
 }
 
 impl PoolCallback for CountingCallbacks {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
-        self.pool_count = pools.len();
-        eprintln!("Parsed {} stake pools", pools.len());
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
+        self.pool_count = pools.pools.len();
+        self.future_pool_count = pools.updates.len();
+        self.retiring_pool_count = pools.retiring.len();
+        eprintln!(
+            "Parsed {} stake pools (future: {}, retiring: {}))",
+            pools.pools.len(),
+            pools.updates.len(),
+            pools.retiring.len()
+        );
 
-        // Show first 10 pools
-        for (i, pool) in pools.iter().take(10).enumerate() {
+        // Keep first 10 for summary
+        self.sample_pools = pools.pools.into_iter().take(10).map(|(_, v)| v).collect();
+
+        // Show sample pools
+        for (i, pool) in self.sample_pools.clone().iter().enumerate() {
             eprintln!(
-                "  Pool #{}: {} (pledge: {}, cost: {}, margin: {:.2}%)",
+                "  Pool #{}: {} (pledge: {}, cost: {}, margin: {:?})",
                 i + 1,
-                pool.pool_id,
+                pool.operator,
                 pool.pledge,
                 pool.cost,
-                pool.margin * 100.0
+                pool.margin
             );
         }
 
-        // Keep first 10 for summary
-        self.sample_pools = pools.into_iter().take(10).collect();
         Ok(())
     }
 }
 
-impl StakeCallback for CountingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.account_count = accounts.len();
-        if !accounts.is_empty() {
-            eprintln!("Parsed {} stake accounts", accounts.len());
+impl AccountsCallback for CountingCallbacks {
+    fn on_accounts(
+        &mut self,
+        data: acropolis_common::snapshot::AccountsBootstrapData,
+    ) -> Result<()> {
+        self.account_count = data.accounts.len();
+        if !data.accounts.is_empty() {
+            eprintln!("Parsed {} stake accounts", data.accounts.len());
 
             // Show first 10 accounts
-            for (i, account) in accounts.iter().take(10).enumerate() {
+            for (i, account) in data.accounts.iter().take(10).enumerate() {
                 eprintln!(
                     "  Account #{}: {} (utxo: {}, rewards: {}, pool: {:?}, drep: {:?})",
                     i + 1,
-                    &account.stake_address[..32],
+                    &account.stake_address.to_string().unwrap(),
                     account.address_state.utxo_value,
                     account.address_state.rewards,
                     account.address_state.delegated_spo.as_ref().map(|s| &s[..16]),
@@ -105,33 +124,43 @@ impl StakeCallback for CountingCallbacks {
             }
         }
 
+        eprintln!(
+            "AccountsBootstrapData: epoch={}, pools={}, retiring={}, dreps={}, snapshots={}",
+            data.epoch,
+            data.pools.len(),
+            data.retiring_pools.len(),
+            data.dreps.len(),
+            data.snapshots
+        );
+
         // Keep first 10 for summary
-        self.sample_accounts = accounts.into_iter().take(10).collect();
+        self.sample_accounts = data.accounts.into_iter().take(10).collect();
         Ok(())
     }
 }
 
 impl DRepCallback for CountingCallbacks {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
         self.drep_count = dreps.len();
-        eprintln!("Parsed {} DReps", self.drep_count);
+        eprintln!("Parsed {} DReps for epoch {}", self.drep_count, epoch);
 
         // Show first 10 DReps
-        for (i, drep) in dreps.iter().take(10).enumerate() {
-            if let Some(anchor) = &drep.anchor {
+        for (i, (cred, record)) in dreps.iter().take(10).enumerate() {
+            let drep_id = cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
+            if let Some(anchor) = &record.anchor {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {}) - {}",
                     i + 1,
-                    drep.drep_id,
-                    drep.deposit,
+                    drep_id,
+                    record.deposit,
                     anchor.url
                 );
             } else {
                 eprintln!(
                     "  DRep #{}: {} (deposit: {})",
                     i + 1,
-                    drep.drep_id,
-                    drep.deposit
+                    drep_id,
+                    record.deposit
                 );
             }
         }
@@ -170,11 +199,12 @@ impl ProposalCallback for CountingCallbacks {
 impl GovernanceProtocolParametersCallback for CountingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        eprintln!("\n=== Governance Protocol Parameters ===\n");
+        eprintln!("\n=== Governance Protocol Parameters for epoch {epoch} ===\n");
 
         eprintln!("Previous Protocol Parameters:");
         eprintln!(
@@ -324,30 +354,6 @@ impl SnapshotCallbacks for CountingCallbacks {
             total_blocks_current
         );
 
-        // Show snapshots info if available
-        if let Some(snapshots_info) = &metadata.snapshots {
-            eprintln!("  Snapshots Info:");
-            eprintln!(
-                "    Mark snapshot: {} sections",
-                snapshots_info.mark.sections_count
-            );
-            eprintln!(
-                "    Set snapshot: {} sections",
-                snapshots_info.set.sections_count
-            );
-            eprintln!(
-                "    Go snapshot: {} sections",
-                snapshots_info.go.sections_count
-            );
-            eprintln!(
-                "    Fee value: {} lovelace ({} ADA)",
-                snapshots_info.fee,
-                snapshots_info.fee as f64 / 1_000_000.0
-            );
-        } else {
-            eprintln!("  No snapshots data available");
-        }
-
         // Show top block producers if any
         if !metadata.blocks_previous_epoch.is_empty() {
             eprintln!("  Previous epoch top producers (first 3):");
@@ -402,67 +408,26 @@ impl SnapshotCallbacks for CountingCallbacks {
 }
 
 impl SnapshotsCallback for CountingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
-        eprintln!("Raw Snapshots Data:");
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
+        eprintln!("Snapshots Data:");
         eprintln!();
 
-        // Calculate total stakes and delegator counts from VMap data
-        let mark_total: i64 = snapshots.mark.0.iter().map(|(_, amount)| amount).sum();
-        let set_total: i64 = snapshots.set.0.iter().map(|(_, amount)| amount).sum();
-        let go_total: i64 = snapshots.go.0.iter().map(|(_, amount)| amount).sum();
-
-        eprintln!("Mark Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.mark.0.len());
+        eprintln!("Mark Snapshot (epoch {}):", snapshots.mark.epoch);
+        eprintln!("  SPOs: {}", snapshots.mark.spos.len());
+        let mark_total: u64 = snapshots.mark.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", mark_total as f64 / 1_000_000.0);
-        if !snapshots.mark.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.mark.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Set Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.set.0.len());
+        eprintln!("Set Snapshot (epoch {}):", snapshots.set.epoch);
+        eprintln!("  SPOs: {}", snapshots.set.spos.len());
+        let set_total: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", set_total as f64 / 1_000_000.0);
-        if !snapshots.set.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.set.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
         eprintln!();
 
-        eprintln!("Go Snapshot:");
-        eprintln!("  Delegators: {}", snapshots.go.0.len());
+        eprintln!("Go Snapshot (epoch {}):", snapshots.go.epoch);
+        eprintln!("  SPOs: {}", snapshots.go.spos.len());
+        let go_total: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
         eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
-        if !snapshots.go.0.is_empty() {
-            eprintln!("  Sample stakes (first 5):");
-            for (i, (cred, amount)) in snapshots.go.0.iter().take(5).enumerate() {
-                let cred_str = cred.to_string().unwrap_or_default();
-                eprintln!(
-                    "    [{}] {} -> {:.2} ADA",
-                    i + 1,
-                    cred_str,
-                    *amount as f64 / 1_000_000.0
-                );
-            }
-        }
-        eprintln!();
-
-        eprintln!("Fee: {:.2} ADA", snapshots.fee as f64 / 1_000_000.0);
         eprintln!();
 
         Ok(())
@@ -496,7 +461,7 @@ fn main() {
     println!("Starting parse...");
     let start = Instant::now();
 
-    match parser.parse(&mut callbacks) {
+    match parser.parse(&mut callbacks, NetworkId::Mainnet) {
         Ok(()) => {
             let duration = start.elapsed();
             println!("Parse completed successfully in {duration:.2?}");
@@ -527,18 +492,6 @@ fn main() {
                     total_blocks_current
                 );
 
-                // Show snapshots info summary
-                if let Some(snapshots_info) = &metadata.snapshots {
-                    println!("  Snapshots Summary:");
-                    println!(
-                        "    Mark: {} sections, Set: {} sections, Go: {} sections, Fee: {} ADA",
-                        snapshots_info.mark.sections_count,
-                        snapshots_info.set.sections_count,
-                        snapshots_info.go.sections_count,
-                        snapshots_info.fee as f64 / 1_000_000.0
-                    );
-                }
-
                 println!();
             }
 
@@ -554,13 +507,14 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
+                    let addr_bytes = utxo.address_bytes();
                     println!(
                         "  {}: {}:{} → {} ({} lovelace)",
                         i + 1,
-                        &utxo.tx_hash[..16],
-                        utxo.output_index,
-                        &utxo.address[..32],
-                        utxo.value
+                        &utxo.tx_hash_hex()[..16],
+                        utxo.output_index(),
+                        hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                        utxo.coin()
                     );
                 }
                 println!();
@@ -571,12 +525,12 @@ fn main() {
                 println!("Sample Pools (first 10):");
                 for (i, pool) in callbacks.sample_pools.iter().enumerate() {
                     println!(
-                        "  {}: {} (pledge: {}, cost: {}, margin: {:.2}%)",
+                        "  {}: {} (pledge: {}, cost: {}, margin: {:?})",
                         i + 1,
-                        pool.pool_id,
+                        pool.operator,
                         pool.pledge,
                         pool.cost,
-                        pool.margin * 100.0
+                        pool.margin
                     );
                 }
                 println!();
@@ -589,7 +543,7 @@ fn main() {
                     println!(
                         "  {}: {} (utxo: {}, rewards: {})",
                         i + 1,
-                        &account.stake_address[..32],
+                        &account.stake_address.to_string().unwrap(),
                         account.address_state.utxo_value,
                         account.address_state.rewards
                     );
@@ -600,14 +554,16 @@ fn main() {
             // Show sample DReps
             if !callbacks.sample_dreps.is_empty() {
                 println!("Sample DReps (first 10):");
-                for (i, drep) in callbacks.sample_dreps.iter().enumerate() {
+                for (i, (cred, record)) in callbacks.sample_dreps.iter().enumerate() {
+                    let drep_id =
+                        cred.to_drep_bech32().unwrap_or_else(|_| "invalid_cred".to_string());
                     print!(
                         "  {}: {} (deposit: {} lovelace)",
                         i + 1,
-                        drep.drep_id,
-                        drep.deposit
+                        drep_id,
+                        record.deposit
                     );
-                    if let Some(anchor) = &drep.anchor {
+                    if let Some(anchor) = &record.anchor {
                         println!(" - {}", anchor.url);
                     } else {
                         println!();

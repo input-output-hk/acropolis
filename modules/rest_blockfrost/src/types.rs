@@ -953,18 +953,16 @@ impl UTxOREST {
             None => (None, None),
         };
 
-        let reference_script_hash = entry.reference_script.as_ref().map(|script| {
-            let bytes = match script {
-                ReferenceScript::Native(b)
-                | ReferenceScript::PlutusV1(b)
-                | ReferenceScript::PlutusV2(b)
-                | ReferenceScript::PlutusV3(b) => b,
-            };
-
-            let mut hasher = Blake2b512::new();
-            hasher.update(bytes);
-            let result = hasher.finalize();
-            hex::encode(&result[..32])
+        let reference_script_hash = entry.reference_script.as_ref().map(|script| match script {
+            ReferenceScript::PlutusV1(b)
+            | ReferenceScript::PlutusV2(b)
+            | ReferenceScript::PlutusV3(b) => {
+                let mut hasher = Blake2b512::new();
+                hasher.update(b);
+                let result = hasher.finalize();
+                hex::encode(&result[..32])
+            }
+            ReferenceScript::Native(b) => b.compute_hash().to_string(),
         });
 
         Self {

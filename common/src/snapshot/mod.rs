@@ -14,23 +14,21 @@ mod decode;
 mod error;
 pub mod mark_set_go;
 mod parser;
-pub mod pool_params;
 pub mod protocol_parameters;
+pub mod reward_snapshot;
 pub mod streaming_snapshot;
-
-// Re-export error types
+pub mod utxo;
 pub use error::SnapshotError;
 
-// Re-export parser functions
 pub use parser::{compute_sha256, parse_manifest, validate_era, validate_integrity};
 
-// Re-export streaming snapshot APIs
 pub use streaming_snapshot::{
-    AccountState, Anchor, CollectingCallbacks, DRepCallback, DRepInfo, EpochCallback,
-    GovernanceProposal, PoolCallback, PoolInfo, PoolMetadata, PotBalances, ProposalCallback, Relay,
-    SnapshotCallbacks, SnapshotMetadata, StakeAddressState, StakeCallback, StreamingSnapshotParser,
-    UtxoCallback, UtxoEntry,
+    AccountState, AccountsBootstrapData, AccountsCallback, Anchor, DRepCallback, DRepInfo,
+    EpochCallback, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
+    SnapshotMetadata, StakeAddressState, StreamingSnapshotParser, UtxoCallback,
 };
 
-// Re-export snapshot types
-pub use mark_set_go::{RawSnapshotsContainer, SnapshotsCallback, VMap};
+pub use mark_set_go::{RawSnapshot, RawSnapshotsContainer, SnapshotsCallback, VMap};
+pub use reward_snapshot::{
+    Likelihood, NonMyopic, PulsingRewardUpdate, Reward, RewardSnapshot, RewardType, RewardUpdate,
+};

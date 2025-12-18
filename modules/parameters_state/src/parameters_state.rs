@@ -1,7 +1,11 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{
+    GovernanceProtocolParametersSlice, SnapshotMessage, SnapshotStateMessage,
+    StateTransitionMessage,
+};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -16,7 +20,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{error, info, info_span, warn, Instrument};
 
 mod alonzo_genesis;
 mod genesis_params;
@@ -30,6 +34,9 @@ const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const CONFIG_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Parameters State module
 #[module(
@@ -110,8 +117,9 @@ impl ParametersState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut enact_s: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
+        // Process the snapshot messages first to bootstrap state if needed
+
         loop {
-            // Normal (Conway) behaviour - fetch from goverance enacted
             if let Some(ref mut sub) = enact_s {
                 let (_, message) = sub.read().await?;
                 match message.as_ref() {
@@ -134,7 +142,7 @@ impl ParametersState {
                                 let current_params = state.current_params.get_params();
 
                                 // Process GovOutcomes message on epoch transition
-                                let new_params = state.handle_enact_state(block, gov).await?;
+                                let new_params = state.handle_enact_state(&block.era, gov).await?;
 
                                 // Publish protocol params message
                                 Self::publish_update(&config, block, new_params.clone())?;
@@ -193,6 +201,66 @@ impl ParametersState {
 
         let query_state = history.clone();
 
+        // Subscribe for snapshot messages, if booting from snapshot
+        let snapshot_subscribe_topic = config
+            .get_string(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        let cfg_clone = cfg.clone();
+        let history_clone = history.clone();
+        let network_name = cfg.network_name.clone();
+
+        if let Some(mut subscription) = snapshot_subscription {
+            context.run(async move {
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("ParameterState: Snapshot Startup message received");
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::ParametersState(msg),
+                        )) => {
+                            // Get current state and current params
+                            let mut state = {
+                                let mut h = history.lock().await;
+                                h.get_or_init_with(|| State::new(network_name.clone()))
+                            };
+                            info!("ParameterState: Snapshot Bootstrap message received");
+                            info!("ParameterState: got slice: {:?}", msg.slice);
+                            if msg.slice == GovernanceProtocolParametersSlice::Current {
+                                let epoch = state.bootstrap(msg);
+                                let mut h = history.lock().await;
+                                h.commit(epoch, state);
+                            } else {
+                                warn!(
+                                    "ParameterState: Unsupported slice in bootstrap: {:?}",
+                                    msg.slice
+                                );
+                                continue;
+                            }
+                        }
+                        Message::Snapshot(SnapshotMessage::Complete) => {
+                            info!("Snapshot complete, exiting Parameters state bootstrap loop");
+                            break; // done processing snapshot messages
+                        }
+                        // There will be other snapshot messages that we're not interested in
+                        _ => (),
+                    }
+                }
+            });
+        }
+
         // Handle parameters queries
         context.handle(&cfg.parameters_query_topic, move |message| {
             let history = query_state.clone();
@@ -223,7 +291,7 @@ impl ParametersState {
                                     state.current_params.get_params(),
                                 ),
                                 None => ParametersStateQueryResponse::Error(QueryError::not_found(
-                                    format!("Epoch {} not found in history", epoch_number),
+                                    format!("Epoch {epoch_number} not found in history"),
                                 )),
                             }
                         }
@@ -242,7 +310,9 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg, history, enact_s).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(cfg_clone, history_clone, enact_s)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

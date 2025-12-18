@@ -3,16 +3,20 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    configuration::StartupMethod,
+    messages::{
+        AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse, StateTransitionMessage,
+    },
     queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
-use tokio::{join, sync::Mutex};
+use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
@@ -27,12 +31,12 @@ use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
 use state::State;
 mod monetary;
 mod rewards;
-mod snapshot;
 mod verifier;
 use acropolis_common::queries::accounts::{
     AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
 };
 use acropolis_common::queries::errors::QueryError;
+use acropolis_common::validation::ValidationOutcomes;
 use verifier::Verifier;
 
 use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
@@ -52,6 +56,11 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
+const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
+
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
@@ -66,15 +75,75 @@ const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
 pub struct AccountsState;
 
 impl AccountsState {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) {
+        let epoch = accounts_data.epoch;
+        let accounts_len = accounts_data.accounts.len();
+
+        // Initialize accounts state from snapshot data
+        state.bootstrap(accounts_data);
+
+        info!(
+            "Accounts state bootstrapped successfully for epoch {} with {} accounts",
+            epoch, accounts_len
+        );
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+    ) -> Result<()> {
+        let snapshot_subscription = match snapshot_subscription.as_mut() {
+            Some(sub) => sub,
+            None => {
+                info!("No snapshot subscription available, using default state");
+                return Ok(());
+            }
+        };
+
+        info!("Waiting for snapshot bootstrap messages...");
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+
+            match message {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::AccountsState(accounts_data),
+                )) => {
+                    info!("Received AccountsState bootstrap message");
+                    let epoch = accounts_data.epoch;
+                    let mut state = history.lock().await.get_or_init_with(State::default);
+                    Self::handle_bootstrap(&mut state, accounts_data);
+                    history.lock().await.commit(epoch, state);
+                    info!("Accounts state bootstrap complete");
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting accounts state bootstrap loop");
+                    return Ok(());
+                }
+                _ => {
+                    // Ignore other messages (e.g., EpochState, SPOState bootstrap messages)
+                }
+            }
+        }
+    }
+
     /// Async run loop
     #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         spdd_store: Option<Arc<Mutex<SPDDStore>>>,
+        context: Arc<Context<Message>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut drep_publisher: DRepDistributionPublisher,
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
+        validation_outcomes_topic: String,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -85,6 +154,9 @@ impl AccountsState {
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
     ) -> Result<()> {
+        // Wait for the snapshot bootstrap (if available)
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
+
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
@@ -121,6 +193,7 @@ impl AccountsState {
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
+            let mut vld = ValidationOutcomes::new();
             let mut state = history.lock().await.get_current_state();
 
             let mut current_block: Option<BlockInfo> = None;
@@ -157,25 +230,59 @@ impl AccountsState {
             }
 
             // Read from epoch-boundary messages only when it's a new epoch
+            // NEWEPOCH ticks
             if new_epoch {
-                let spdd_store_guard = match spdd_store.as_ref() {
-                    Some(s) => Some(s.lock().await),
-                    None => None,
+                // Applies reewards from previous epoch
+                let previous_epoch_rewards_result = state
+                    .complete_previous_epoch_rewards_calculation(verifier)
+                    .await
+                    .inspect_err(|e| {
+                        vld.push_anyhow(anyhow!("Previous epoch rewards calculation error: {e:#}"))
+                    })
+                    .ok();
+
+                let mut stake_reward_deltas = if let Some(block_info) = current_block.as_ref() {
+                    if let Some((spo_rewards, stake_reward_deltas)) = previous_epoch_rewards_result
+                    {
+                        // publish spo rewards
+                        spo_rewards_publisher
+                            .publish_spo_rewards(block_info, spo_rewards)
+                            .await
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("Error publishing SPO rewards: {e:#}"))
+                            })
+                            .ok();
+                        stake_reward_deltas
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
                 };
 
-                // Publish SPDD message before anything else and store spdd history if enabled
+                // EPOCH rule
+                // a. SNAP: Take the snapshot and pool distribution
+                // rotate the snapshots (mark, set, go)
+                // b. POOLREAP: for any retiring pools, refund,
+                // remove from pool registry, clear delegations
+
                 if let Some(block_info) = current_block.as_ref() {
                     let spdd = state.generate_spdd();
+                    verifier.verify_spdd(block_info, &spdd);
                     if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
-                        error!("Error publishing SPO stake distribution: {e:#}")
+                        vld.push_anyhow(anyhow!("Error publishing SPO stake distribution: {e:#}"))
                     }
 
-                    // if we store spdd history
-                    let spdd_state = state.dump_spdd_state();
+                    // store spdd history if enabled
+                    let spdd_store_guard = match spdd_store.as_ref() {
+                        Some(s) => Some(s.lock().await),
+                        None => None,
+                    };
                     if let Some(mut spdd_store) = spdd_store_guard {
-                        // active stakes taken at beginning of epoch i is for epoch + 1
+                        let spdd_state = state.dump_spdd_state();
+                        // stakes distribution taken at beginning of epoch i is active for epoch + 1
                         if let Err(e) = spdd_store.store_spdd(block_info.epoch + 1, spdd_state) {
-                            error!("Error storing SPDD state: {e:#}")
+                            vld.push_anyhow(anyhow!("Error storing SPDD state: {e:#}"))
                         }
                     }
                 }
@@ -194,9 +301,10 @@ impl AccountsState {
                                 state.handle_drep_state(dreps_msg);
 
                                 let drdd = state.generate_drdd();
-                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await
-                                {
-                                    error!("Error publishing drep voting stake distribution: {e:#}")
+                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                    vld.push_anyhow(anyhow!(
+                                        "Error publishing drep voting stake distribution: {e:#}"
+                                    ))
                                 }
                             }
                             .instrument(span)
@@ -217,7 +325,9 @@ impl AccountsState {
                             Self::check_sync(&current_block, block_info);
                             state
                                 .handle_spo_state(spo_msg)
-                                .inspect_err(|e| error!("SPOState handling error: {e:#}"))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("SPOState handling error: {e:#}"))
+                                })
                                 .ok();
                         }
                         .instrument(span)
@@ -238,7 +348,9 @@ impl AccountsState {
                             Self::check_sync(&current_block, block_info);
                             state
                                 .handle_parameters(params_msg)
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("Messaging handling error: {e}"))
+                                })
                                 .ok();
                         }
                         .instrument(span)
@@ -261,25 +373,22 @@ impl AccountsState {
                             let after_epoch_result = state
                                 .handle_epoch_activity(ea_msg, verifier)
                                 .await
-                                .inspect_err(|e| error!("EpochActivity handling error: {e:#}"))
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
+                                })
                                 .ok();
-                            if let Some((spo_rewards, stake_reward_deltas)) = after_epoch_result {
-                                // SPO Rewards Future
-                                let spo_rewards_future = spo_rewards_publisher
-                                    .publish_spo_rewards(block_info, spo_rewards);
-                                // Stake Reward Deltas Future
-                                let stake_reward_deltas_future = stake_reward_deltas_publisher
-                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas);
-
-                                // publish in parallel
-                                let (spo_rewards_result, stake_reward_deltas_result) =
-                                    join!(spo_rewards_future, stake_reward_deltas_future);
-                                spo_rewards_result.unwrap_or_else(|e| {
-                                    error!("Error publishing SPO rewards: {e:#}")
-                                });
-                                stake_reward_deltas_result.unwrap_or_else(|e| {
-                                    error!("Error publishing stake reward deltas: {e:#}")
-                                });
+                            if let Some(refund_deltas) = after_epoch_result {
+                                // publish stake reward deltas
+                                stake_reward_deltas.extend(refund_deltas);
+                                stake_reward_deltas_publisher
+                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas)
+                                    .await
+                                    .inspect_err(|e| {
+                                        vld.push_anyhow(anyhow!(
+                                            "Error publishing stake reward deltas: {e:#}"
+                                        ))
+                                    })
+                                    .ok();
                             }
                         }
                         .instrument(span)
@@ -298,7 +407,9 @@ impl AccountsState {
                         Self::check_sync(&current_block, block_info);
                         state
                             .handle_tx_certificates(tx_certs_msg)
-                            .inspect_err(|e| error!("TxCertificates handling error: {e:#}"))
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -326,8 +437,10 @@ impl AccountsState {
                     async {
                         Self::check_sync(&current_block, block_info);
                         state
-                            .handle_withdrawals(withdrawals_msg)
-                            .inspect_err(|e| error!("Withdrawals handling error: {e:#}"))
+                            .handle_withdrawals(withdrawals_msg, &mut vld)
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("Withdrawals handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -348,8 +461,10 @@ impl AccountsState {
                     async {
                         Self::check_sync(&current_block, block_info);
                         state
-                            .handle_stake_deltas(deltas_msg)
-                            .inspect_err(|e| error!("StakeAddressDeltas handling error: {e:#}"))
+                            .handle_stake_deltas(deltas_msg, &mut vld)
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("StakeAddressDeltas handling error: {e:#}"))
+                            })
                             .ok();
                     }
                     .instrument(span)
@@ -362,6 +477,9 @@ impl AccountsState {
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
+                vld.publish(&context, &validation_outcomes_topic, &block_info).await?;
+            } else {
+                vld.print_errors(None);
             }
         }
     }
@@ -422,6 +540,10 @@ impl AccountsState {
             info!("Creating DRep state subscriber on '{topic}'");
         }
 
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
         // Publishing topics
         let drep_distribution_topic = config
             .get_string("publish-drep-distribution-topic")
@@ -442,6 +564,11 @@ impl AccountsState {
             .get_string("publish-stake-reward-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
+
+        let validation_outcomes_topic = config
+            .get_string("validation-outcomes-topic")
+            .unwrap_or(DEFAULT_VALIDATION_OUTCOMES_TOPIC.to_string());
+        info!("Validation outcomes are to be published on '{validation_outcomes_topic}'");
 
         // SPDD configs
         let spdd_db_path =
@@ -472,7 +599,12 @@ impl AccountsState {
 
         if let Ok(verify_rewards_files) = config.get_string("verify-rewards-files") {
             info!("Verifying rewards against '{verify_rewards_files}'");
-            verifier.read_rewards(&verify_rewards_files);
+            verifier.set_rewards_template(&verify_rewards_files);
+        }
+
+        if let Ok(verify_spdd_files) = config.get_string("verify-spdd-files") {
+            info!("Verifying rewards against '{verify_spdd_files}'");
+            verifier.set_spdd_template(&verify_spdd_files);
         }
 
         // History
@@ -708,15 +840,28 @@ impl AccountsState {
         };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
+        // Only subscribe to Snapshot if we're using Snapshot to start-up
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
+            None
+        };
+
+        let context_copy = context.clone();
         // Start run task
         context.run(async move {
             Self::run(
                 history,
                 spdd_store,
+                context_copy,
+                snapshot_subscription,
                 drep_publisher,
                 spo_publisher,
                 spo_rewards_publisher,
                 stake_reward_deltas_publisher,
+                validation_outcomes_topic,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,

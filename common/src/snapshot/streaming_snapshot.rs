@@ -24,25 +24,34 @@ use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use tracing::info;
 
-pub use crate::hash::Hash;
+use crate::epoch_snapshot::SnapshotsContainer;
+use crate::hash::Hash;
+use crate::ledger_state::SPOState;
 use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
+use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
-pub use crate::StakeCredential;
-
+pub use crate::{
+    Constitution, DRepChoice, DRepCredential, DRepRecord, EpochBootstrapData, Lovelace,
+    MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
+    SingleHostName, StakeAddress, StakeCredential,
+};
+use crate::{PoolBlockProduction, Pots};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
+use super::reward_snapshot::PulsingRewardUpdate;
 
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
 // -----------------------------------------------------------------------------
 
 pub type Epoch = u64;
-pub type Lovelace = u64;
 
 /*
  * This was replaced with the StakeCredential defined in types.rs, but the implementation here is much
@@ -59,26 +68,15 @@ pub enum StakeCredential {
 */
 
 impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
-    fn decode(
-        d: &mut minicbor::Decoder<'b>,
-        _ctx: &mut C,
-    ) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
+        // Variant 0 = key hash, Variant 1 = script hash
         match variant {
             0 => {
-                // ScriptHash variant (first in enum) - decode bytes directly
-                let bytes = d.bytes()?;
-                let key_hash = bytes.try_into().map_err(|_| {
-                    minicbor::decode::Error::message(
-                        "invalid length for ScriptHash in StakeCredential",
-                    )
-                })?;
-                Ok(StakeCredential::ScriptHash(key_hash))
-            }
-            1 => {
-                // AddrKeyHash variant (second in enum) - decodes bytes directly
+                // AddrKeyHash variant - key hash credential
                 let bytes = d.bytes()?;
                 let key_hash = bytes.try_into().map_err(|_| {
                     minicbor::decode::Error::message(
@@ -86,6 +84,16 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for StakeCredential {
                     )
                 })?;
                 Ok(StakeCredential::AddrKeyHash(key_hash))
+            }
+            1 => {
+                // ScriptHash variant - script hash credential
+                let bytes = d.bytes()?;
+                let key_hash = bytes.try_into().map_err(|_| {
+                    minicbor::decode::Error::message(
+                        "invalid length for ScriptHash in StakeCredential",
+                    )
+                })?;
+                Ok(StakeCredential::ScriptHash(key_hash))
             }
             _ => Err(minicbor::decode::Error::message(
                 "invalid variant id for StakeCredential",
@@ -100,16 +108,17 @@ impl<C> minicbor::encode::Encode<C> for StakeCredential {
         e: &mut minicbor::Encoder<W>,
         ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        // CDDL: credential = [0, addr_keyhash // 1, scripthash]
         match self {
-            StakeCredential::ScriptHash(key_hash) => {
-                // ScriptHash is variant 0 (first in enum)
+            StakeCredential::AddrKeyHash(key_hash) => {
+                // AddrKeyHash is variant 0 (key hash)
                 e.array(2)?;
                 e.encode_with(0, ctx)?;
                 e.encode_with(key_hash, ctx)?;
                 Ok(())
             }
-            StakeCredential::AddrKeyHash(key_hash) => {
-                // AddrKeyHash is variant 1 (second in enum)
+            StakeCredential::ScriptHash(key_hash) => {
+                // ScriptHash is variant 1 (script hash)
                 e.array(2)?;
                 e.encode_with(1, ctx)?;
                 e.encode_with(key_hash, ctx)?;
@@ -175,28 +184,28 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// Set type (encoded as array, sometimes with CBOR tag 258)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Set<T>(pub Vec<T>);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotSet<T>(pub Vec<T>);
 
-impl<T> Set<T> {
+impl<T> SnapshotSet<T> {
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.0.iter()
     }
 }
 
-impl<T> From<Vec<T>> for Set<T> {
+impl<T> From<Vec<T>> for SnapshotSet<T> {
     fn from(vec: Vec<T>) -> Self {
-        Set(vec)
+        SnapshotSet(vec)
     }
 }
 
-impl<T> From<Set<T>> for Vec<T> {
-    fn from(set: Set<T>) -> Self {
+impl<T> From<SnapshotSet<T>> for Vec<T> {
+    fn from(set: SnapshotSet<T>) -> Self {
         set.0
     }
 }
 
-impl<'b, C, T> minicbor::Decode<'b, C> for Set<T>
+impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotSet<T>
 where
     T: minicbor::Decode<'b, C>,
 {
@@ -207,11 +216,11 @@ where
         }
 
         let vec: Vec<T> = d.decode_with(ctx)?;
-        Ok(Set(vec))
+        Ok(SnapshotSet(vec))
     }
 }
 
-impl<C, T> minicbor::Encode<C> for Set<T>
+impl<C, T> minicbor::Encode<C> for SnapshotSet<T>
 where
     T: minicbor::Encode<C>,
 {
@@ -235,7 +244,7 @@ pub enum DRep {
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for DRep {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let variant = d.u16()?;
 
@@ -290,13 +299,13 @@ impl<C> minicbor::Encode<C> for DRep {
 #[derive(Debug)]
 pub struct Account {
     pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
-    pub pointers: Set<(u64, u64, u64)>,
+    pub pointers: SnapshotSet<(u64, u64, u64)>,
     pub pool: StrictMaybe<PoolId>,
     pub drep: StrictMaybe<DRep>,
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for Account {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         Ok(Account {
             rewards_and_deposit: d.decode_with(ctx)?,
@@ -308,48 +317,71 @@ impl<'b, C> minicbor::Decode<'b, C> for Account {
 }
 
 // -----------------------------------------------------------------------------
-// Type aliases for pool_params compatibility
+// Type decoders for snapshot compatibility
 // -----------------------------------------------------------------------------
 
 pub use crate::types::AddrKeyhash;
 pub use crate::types::ScriptHash;
-use crate::{Constitution, EpochBootstrapData, PoolId};
-/// Alias minicbor as cbor for pool_params module
-pub use minicbor as cbor;
 
-/// Coin amount (Lovelace)
-pub type Coin = u64;
+pub struct SnapshotContext {
+    pub network: NetworkId,
+}
 
-/// Reward account (stake address bytes) - wrapper to handle CBOR bytes encoding
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RewardAccount(pub Vec<u8>);
-
-impl<'b, C> minicbor::Decode<'b, C> for RewardAccount {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let bytes = d.bytes()?;
-        Ok(RewardAccount(bytes.to_vec()))
+impl AsRef<SnapshotContext> for SnapshotContext {
+    fn as_ref(&self) -> &Self {
+        self
     }
 }
 
-impl<C> minicbor::Encode<C> for RewardAccount {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
+struct SnapshotOption<T>(pub Option<T>);
+
+impl<'b, C, T> minicbor::Decode<'b, C> for SnapshotOption<T>
+where
+    T: minicbor::Decode<'b, C>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        match d.datatype()? {
+            Type::Null | Type::Undefined => {
+                d.skip()?;
+                Ok(SnapshotOption(None))
+            }
+            _ => {
+                let t = T::decode(d, ctx)?;
+                Ok(SnapshotOption(Some(t)))
+            }
+        }
     }
 }
 
-/// Unit interval (rational number for pool margin)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnitInterval {
-    pub numerator: u64,
-    pub denominator: u64,
+pub struct SnapshotPoolRegistration(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistration
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let _len = d.array()?;
+        Ok(Self(PoolRegistration {
+            operator: d.decode_with(ctx)?,
+            vrf_key_hash: d.decode_with(ctx)?,
+            pledge: d.decode_with(ctx)?,
+            cost: d.decode_with(ctx)?,
+            margin: SnapshotRatio::decode(d, ctx)?.0,
+            reward_account: SnapshotStakeAddress::decode(d, ctx)?.0,
+            pool_owners: SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
+                .0
+                .into_iter()
+                .map(|a| a.0)
+                .collect(),
+            relays: Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect(),
+            pool_metadata: SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0),
+        }))
+    }
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for UnitInterval {
+struct SnapshotRatio(pub Ratio);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         // UnitInterval might be tagged (tag 30 for rational)
         if matches!(d.datatype()?, Type::Tag) {
@@ -358,130 +390,48 @@ impl<'b, C> minicbor::Decode<'b, C> for UnitInterval {
         d.array()?;
         let numerator = d.u64()?;
         let denominator = d.u64()?;
-        Ok(UnitInterval {
+        Ok(Self(Ratio {
             numerator,
             denominator,
-        })
-    }
-}
-
-impl<C> minicbor::Encode<C> for UnitInterval {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.tag(minicbor::data::Tag::new(30))?;
-        e.array(2)?;
-        e.u64(self.numerator)?;
-        e.u64(self.denominator)?;
-        Ok(())
-    }
-}
-
-/// Nullable type (like Maybe but with explicit null vs undefined)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Nullable<T> {
-    Undefined,
-    Null,
-    Some(T),
-}
-
-impl<'b, C, T> minicbor::Decode<'b, C> for Nullable<T>
-where
-    T: minicbor::Decode<'b, C>,
-{
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        match d.datatype()? {
-            Type::Null => {
-                d.skip()?;
-                Ok(Nullable::Null)
-            }
-            Type::Undefined => {
-                d.skip()?;
-                Ok(Nullable::Undefined)
-            }
-            _ => {
-                let value = T::decode(d, ctx)?;
-                Ok(Nullable::Some(value))
-            }
-        }
-    }
-}
-
-impl<C, T> minicbor::Encode<C> for Nullable<T>
-where
-    T: minicbor::Encode<C>,
-{
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        match self {
-            Nullable::Undefined => e.undefined()?.ok(),
-            Nullable::Null => e.null()?.ok(),
-            Nullable::Some(v) => v.encode(e, ctx),
-        }
+        }))
     }
 }
 
 // Network types for pool relays
-pub type Port = u32;
+pub type SnapshotPort = u32;
 
-/// IPv4 address (4 bytes, encoded as CBOR bytes)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IPv4(pub Vec<u8>);
+struct SnapshotStakeAddress(pub StakeAddress);
 
-impl<'b, C> minicbor::Decode<'b, C> for IPv4 {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.bytes()?;
-        Ok(IPv4(bytes.to_vec()))
+        let bytes = bytes.to_vec();
+        Ok(Self(StakeAddress::from_binary(&bytes).map_err(|e| {
+            minicbor::decode::Error::message(e.to_string())
+        })?))
     }
 }
 
-impl<C> minicbor::Encode<C> for IPv4 {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
-    }
-}
+struct SnapshotStakeAddressFromCred(pub StakeAddress);
 
-/// IPv6 address (16 bytes, encoded as CBOR bytes)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IPv6(pub Vec<u8>);
-
-impl<'b, C> minicbor::Decode<'b, C> for IPv6 {
-    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.bytes()?;
-        Ok(IPv6(bytes.to_vec()))
+        let bytes = Hash::<28>::try_from(bytes)
+            .map_err(|e| minicbor::decode::Error::message(e.to_string()))?;
+        Ok(Self(StakeAddress::new(
+            StakeCredential::AddrKeyHash(bytes),
+            ctx.as_ref().network.clone(),
+        )))
     }
 }
 
-impl<C> minicbor::Encode<C> for IPv6 {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        _ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.bytes(&self.0)?;
-        Ok(())
-    }
-}
+struct SnapshotRelay(pub Relay);
 
-/// Pool relay types (for CBOR encoding/decoding)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Relay {
-    SingleHostAddr(Nullable<Port>, Nullable<IPv4>, Nullable<IPv6>),
-    SingleHostName(Nullable<Port>, String),
-    MultiHostName(String),
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for Relay {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotRelay {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let tag = d.u32()?;
@@ -489,85 +439,42 @@ impl<'b, C> minicbor::Decode<'b, C> for Relay {
         match tag {
             0 => {
                 // SingleHostAddr
-                let port = Nullable::<Port>::decode(d, ctx)?;
-                let ipv4 = Nullable::<IPv4>::decode(d, ctx)?;
-                let ipv6 = Nullable::<IPv6>::decode(d, ctx)?;
-                Ok(Relay::SingleHostAddr(port, ipv4, ipv6))
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
+                let ipv4 = Option::<Ipv4Addr>::decode(d, ctx)?;
+                let ipv6 = Option::<Ipv6Addr>::decode(d, ctx)?;
+                Ok(Self(Relay::SingleHostAddr(SingleHostAddr {
+                    port,
+                    ipv4,
+                    ipv6,
+                })))
             }
             1 => {
                 // SingleHostName
-                let port = Nullable::<Port>::decode(d, ctx)?;
-                let hostname = d.str()?.to_string();
-                Ok(Relay::SingleHostName(port, hostname))
+                let port = Option::<SnapshotPort>::decode(d, ctx)?.map(|p| p as u16);
+                let dns_name = d.str()?.to_string();
+                Ok(Self(Relay::SingleHostName(SingleHostName {
+                    port,
+                    dns_name,
+                })))
             }
             2 => {
                 // MultiHostName
-                let hostname = d.str()?.to_string();
-                Ok(Relay::MultiHostName(hostname))
+                let dns_name = d.str()?.to_string();
+                Ok(Self(Relay::MultiHostName(MultiHostName { dns_name })))
             }
             _ => Err(minicbor::decode::Error::message("Invalid relay tag")),
         }
     }
 }
 
-impl<C> minicbor::Encode<C> for Relay {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        match self {
-            Relay::SingleHostAddr(port, ipv4, ipv6) => {
-                e.array(4)?;
-                e.u32(0)?;
-                port.encode(e, ctx)?;
-                ipv4.encode(e, ctx)?;
-                ipv6.encode(e, ctx)?;
-                Ok(())
-            }
-            Relay::SingleHostName(port, hostname) => {
-                e.array(3)?;
-                e.u32(1)?;
-                port.encode(e, ctx)?;
-                e.str(hostname)?;
-                Ok(())
-            }
-            Relay::MultiHostName(hostname) => {
-                e.array(2)?;
-                e.u32(2)?;
-                e.str(hostname)?;
-                Ok(())
-            }
-        }
-    }
-}
+struct SnapshotPoolMetadata(pub PoolMetadata);
 
-/// Pool metadata (for CBOR encoding/decoding)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PoolMetadata {
-    pub url: String,
-    pub hash: Hash<32>,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for PoolMetadata {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let url = d.str()?.to_string();
-        let hash = Hash::<32>::decode(d, ctx)?;
-        Ok(PoolMetadata { url, hash })
-    }
-}
-
-impl<C> minicbor::Encode<C> for PoolMetadata {
-    fn encode<W: minicbor::encode::Write>(
-        &self,
-        e: &mut minicbor::Encoder<W>,
-        ctx: &mut C,
-    ) -> Result<(), minicbor::encode::Error<W::Error>> {
-        e.array(2)?;
-        e.str(&self.url)?;
-        self.hash.encode(e, ctx)?;
-        Ok(())
+        let hash = Hash::<32>::decode(d, ctx)?.to_vec();
+        Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }
 
@@ -581,7 +488,7 @@ pub struct DRepState {
     pub expiry: Epoch,
     pub anchor: StrictMaybe<Anchor>,
     pub deposit: Lovelace,
-    pub delegators: Set<StakeCredential>,
+    pub delegators: SnapshotSet<StakeCredential>,
 }
 
 impl<'b, C> minicbor::Decode<'b, C> for DRepState {
@@ -600,7 +507,7 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
         if matches!(d.datatype()?, Type::Tag) {
             d.tag()?; // skip the tag
         }
-        let delegators = Set::<StakeCredential>::decode(d, ctx)?;
+        let delegators = SnapshotSet::<StakeCredential>::decode(d, ctx)?;
 
         Ok(DRepState {
             expiry,
@@ -612,113 +519,14 @@ impl<'b, C> minicbor::Decode<'b, C> for DRepState {
 }
 
 // -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
-/// UTXO entry with transaction hash, index, address, and value
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UtxoEntry {
-    /// Transaction hash (hex-encoded)
-    pub tx_hash: String,
-    /// Output index
-    pub output_index: u64,
-    /// Hex encoded Cardano addresses
-    pub address: String,
-    /// Lovelace amount
-    pub value: u64,
-    /// Optional inline datum (hex-encoded CBOR)
-    pub datum: Option<String>,
-    /// Optional script reference (hex-encoded CBOR)
-    pub script_ref: Option<String>,
-}
-
-// -----------------------------------------------------------------------------
 // Ledger types for DState parsing
 // -----------------------------------------------------------------------------
-
-/// DRep credential (ledger format for CBOR decoding)
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DRepCredential {
-    AddrKeyhash(AddrKeyhash),
-    ScriptHash(ScriptHash),
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for DRepCredential {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        let variant = d.u16()?;
-
-        match variant {
-            0 => Ok(DRepCredential::AddrKeyhash(d.decode_with(ctx)?)),
-            1 => Ok(DRepCredential::ScriptHash(d.decode_with(ctx)?)),
-            _ => Err(minicbor::decode::Error::message(
-                "invalid variant id for DRepCredential",
-            )),
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Data Structures (based on OpenAPI schema)
-// -----------------------------------------------------------------------------
-
-/// Stake pool information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolInfo {
-    /// Bech32-encoded pool ID
-    pub pool_id: String,
-    /// Hex-encoded VRF key hash
-    pub vrf_key_hash: String,
-    /// Pledge amount in Lovelace
-    pub pledge: u64,
-    /// Fixed cost in Lovelace
-    pub cost: u64,
-    /// Pool margin (0.0 to 1.0)
-    pub margin: f64,
-    /// Bech32-encoded reward account
-    pub reward_account: String,
-    /// List of pool owner stake addresses
-    pub pool_owners: Vec<String>,
-    /// Pool relay information
-    pub relays: Vec<ApiRelay>,
-    /// Pool metadata (URL and hash)
-    pub pool_metadata: Option<ApiPoolMetadata>,
-    /// Optional retirement epoch
-    pub retirement_epoch: Option<u64>,
-}
-
-/// Pool relay information (for API/JSON output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub enum ApiRelay {
-    SingleHostAddr {
-        port: Option<u16>,
-        ipv4: Option<String>,
-        ipv6: Option<String>,
-    },
-    SingleHostName {
-        port: Option<u16>,
-        dns_name: String,
-    },
-    MultiHostName {
-        dns_name: String,
-    },
-}
-
-/// Pool metadata anchor (for API/JSON output)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiPoolMetadata {
-    /// IPFS or HTTP(S) URL
-    pub url: String,
-    /// Hex-encoded hash
-    pub hash: String,
-}
 
 /// DRep information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DRepInfo {
-    /// Bech32-encoded DRep ID
-    pub drep_id: String,
+    /// DRep credential
+    pub drep_id: DRepCredential,
     /// Lovelace deposit amount
     pub deposit: u64,
     /// Optional anchor (URL and hash)
@@ -749,34 +557,19 @@ pub struct AnchorInfo {
     pub data_hash: String,
 }
 
-/// Pot balances (treasury, reserves, deposits)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PotBalances {
-    /// Current reserves pot balance in Lovelace
-    pub reserves: u64,
-    /// Current treasury pot balance in Lovelace
-    pub treasury: u64,
-    /// Current deposits pot balance in Lovelace
-    pub deposits: u64,
-    /// Current fees accumulated in Lovelace
-    pub fees: u64,
-}
-
 /// Snapshot metadata extracted before streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
     /// Epoch number
     pub epoch: u64,
     /// Pot balances
-    pub pot_balances: PotBalances,
+    pub pot_balances: Pots,
     /// Total number of UTXOs (for progress tracking)
     pub utxo_count: Option<u64>,
     /// Block production statistics for previous epoch
-    pub blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
+    pub blocks_previous_epoch: Vec<PoolBlockProduction>,
     /// Block production statistics for current epoch
-    pub blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
-    /// Parsed snapshots (Mark, Set, Go, Fee)
-    pub snapshots: Option<SnapshotsInfo>,
+    pub blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -796,19 +589,41 @@ pub trait EpochCallback {
 /// Callback invoked with bulk stake pool data
 pub trait PoolCallback {
     /// Called once with all pool data
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()>;
+    fn on_pools(&mut self, spo_state: SPOState) -> Result<()>;
 }
 
-/// Callback invoked with bulk stake account data
-pub trait StakeCallback {
-    /// Called once with all account states
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()>;
+/// Data needed to bootstrap accounts state, parsed from the snapshot.
+/// This is a pure data structure - the publisher is responsible for
+/// converting it to the appropriate message type.
+#[derive(Debug, Clone)]
+pub struct AccountsBootstrapData {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
+    /// Treasury, reserves, and deposits
+    pub pots: Pots,
+    /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation.
+    /// Empty (default) for pre-Shelley eras.
+    pub snapshots: SnapshotsContainer,
+}
+
+/// Callback invoked with accounts bootstrap data
+pub trait AccountsCallback {
+    /// Called once with all data needed to bootstrap accounts state
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()>;
 }
 
 /// Callback invoked with bulk DRep data
 pub trait DRepCallback {
-    /// Called once with all DRep info
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()>;
+    /// Called once with all DRep data
+    fn on_dreps(&mut self, epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()>;
 }
 
 /// Callback invoked with bulk governance proposal data
@@ -822,6 +637,7 @@ pub trait GovernanceProtocolParametersCallback {
     /// Called once with all proposals
     fn on_gs_protocol_parameters(
         &mut self,
+        epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
@@ -832,7 +648,7 @@ pub trait GovernanceProtocolParametersCallback {
 pub trait SnapshotCallbacks:
     UtxoCallback
     + PoolCallback
-    + StakeCallback
+    + AccountsCallback
     + DRepCallback
     + GovernanceProtocolParametersCallback
     + ProposalCallback
@@ -855,11 +671,11 @@ struct ParsedMetadata {
     epoch: u64,
     treasury: u64,
     reserves: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
     utxo_position: u64,
 }
 
@@ -868,11 +684,11 @@ struct ParsedMetadataWithoutUtxoPosition {
     epoch: u64,
     treasury: u64,
     reserves: u64,
-    pools: Vec<PoolInfo>,
+    pools: SPOState,
     dreps: Vec<DRepInfo>,
     accounts: Vec<AccountState>,
-    blocks_previous_epoch: Vec<crate::types::PoolBlockProduction>,
-    blocks_current_epoch: Vec<crate::types::PoolBlockProduction>,
+    blocks_previous_epoch: Vec<PoolBlockProduction>,
+    blocks_current_epoch: Vec<PoolBlockProduction>,
 }
 
 // -----------------------------------------------------------------------------
@@ -948,9 +764,13 @@ impl StreamingSnapshotParser {
     ///   5: StakeDistr,
     /// ]
     /// ```
-    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C) -> Result<()> {
+    pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C, network: NetworkId) -> Result<()> {
         let file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
+
+        let mut ctx = SnapshotContext {
+            network: network.clone(),
+        };
 
         let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
 
@@ -995,6 +815,7 @@ impl StreamingSnapshotParser {
 
             // Extract epoch number [0]
             let epoch = decoder.u64().context("Failed to parse epoch number")?;
+            info!("Parsing snapshot for epoch {}", epoch);
 
             // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
             let blocks_previous_epoch =
@@ -1078,8 +899,8 @@ impl StreamingSnapshotParser {
                 Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
             // Parse PState [3][1][0][1] for pools
-            let pools =
-                Self::parse_pstate(&mut decoder).context("Failed to parse PState for pools")?;
+            let pools = Self::parse_pstate(&mut decoder, &mut ctx)
+                .context("Failed to parse PState for pools")?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
             // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
@@ -1099,25 +920,34 @@ impl StreamingSnapshotParser {
                 }
             }
 
-            // Convert to AccountState for API
+            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+            // Parse instant rewards (MIRs) and combine with regular rewards
+            // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
+            let instant_rewards = Self::parse_instant_rewards(&mut decoder)
+                .context("Failed to parse instant rewards")?;
+
+            // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
                 .into_iter()
                 .map(|(credential, account)| {
                     // Convert StakeCredential to stake address representation
-                    let stake_address = match &credential {
-                        StakeCredential::AddrKeyHash(hash) => {
-                            format!("stake_key_{}", hex::encode(hash))
-                        }
-                        StakeCredential::ScriptHash(hash) => {
-                            format!("stake_script_{}", hex::encode(hash))
-                        }
-                    };
+                    let stake_address = StakeAddress::new(credential.clone(), NetworkId::Mainnet);
 
                     // Extract rewards from rewards_and_deposit (first element of tuple)
-                    let rewards = match &account.rewards_and_deposit {
+                    let regular_rewards = match &account.rewards_and_deposit {
                         StrictMaybe::Just((reward, _deposit)) => *reward,
                         StrictMaybe::Nothing => 0,
                     };
+
+                    // Add instant rewards (MIRs) if any
+                    let mir_rewards = instant_rewards.get(&credential).copied().unwrap_or(0);
+                    let rewards = regular_rewards + mir_rewards;
 
                     // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
                     // PoolId is Hash<28>, we need to convert to Vec<u8>
@@ -1129,10 +959,10 @@ impl StreamingSnapshotParser {
                     // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
                     let delegated_drep = match &account.drep {
                         StrictMaybe::Just(drep) => Some(match drep {
-                            DRep::Key(hash) => crate::DRepChoice::Key(*hash),
-                            DRep::Script(hash) => crate::DRepChoice::Script(*hash),
-                            DRep::Abstain => crate::DRepChoice::Abstain,
-                            DRep::NoConfidence => crate::DRepChoice::NoConfidence,
+                            DRep::Key(hash) => DRepChoice::Key(*hash),
+                            DRep::Script(hash) => DRepChoice::Script(*hash),
+                            DRep::Abstain => DRepChoice::Abstain,
+                            DRep::NoConfidence => DRepChoice::NoConfidence,
                         }),
                         StrictMaybe::Nothing => None,
                     };
@@ -1140,8 +970,8 @@ impl StreamingSnapshotParser {
                     AccountState {
                         stake_address,
                         address_state: StakeAddressState {
-                            registered: false, // Accounts are registered by SPOState
-                            utxo_value: 0, // Not available in DState, would need to aggregate from UTxOs
+                            registered: true, // Accounts in DState are registered by definition
+                            utxo_value: 0,    // Will be populated from UTXO parsing
                             rewards,
                             delegated_spo,
                             delegated_drep,
@@ -1149,18 +979,6 @@ impl StreamingSnapshotParser {
                     }
                 })
                 .collect();
-
-            // Skip remaining DState fields (fut_gen_deleg, gen_deleg, instant_rewards)
-            // The UMap already handled all its internal elements including pointers
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
-            decoder.skip()?;
 
             // Navigate to UTxOState [3][1][1]
             let utxo_state_len = decoder
@@ -1199,8 +1017,9 @@ impl StreamingSnapshotParser {
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        let (utxo_count, bytes_consumed_from_file) = Self::stream_utxos(&mut utxo_file, callbacks)
-            .context("Failed to stream UTXOs with true streaming")?;
+        let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
+            Self::stream_utxos(&mut utxo_file, callbacks)
+                .context("Failed to stream UTXOs with true streaming")?;
 
         // After UTXOs, parse deposits from UTxOState[1]
         // Reset our file pointer to a position after UTXOs
@@ -1261,31 +1080,10 @@ impl StreamingSnapshotParser {
         // UTxOState = [utxos (already consumed), deposits, fees, gov_state, donations]
 
         // Parse deposits (UTxOState[1])
-        let deposits = match remainder_decoder.decode::<u64>() {
-            Ok(deposits_value) => {
-                info!(
-                    "    Successfully parsed deposits: {} lovelace",
-                    deposits_value
-                );
-                deposits_value
-            }
-            Err(e) => {
-                info!("    Failed to parse deposits: {}, using 0", e);
-                0
-            }
-        };
+        let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse fees (UTxOState[2])
-        let fees = match remainder_decoder.decode::<u64>() {
-            Ok(fees_value) => {
-                info!("    Successfully parsed fees: {} lovelace", fees_value);
-                fees_value as i64
-            }
-            Err(e) => {
-                info!("    Failed to parse fees: {}, using 0", e);
-                0
-            }
-        };
+        // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
+        let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         let (_root_params, _root_hard_fork, _root_cc, _root_constitution) = {
             // Epoch State / Ledger State / UTxO State / utxosGovState
@@ -1317,6 +1115,7 @@ impl StreamingSnapshotParser {
         let gs_future_pparams: ProtocolParameters = remainder_decoder.decode()?; // may be empty
 
         callbacks.on_gs_protocol_parameters(
+            epoch,
             gs_previous_pparams,
             gs_current_pparams,
             gs_future_pparams,
@@ -1355,50 +1154,131 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         remainder_decoder.skip()?;
 
-        // Finally, attempt to parse mark/set/go snapshots (EpochState[4])
+        // Parse mark/set/go snapshots (EpochState[2])
         let snapshots_result =
-            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, epoch);
+            Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
-        match &snapshots_result {
+        // Skip non_myopic (EpochState[3])
+        remainder_decoder.skip()?;
+
+        // Exit EpochState, now at NewEpochState level
+        // Parse pulsing_rew_update (NewEpochState[4]) to get reward snapshot
+        let reward_snapshot_rewards = Self::parse_pulsing_reward_update(&mut remainder_decoder)?;
+
+        // Convert block production data to HashMap<PoolId, usize> for snapshot processing
+        let blocks_prev_map: std::collections::HashMap<PoolId, usize> =
+            blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+        let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
+            blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
+
+        // Build pots for snapshot conversion
+        let pots = Pots {
+            reserves,
+            treasury,
+            deposits,
+        };
+
+        let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
-                info!("    Successfully parsed mark/set/go snapshots!");
-                // Call the raw snapshots callback
-                callbacks.on_snapshots(raw_snapshots.clone())?;
+                info!("Successfully parsed mark/set/go snapshots!");
+                // Convert raw snapshots to processed SnapshotsContainer
+                let processed = raw_snapshots.into_snapshots_container(
+                    epoch,
+                    &blocks_prev_map,
+                    &blocks_curr_map,
+                    pots.clone(),
+                    network.clone(),
+                );
+                info!(
+                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+                    processed.mark.spos.len(),
+                    processed.set.spos.len(),
+                    processed.go.spos.len()
+                );
+                callbacks.on_snapshots(processed.clone())?;
+                processed
             }
             Err(e) => {
                 info!("    Failed to parse snapshots: {}", e);
-                info!("    Continuing with empty snapshots...");
+                info!("    Using empty snapshots (pre-Shelley or parse error)...");
+                SnapshotsContainer::default()
             }
-        }
+        };
+
+        // Build pool registrations list for AccountsBootstrapMessage
+        let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
+        let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
+
+        info!(
+            "Pools: {} registered, {} retiring, {} DReps",
+            pool_registrations.len(),
+            retiring_pools.len(),
+            dreps.len()
+        );
+
+        // Convert DRepInfo to (credential, deposit) tuples
+        let drep_deposits: Vec<(DRepCredential, u64)> =
+            dreps.iter().map(|(cred, record)| (cred.clone(), record.deposit)).collect();
+
+        // Merge UTXO values and pulsing reward update rewards into accounts
+        // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
+        // added to DState rewards (accumulated rewards from previous epochs).
+        let mut pulsing_rewards_total: u64 = 0;
+        let accounts_with_utxo_values: Vec<AccountState> = accounts
+            .into_iter()
+            .map(|mut account| {
+                if let Some(&utxo_value) = stake_utxo_values.get(&account.stake_address.credential)
+                {
+                    account.address_state.utxo_value = utxo_value;
+                }
+                if let Some(&pulsing_reward) =
+                    reward_snapshot_rewards.get(&account.stake_address.credential)
+                {
+                    account.address_state.rewards += pulsing_reward;
+                    pulsing_rewards_total += pulsing_reward;
+                }
+                account
+            })
+            .collect();
+
+        // Calculate summary statistics
+        let total_utxo_value: u64 = stake_utxo_values.values().sum();
+        let total_rewards: u64 =
+            accounts_with_utxo_values.iter().map(|a| a.address_state.rewards).sum();
+        let delegated_count = accounts_with_utxo_values
+            .iter()
+            .filter(|a| a.address_state.delegated_spo.is_some())
+            .count();
+
+        info!(
+            "Accounts: {} total, {} delegated, {} ADA in UTXOs, {} ADA rewards ({} ADA from pulsing update)",
+            accounts_with_utxo_values.len(),
+            delegated_count,
+            total_utxo_value / 1_000_000,
+            total_rewards / 1_000_000,
+            pulsing_rewards_total / 1_000_000
+        );
+
+        // Build the accounts bootstrap data
+        let accounts_bootstrap_data = AccountsBootstrapData {
+            epoch,
+            accounts: accounts_with_utxo_values,
+            pools: pool_registrations,
+            retiring_pools,
+            dreps: drep_deposits,
+            pots: Pots {
+                reserves,
+                treasury,
+                deposits,
+            },
+            snapshots: bootstrap_snapshots,
+        };
 
         // Emit bulk callbacks
         callbacks.on_pools(pools)?;
-        callbacks.on_dreps(dreps)?;
-        callbacks.on_accounts(accounts)?;
+        callbacks.on_dreps(epoch, dreps)?;
+        callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
-
-        // Emit metadata callback with accurate deposits, fees, utxo count, and snapshots
-        let snapshots_info = match snapshots_result {
-            Ok(_raw_snapshots) => {
-                // For metadata, we can provide basic info without converting to API format
-                Some(SnapshotsInfo {
-                    mark: SnapshotInfo {
-                        name: "Mark".to_string(),
-                        sections_count: _raw_snapshots.mark.0.len() as u64,
-                    },
-                    set: SnapshotInfo {
-                        name: "Set".to_string(),
-                        sections_count: _raw_snapshots.set.0.len() as u64,
-                    },
-                    go: SnapshotInfo {
-                        name: "Go".to_string(),
-                        sections_count: _raw_snapshots.go.0.len() as u64,
-                    },
-                    fee: _raw_snapshots.fee,
-                })
-            }
-            Err(_) => None,
-        };
 
         let epoch_bootstrap =
             EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
@@ -1406,12 +1286,10 @@ impl StreamingSnapshotParser {
 
         let snapshot_metadata = SnapshotMetadata {
             epoch,
-            snapshots: snapshots_info,
-            pot_balances: PotBalances {
+            pot_balances: Pots {
                 reserves,
                 treasury,
                 deposits,
-                fees: fees as u64,
             },
             utxo_count: Some(utxo_count),
             blocks_previous_epoch,
@@ -1419,14 +1297,28 @@ impl StreamingSnapshotParser {
         };
         callbacks.on_metadata(snapshot_metadata)?;
 
-        // Emit completion callback
+        info!(
+            "Snapshot parsing complete: treasury {} ADA, reserves {} ADA, deposits {} ADA",
+            treasury / 1_000_000,
+            reserves / 1_000_000,
+            deposits / 1_000_000
+        );
+
         callbacks.on_complete()?;
 
         Ok(())
     }
 
     /// STREAMING: Process UTXOs with chunked buffering and incremental parsing
-    fn stream_utxos<C: UtxoCallback>(file: &mut File, callbacks: &mut C) -> Result<(u64, u64)> {
+    ///
+    /// Returns a tuple of:
+    /// - UTXO count
+    /// - Bytes consumed from file
+    /// - Map of stake credentials to accumulated UTXO values
+    fn stream_utxos<C: UtxoCallback>(
+        file: &mut File,
+        callbacks: &mut C,
+    ) -> Result<(u64, u64, HashMap<StakeCredential, u64>)> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
 
@@ -1439,6 +1331,9 @@ impl StreamingSnapshotParser {
         let mut total_bytes_processed = 0usize;
         let mut total_bytes_read_from_file = 0u64;
 
+        // Accumulate UTXO values by stake credential for SPDD generation
+        let mut stake_values: HashMap<StakeCredential, u64> = HashMap::new();
+
         // Read a larger initial buffer for better performance
         let mut chunk = vec![0u8; READ_CHUNK_SIZE];
         let initial_read = file.read(&mut chunk)?;
@@ -1448,16 +1343,8 @@ impl StreamingSnapshotParser {
 
         // Parse map header first
         let mut decoder = Decoder::new(&buffer);
-        let map_len = match decoder.map()? {
-            Some(len) => {
-                // Found CBOR map with "len" UTXO entries
-                len
-            }
-            None => {
-                // indefinite-length CBOR map
-                u64::MAX
-            }
-        };
+        // Use u64::MAX for indefinite-length CBOR maps
+        let map_len = (decoder.map()?).unwrap_or(u64::MAX);
 
         let header_consumed = decoder.position();
         buffer.drain(0..header_consumed);
@@ -1501,6 +1388,14 @@ impl StreamingSnapshotParser {
                         let bytes_consumed = entry_decoder.position();
                         let entry_size = bytes_consumed - position_before;
                         max_single_entry_size = max_single_entry_size.max(entry_size);
+
+                        // Track total UTXO value
+                        let coin = utxo.coin();
+
+                        // Accumulate UTXO value by stake credential for SPDD
+                        if let Some(stake_cred) = utxo.extract_stake_credential() {
+                            *stake_values.entry(stake_cred).or_insert(0) += coin;
+                        }
 
                         // Emit the UTXO
                         callbacks.on_utxo(utxo)?;
@@ -1609,7 +1504,7 @@ impl StreamingSnapshotParser {
         // This is the total bytes processed minus any remaining buffer content
         let bytes_consumed_from_file = total_bytes_read_from_file - buffer.len() as u64;
 
-        Ok((utxo_count, bytes_consumed_from_file))
+        Ok((utxo_count, bytes_consumed_from_file, stake_values))
     }
 
     /// Parse a single block production entry from a map (producer pool ID -> block count)
@@ -1617,9 +1512,7 @@ impl StreamingSnapshotParser {
     fn parse_single_block_production_entry(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<crate::types::PoolBlockProduction> {
-        use crate::types::PoolBlockProduction;
-
+    ) -> Result<PoolBlockProduction> {
         // Parse the pool ID (key) - stored as bytes (28 bytes for pool ID)
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
@@ -1641,7 +1534,7 @@ impl StreamingSnapshotParser {
     fn parse_blocks_with_epoch(
         decoder: &mut Decoder,
         epoch: u64,
-    ) -> Result<Vec<crate::types::PoolBlockProduction>> {
+    ) -> Result<Vec<PoolBlockProduction>> {
         // Blocks are typically encoded as an array or map
         match decoder.datatype().context("Failed to read blocks datatype")? {
             Type::Array | Type::ArrayIndef => {
@@ -1755,31 +1648,100 @@ impl StreamingSnapshotParser {
         }
     }
 
+    /// Parse instant rewards (MIRs) from DState
+    ///
+    /// instantaneous_rewards = [
+    ///   ir_reserves : { * credential_staking => coin },
+    ///   ir_treasury : { * credential_staking => coin },
+    ///   ir_delta_reserves : delta_coin,
+    ///   ir_delta_treasury : delta_coin,
+    /// ]
+    ///
+    /// Returns a combined map of all instant rewards (from both reserves and treasury)
+    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        let ir_len = decoder
+            .array()
+            .context("Failed to parse instant_rewards array")?
+            .ok_or_else(|| anyhow!("instant_rewards must be a definite-length array"))?;
+
+        if ir_len < 4 {
+            return Err(anyhow!(
+                "instant_rewards array too short: expected 4 elements, got {ir_len}"
+            ));
+        }
+
+        // Parse ir_reserves and ir_treasury: { * credential_staking => coin }
+        let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
+        let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
+
+        // Skip ir_delta_reserves and ir_delta_treasury (not needed for account balances)
+        decoder.skip()?;
+        decoder.skip()?;
+
+        // Combine rewards from both sources
+        let mut combined = ir_reserves;
+        for (credential, amount) in ir_treasury {
+            *combined.entry(credential).or_insert(0) += amount;
+        }
+
+        Ok(combined)
+    }
+
+    /// Parse pulsing_rew_update to extract reward information.
+    ///
+    /// The pulsing_rew_update is wrapped in a StrictMaybe, so we first check if it's
+    /// present before parsing using the PulsingRewardUpdate type.
+    ///
+    /// Returns a map of stake credentials to their total rewards (sum of all reward entries).
+    fn parse_pulsing_reward_update(decoder: &mut Decoder) -> Result<HashMap<StakeCredential, u64>> {
+        // Check if strict_maybe is empty or has content
+        match decoder.array()? {
+            Some(0) => return Ok(HashMap::new()),
+            Some(1) => {}
+            Some(other) => {
+                return Err(anyhow!(
+                    "Invalid strict_maybe length for pulsing_rew_update: {}",
+                    other
+                ));
+            }
+            None => {
+                return Err(anyhow!("pulsing_rew_update must be definite-length array"));
+            }
+        };
+
+        // Parse using the proper PulsingRewardUpdate type
+        let pulsing_update: PulsingRewardUpdate =
+            decoder.decode().context("Failed to decode PulsingRewardUpdate")?;
+
+        // Extract rewards based on variant, summing all reward entries per credential
+        let rewards = match pulsing_update {
+            PulsingRewardUpdate::Pulsing { snapshot } => snapshot
+                .leaders
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+            PulsingRewardUpdate::Complete { update } => update
+                .rewards
+                .0
+                .iter()
+                .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                .collect(),
+        };
+
+        Ok(rewards)
+    }
+
     /// Parse a single UTXO entry from the streaming buffer
     fn parse_single_utxo(decoder: &mut Decoder) -> Result<UtxoEntry> {
         // Parse key: TransactionInput (array [tx_hash, output_index])
         decoder.array().context("Failed to parse TxIn array")?;
-
-        let tx_hash_bytes = decoder.bytes().context("Failed to parse tx_hash")?;
-        let output_index = decoder.u64().context("Failed to parse output_index")?;
-        let tx_hash = hex::encode(tx_hash_bytes);
-
-        // Parse value: TransactionOutput
-        let (address, value) = Self::parse_transaction_output(decoder)
-            .context("Failed to parse transaction output")?;
-
-        Ok(UtxoEntry {
-            tx_hash,
-            output_index,
-            address,
-            value,
-            datum: None,      // TODO: Extract from TxOut
-            script_ref: None, // TODO: Extract from TxOut
-        })
+        let utxo: SnapshotUTxO = decoder.decode().context("Failed to parse UTxO")?;
+        Ok(utxo.0)
     }
 
     /// VState = [dreps_map, committee_state, dormant_epoch]
-    fn parse_vstate(decoder: &mut Decoder) -> Result<Vec<DRepInfo>> {
+    fn parse_vstate(decoder: &mut Decoder) -> Result<HashMap<DRepCredential, DRepRecord>> {
         // Parse VState array
         let vstate_len = decoder
             .array()
@@ -1795,31 +1757,23 @@ impl StreamingSnapshotParser {
         // Parse DReps map [0]: StakeCredential -> DRepState
         // Using minicbor's Decode trait - much simpler than manual parsing!
         let dreps_map: BTreeMap<StakeCredential, DRepState> = decoder.decode()?;
-
-        // Convert to DRepInfo for API compatibility
-        let dreps = dreps_map
+        let dreps: HashMap<DRepCredential, DRepRecord> = dreps_map
             .into_iter()
             .map(|(cred, state)| {
-                let drep_id = match cred {
-                    StakeCredential::AddrKeyHash(hash) => format!("drep_{}", hex::encode(hash)),
-                    StakeCredential::ScriptHash(hash) => {
-                        format!("drep_script_{}", hex::encode(hash))
-                    }
-                };
-
                 let anchor = match state.anchor {
-                    StrictMaybe::Just(a) => Some(AnchorInfo {
+                    StrictMaybe::Just(a) => Some(crate::Anchor {
                         url: a.url,
-                        data_hash: a.content_hash.to_string(),
+                        data_hash: a.content_hash.to_vec(),
                     }),
                     StrictMaybe::Nothing => None,
                 };
 
-                DRepInfo {
-                    drep_id,
+                let record = DRepRecord {
                     deposit: state.deposit,
                     anchor,
-                }
+                };
+
+                (cred, record)
             })
             .collect();
 
@@ -1833,7 +1787,7 @@ impl StreamingSnapshotParser {
 
     /// Parse PState to extract stake pools
     /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
-    pub fn parse_pstate(decoder: &mut Decoder) -> Result<Vec<PoolInfo>> {
+    pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
         // Parse PState array
         let pstate_len = decoder
             .array()
@@ -1852,17 +1806,17 @@ impl StreamingSnapshotParser {
             decoder.tag()?; // skip tag if present
         }
 
-        let mut pools_map = BTreeMap::new();
+        let mut pools = BTreeMap::new();
         match decoder.map()? {
             Some(pool_count) => {
                 // Definite-length map
                 for i in 0..pool_count {
-                    let pool_id: Hash<28> =
-                        decoder.decode().context(format!("Failed to decode pool ID #{i}"))?;
-                    let params: super::pool_params::PoolParams = decoder
-                        .decode()
-                        .context(format!("Failed to decode pool params for pool #{i}"))?;
-                    pools_map.insert(pool_id, params);
+                    let pool_id: PoolId =
+                        decoder.decode().context(format!("Failed to decode pool id #{i}"))?;
+                    let pool: SnapshotPoolRegistration = decoder
+                        .decode_with(ctx)
+                        .context(format!("Failed to decode pool for pool #{i}"))?;
+                    pools.insert(pool_id, pool.0);
                 }
             }
             None => {
@@ -1875,13 +1829,13 @@ impl StreamingSnapshotParser {
                             break;
                         }
                         _ => {
-                            let pool_id: Hash<28> = decoder
+                            let pool_id: PoolId = decoder
                                 .decode()
-                                .context(format!("Failed to decode pool ID #{count}"))?;
-                            let params: super::pool_params::PoolParams = decoder.decode().context(
-                                format!("Failed to decode pool params for pool #{count}"),
-                            )?;
-                            pools_map.insert(pool_id, params);
+                                .context(format!("Failed to decode pool id #{count}"))?;
+                            let pool: SnapshotPoolRegistration = decoder
+                                .decode_with(ctx)
+                                .context(format!("Failed to decode pool for pool #{count}"))?;
+                            pools.insert(pool_id, pool.0);
                             count += 1;
                         }
                     }
@@ -1893,235 +1847,25 @@ impl StreamingSnapshotParser {
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let _pools_updates: BTreeMap<Hash<28>, super::pool_params::PoolParams> =
-            decoder.decode()?;
+        let updates: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder.decode_with(ctx)?;
+        let updates = updates.into_iter().map(|(id, pool)| (id, pool.0)).collect();
 
         // Parse retiring map [2]: PoolId -> Epoch
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let pools_retirements: BTreeMap<Hash<28>, Epoch> = decoder.decode()?;
-
-        // Convert to PoolInfo for API compatibility
-        let pools = pools_map
-            .into_iter()
-            .map(|(pool_id, params)| {
-                // Convert relay types from ledger format to API format
-                let relays: Vec<ApiRelay> = params
-                    .relays
-                    .iter()
-                    .map(|relay| match relay {
-                        Relay::SingleHostAddr(port, ipv4, ipv6) => {
-                            let port_opt = match port {
-                                Nullable::Some(p) => u16::try_from(*p).ok(),
-                                _ => None,
-                            };
-                            let ipv4_opt = match ipv4 {
-                                Nullable::Some(bytes) if bytes.0.len() == 4 => Some(format!(
-                                    "{}.{}.{}.{}",
-                                    bytes.0[0], bytes.0[1], bytes.0[2], bytes.0[3]
-                                )),
-                                _ => None,
-                            };
-                            let ipv6_opt = match ipv6 {
-                                Nullable::Some(bytes) if bytes.0.len() == 16 => {
-                                    // Convert big-endian byte array to IPv6 string
-                                    let b = &bytes.0;
-                                    let addr = std::net::Ipv6Addr::from([
-                                        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
-                                        b[10], b[11], b[12], b[13], b[14], b[15],
-                                    ]);
-                                    Some(addr.to_string())
-                                }
-                                _ => None,
-                            };
-                            ApiRelay::SingleHostAddr {
-                                port: port_opt,
-                                ipv4: ipv4_opt,
-                                ipv6: ipv6_opt,
-                            }
-                        }
-                        Relay::SingleHostName(port, hostname) => {
-                            let port_opt = match port {
-                                Nullable::Some(p) => Some(*p as u16),
-                                _ => None,
-                            };
-                            ApiRelay::SingleHostName {
-                                port: port_opt,
-                                dns_name: hostname.clone(),
-                            }
-                        }
-                        Relay::MultiHostName(hostname) => ApiRelay::MultiHostName {
-                            dns_name: hostname.clone(),
-                        },
-                    })
-                    .collect();
-
-                // Convert metadata from ledger format to API format
-                let pool_metadata = match &params.metadata {
-                    Nullable::Some(meta) => Some(ApiPoolMetadata {
-                        url: meta.url.clone(),
-                        hash: meta.hash.to_string(),
-                    }),
-                    _ => None,
-                };
-
-                // Look up retirement epoch
-                let retirement_epoch = pools_retirements.get(&pool_id).copied();
-
-                PoolInfo {
-                    pool_id: pool_id.to_string(),
-                    vrf_key_hash: params.vrf.to_string(),
-                    pledge: params.pledge,
-                    cost: params.cost,
-                    margin: (params.margin.numerator as f64) / (params.margin.denominator as f64),
-                    reward_account: hex::encode(&params.reward_account.0),
-                    pool_owners: params.owners.iter().map(|h| h.to_string()).collect(),
-                    relays,
-                    pool_metadata,
-                    retirement_epoch,
-                }
-            })
-            .collect();
+        let retiring: BTreeMap<PoolId, Epoch> = decoder.decode()?;
 
         // Skip any remaining PState elements (like deposits)
         for i in 3..pstate_len {
             decoder.skip().context(format!("Failed to skip PState[{i}]"))?;
         }
 
-        Ok(pools)
-    }
-
-    /// Stream UTXOs with per-entry callback
-    ///
-    /// Parse a single TxOut from the CBOR decoder
-    fn parse_transaction_output(dec: &mut Decoder) -> Result<(String, u64)> {
-        // TxOut is typically an array [address, value, ...]
-        // or a map for Conway with optional fields
-
-        // Try array format first (most common)
-        match dec.datatype().context("Failed to read TxOut datatype")? {
-            Type::Array | Type::ArrayIndef => {
-                let arr_len = dec.array().context("Failed to parse TxOut array")?;
-                if arr_len == Some(0) {
-                    return Err(anyhow!("empty TxOut array"));
-                }
-
-                // Element 0: Address (bytes)
-                let address_bytes = dec.bytes().context("Failed to parse address bytes")?;
-                let hex_address = hex::encode(address_bytes);
-
-                // Element 1: Value (coin or map)
-                let value = match dec.datatype().context("Failed to read value datatype")? {
-                    Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        // Simple ADA-only value
-                        dec.u64().context("Failed to parse u64 value")?
-                    }
-                    Type::Array | Type::ArrayIndef => {
-                        // Multi-asset: [coin, assets_map]
-                        dec.array().context("Failed to parse value array")?;
-                        let coin = dec.u64().context("Failed to parse coin amount")?;
-                        // Skip the assets map
-                        dec.skip().context("Failed to skip assets map")?;
-                        coin
-                    }
-                    _ => {
-                        return Err(anyhow!("unexpected value type"));
-                    }
-                };
-
-                // Skip remaining fields (datum, script_ref)
-                if let Some(len) = arr_len {
-                    for _ in 2..len {
-                        dec.skip().context("Failed to skip TxOut field")?;
-                    }
-                }
-
-                Ok((hex_address, value))
-            }
-            Type::Map | Type::MapIndef => {
-                // Map format (Conway with optional fields)
-                // Map keys: 0=address, 1=value, 2=datum, 3=script_ref
-                let map_len = dec.map().context("Failed to parse TxOut map")?;
-
-                let mut address = String::new();
-                let mut value = 0u64;
-                let mut found_address = false;
-                let mut found_value = false;
-
-                let entries = map_len.unwrap_or(4); // Assume max 4 entries if indefinite
-                for _ in 0..entries {
-                    // Check for break in indefinite map
-                    if map_len.is_none() && matches!(dec.datatype(), Ok(Type::Break)) {
-                        dec.skip().ok(); // consume break
-                        break;
-                    }
-
-                    // Read key
-                    let key = match dec.u32() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            // Skip both key and value if key is not u32
-                            dec.skip().ok();
-                            dec.skip().ok();
-                            continue;
-                        }
-                    };
-
-                    // Read value based on key
-                    match key {
-                        0 => {
-                            // Address
-                            if let Ok(addr_bytes) = dec.bytes() {
-                                address = hex::encode(addr_bytes);
-                                found_address = true;
-                            } else {
-                                dec.skip().ok();
-                            }
-                        }
-                        1 => {
-                            // Value (coin or multi-asset)
-                            match dec.datatype() {
-                                Ok(Type::U8) | Ok(Type::U16) | Ok(Type::U32) | Ok(Type::U64) => {
-                                    if let Ok(coin) = dec.u64() {
-                                        value = coin;
-                                        found_value = true;
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                Ok(Type::Array) | Ok(Type::ArrayIndef) => {
-                                    // Multi-asset: [coin, assets_map]
-                                    if dec.array().is_ok() {
-                                        if let Ok(coin) = dec.u64() {
-                                            value = coin;
-                                            found_value = true;
-                                        }
-                                        dec.skip().ok(); // skip assets map
-                                    } else {
-                                        dec.skip().ok();
-                                    }
-                                }
-                                _ => {
-                                    dec.skip().ok();
-                                }
-                            }
-                        }
-                        _ => {
-                            // datum (2), script_ref (3), or unknown - skip
-                            dec.skip().ok();
-                        }
-                    }
-                }
-
-                if found_address && found_value {
-                    Ok((address, value))
-                } else {
-                    Err(anyhow!("map-based TxOut missing required fields"))
-                }
-            }
-            _ => Err(anyhow!("unexpected TxOut type")),
-        }
+        Ok(SPOState {
+            pools,
+            updates,
+            retiring,
+        })
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
@@ -2133,98 +1877,36 @@ impl StreamingSnapshotParser {
     /// Epoch State / Snapshots / Fee
     fn parse_snapshots_with_hybrid_approach(
         decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
         _epoch: u64,
     ) -> Result<RawSnapshotsContainer> {
-        info!("    Starting snapshots parsing...");
-
-        // SnapShots = [Mark, Set, Go, Fee] or possibly different structure
         let snapshots_len = decoder
             .array()
             .context("Failed to parse SnapShots array")?
             .ok_or_else(|| anyhow!("SnapShots must be a definite-length array"))?;
 
-        // Investigate actual structure before enforcing 3 elements
         if snapshots_len != 4 {
             return Err(anyhow!(
                 "SnapShots array must have exactly 4 elements (Mark, Set, Go, Fee), got {snapshots_len}"
             ));
         }
 
-        info!("    SnapShots array has {snapshots_len} elements (Mark, Set, Go, Fee)");
+        // Parse Mark, Set, Go snapshots
+        let mark_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
+        let set_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
+        let go_snapshot =
+            RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
+        let fee = decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse each snapshot using snapshot.rs functions
-        let mut parsed_snapshots = Vec::new();
-
-        // Parse Mark snapshot [0]
-        info!("    Parsing Mark snapshot...");
-        let mark_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Mark")
-            .context("Failed to parse Mark snapshot")?;
-        parsed_snapshots.push(mark_snapshot);
-
-        // Parse Set snapshot [1]
-        info!("    Parsing Set snapshot...");
-        let set_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Set")
-            .context("Failed to parse Set snapshot")?;
-        parsed_snapshots.push(set_snapshot);
-
-        // Parse Go snapshot [2]
-        info!("    Parsing Go snapshot...");
-        let go_snapshot = super::mark_set_go::Snapshot::parse_single_snapshot(decoder, "Go")
-            .context("Failed to parse Go snapshot")?;
-        parsed_snapshots.push(go_snapshot);
-
-        // Parse Fee snapshot [3]
-        info!("    Parsing Fee snapshot...");
-        let fee_value = match decoder.decode::<u64>() {
-            Ok(fee) => {
-                info!("    Successfully parsed Fee value: {}", fee);
-                fee
-            }
-            Err(e) => {
-                info!("    Failed to parse Fee value: {}, using 0", e);
-                0
-            }
-        };
-
-        info!(
-            "    All four snapshots parsed successfully with hybrid approach (Mark, Set, Go, Fee)"
-        );
-
-        // Create raw snapshots container with VMap data directly
-        let raw_snapshots = RawSnapshotsContainer {
-            mark: parsed_snapshots[0].snapshot_stake.clone(),
-            set: parsed_snapshots[1].snapshot_stake.clone(),
-            go: parsed_snapshots[2].snapshot_stake.clone(),
-            fee: fee_value,
-        };
-
-        info!("    Raw snapshots container created with VMap data");
-
-        // Return only the raw snapshots - no more API compatibility needed
-        Ok(raw_snapshots)
+        Ok(RawSnapshotsContainer {
+            mark: mark_snapshot,
+            set: set_snapshot,
+            go: go_snapshot,
+            fee,
+        })
     }
-}
-
-/// Information about a parsed snapshot (Mark, Set, or Go)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotInfo {
-    /// Name of the snapshot (Mark, Set, or Go)
-    pub name: String,
-    /// Number of sections in the snapshot
-    pub sections_count: u64,
-}
-
-/// Information about all four snapshots (Mark, Set, Go, Fee)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SnapshotsInfo {
-    /// Mark snapshot information
-    pub mark: SnapshotInfo,
-    /// Set snapshot information
-    pub set: SnapshotInfo,
-    /// Go snapshot information
-    pub go: SnapshotInfo,
-    /// Fee value from the snapshots
-    pub fee: u64,
 }
 
 // -----------------------------------------------------------------------------
@@ -2236,9 +1918,9 @@ pub struct SnapshotsInfo {
 pub struct CollectingCallbacks {
     pub metadata: Option<SnapshotMetadata>,
     pub utxos: Vec<UtxoEntry>,
-    pub pools: Vec<PoolInfo>,
+    pub pools: SPOState,
     pub accounts: Vec<AccountState>,
-    pub dreps: Vec<DRepInfo>,
+    pub dreps: HashMap<DRepCredential, DRepRecord>,
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
@@ -2262,21 +1944,21 @@ impl EpochCallback for CollectingCallbacks {
 }
 
 impl PoolCallback for CollectingCallbacks {
-    fn on_pools(&mut self, pools: Vec<PoolInfo>) -> Result<()> {
+    fn on_pools(&mut self, pools: SPOState) -> Result<()> {
         self.pools = pools;
         Ok(())
     }
 }
 
-impl StakeCallback for CollectingCallbacks {
-    fn on_accounts(&mut self, accounts: Vec<AccountState>) -> Result<()> {
-        self.accounts = accounts;
+impl AccountsCallback for CollectingCallbacks {
+    fn on_accounts(&mut self, data: AccountsBootstrapData) -> Result<()> {
+        self.accounts = data.accounts;
         Ok(())
     }
 }
 
 impl DRepCallback for CollectingCallbacks {
-    fn on_dreps(&mut self, dreps: Vec<DRepInfo>) -> Result<()> {
+    fn on_dreps(&mut self, _epoch: u64, dreps: HashMap<DRepCredential, DRepRecord>) -> Result<()> {
         self.dreps = dreps;
         Ok(())
     }
@@ -2292,10 +1974,12 @@ impl ProposalCallback for CollectingCallbacks {
 impl GovernanceProtocolParametersCallback for CollectingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
+        _epoch: u64,
         gs_previous_params: ProtocolParameters,
         gs_current_params: ProtocolParameters,
         gs_future_params: ProtocolParameters,
     ) -> Result<()> {
+        // epoch is already stored in metadata
         self.gs_protocol_previous_parameters = Some(gs_previous_params);
         self.gs_protocol_current_parameters = Some(gs_current_params);
         self.gs_protocol_future_parameters = Some(gs_future_params);
@@ -2315,13 +1999,13 @@ impl SnapshotCallbacks for CollectingCallbacks {
 }
 
 impl SnapshotsCallback for CollectingCallbacks {
-    fn on_snapshots(&mut self, snapshots: RawSnapshotsContainer) -> Result<()> {
+    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
-            "CollectingCallbacks: Received raw snapshots data with {} mark, {} set, {} go entries",
-            snapshots.mark.0.len(),
-            snapshots.set.0.len(),
-            snapshots.go.0.len()
+            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
+            snapshots.mark.spos.len(),
+            snapshots.set.spos.len(),
+            snapshots.go.spos.len()
         );
         Ok(())
     }
@@ -2329,6 +2013,8 @@ impl SnapshotsCallback for CollectingCallbacks {
 
 #[cfg(test)]
 mod tests {
+    use crate::{Address, NativeAssets, TxHash, UTXOValue, UTxOIdentifier, Value};
+
     use super::*;
 
     #[test]
@@ -2339,16 +2025,14 @@ mod tests {
         callbacks
             .on_metadata(SnapshotMetadata {
                 epoch: 507,
-                pot_balances: PotBalances {
+                pot_balances: Pots {
                     reserves: 1000000,
                     treasury: 2000000,
                     deposits: 500000,
-                    fees: 100000,
                 },
                 utxo_count: Some(100),
                 blocks_previous_epoch: Vec::new(),
                 blocks_current_epoch: Vec::new(),
-                snapshots: None,
             })
             .unwrap();
 
@@ -2361,16 +2045,20 @@ mod tests {
         // Test UTXO callback
         callbacks
             .on_utxo(UtxoEntry {
-                tx_hash: "abc123".to_string(),
-                output_index: 0,
-                address: "addr1...".to_string(),
-                value: 5000000,
-                datum: None,
-                script_ref: None,
+                id: UTxOIdentifier::new(TxHash::new(<[u8; 32]>::default()), 0),
+                value: UTXOValue {
+                    address: Address::None,
+                    value: Value {
+                        lovelace: 5000000,
+                        assets: NativeAssets::default(),
+                    },
+                    datum: None,
+                    reference_script: None,
+                },
             })
             .unwrap();
 
         assert_eq!(callbacks.utxos.len(), 1);
-        assert_eq!(callbacks.utxos[0].value, 5000000);
+        assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
     }
 }

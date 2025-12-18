@@ -2,10 +2,14 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::crypto::keyhash_224;
+use crate::drep::{
+    Anchor, DRepChoice, DRepDeregistration, DRepRegistration, DRepUpdate, DRepVotingThresholds,
+};
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
 use crate::{
-    address::{Address, ShelleyAddress, StakeAddress},
+    address::{Address, ShelleyAddress, ShelleyAddressDelegationPart, StakeAddress},
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
 };
@@ -204,6 +208,12 @@ pub enum BlockIntent {
     ValidateAndApply = BlockIntent::Validate.bits | BlockIntent::Apply.bits, // Validate and apply block
 }
 
+impl BlockIntent {
+    pub fn do_validation(&self) -> bool {
+        (*self & BlockIntent::Validate) == BlockIntent::Validate
+    }
+}
+
 /// Block info, shared across multiple messages
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockInfo {
@@ -257,6 +267,12 @@ impl PartialOrd for BlockInfo {
 }
 
 impl BlockInfo {
+    pub fn with_intent(&self, intent: BlockIntent) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.intent = intent;
+        copy
+    }
+
     pub fn is_at_tip(&self) -> bool {
         // The slot of a newly-reported block can be later than the slot of the tip.
         // This is because the tip is the most recent slot with a _validated_ block,
@@ -274,6 +290,17 @@ pub struct TxUTxODeltas {
     // Created and spent UTxOs
     pub inputs: Vec<UTxOIdentifier>,
     pub outputs: Vec<TxOutput>,
+
+    // State needed for validation
+    // This is missing UTxO Authors
+    pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
+    pub script_hashes_needed: Option<HashSet<ScriptHash>>,
+    // From witnesses
+    pub vkey_hashes_provided: Option<Vec<KeyHash>>,
+    // NOTE:
+    // This includes only native scripts
+    // missing Plutus Scripts
+    pub script_hashes_provided: Option<Vec<ScriptHash>>,
 }
 
 /// Individual address balance change
@@ -348,7 +375,7 @@ impl fmt::Display for RewardType {
     }
 }
 
-pub type PolicyId = [u8; 28];
+pub type PolicyId = Hash<28>;
 pub type NativeAssets = Vec<(PolicyId, Vec<NativeAsset>)>;
 pub type NativeAssetsDelta = Vec<(PolicyId, Vec<NativeAssetDelta>)>;
 pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
@@ -436,10 +463,169 @@ pub enum Datum {
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum ReferenceScript {
-    Native(Vec<u8>),
+    Native(NativeScript),
     PlutusV1(Vec<u8>),
     PlutusV2(Vec<u8>),
     PlutusV3(Vec<u8>),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum NativeScript {
+    ScriptPubkey(AddrKeyhash),
+    ScriptAll(Vec<NativeScript>),
+    ScriptAny(Vec<NativeScript>),
+    ScriptNOfK(u32, Vec<NativeScript>),
+    InvalidBefore(u64),
+    InvalidHereafter(u64),
+}
+
+impl<'b, C> minicbor::decode::Decode<'b, C> for NativeScript {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let size = d.array()?;
+
+        let assert_size = |expected| {
+            // NOTE: unwrap_or allows for indefinite arrays.
+            if expected != size.unwrap_or(expected) {
+                return Err(minicbor::decode::Error::message(
+                    "unexpected array size in NativeScript",
+                ));
+            }
+            Ok(())
+        };
+
+        let variant = d.u32()?;
+
+        let script = match variant {
+            0 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptPubkey(d.decode_with(ctx)?))
+            }
+            1 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAll(d.decode_with(ctx)?))
+            }
+            2 => {
+                assert_size(2)?;
+                Ok(NativeScript::ScriptAny(d.decode_with(ctx)?))
+            }
+            3 => {
+                assert_size(3)?;
+                Ok(NativeScript::ScriptNOfK(
+                    d.decode_with(ctx)?,
+                    d.decode_with(ctx)?,
+                ))
+            }
+            4 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidBefore(d.decode_with(ctx)?))
+            }
+            5 => {
+                assert_size(2)?;
+                Ok(NativeScript::InvalidHereafter(d.decode_with(ctx)?))
+            }
+            _ => Err(minicbor::decode::Error::message(
+                "unknown variant id for native script",
+            )),
+        }?;
+
+        if size.is_none() {
+            let next = d.datatype()?;
+            if next != minicbor::data::Type::Break {
+                return Err(minicbor::decode::Error::type_mismatch(next));
+            }
+        }
+
+        Ok(script)
+    }
+}
+
+impl<C> minicbor::encode::Encode<C> for NativeScript {
+    fn encode<W: minicbor::encode::Write>(
+        &self,
+        e: &mut minicbor::Encoder<W>,
+        ctx: &mut C,
+    ) -> Result<(), minicbor::encode::Error<W::Error>> {
+        match self {
+            NativeScript::ScriptPubkey(v) => {
+                e.array(2)?;
+                e.encode_with(0, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAll(v) => {
+                e.array(2)?;
+                e.encode_with(1, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptAny(v) => {
+                e.array(2)?;
+                e.encode_with(2, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::ScriptNOfK(a, b) => {
+                e.array(3)?;
+                e.encode_with(3, ctx)?;
+                e.encode_with(a, ctx)?;
+                e.encode_with(b, ctx)?;
+            }
+            NativeScript::InvalidBefore(v) => {
+                e.array(2)?;
+                e.encode_with(4, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+            NativeScript::InvalidHereafter(v) => {
+                e.array(2)?;
+                e.encode_with(5, ctx)?;
+                e.encode_with(v, ctx)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl NativeScript {
+    pub fn compute_hash(&self) -> ScriptHash {
+        let mut data = vec![0u8];
+        let raw_bytes = minicbor::to_vec(self).expect("Failed to encode NativeScript to CBOR");
+        data.extend_from_slice(raw_bytes.as_slice());
+        ScriptHash::from(keyhash_224(&data))
+    }
+
+    pub fn eval(
+        &self,
+        vkey_hashes_provided: &HashSet<KeyHash>,
+        low_bnd: Option<u64>,
+        upp_bnd: Option<u64>,
+    ) -> bool {
+        match self {
+            Self::ScriptAll(scripts) => {
+                scripts.iter().all(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptAny(scripts) => {
+                scripts.iter().any(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+            }
+            Self::ScriptPubkey(hash) => vkey_hashes_provided.contains(hash),
+            Self::ScriptNOfK(val, scripts) => {
+                let count = scripts
+                    .iter()
+                    .map(|script| script.eval(vkey_hashes_provided, low_bnd, upp_bnd))
+                    .fold(0, |x, y| x + y as u32);
+                count >= *val
+            }
+            Self::InvalidBefore(val) => {
+                match low_bnd {
+                    Some(time) => *val <= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+            Self::InvalidHereafter(val) => {
+                match upp_bnd {
+                    Some(time) => *val >= time,
+                    None => false, // as per mary-ledger.pdf, p.20
+                }
+            }
+        }
+    }
 }
 
 /// Value (lovelace + multiasset)
@@ -645,6 +831,46 @@ pub struct UTXOValue {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl UTXOValue {
+    /// Get the coin (lovelace) value
+    pub fn coin(&self) -> u64 {
+        self.value.lovelace
+    }
+
+    /// Get the address as raw bytes
+    pub fn address_bytes(&self) -> Vec<u8> {
+        match &self.address {
+            Address::Shelley(shelley) => shelley.to_bytes_key(),
+            Address::Byron(byron) => byron.payload.clone(),
+            Address::Stake(stake) => stake.to_binary(),
+            Address::None => Vec::new(),
+        }
+    }
+
+    /// Extract the stake credential from the address, if present.
+    ///
+    /// Returns `Some(StakeCredential)` for Shelley addresses that have
+    /// a stake key or script hash delegation. Returns `None` for:
+    /// - Byron addresses
+    /// - Enterprise addresses (no delegation)
+    /// - Pointer addresses (delegation is a pointer, not a credential)
+    /// - Stake/reward addresses
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        match &self.address {
+            Address::Shelley(shelley) => match &shelley.delegation {
+                ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                    Some(StakeCredential::AddrKeyHash(*hash))
+                }
+                ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                    Some(StakeCredential::ScriptHash(*hash))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// Transaction output (UTXO)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxOutput {
@@ -683,7 +909,7 @@ declare_hash_type_with_bech32!(PoolId, 28, "pool");
 
 declare_hash_type_with_bech32!(ConstitutionalCommitteeKeyHash, 28, "cc_hot");
 declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_script");
-declare_hash_type_with_bech32!(DrepKeyHash, 28, "drep");
+declare_hash_type_with_bech32!(DRepKeyHash, 28, "drep");
 declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
 /// Data hash used for metadata, anchors (SHA256)
@@ -730,6 +956,12 @@ impl TxIdentifier {
     }
 }
 
+impl Display for TxIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.block_number(), self.tx_index())
+    }
+}
+
 // Full UTXO identifier as used in the outside world, with TX hash and output index
 #[derive(
     Debug,
@@ -759,6 +991,11 @@ impl UTxOIdentifier {
         }
     }
 
+    /// Get the transaction hash as a hex string
+    pub fn tx_hash_hex(&self) -> String {
+        self.tx_hash.to_string()
+    }
+
     pub fn to_bytes(&self) -> [u8; 34] {
         let mut buf = [0u8; 34];
         buf[..32].copy_from_slice(self.tx_hash.as_inner());
@@ -770,6 +1007,32 @@ impl UTxOIdentifier {
 impl Display for UTxOIdentifier {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}#{}", self.tx_hash, self.output_index)
+    }
+}
+
+pub type VKey = Hash<32>;
+pub type Signature = Hash<64>;
+
+/// VKey Witness
+#[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct VKeyWitness {
+    pub vkey: VKey,
+    pub signature: Signature,
+}
+
+impl VKeyWitness {
+    pub fn new(vkey: VKey, signature: Signature) -> Self {
+        Self { vkey, signature }
+    }
+
+    pub fn key_hash(&self) -> KeyHash {
+        keyhash_224(self.vkey.as_ref())
+    }
+}
+
+impl Display for VKeyWitness {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "vkey={}, signature={}", self.vkey, self.signature)
     }
 }
 
@@ -815,6 +1078,36 @@ impl Display for Point {
 /// Amount of Ada, in Lovelace
 pub type Lovelace = u64;
 pub type LovelaceDelta = i64;
+
+/// Global 'pot' account state (treasury, reserves, deposits)
+#[derive(Debug, Default, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Pots {
+    /// Unallocated reserves
+    pub reserves: Lovelace,
+
+    /// Treasury
+    pub treasury: Lovelace,
+
+    /// Deposits
+    pub deposits: Lovelace,
+}
+
+/// Registration change kind for stake addresses
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum RegistrationChangeKind {
+    Registered,
+    Deregistered,
+}
+
+/// Registration change on a stake address during an epoch
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegistrationChange {
+    /// Stake address
+    pub address: StakeAddress,
+
+    /// Change type
+    pub kind: RegistrationChangeKind,
+}
 
 /// Rational number = numerator / denominator
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
@@ -1278,22 +1571,6 @@ pub struct Deregistration {
     pub refund: Lovelace,
 }
 
-/// DRepChoice (=CDDL drep, badly named)
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum DRepChoice {
-    /// Address key
-    Key(KeyHash),
-
-    /// Script key
-    Script(KeyHash),
-
-    /// Abstain
-    Abstain,
-
-    /// No confidence
-    NoConfidence,
-}
-
 /// Vote delegation (simple, existing registration) = vote_deleg_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VoteDelegation {
@@ -1361,82 +1638,8 @@ pub struct StakeRegistrationAndStakeAndVoteDelegation {
     pub deposit: Lovelace,
 }
 
-/// Anchor
-#[serde_as]
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Anchor {
-    /// Metadata URL
-    pub url: String,
-
-    /// Metadata hash
-    #[serde_as(as = "Hex")]
-    pub data_hash: DataHash,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for Anchor {
-    fn decode(
-        d: &mut minicbor::Decoder<'b>,
-        _ctx: &mut C,
-    ) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-
-        // URL can be either bytes or text string (snapshot format uses bytes)
-        let url = match d.datatype()? {
-            minicbor::data::Type::Bytes => {
-                let url_bytes = d.bytes()?;
-                String::from_utf8_lossy(url_bytes).to_string()
-            }
-            minicbor::data::Type::String => d.str()?.to_string(),
-            _ => {
-                return Err(minicbor::decode::Error::message(
-                    "Expected bytes or string for Anchor URL",
-                ))
-            }
-        };
-
-        // data_hash is encoded as direct bytes, not an array
-        let data_hash = d.bytes()?.to_vec();
-
-        Ok(Self { url, data_hash })
-    }
-}
-
-pub type DRepCredential = Credential;
-
-/// DRep Registration = reg_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistration {
-    /// DRep credential
-    pub credential: DRepCredential,
-
-    /// Deposit paid
-    pub deposit: Lovelace,
-
-    /// Optional anchor
-    pub anchor: Option<Anchor>,
-}
-
-/// DRep Deregistration = unreg_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepDeregistration {
-    /// DRep credential
-    pub credential: DRepCredential,
-
-    /// Deposit to refund
-    pub refund: Lovelace,
-}
-
-/// DRep Update = update_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepUpdate {
-    /// DRep credential
-    pub credential: DRepCredential,
-
-    /// Optional anchor
-    pub anchor: Option<Anchor>,
-}
-
 pub type CommitteeCredential = Credential;
+pub use crate::drep::DRepCredential;
 
 /// Authorise a committee hot credential
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1596,30 +1799,6 @@ pub struct PoolVotingThresholds {
     pub security_voting_threshold: RationalNumber,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
-pub struct DRepVotingThresholds {
-    #[n(0)]
-    pub motion_no_confidence: RationalNumber,
-    #[n(1)]
-    pub committee_normal: RationalNumber,
-    #[n(2)]
-    pub committee_no_confidence: RationalNumber,
-    #[n(3)]
-    pub update_constitution: RationalNumber,
-    #[n(4)]
-    pub hard_fork_initiation: RationalNumber,
-    #[n(5)]
-    pub pp_network_group: RationalNumber,
-    #[n(6)]
-    pub pp_economic_group: RationalNumber,
-    #[n(7)]
-    pub pp_technical_group: RationalNumber,
-    #[n(8)]
-    pub pp_governance_group: RationalNumber,
-    #[n(9)]
-    pub treasury_withdrawal: RationalNumber,
-}
-
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SoftForkRule {
     pub init_thd: u64,
@@ -1661,7 +1840,7 @@ pub struct HeavyDelegate {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GenesisDelegate {
     #[serde_as(as = "Hex")]
     pub delegate: Hash<28>,
@@ -1669,8 +1848,11 @@ pub struct GenesisDelegate {
     pub vrf: VrfKeyHash,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisDelegates(pub BTreeMap<GenesisKeyhash, GenesisDelegate>);
+#[serde_as]
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct GenesisDelegates(
+    #[serde_as(as = "BTreeMap<Hex, _>")] pub BTreeMap<GenesisKeyhash, GenesisDelegate>,
+);
 
 impl TryFrom<Vec<(&str, (&str, &str))>> for GenesisDelegates {
     type Error = anyhow::Error;
@@ -1899,7 +2081,7 @@ pub struct AlonzoBabbageUpdateProposal {
     pub enactment_epoch: u64,
 }
 
-#[derive(Serialize, PartialEq, Deserialize, Debug, Clone)]
+#[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
@@ -1960,21 +2142,21 @@ impl Committee {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParameterChangeAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_param_update: Box<ProtocolParamUpdate>,
     pub script_hash: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HardForkInitiationAction {
     pub previous_action_id: Option<GovActionId>,
     pub protocol_version: protocol_params::ProtocolVersion,
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TreasuryWithdrawalsAction {
     #[serde_as(as = "Vec<(_, _)>")]
     pub rewards: HashMap<Vec<u8>, Lovelace>,
@@ -1982,7 +2164,7 @@ pub struct TreasuryWithdrawalsAction {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitteeChange {
     pub removed_committee_members: HashSet<CommitteeCredential>,
     #[serde_as(as = "Vec<(_, _)>")]
@@ -1990,19 +2172,19 @@ pub struct CommitteeChange {
     pub terms: RationalNumber,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdateCommitteeAction {
     pub previous_action_id: Option<GovActionId>,
     pub data: CommitteeChange,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewConstitutionAction {
     pub previous_action_id: Option<GovActionId>,
     pub new_constitution: Constitution,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GovernanceAction {
     ParameterChange(ParameterChangeAction),
     HardForkInitiation(HardForkInitiationAction),
@@ -2057,7 +2239,7 @@ impl GovernanceAction {
 pub enum Voter {
     ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash),
     ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash),
-    DRepKey(DrepKeyHash),
+    DRepKey(DRepKeyHash),
     DRepScript(DRepScriptHash),
     StakePoolKey(PoolId),
 }
@@ -2212,7 +2394,7 @@ pub struct VotingOutcome {
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProposalProcedure {
     pub deposit: Lovelace,
     pub reward_account: StakeAddress,
@@ -2330,6 +2512,56 @@ pub enum TxCertificate {
     DRepUpdate(DRepUpdate),
 }
 
+impl TxCertificate {
+    /// This function extracts required VKey Hashes
+    /// from TxCertificate
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    ///
+    /// returns (vkey_hashes, script_hashes)
+    pub fn get_cert_authors(&self) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
+        let mut vkey_hashes = HashSet::new();
+        let mut script_hashes = HashSet::new();
+
+        let mut parse_cred = |cred: &StakeCredential| match cred {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(*vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(*script_hash);
+            }
+        };
+
+        match self {
+            // Deregistration requires witness from stake credential
+            Self::StakeDeregistration(addr) => {
+                parse_cred(&addr.credential);
+            }
+            // Delegation requries witness from delegator
+            Self::StakeDelegation(deleg) => {
+                parse_cred(&deleg.stake_address.credential);
+            }
+            // Pool registration requires witness from pool cold key and owners
+            Self::PoolRegistration(pool_reg) => {
+                vkey_hashes.insert(*pool_reg.operator);
+                vkey_hashes.extend(
+                    pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>(),
+                );
+            }
+            // Pool retirement requires witness from pool cold key
+            Self::PoolRetirement(retirement) => {
+                vkey_hashes.insert(*retirement.operator);
+            }
+            // Genesis delegation requires witness from genesis key
+            Self::GenesisKeyDelegation(gen_deleg) => {
+                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
+            }
+            _ => {}
+        }
+
+        (vkey_hashes, script_hashes)
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxCertificateWithPos {
     pub cert: TxCertificate,
@@ -2428,8 +2660,8 @@ impl AddressTotals {
     }
 
     fn apply_asset(
-        target: &mut HashMap<[u8; 28], HashMap<AssetName, u64>>,
-        policy: [u8; 28],
+        target: &mut HashMap<PolicyId, HashMap<AssetName, u64>>,
+        policy: PolicyId,
         name: AssetName,
         amount: u64,
     ) {
@@ -2603,5 +2835,19 @@ mod tests {
         assert_eq!(serialized_back, serialized);
 
         Ok(())
+    }
+
+    #[test]
+    fn resolve_hash_correctly() {
+        let native_script = NativeScript::ScriptPubkey(
+            AddrKeyhash::from_str("976ec349c3a14f58959088e13e98f6cd5a1e8f27f6f3160b25e415ca")
+                .unwrap(),
+        );
+        let script_hash = native_script.compute_hash();
+        assert_eq!(
+            script_hash,
+            ScriptHash::from_str("c3a33acb8903cf42611e26b15c7731f537867c6469f5bf69c837e4a3")
+                .unwrap()
+        );
     }
 }

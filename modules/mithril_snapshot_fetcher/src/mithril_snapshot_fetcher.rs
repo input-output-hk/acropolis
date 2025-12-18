@@ -1,13 +1,14 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
+use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     configuration::StartupMethod,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context};
 use chrono::{Duration, Utc};
 use config::Config;
@@ -15,10 +16,8 @@ use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     ClientBuilder, MessageBuilder, Snapshot,
 };
-use pallas::{
-    ledger::traverse::{Era as PallasEra, MultiEraBlock},
-    storage::hardano,
-};
+use pallas::storage::hardano;
+use pallas_traverse::MultiEraBlock;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -46,6 +45,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
+const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "downloads";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
@@ -255,6 +255,8 @@ impl MithrilSnapshotFetcher {
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
+        let stop_constraint =
+            PauseType::from_config(&config, DEFAULT_STOP).unwrap_or(PauseType::NoPause);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -273,6 +275,7 @@ impl MithrilSnapshotFetcher {
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         for raw_block in blocks {
+            let mut stop = false;
             match raw_block {
                 Ok(raw_block) => {
                     let span = info_span!("mithril_snapshot_fetcher.raw_block");
@@ -314,19 +317,7 @@ impl MithrilSnapshotFetcher {
                         }
 
                         let timestamp = genesis.slot_to_timestamp(slot);
-
-                        let era = match block.era() {
-                            PallasEra::Byron => Era::Byron,
-                            PallasEra::Shelley => Era::Shelley,
-                            PallasEra::Allegra => Era::Allegra,
-                            PallasEra::Mary => Era::Mary,
-                            PallasEra::Alonzo => Era::Alonzo,
-                            PallasEra::Babbage => Era::Babbage,
-                            PallasEra::Conway => Era::Conway,
-                            x => bail!(
-                                "Block slot {slot}, number {number} has impossible era: {x:?}"
-                            ),
-                        };
+                        let era = map_to_block_era(&block)?;
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
@@ -353,30 +344,40 @@ impl MithrilSnapshotFetcher {
                             }
                         }
 
-                        // Send the block message
-                        let message = RawBlockMessage {
-                            header: block.header().cbor().to_vec(),
-                            body: raw_block,
-                        };
+                        // And stop constraint - note we can pause first if we want to
+                        if stop_constraint.should_pause(&block_info) {
+                            info!(number, slot, "Stopping early");
+                            stop = true;
+                        } else {
+                            // Send the block message
+                            let message = RawBlockMessage {
+                                header: block.header().cbor().to_vec(),
+                                body: raw_block,
+                            };
 
-                        let message_enum = Message::Cardano((
-                            block_info.clone(),
-                            CardanoMessage::BlockAvailable(message),
-                        ));
+                            let message_enum = Message::Cardano((
+                                block_info.clone(),
+                                CardanoMessage::BlockAvailable(message),
+                            ));
 
-                        context
-                            .message_bus
-                            .publish(&block_publish_topic, Arc::new(message_enum))
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
+                            context
+                                .message_bus
+                                .publish(&block_publish_topic, Arc::new(message_enum))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
 
-                        last_block_info = Some(block_info);
+                            last_block_info = Some(block_info);
+                        }
                         Ok::<(), anyhow::Error>(())
                     }
                     .instrument(span)
                     .await?;
                 }
                 Err(e) => error!("Error reading block: {e}"),
+            }
+
+            if stop {
+                break;
             }
         }
 

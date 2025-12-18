@@ -8,6 +8,8 @@ pub mod cip19;
 pub mod commands;
 pub mod configuration;
 pub mod crypto;
+pub mod drep;
+pub mod epoch_snapshot;
 pub mod genesis_values;
 pub mod hash;
 pub mod ledger_state;
@@ -25,11 +27,14 @@ pub mod serialization;
 pub mod snapshot;
 pub mod stake_addresses;
 pub mod state_history;
+pub mod tx;
 pub mod types;
 pub mod upstream_cache;
 pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
+pub use self::drep::*;
 pub use self::metadata::*;
+pub use self::tx::*;
 pub use self::types::*;

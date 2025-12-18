@@ -85,11 +85,13 @@ impl PeerNetworkInterface {
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
+                    tracing::info!("Starting sync from origin");
                     let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
+                    tracing::info!("Starting sync from tip");
                     let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
@@ -98,6 +100,7 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
+                    tracing::info!("Starting sync from cache at {:?}", cache_sync_point);
                     let mut manager = Self::init_manager(cfg, sink, command_subscription);
                     manager.sync_to_point(cache_sync_point);
                     manager
@@ -107,9 +110,14 @@ impl PeerNetworkInterface {
                         snapshot_complete.expect("Snapshot topic subscription missing");
                     match Self::wait_snapshot_completion(&mut subscription).await {
                         Ok(point) => {
-                            if let Point::Specific(slot, _) = point {
-                                let (epoch, _) = sink.genesis_values.slot_to_epoch(slot);
+                            if let Point::Specific(slot, _) = &point {
+                                let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
+                                tracing::info!(
+                                    "Starting sync from snapshot at slot {} epoch {}",
+                                    slot,
+                                    epoch,
+                                );
                             }
                             let mut manager = Self::init_manager(cfg, sink, command_subscription);
                             manager.sync_to_point(point);
@@ -121,7 +129,10 @@ impl PeerNetworkInterface {
                         }
                     }
                 }
-                SyncPoint::Dynamic => Self::init_manager(cfg, sink, command_subscription),
+                SyncPoint::Dynamic => {
+                    tracing::info!("Starting sync in dynamic mode");
+                    Self::init_manager(cfg, sink, command_subscription)
+                }
             };
 
             if let Err(err) = manager.run().await {

@@ -2,7 +2,8 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::configuration::StartupMethod;
+use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
@@ -34,6 +35,9 @@ const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("governance-subscribe-topic", "cardano.governance");
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 // Publisher topic
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
@@ -57,8 +61,62 @@ const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 pub struct DRepState;
 
 impl DRepState {
+    /// Wait for and process snapshot bootstrap message if available
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        storage_config: DRepStorageConfig,
+    ) -> Result<()> {
+        let mut subscription = match snapshot_subscription {
+            Some(sub) => sub,
+            None => {
+                info!("No snapshot subscription, skipping bootstrap");
+                return Ok(());
+            }
+        };
+
+        info!("Waiting for snapshot bootstrap messages...");
+        loop {
+            let Ok((_, message)) = subscription.read().await else {
+                info!("Snapshot subscription closed without receiving bootstrap");
+                break;
+            };
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received Startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::DRepState(
+                    drep_msg,
+                ))) => {
+                    info!(
+                        "Received bootstrap message with {} DReps for epoch {}",
+                        drep_msg.dreps.len(),
+                        drep_msg.epoch
+                    );
+                    let mut state = State::new(storage_config);
+                    state.bootstrap(drep_msg);
+                    let drep_count = state.dreps.len();
+                    history.lock().await.commit_forced(state);
+                    info!(
+                        "Bootstrap complete - {} DReps committed to state",
+                        drep_count
+                    );
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting DRep state bootstrap loop");
+                    return Ok(());
+                }
+                _ => (),
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
         mut gov_subscription: Option<Box<dyn Subscription<Message>>>,
         mut params_subscription: Option<Box<dyn Subscription<Message>>>,
@@ -66,12 +124,16 @@ impl DRepState {
         context: Arc<Context<Message>>,
         storage_config: DRepStorageConfig,
     ) -> Result<()> {
+        // Wait for snapshot bootstrap first (if available)
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, storage_config).await?;
+
         if storage_config.store_info {
             if let Some(sub) = params_subscription.as_mut() {
                 let _ = sub.read().await?;
                 info!("Consumed initial genesis params from params_subscription");
             }
         }
+
         // Main loop of synchronised messages
         loop {
             // Get the current state snapshot
@@ -272,6 +334,18 @@ impl DRepState {
         let query_history = history.clone();
         let ticker_history = history.clone();
         let ctx_run = context.clone();
+
+        // Subscribe for snapshot messages if bootstrapping from snapshot
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
 
         // Query handler
         context.handle(&drep_query_topic, move |message| {
@@ -495,6 +569,7 @@ impl DRepState {
         context.run(async move {
             Self::run(
                 history_run,
+                snapshot_subscription,
                 certs_sub,
                 gov_sub,
                 params_sub,

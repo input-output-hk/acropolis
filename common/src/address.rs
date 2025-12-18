@@ -39,10 +39,7 @@ impl ByronAddress {
         Ok(bs58::encode(buf).into_string())
     }
 
-    pub fn from_string(s: &str) -> Result<Self> {
-        let bytes = bs58::decode(s).into_vec()?;
-        let mut dec = minicbor::Decoder::new(&bytes);
-
+    pub fn from_cbor(dec: &mut minicbor::Decoder) -> Result<Self> {
         let len = dec.array()?.unwrap_or(0);
         if len != 2 {
             anyhow::bail!("Invalid Byron address CBOR array length");
@@ -64,6 +61,12 @@ impl ByronAddress {
         }
 
         Ok(address)
+    }
+
+    pub fn from_string(s: &str) -> Result<Self> {
+        let bytes = bs58::decode(s).into_vec()?;
+        let mut dec = minicbor::Decoder::new(&bytes);
+        Self::from_cbor(&mut dec)
     }
 
     pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
@@ -631,6 +634,14 @@ impl Address {
             if let ShelleyAddressDelegationPart::Pointer(ptr) = &shelley.delegation {
                 return Some(ptr.clone());
             }
+        }
+        None
+    }
+
+    /// Get payment part
+    pub fn get_payment_part(&self) -> Option<ShelleyAddressPaymentPart> {
+        if let Address::Shelley(shelley) = self {
+            return Some(shelley.payment.clone());
         }
         None
     }

@@ -60,3 +60,21 @@ verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{
 ```
 
 The verifier will only verify epochs where this file exists.
+
+### SPDD verification
+
+Reference SPDD for epoch N (found in `spdd.mainnet.{}.csv`) was taken from Haskell node 
+debug dump (rewards computation routine, Go snapshot for epoch N+3). It is compared with 
+`live` SPDD for epoch N (actual at N/N+1 epoch border, distributed with first block of 
+epoch N+1).
+
+If verification is not successful, all different pool balances are printed, along
+with all pool ids, missing from Acropolis distribution (but found in reference SPDD), 
+and extra pool ids (found in Acropolis, but missing in reference SPDD).
+
+To activate verification, use
+
+```toml
+[module.accounts-state]
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
+```

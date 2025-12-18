@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: rewards calculations
 
-use crate::snapshot::{Snapshot, SnapshotSPO};
+use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
     SPORewards, StakeAddress,
@@ -52,8 +52,8 @@ pub struct RewardsResult {
 /// Note immutable - only state change allowed is to push a new snapshot
 pub fn calculate_rewards(
     epoch: u64,
-    performance: Arc<Snapshot>,
-    staking: Arc<Snapshot>,
+    performance: Arc<EpochSnapshot>,
+    staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
     registrations: &HashSet<StakeAddress>,
@@ -238,7 +238,7 @@ fn calculate_spo_rewards(
     relative_pool_saturation_size: &BigDecimal,
     pledge_influence_factor: &BigDecimal,
     params: &ShelleyParams,
-    staking: Arc<Snapshot>,
+    staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {
@@ -345,6 +345,11 @@ fn calculate_spo_rewards(
                 // and hence how much of the total reward they get
                 let reward = &to_delegators * &proportion;
                 let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+
+                // Skip if it's rounded to zero
+                if to_pay == 0 {
+                    continue;
+                }
 
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
                        delegator_stake_address);

@@ -1,20 +1,22 @@
 use acropolis_common::{
-    GenesisDelegate, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
+    Era, GenesisDelegates, HeavyDelegate, PoolId, crypto::keyhash_224, queries::blocks::BlockIssuer,
 };
+use anyhow::{Result, bail};
 use pallas_primitives::byron::BlockSig::DlgSig;
-use pallas_traverse::MultiEraHeader;
+use pallas_traverse::{Era as PallasEra, MultiEraBlock, MultiEraHeader};
 use std::collections::HashMap;
 
 pub fn map_to_block_issuer(
     header: &MultiEraHeader,
     byron_heavy_delegates: &HashMap<PoolId, HeavyDelegate>,
-    shelley_genesis_delegates: &HashMap<PoolId, GenesisDelegate>,
+    shelley_genesis_delegates: &GenesisDelegates,
 ) -> Option<BlockIssuer> {
     match header.issuer_vkey() {
         Some(vkey) => match header {
             MultiEraHeader::ShelleyCompatible(_) => {
                 let digest = keyhash_224(vkey);
                 if let Some(issuer) = shelley_genesis_delegates
+                    .as_ref()
                     .values()
                     .find(|v| v.delegate == digest)
                     .map(|i| BlockIssuer::GenesisDelegate(i.clone()))
@@ -40,4 +42,21 @@ pub fn map_to_block_issuer(
             _ => None,
         },
     }
+}
+
+pub fn map_to_block_era(block: &MultiEraBlock) -> Result<Era> {
+    Ok(match block.era() {
+        PallasEra::Byron => Era::Byron,
+        PallasEra::Shelley => Era::Shelley,
+        PallasEra::Allegra => Era::Allegra,
+        PallasEra::Mary => Era::Mary,
+        PallasEra::Alonzo => Era::Alonzo,
+        PallasEra::Babbage => Era::Babbage,
+        PallasEra::Conway => Era::Conway,
+        x => bail!(
+            "Block slot {}, number {} has impossible era: {x:?}",
+            block.slot(),
+            block.number()
+        ),
+    })
 }

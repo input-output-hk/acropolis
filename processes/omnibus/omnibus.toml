@@ -19,9 +19,11 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
+# Stop constraint likewise
+stop = "none"
 
 [module.snapshot-bootstrapper]
-epoch = 509
+epoch = 507
 network = "mainnet"
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
@@ -43,7 +45,8 @@ validators = [
 # Add these once they are actually being sent
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
-#           "cardano.validation.utxo"
+#           "cardano.validation.utxo",
+           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -57,6 +60,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+publish-tx-validation-topic = "cardano.validation.tx"
 network-name = "mainnet"
 
 [module.utxo-state]
@@ -151,6 +155,7 @@ spdd-clear-on-start = true
 # Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
@@ -189,7 +194,7 @@ store-transactions = false
 [module.clock]
 
 [module.rest-server]
-address = "127.0.0.1"
+address = "0.0.0.0"
 port = 4340
 
 # Enable for message spying

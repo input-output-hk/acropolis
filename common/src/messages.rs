@@ -1,5 +1,6 @@
 //! Definition of Acropolis messages
 
+use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -23,13 +24,17 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
+use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::AccountState;
+use crate::Pots;
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
-use crate::types::*;
 use crate::validation::ValidationStatus;
+use crate::{types::*, DRepRecord};
 
 // Caryatid core messages which we re-export
+use crate::epoch_snapshot::SnapshotsContainer;
 pub use caryatid_module_clock::messages::ClockTickMessage;
 pub use caryatid_module_rest_server::messages::{GetRESTResponse, RESTRequest, RESTResponse};
 
@@ -300,7 +305,8 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<PoolId>,
+    /// and the reward account to pay the deposit refund to
+    pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
 /// Cardano message enum
@@ -343,8 +349,31 @@ pub enum CardanoMessage {
 pub enum SnapshotMessage {
     Startup, // subscribers should listen for incremental snapshot data
     Bootstrap(SnapshotStateMessage),
+    Complete, // all bootstrap data has been sent on this topic
     DumpRequest(SnapshotDumpMessage),
     Dump(SnapshotStateMessage),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DRepBootstrapMessage {
+    pub epoch: u64,
+    pub dreps: HashMap<DRepCredential, DRepRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum GovernanceProtocolParametersSlice {
+    Previous,
+    Current,
+    Future,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProtocolParametersBootstrapMessage {
+    pub network_name: String,
+    pub era: Option<Era>,
+    pub slice: GovernanceProtocolParametersSlice,
+    pub params: ProtocolParameters,
+    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -400,11 +429,51 @@ pub struct EpochBootstrapMessage {
     pub praos_params: Option<PraosParams>,
 }
 
+/// Accounts bootstrap message containing all data needed to bootstrap accounts state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountsBootstrapMessage {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+
+    /// All account states (stake addresses with delegations and balances)
+    pub accounts: Vec<AccountState>,
+
+    /// All registered stake pools with their full registration data
+    pub pools: Vec<PoolRegistration>,
+
+    /// Pool IDs that are retiring
+    pub retiring_pools: Vec<PoolId>,
+
+    /// All registered DReps with their deposits (credential, deposit amount)
+    pub dreps: Vec<(DRepCredential, u64)>,
+
+    /// Pot balances (treasury, reserves, deposits)
+    pub pots: Pots,
+
+    /// Fully processed bootstrap snapshots (Mark, Set, Go)
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
+    /// Empty (default) for pre-Shelley eras.
+    pub bootstrap_snapshots: SnapshotsContainer,
+}
+
+/// UTxO bootstrap message containing partial UTxO state
+/// All data is in internal format, ready for direct use by the state module
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UTxOPartialState {
+    /// UTxOs
+    pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
     SPOState(SPOState),
     EpochState(EpochBootstrapMessage),
+    AccountsState(AccountsBootstrapMessage),
+    UTxOPartialState(UTxOPartialState),
+    DRepState(DRepBootstrapMessage),
+    ParametersState(GovernanceProtocolParametersBootstrapMessage),
 }
 
 // === Global message enum ===

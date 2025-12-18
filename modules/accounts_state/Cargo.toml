@@ -19,7 +19,6 @@ chrono = { workspace = true }
 config = { workspace = true }
 hex = { workspace = true }
 imbl = { workspace = true }
-serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 fjall = "2.11.2"
