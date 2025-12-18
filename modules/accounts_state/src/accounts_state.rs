@@ -301,7 +301,8 @@ impl AccountsState {
                                 state.handle_drep_state(dreps_msg);
 
                                 let drdd = state.generate_drdd();
-                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await
+                                {
                                     vld.push_anyhow(anyhow!(
                                         "Error publishing drep voting stake distribution: {e:#}"
                                     ))

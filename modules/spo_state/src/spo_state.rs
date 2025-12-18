@@ -368,15 +368,17 @@ impl SPOState {
 
                 // Handle EpochActivityMessage
                 if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
-                    let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks()
-                        .await?;
+                    let (_, ea_message) =
+                        epoch_activity_subscription.read_ignoring_rollbacks().await?;
                     if let Message::Cardano((
                         block_info,
                         CardanoMessage::EpochActivity(epoch_activity_message),
                     )) = ea_message.as_ref()
                     {
-                        let span =
-                            info_span!("spo_state.handle_epoch_activity", block = block_info.number);
+                        let span = info_span!(
+                            "spo_state.handle_epoch_activity",
+                            block = block_info.number
+                        );
                         span.in_scope(|| {
                             ctx.check_sync(block_info);
                             // update epochs_history
