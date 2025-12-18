@@ -23,8 +23,8 @@ use acropolis_module_custom_indexer::cursor_store::{FjallCursorStore, InMemoryCu
 
 #[derive(Debug, clap::Parser)]
 struct Args {
-    #[arg(long, value_name = "PATH", default_value = "indexer.toml")]
-    config: String,
+    #[arg(long, value_name = "PATH", default_values_t = vec!["indexer.toml".to_string()])]
+    config: Vec<String>,
 }
 
 #[tokio::main]
@@ -32,13 +32,12 @@ async fn main() -> Result<()> {
     // Get arguments and config
     let args = Args::parse();
     tracing_subscriber::fmt().with_env_filter("info").init();
-    let config = Arc::new(
-        Config::builder()
-            .add_source(File::with_name(&args.config))
-            .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()
-            .unwrap(),
-    );
+    let mut builder = Config::builder();
+    for file in &args.config {
+        builder = builder.add_source(File::with_name(file));
+    }
+    let config =
+        Arc::new(builder.add_source(Environment::with_prefix("ACROPOLIS")).build().unwrap());
 
     let mut process = Process::<Message>::create(config).await;
 

@@ -1,29 +1,32 @@
+use acropolis_common::commands::chain_sync::ChainSyncCommand;
+use acropolis_common::epoch_snapshot::SnapshotsContainer;
+use acropolis_common::messages::{Command, DRepBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots, GovernanceProtocolParametersBootstrapMessage, GovernanceProtocolParametersSlice};
+use acropolis_common::protocol_params::{Nonces, PraosParams};
+use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
+use acropolis_common::snapshot::streaming_snapshot::GovernanceProtocolParametersCallback;
+use acropolis_common::snapshot::utxo::UtxoEntry;
+use acropolis_common::snapshot::{AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback, PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback, UtxoCallback};
+use acropolis_common::DRepRecord;
+use acropolis_common::Point;
 use acropolis_common::{
-    epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots, Message, SnapshotMessage,
+        AccountsBootstrapMessage, EpochBootstrapMessage, Message, SnapshotMessage,
         SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
-    protocol_params::{Nonces, PraosParams},
-    snapshot::{
-        protocol_parameters::ProtocolParameters,
-        streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
-        AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback,
-        PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
-        UtxoCallback,
-    },
     stake_addresses::AccountState,
-    BlockInfo, DRepCredential, DRepRecord, EpochBootstrapData, UTXOValue, UTxOIdentifier,
+    DRepCredential, EpochBootstrapData, Era, UTXOValue, UTxOIdentifier,
 };
+
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+
+use crate::publisher::GovernanceProtocolParametersSlice::{Current, Future, Previous};
 
 const UTXO_BATCH_SIZE: usize = 10_000;
 
@@ -82,8 +85,8 @@ impl EpochContext {
 /// External context (nonces, timing) can be added via `with_bootstrap_context()`.
 pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
-    completion_topic: String,
     snapshot_topic: String,
+    sync_command_topic: String,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -99,14 +102,14 @@ pub struct SnapshotPublisher {
 impl SnapshotPublisher {
     pub fn new(
         context: Arc<Context<Message>>,
-        completion_topic: String,
         snapshot_topic: String,
+        sync_command_topic: String,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
-            completion_topic,
             snapshot_topic,
+            sync_command_topic,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -137,18 +140,17 @@ impl SnapshotPublisher {
         Ok(())
     }
 
-    pub async fn publish_completion(&self, block_info: BlockInfo) -> Result<()> {
+    pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
         info!(
-            "Publishing SnapshotComplete on '{}' for block {} slot {} epoch {}",
-            self.completion_topic, block_info.number, block_info.slot, block_info.epoch
+            "Publishing sync command on {} for slot {}",
+            self.sync_command_topic,
+            point.slot()
         );
-        let message = Arc::new(Message::Cardano((
-            block_info,
-            CardanoMessage::SnapshotComplete,
-        )));
-        self.context.publish(&self.completion_topic, message).await.unwrap_or_else(|e| {
-            tracing::error!("Failed to publish bootstrap completion message: {}", e);
-        });
+        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        self.context
+            .publish(&self.sync_command_topic, Arc::new(message))
+            .await
+            .unwrap_or_else(|e| tracing::error!("Failed to publish sync command message: {}", e));
         Ok(())
     }
 
@@ -373,18 +375,61 @@ impl ProposalCallback for SnapshotPublisher {
 impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
-        _gs_previous_params: ProtocolParameters,
-        _gs_current_params: ProtocolParameters,
-        _gs_future_params: ProtocolParameters,
+        epoch: u64,
+        gs_previous_params: ProtocolParameters,
+        gs_current_params: ProtocolParameters,
+        gs_future_params: ProtocolParameters,
     ) -> Result<()> {
-        info!("Received governance protocol parameters (current, previous, future)");
-        // TODO: Publish protocol parameters to appropriate message bus topics
-        // This could involve publishing messages for:
-        // - CurrentProtocolParameters → ParametersState processor
-        // - PreviousProtocolParameters → ParametersState processor
-        // - FutureProtocolParameters → ParametersState processor
+        // Separate publish for each slice so that the messages enum is not too large
+        [
+            (Previous, gs_previous_params),
+            (Current, gs_current_params),
+            (Future, gs_future_params),
+        ]
+        .into_iter()
+        .for_each(|(slice, params)| {
+            publish_gov_state(&self.context, &self.snapshot_topic, slice, epoch, params)
+        });
+
         Ok(())
     }
+}
+
+fn publish_gov_state(
+    context: &Arc<Context<Message>>,
+    topic: &str,
+    slice: GovernanceProtocolParametersSlice,
+    epoch: u64,
+    params: ProtocolParameters,
+) {
+    info!(
+        "Received governance protocol parameters for epoch {epoch} slice {:?}",
+        slice
+    );
+    // Send a message to the protocol parameters state, one per slice
+    let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+        SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+            epoch,
+            slice,
+            params,
+            era: Some(Era::Conway),
+            network_name: "mainnet".to_string(),
+            // NOTE: The era is hardcoded to Conway. This code is currently
+            // Conway-focused and has not been tested on other eras. And the
+            // network name is hardcoded to mainnet for the same reason.
+        }),
+    )));
+
+    // Clone what we need for the async task
+    let context = context.clone();
+    let topic = topic.to_owned();
+
+    // Spawn async publish task since this callback is synchronous
+    tokio::spawn(async move {
+        if let Err(e) = context.publish(&topic, message).await {
+            tracing::error!("Failed to publish DRepBootstrap message: {e}");
+        }
+    });
 }
 
 impl EpochCallback for SnapshotPublisher {

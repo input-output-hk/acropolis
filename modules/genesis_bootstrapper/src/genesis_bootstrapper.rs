@@ -84,8 +84,9 @@ impl GenesisBootstrapper {
                     .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
                 info!("Completing with '{completion_topic}'");
 
-                let network_name =
-                    config.get_string("network-name").unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+                let network_name = config
+                    .get_string("startup.network-name")
+                    .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
                 let (byron_genesis, shelley_genesis, shelley_start_epoch) =
                     match network_name.as_ref() {
@@ -175,6 +176,10 @@ impl GenesisBootstrapper {
                             tx_identifier,
                             inputs: Vec::new(),
                             outputs: vec![tx_output],
+                            vkey_hashes_needed: None,
+                            script_hashes_needed: None,
+                            vkey_hashes_provided: None,
+                            script_hashes_provided: None,
                         });
                         total_allocated += amount;
                     }
@@ -244,6 +249,7 @@ impl GenesisBootstrapper {
                             .collect::<Vec<(&str, (&str, &str))>>(),
                     )
                     .unwrap(),
+                    magic_number: byron_genesis.protocol_consts.protocol_magic,
                 };
 
                 // Send completion message
@@ -256,6 +262,7 @@ impl GenesisBootstrapper {
                     .publish(&completion_topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                info!("Publishing genesis complete message on '{completion_topic}'");
             }
             .instrument(span)
             .await;

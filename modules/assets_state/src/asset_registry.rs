@@ -75,7 +75,7 @@ mod tests {
     use acropolis_common::{AssetName, PolicyId};
 
     fn dummy_policy(byte: u8) -> PolicyId {
-        [byte; 28]
+        PolicyId::from([byte; 28])
     }
 
     fn asset_name_from_str(s: &str) -> AssetName {

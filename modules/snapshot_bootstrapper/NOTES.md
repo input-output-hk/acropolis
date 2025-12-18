@@ -135,7 +135,7 @@ Loading occurs in this order:
 5. Download snapshot file (skips if already present)
 6. Publish `SnapshotMessage::Startup` to the snapshot topic
 7. Parse the snapshot file using the [streaming_snapshot](../../common/src/snapshot/streaming_snapshot.rs)
-8. Publish `CardanoMessage::SnapshotComplete` with final block info to the completion topic
+8. Publish `ChainSync::FindIntersect` command with point to begin fetching blocks
 
 Modules in the system will have subscribed to the startup and completion topics before the
 bootstrapper runs the above sequence. Upon receiving snapshot data messages,
@@ -169,4 +169,4 @@ The bootstrapper supports the following configuration options:
 - `data-dir`: Base directory for network data (default: "./data")
 - `snapshot-topic`: Topic to publish snapshot messages (default: "cardano.snapshot")
 - `bootstrapped-subscribe-topic`: Topic to receive genesis completion (default: "cardano.sequence.bootstrapped")
-- `completion-topic`: Topic to publish completion signal (default: "cardano.snapshot.complete")
+- `sync-command-topic`: Topic to publish completion signal (default: "cardano.sync.command")

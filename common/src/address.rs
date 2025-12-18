@@ -638,6 +638,14 @@ impl Address {
         None
     }
 
+    /// Get payment part
+    pub fn get_payment_part(&self) -> Option<ShelleyAddressPaymentPart> {
+        if let Address::Shelley(shelley) = self {
+            return Some(shelley.payment.clone());
+        }
+        None
+    }
+
     /// Read from string format ("addr1...")
     pub fn from_string(text: &str) -> Result<Self> {
         if text.starts_with("addr1") || text.starts_with("addr_test1") {

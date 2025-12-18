@@ -7,7 +7,7 @@ It will wait for
 a startup event before beginning to allow the
 [Genesis Bootstrapper](../genesis_bootstrapper) to complete.
 
-When it has finished it sends a snapshot complete event indicating the
+When it has finished it sends a ChainSync::FindIntersect command indicating the
 last block fetched, which is used by the
 [Peer Network Interface](../peer_network_interface) to synchronize ongoing 
 fetches.
@@ -93,13 +93,13 @@ pub struct BlockBodyMessage {
 ```
 
 When the snapshot has been fully replayed, it sends a
-`cardano.snapshot.complete` message with details of the last block in
+`cardano.sync.command` message with details of the last point in
 the snapshot:
 
 ```
-pub struct SnapshotCompleteMessage {
-    /// Last block in snapshot data
-    pub last_block: BlockInfo,
+pub enum ChainSyncCommand {
+    // The point from which to begin fetching blocks from
+    FindIntersect(Point),
 }
 ```
 

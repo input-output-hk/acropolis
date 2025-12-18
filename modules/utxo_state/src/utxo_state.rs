@@ -8,7 +8,7 @@ use acropolis_common::{
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
 };
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 
 use acropolis_common::queries::errors::QueryError;
 use anyhow::{anyhow, Result};
@@ -38,7 +38,10 @@ use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.utxo.deltas";
+mod validations;
+
+const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
@@ -52,59 +55,44 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 pub struct UTXOState;
 
 impl UTXOState {
-    /// Wait for and process snapshot bootstrap messages
-    async fn wait_for_bootstrap(
-        store: Arc<dyn ImmutableUTXOStore>,
-        mut snapshot_subscription: Box<dyn caryatid_sdk::Subscription<Message>>,
+    /// Main run function
+    async fn run(
+        state: Arc<Mutex<State>>,
+        mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        info!("Waiting for UTXO state snapshot bootstrap messages...");
-
-        let mut total_utxos_received = 0u64;
-        let mut batch_count = 0u64;
-
         loop {
-            let Ok((_, message)) = snapshot_subscription.read().await else {
-                info!("Snapshot subscription closed");
-                return Ok(());
+            let Ok((_, message)) = utxo_deltas_subscription.read().await else {
+                return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
 
             match message.as_ref() {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("UTXO state received Snapshot Startup message");
+                Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
+                    let span = info_span!("utxo_state.handle", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        state
+                            .handle(block, deltas_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+                    }
+                    .instrument(span)
+                    .await;
                 }
-                Message::Snapshot(SnapshotMessage::Bootstrap(
-                    SnapshotStateMessage::UTxOPartialState(utxo_state),
+
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
-                    let batch_size = utxo_state.utxos.len();
-                    batch_count += 1;
-                    total_utxos_received += batch_size as u64;
-
-                    if batch_count == 1 {
-                        info!(
-                            "UTXO state received first UTxO batch with {} UTxOs",
-                            batch_size
-                        );
-                    } else if batch_count % 100 == 0 {
-                        info!(
-                            "UTXO state received {} batches, {} total UTxOs so far",
-                            batch_count, total_utxos_received
-                        );
-                    }
-
-                    for (key, value) in &utxo_state.utxos {
-                        if store.add_utxo(*key, value.clone()).await.is_err() {
-                            error!("Failed to add snapshot utxo to state store");
-                        }
-                    }
+                    let mut state = state.lock().await;
+                    state
+                        .handle_rollback(message)
+                        .await
+                        .inspect_err(|e| error!("Rollback handling error: {e}"))
+                        .ok();
                 }
-                Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!(
-                        "UTXO state snapshot complete: {} UTxOs in {} batches",
-                        total_utxos_received, batch_count
-                    );
-                    return Ok(());
-                }
-                _ => {}
+
+                _ => error!("Unexpected message type: {message:?}"),
             }
         }
     }
@@ -112,9 +100,10 @@ impl UTXOState {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{subscribe_topic}'");
+        let utxo_deltas_subscribe_topic = config
+            .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
 
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -146,54 +135,70 @@ impl UTXOState {
 
         let state = Arc::new(Mutex::new(state));
 
-        // Subscribe for snapshot bootstrap (if using snapshot startup)
-        let snapshot_subscription = context.subscribe(&snapshot_topic).await?;
+        // Subscribers
+        let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
 
-        // Subscribe for UTXO messages
-        let state1 = state.clone();
-        let mut subscription = context.subscribe(&subscribe_topic).await?;
+        let state_run = state.clone();
         context.run(async move {
-            // Wait for snapshot bootstrap before processing messages
-            if let Err(e) = Self::wait_for_bootstrap(snapshot_store, snapshot_subscription).await {
-                error!("Failed to bootstrap UTXO state: {e}");
-                return;
-            }
-
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                match message.as_ref() {
-                    Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
-                        let span = info_span!("utxo_state.handle", block = block.number);
-                        async {
-                            let mut state = state1.lock().await;
-                            state
-                                .handle(block, deltas_msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    Message::Cardano((
-                        _,
-                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                    )) => {
-                        let mut state = state1.lock().await;
-                        state
-                            .handle_rollback(message)
-                            .await
-                            .inspect_err(|e| error!("Rollback handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-            }
+            Self::run(state_run, utxo_deltas_subscription)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
+
+        // Subscribe for snapshot messages
+        {
+            let mut subscription = context.subscribe(&snapshot_topic).await?;
+            let context = context.clone();
+            let store = snapshot_store.clone();
+            enum SnapshotState {
+                Preparing,
+                Started,
+            }
+            let mut snapshot_state = SnapshotState::Preparing;
+            let mut total_utxos_received = 0u64;
+            let mut batch_count = 0u64;
+            context.run(async move {
+                loop {
+                    let Ok((_, message)) = subscription.read().await else {
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Snapshot(SnapshotMessage::Startup) => {
+                            info!("UTXO state received Snapshot Startup message");
+                            match snapshot_state {
+                                SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
+                                _ => error!("Snapshot Startup message received but we have already left preparing state"),
+                            }
+                        }
+                        Message::Snapshot(SnapshotMessage::Bootstrap(
+                            SnapshotStateMessage::UTxOPartialState(utxo_state),
+                        )) => {
+                            let batch_size = utxo_state.utxos.len();
+                            batch_count += 1;
+                            total_utxos_received += batch_size as u64;
+
+                            if batch_count == 1 {
+                                info!("UTXO state received first UTxO batch with {} UTxOs", batch_size);
+                            } else if batch_count.is_multiple_of(100) {
+                                info!("UTXO state received {} batches, {} total UTxOs so far", batch_count, total_utxos_received);
+                            }
+
+                            for (key, value) in &utxo_state.utxos {
+                                if store.add_utxo(*key, value.clone()).await.is_err() {
+                                    error!("Failed to add snapshot utxo to state store");
+                                }
+                            }
+                        }
+                        Message::Snapshot(SnapshotMessage::Complete) => {
+                            info!("UTXO state snapshot complete: {} UTxOs in {} batches", total_utxos_received, batch_count);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
 
         // Query handler
         let state_query = state.clone();

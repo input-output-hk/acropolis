@@ -10,6 +10,7 @@ license = "Apache-2.0"
 
 [dependencies]
 acropolis_common = { path = "../../common" }
+acropolis_codec = { path = "../../codec" }
 
 caryatid_sdk = { workspace = true }
 
@@ -20,6 +21,7 @@ config = { workspace = true }
 mithril-client = { version = "0.12", features = ["fs"] }
 mithril-common = { version = "0.6.17" }
 pallas = { version = "0.32.0", features = ["hardano"] }
+pallas-traverse = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

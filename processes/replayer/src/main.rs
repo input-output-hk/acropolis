@@ -122,8 +122,8 @@ fn setup_governance_replay(process: &mut dyn ModuleRegistry<Message>) {
     group(clap::ArgGroup::new("mode").required(true).args(&["governance_collect", "governance_replay", "alonzo_governance_collect"])),
 )]
 struct Args {
-    #[arg(long, value_name = "PATH", default_value_t = option_env!("ACROPOLIS_REPLAYER_DEFAULT_CONFIG").unwrap_or("replayer.toml").to_string())]
-    config: String,
+    #[arg(long, value_name = "PATH", default_values_t = vec![option_env!("ACROPOLIS_REPLAYER_DEFAULT_CONFIG").unwrap_or("replayer.toml").to_string()])]
+    config: Vec<String>,
 
     // FIXME: typically, these should be real [`clap::Command`] commands, not
     // flags, but @michalrus kept `--` for backwards compatibility.
@@ -168,13 +168,11 @@ pub async fn main() -> Result<()> {
     info!("Acropolis replayer process");
 
     // Read the config
-    let config = Arc::new(
-        Config::builder()
-            .add_source(File::with_name(&args.config))
-            .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()
-            .unwrap(),
-    );
+    let mut builder = Config::builder();
+    for file in &args.config {
+        builder = builder.add_source(File::with_name(file));
+    }
+    let config = Arc::new(builder.add_source(Environment::with_prefix("ACROPOLIS")).build()?);
 
     // Create the process
     let mut process = Process::<Message>::create(config).await;

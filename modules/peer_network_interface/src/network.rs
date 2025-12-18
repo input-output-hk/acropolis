@@ -47,7 +47,7 @@ impl PeerData {
 }
 
 pub struct NetworkManager {
-    network_magic: u64,
+    network_magic: u32,
     next_id: u64,
     peers: BTreeMap<PeerId, PeerData>,
     chain: ChainState,
@@ -60,7 +60,7 @@ pub struct NetworkManager {
 
 impl NetworkManager {
     pub fn new(
-        network_magic: u64,
+        network_magic: u32,
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,

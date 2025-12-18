@@ -102,17 +102,16 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
         );
 
+        // Publish
+        let mut publisher = SnapshotPublisher::new(
+            context.clone(),
+            cfg.snapshot_topic.clone(),
+            cfg.sync_command_topic.clone(),
+            bootstrap_ctx.context(),
+        );
         // Download
         let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
         downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
-
-        // Publish
-        let mut publisher = SnapshotPublisher::new(
-            context,
-            cfg.completion_topic.clone(),
-            cfg.snapshot_topic.clone(),
-            bootstrap_ctx.context(),
-        );
 
         publisher.publish_start().await?;
 
@@ -130,7 +129,7 @@ impl SnapshotBootstrapper {
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
         publisher.publish_snapshot_complete().await?;
-        publisher.publish_completion(bootstrap_ctx.block_info).await?;
+        publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
         info!("Snapshot bootstrap completed");
         Ok(())
