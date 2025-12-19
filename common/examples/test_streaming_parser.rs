@@ -222,9 +222,9 @@ impl GovernanceProtocolParametersCallback for CountingCallbacks {
         eprintln!("  Min pool cost: {}", previous_reward_params.min_pool_cost);
 
         eprintln!("\nCurrent Reward Parameters:");
-        eprintln!("  Expansion rate {}", current_reward_params.expansion_rate);
+        eprintln!("  Expansion rate: {}", current_reward_params.expansion_rate);
         eprintln!(
-            "  Treasury growth rate {}",
+            "  Treasury growth rate: {}",
             current_reward_params.treasury_growth_rate
         );
         eprintln!(
@@ -236,6 +236,96 @@ impl GovernanceProtocolParametersCallback for CountingCallbacks {
             current_reward_params.pool_pledge_influence
         );
         eprintln!("  Min pool cost: {}", current_reward_params.min_pool_cost);
+
+        eprintln!("\nBootstrap Parameters:");
+        eprintln!("  Min fee a: {}", params.minfee_a.unwrap());
+        eprintln!("  Min fee b: {}", params.minfee_b.unwrap());
+        eprintln!(
+            "  Max block body size: {}",
+            params.max_block_body_size.unwrap()
+        );
+        eprintln!(
+            "  Max transaction size: {}",
+            params.max_transaction_size.unwrap()
+        );
+        eprintln!(
+            "  Max block header size: {}",
+            params.max_block_header_size.unwrap()
+        );
+        eprintln!("  Key deposit: {}", params.key_deposit.unwrap());
+        eprintln!("  Pool deposit: {}", params.pool_deposit.unwrap());
+        eprintln!("  Pool max retire epoch: {}", params.maximum_epoch.unwrap());
+        eprintln!(
+            "  Desired number of stake pools: {}",
+            params.desired_number_of_stake_pools.unwrap()
+        );
+        eprintln!(
+            "  Pool pledge influence: {}",
+            params.pool_pledge_influence.clone().unwrap()
+        );
+        eprintln!(
+            "  Monetary expansion rate: {}",
+            params.expansion_rate.clone().unwrap()
+        );
+        eprintln!(
+            "  Treasury growth rate: {}",
+            params.treasury_growth_rate.clone().unwrap()
+        );
+        eprintln!("  Min pool cost: {}", params.min_pool_cost.unwrap());
+        eprintln!(
+            "  Execution prices: {:?}",
+            params.execution_costs.clone().unwrap()
+        );
+        eprintln!(
+            "  Max execution units: {:?}",
+            params.max_block_ex_units.unwrap()
+        );
+        eprintln!("  Max value size: {:?}", params.max_value_size.unwrap());
+        eprintln!(
+            "  Collateral percentage: {:?}",
+            params.collateral_percentage.unwrap()
+        );
+        eprintln!(
+            "  Max collateral inputs: {:?}",
+            params.max_collateral_inputs.unwrap()
+        );
+        eprintln!(
+            "  Coins per UTxO byte: {:?}",
+            params.coins_per_utxo_byte.unwrap()
+        );
+        eprintln!(
+            "  Min committee size: {:?}",
+            params.min_committee_size.unwrap()
+        );
+        eprintln!(
+            "  Max committee term limit: {:?}",
+            params.committee_term_limit.unwrap()
+        );
+        eprintln!(
+            "  Governance action validity period: {:?}",
+            params.governance_action_validity_period.unwrap()
+        );
+        eprintln!(
+            "  Governance action deposit: {:?}",
+            params.governance_action_deposit.unwrap()
+        );
+        eprintln!("  DRep deposit: {:?}", params.drep_deposit.unwrap());
+        eprintln!(
+            "  DRep inactivity period: {:?}",
+            params.drep_inactivity_period.unwrap()
+        );
+        eprintln!(
+            "  Min fee refscript cost per byte: {:?}",
+            params.minfee_refscript_cost_per_byte.clone().unwrap()
+        );
+        eprintln!(
+            "  Decentralization constant: {:?}",
+            params.decentralisation_constant.clone().unwrap()
+        );
+        eprintln!(
+            "  Protocol version: {:?}",
+            params.protocol_version.clone().unwrap()
+        );
 
         // Store for later display
         self.previous_reward_params = Some(previous_reward_params);
