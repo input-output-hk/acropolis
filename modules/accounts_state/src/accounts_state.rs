@@ -8,8 +8,15 @@ use acropolis_common::{
         AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse, StateTransitionMessage,
     },
-    queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::{
+        accounts::{
+            AccountInfo, AccountsStateQuery, AccountsStateQueryResponse, DrepDelegators,
+            PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC,
+        },
+        errors::QueryError,
+    },
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
 };
 use anyhow::{anyhow, Result};
@@ -17,7 +24,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{error, info, info_span, Instrument};
 
 mod drep_distribution_publisher;
 use drep_distribution_publisher::DRepDistributionPublisher;
@@ -32,11 +39,7 @@ use state::State;
 mod monetary;
 mod rewards;
 mod verifier;
-use acropolis_common::queries::accounts::{
-    AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
-};
-use acropolis_common::queries::errors::QueryError;
-use acropolis_common::validation::ValidationOutcomes;
+
 use verifier::Verifier;
 
 use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
@@ -461,16 +464,6 @@ impl AccountsState {
                     );
                     async {
                         Self::check_sync(&current_block, block_info);
-                        // Debug: log block info for stake deltas to help diagnose underflows
-                        if !deltas_msg.deltas.is_empty() {
-                            debug!(
-                                block = block_info.number,
-                                epoch = block_info.epoch,
-                                epoch_slot = block_info.epoch_slot,
-                                num_deltas = deltas_msg.deltas.len(),
-                                "Processing stake address deltas"
-                            );
-                        }
                         state
                             .handle_stake_deltas(deltas_msg, &mut vld)
                             .inspect_err(|e| {
