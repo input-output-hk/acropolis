@@ -1,5 +1,4 @@
 {
-  "current_slot": 9244417,
   "shelley_params": {
     "activeSlotsCoeff": 0.05,
     "epochLength": 432000,
@@ -67,22 +66,15 @@
       }
     }
   },
-  "utxos": [
-    [
-      ["0035edcf1ec947ee542330a8dad1f71c426af6958dd863ca4528cbfcff7b0d45", 0],
-      [4701984, 0]
-    ],
-    [
-      ["2197beb48981c6bc0eed1f6f47da9910763a4be0450f249a3db5fa8fbaf70c00", 5],
-      [4491004, 0]
-    ],
-    [
-      ["2197beb48981c6bc0eed1f6f47da9910763a4be0450f249a3db5fa8fbaf70c00", 11],
-      [4491004, 0]
-    ],
-    [
-      ["d9ca0ba5ff5b5096fb7bbc2b967685db5c70c17bb0b5120aec03a0802b3f312d", 0],
-      [4530419, 0]
-    ]
-  ]
+  "utxos": {
+    "5dd12a1c34f74d150f987ea8a03507b64b35ef4ec1f61b648e9836c1946cad35#0": {
+      "address": "addr1v8vqle5aa50ljr6pu5ndqve29luch29qmpwwhz2pk5tcggqn3q8mu",
+      "value": {
+        "lovelace": 5000000,
+        "assets": []
+      },
+      "datum": null,
+      "reference_script": null
+    }
+  }
 }

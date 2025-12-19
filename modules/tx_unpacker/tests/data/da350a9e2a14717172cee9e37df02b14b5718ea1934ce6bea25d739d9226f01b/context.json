@@ -1,5 +1,5 @@
 {
-  "current_slot": 9244417,
+  "current_slot": 7084748,
   "shelley_params": {
     "activeSlotsCoeff": 0.05,
     "epochLength": 432000,
@@ -69,20 +69,8 @@
   },
   "utxos": [
     [
-      ["0035edcf1ec947ee542330a8dad1f71c426af6958dd863ca4528cbfcff7b0d45", 0],
-      [4701984, 0]
-    ],
-    [
-      ["2197beb48981c6bc0eed1f6f47da9910763a4be0450f249a3db5fa8fbaf70c00", 5],
-      [4491004, 0]
-    ],
-    [
-      ["2197beb48981c6bc0eed1f6f47da9910763a4be0450f249a3db5fa8fbaf70c00", 11],
-      [4491004, 0]
-    ],
-    [
-      ["d9ca0ba5ff5b5096fb7bbc2b967685db5c70c17bb0b5120aec03a0802b3f312d", 0],
-      [4530419, 0]
+      ["4a53dd78e0b2fd4f1ad6c95c3a06d35f00665edd627ed84ba7646f3c3b17ed68", 1],
+      [4720846, 0]
     ]
   ]
 }

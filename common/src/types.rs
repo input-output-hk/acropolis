@@ -30,6 +30,7 @@ use std::{
     ops::{AddAssign, Neg},
     str::FromStr,
 };
+use tracing::error;
 
 /// Network identifier
 #[derive(
@@ -295,8 +296,8 @@ pub struct TxUTxODeltas {
     pub tx_identifier: TxIdentifier,
 
     // Created and spent UTxOs
-    pub inputs: Vec<UTxOIdentifier>,
-    pub outputs: Vec<TxOutput>,
+    pub consumes: Vec<UTxOIdentifier>,
+    pub produces: Vec<TxOutput>,
 
     // State needed for validation
     // This is missing UTxO Authors
@@ -897,6 +898,17 @@ pub struct TxOutput {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl TxOutput {
+    pub fn utxo_value(&self) -> UTXOValue {
+        UTXOValue {
+            address: self.address.clone(),
+            value: self.value.clone(),
+            datum: self.datum.clone(),
+            reference_script: self.reference_script.clone(),
+        }
+    }
+}
+
 /// Key hash
 pub type KeyHash = Hash<28>;
 
@@ -1156,6 +1168,22 @@ pub struct Withdrawal {
     pub tx_identifier: TxIdentifier,
 }
 
+impl Withdrawal {
+    pub fn get_withdrawal_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
+        match self.address.credential {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(script_hash);
+            }
+        }
+    }
+}
 /// Treasury pot account
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pot {
@@ -1887,6 +1915,12 @@ impl AsRef<BTreeMap<GenesisKeyhash, GenesisDelegate>> for GenesisDelegates {
     }
 }
 
+impl From<HashMap<PoolId, GenesisDelegate>> for GenesisDelegates {
+    fn from(map: HashMap<PoolId, GenesisDelegate>) -> Self {
+        GenesisDelegates(map.into_iter().map(|(k, v)| (*k, v)).collect())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
@@ -2086,6 +2120,23 @@ pub struct ProtocolParamUpdate {
 pub struct AlonzoBabbageUpdateProposal {
     pub proposals: Vec<(GenesisKeyhash, Box<ProtocolParamUpdate>)>,
     pub enactment_epoch: u64,
+}
+
+impl AlonzoBabbageUpdateProposal {
+    pub fn get_governance_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        genesis_delegs: &GenesisDelegates,
+    ) {
+        for (genesis_key, _) in self.proposals.iter() {
+            let found_genesis = genesis_delegs.as_ref().get(genesis_key);
+            if let Some(genesis) = found_genesis {
+                vkey_hashes.insert(genesis.delegate);
+            } else {
+                error!("Genesis delegate not found: {genesis_key}");
+            }
+        }
+    }
 }
 
 #[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
@@ -2525,10 +2576,11 @@ impl TxCertificate {
     /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
     ///
     /// returns (vkey_hashes, script_hashes)
-    pub fn get_cert_authors(&self) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
-        let mut vkey_hashes = HashSet::new();
-        let mut script_hashes = HashSet::new();
-
+    pub fn get_cert_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
         let mut parse_cred = |cred: &StakeCredential| match cred {
             StakeCredential::AddrKeyHash(vkey_hash) => {
                 vkey_hashes.insert(*vkey_hash);
@@ -2564,8 +2616,6 @@ impl TxCertificate {
             }
             _ => {}
         }
-
-        (vkey_hashes, script_hashes)
     }
 }
 

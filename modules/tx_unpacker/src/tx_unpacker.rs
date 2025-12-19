@@ -9,6 +9,7 @@ use acropolis_common::{
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     *,
 };
 use anyhow::Result;
@@ -18,14 +19,13 @@ use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::state::State;
-mod state;
-mod tx_validation_publisher;
-mod validations;
-use tx_validation_publisher::TxValidationPublisher;
 mod crypto;
+mod state;
+mod utils;
+mod validations;
 
 #[cfg(test)]
 mod test_utils;
@@ -65,7 +65,7 @@ impl TxUnpacker {
         publish_certificates_topic: Option<String>,
         publish_governance_procedures_topic: Option<String>,
         publish_block_txs_topic: Option<String>,
-        tx_validation_publisher: Option<TxValidationPublisher>,
+        publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
         mut bootstrapped_sub: Box<dyn Subscription<Message>>,
@@ -137,8 +137,8 @@ impl TxUnpacker {
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
                                     let Transaction {
-                                        inputs: tx_inputs,
-                                        outputs: tx_outputs,
+                                        consumes: tx_consumes,
+                                        produces: tx_produces,
                                         total_output: tx_total_output,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
@@ -150,27 +150,25 @@ impl TxUnpacker {
                                     let mut props = None;
                                     let mut votes = None;
 
-                                    let (vkey_hashes_needed, script_hashes_needed, vkey_hashes_provided, script_hashes_provided) = if block.intent.do_validation() {
-                                        let (vkey_hashes_needed, script_hashes_needed) = Self::get_vkey_script_needed(
-                                            &tx_certs,
-                                            &tx_withdrawals,
-                                            &tx_proposal_update,
-                                        );
-                                        let (vkey_hashes_provided, script_hashes_provided) = Self::get_vkey_script_provided(
-                                            &vkey_witnesses,
-                                            &native_scripts,
-                                        );
-                                        (Some(vkey_hashes_needed), Some(script_hashes_needed), Some(vkey_hashes_provided), Some(script_hashes_provided))
-                                    } else {
-                                        (None, None, None, None)
-                                    };
+                                    let mut vkey_needed = HashSet::new();
+                                    let mut script_needed = HashSet::new();
+                                    utils::get_vkey_script_needed(
+                                        &tx_certs,
+                                        &tx_withdrawals,
+                                        &tx_proposal_update,
+                                        &state.protocol_params,
+                                        &mut vkey_needed,
+                                        &mut script_needed,
+                                    );
+                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               tx_inputs.len(), tx_outputs.len(), tx_certs.len(), tx_total_output);
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
                                     }
 
                                     if let Some(error) = tx_error {
@@ -183,12 +181,12 @@ impl TxUnpacker {
                                         // Group deltas by tx
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
-                                            inputs: tx_inputs,
-                                            outputs: tx_outputs,
-                                            vkey_hashes_needed,
-                                            script_hashes_needed,
-                                            vkey_hashes_provided,
-                                            script_hashes_provided,
+                                            consumes: tx_consumes,
+                                            produces: tx_produces,
+                                            vkey_hashes_needed: Some(vkey_needed),
+                                            script_hashes_needed: Some(script_needed),
+                                            vkey_hashes_provided: Some(vkey_hashes_provided),
+                                            script_hashes_provided: Some(script_hashes_provided),
                                         });
                                     }
 
@@ -420,25 +418,24 @@ impl TxUnpacker {
                 }
             }
 
-            if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
+            if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
                 if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
                     message.as_ref()
                 {
-                    let mut tx_errors = Vec::new();
-                    for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
-                        let tx_index = tx_index as u16;
-
-                        // Validate transaction
-                        if let Err(e) =
-                            state.validate_transaction(block, raw_tx, &genesis.genesis_delegs)
-                        {
-                            tx_errors.push((tx_index, *e));
+                    let span = info_span!("tx_unpacker.validate", block = block.number);
+                    async {
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
+                            validation_outcomes.push(*e);
                         }
+
+                        validation_outcomes
+                            .publish(&context, publish_tx_validation_topic, block)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                     }
-                    tx_validation_publisher
-                        .publish_tx_validation(block, tx_errors)
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                    .instrument(span)
+                    .await;
                 }
             }
 
@@ -484,12 +481,6 @@ impl TxUnpacker {
         }
 
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
-        let tx_validation_publisher = if let Some(ref topic) = publish_tx_validation_topic {
-            info!("Publishing tx validation on '{topic}'");
-            Some(TxValidationPublisher::new(context.clone(), topic.clone()))
-        } else {
-            None
-        };
 
         // Subscribers
         let transactions_subscribe_topic = config
@@ -532,7 +523,7 @@ impl TxUnpacker {
                 publish_certificates_topic,
                 publish_governance_procedures_topic,
                 publish_block_txs_topic,
-                tx_validation_publisher,
+                publish_tx_validation_topic,
                 txs_sub,
                 bootstrapped_sub,
                 protocol_params_sub,
@@ -542,82 +533,6 @@ impl TxUnpacker {
         });
 
         Ok(())
-    }
-
-    /// Get VKey Witnesses needed for transaction
-    /// Get Scripts needed for transaction
-    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L274
-    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L226
-    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/UTxO.hs#L103
-    ///
-    /// VKey Witnesses needed
-    /// 1. UTxO authors: keys that own the UTxO being spent
-    /// 2. Certificate authors: keys authorizing certificates
-    /// 3. Pool owners: owners that must sign pool registration
-    /// 4. Withdrawal authors: keys authorizing reward withdrawals
-    /// 5. Governance authors: keys authorizing governance actions (e.g. protocol update)
-    ///
-    /// Script Witnesses needed
-    /// 1. Input scripts: scripts locking UTxO being spent
-    /// 2. Withdrawal scripts: scripts controlling reward accounts
-    /// 3. Certificate scripts: scripts in certificate credentials.
-    ///
-    /// NOTE:
-    /// This doesn't count `inputs`
-    /// which will be considered in the utxos_state
-    fn get_vkey_script_needed(
-        certs: &[TxCertificateWithPos],
-        withdrawals: &[Withdrawal],
-        proposal_update: &Option<AlonzoBabbageUpdateProposal>,
-    ) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
-        let mut vkey_hashes = HashSet::new();
-        let mut script_hashes = HashSet::new();
-
-        // for each certificate, get the required vkey and script hashes
-        for cert_with_pos in certs.iter() {
-            let (v, s) = cert_with_pos.cert.get_cert_authors();
-            vkey_hashes.extend(v);
-            script_hashes.extend(s);
-        }
-
-        // for each withdrawal, get the required vkey and script hashes
-        for withdrawal in withdrawals.iter() {
-            match withdrawal.address.credential {
-                StakeCredential::AddrKeyHash(vkey_hash) => {
-                    vkey_hashes.insert(vkey_hash);
-                }
-                StakeCredential::ScriptHash(script_hash) => {
-                    script_hashes.insert(script_hash);
-                }
-            }
-        }
-
-        // for each governance action, get the required vkey hashes
-        if let Some(proposal_update) = proposal_update.as_ref() {
-            for (genesis_key, _) in proposal_update.proposals.iter() {
-                vkey_hashes.insert(*genesis_key);
-            }
-        }
-
-        (vkey_hashes, script_hashes)
-    }
-
-    fn get_vkey_script_provided(
-        vkey_witnesses: &[VKeyWitness],
-        native_scripts: &[NativeScript],
-    ) -> (Vec<KeyHash>, Vec<ScriptHash>) {
-        let mut vkey_hashes = Vec::new();
-        let mut script_hashes = Vec::new();
-
-        for vkey_witness in vkey_witnesses.iter() {
-            vkey_hashes.push(vkey_witness.key_hash());
-        }
-
-        for native_script in native_scripts.iter() {
-            script_hashes.push(native_script.compute_hash());
-        }
-
-        (vkey_hashes, script_hashes)
     }
 
     /// Check for synchronisation

@@ -8,7 +8,7 @@ use acropolis_common::{
     messages::{ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage},
     protocol_params::Nonce,
     rational_number::RationalNumber,
-    validation::VrfValidationError,
+    validation::{ValidationError, VrfValidationError},
     BlockInfo, Era,
 };
 use anyhow::Result;
@@ -74,12 +74,12 @@ impl State {
         self.epoch_snapshots.push(new_snapshot);
     }
 
-    pub fn validate_block_vrf(
+    pub fn validate(
         &self,
         block_info: &BlockInfo,
         raw_header: &[u8],
         genesis: &GenesisValues,
-    ) -> Result<(), Box<VrfValidationError>> {
+    ) -> Result<(), Box<ValidationError>> {
         // Validation starts after Shelley Era
         if block_info.epoch < genesis.shelley_epoch {
             return Ok(());
@@ -89,27 +89,28 @@ impl State {
             Ok(header) => header,
             Err(e) => {
                 error!("Can't decode header {}: {e}", block_info.slot);
-                return Err(Box::new(VrfValidationError::Other(format!(
-                    "Can't decode header {}: {e}",
-                    block_info.slot
-                ))));
+                return Err(Box::new(ValidationError::CborDecodeError {
+                    era: block_info.era,
+                    slot: block_info.slot,
+                    reason: e.to_string(),
+                }));
             }
         };
 
         let Some(decentralisation_param) = self.decentralisation_param.clone() else {
-            return Err(Box::new(VrfValidationError::Other(
-                "Decentralisation Param is not set".to_string(),
-            )));
+            return Err(Box::new(
+                VrfValidationError::Other("Decentralisation Param is not set".to_string()).into(),
+            ));
         };
         let Some(active_slots_coeff) = self.active_slots_coeff.clone() else {
-            return Err(Box::new(VrfValidationError::Other(
-                "Active Slots Coeff is not set".to_string(),
-            )));
+            return Err(Box::new(
+                VrfValidationError::Other("Active Slots Coeff is not set".to_string()).into(),
+            ));
         };
         let Some(epoch_nonce) = self.epoch_nonce.as_ref() else {
-            return Err(Box::new(VrfValidationError::Other(
-                "Epoch Nonce is not set".to_string(),
-            )));
+            return Err(Box::new(
+                VrfValidationError::Other("Epoch Nonce is not set".to_string()).into(),
+            ));
         };
 
         let is_tpraos = matches!(
@@ -117,8 +118,8 @@ impl State {
             Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo
         );
 
-        if is_tpraos {
-            let result = ouroboros::tpraos::validate_vrf_tpraos(
+        let result = if is_tpraos {
+            ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
                 &header,
                 epoch_nonce,
@@ -131,10 +132,9 @@ impl State {
             )
             .and_then(|vrf_validations| {
                 vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
-            });
-            result
+            })
         } else {
-            let result = ouroboros::praos::validate_vrf_praos(
+            ouroboros::praos::validate_vrf_praos(
                 block_info,
                 &header,
                 epoch_nonce,
@@ -145,8 +145,8 @@ impl State {
             )
             .and_then(|vrf_validations| {
                 vrf_validations.iter().try_for_each(|assert| assert().map_err(Box::new))
-            });
-            result
-        }
+            })
+        };
+        result.map_err(|e| Box::new((*e).into()))
     }
 }

@@ -7,6 +7,7 @@ use acropolis_common::{
         StateQueryResponse, StateTransitionMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    validation::ValidationOutcomes,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -19,6 +20,9 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::{ImmutableUTXOStore, State};
+
+#[cfg(test)]
+mod test_utils;
 
 mod address_delta_publisher;
 mod volatile_index;
@@ -45,6 +49,8 @@ const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
+    ("utxo-validation-publish-topic", "cardano.validation.utxo");
 
 /// UTXO state module
 #[module(
@@ -57,16 +63,36 @@ pub struct UTXOState;
 impl UTXOState {
     /// Main run function
     async fn run(
+        context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
+        publish_tx_validation_topic: String,
     ) -> Result<()> {
         loop {
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
 
+            // Validate UTxODeltas
+            // before applying them
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
+                    let span = info_span!("utxo_state.validate", block = block.number);
+                    async {
+                        let mut state = state.lock().await;
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block, deltas_msg).await {
+                            validation_outcomes.push(*e);
+                        }
+
+                        validation_outcomes
+                            .publish(&context, &publish_tx_validation_topic, block)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
+                    }
+                    .instrument(span)
+                    .await;
+
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
                         let mut state = state.lock().await;
@@ -114,6 +140,11 @@ impl UTXOState {
             .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
             .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
 
+        let utxo_validation_publish_topic = config
+            .get_string(DEFAULT_UTXO_VALIDATION_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
+        info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
+
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
@@ -139,10 +170,16 @@ impl UTXOState {
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
 
         let state_run = state.clone();
+        let context_run = context.clone();
         context.run(async move {
-            Self::run(state_run, utxo_deltas_subscription)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                context_run,
+                state_run,
+                utxo_deltas_subscription,
+                utxo_validation_publish_topic,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         // Subscribe for snapshot messages
