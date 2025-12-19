@@ -3,8 +3,7 @@
 use crate::ParametersUpdater;
 use acropolis_common::{
     messages::{
-        GovernanceOutcomesMessage, GovernanceProtocolParametersBootstrapMessage,
-        ProtocolParamsMessage,
+        GovernanceOutcomesMessage, ProtocolParametersBootstrapMessage, ProtocolParamsMessage,
     },
     AlonzoBabbageVotingOutcome, Era, GovernanceOutcomeVariant,
 };
@@ -99,10 +98,7 @@ impl State {
     /// # Behavior
     ///
     /// - Assumes Conway era as the current era
-    pub fn bootstrap(
-        &mut self,
-        param_msg: &GovernanceProtocolParametersBootstrapMessage,
-    ) -> Result<u64> {
+    pub fn bootstrap(&mut self, param_msg: &ProtocolParametersBootstrapMessage) -> Result<u64> {
         self.network_name = param_msg.network_name.clone();
         self.current_era = Some(param_msg.era);
 

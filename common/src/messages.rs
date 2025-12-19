@@ -352,7 +352,7 @@ pub struct DRepBootstrapMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GovernanceProtocolParametersBootstrapMessage {
+pub struct ProtocolParametersBootstrapMessage {
     pub network_name: String,
     pub era: Era,
     pub params: ProtocolParamUpdate,
@@ -491,7 +491,7 @@ pub enum SnapshotStateMessage {
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
-    ParametersState(GovernanceProtocolParametersBootstrapMessage),
+    ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
 }
 

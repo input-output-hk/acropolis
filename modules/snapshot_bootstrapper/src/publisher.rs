@@ -1,3 +1,4 @@
+use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
 use acropolis_common::RewardParams;
 use acropolis_common::{commands::chain_sync::ChainSyncCommand, messages::Command};
@@ -7,9 +8,9 @@ use acropolis_common::{
     ledger_state::SPOState,
     messages::{
         AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots,
-        GovernanceProtocolParametersBootstrapMessage, Message, SnapshotMessage,
-        SnapshotStateMessage, UTxOPartialState,
+        GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
+        UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
@@ -48,6 +49,10 @@ pub struct EpochContext {
     pub last_block_time: u64,
     /// Last block height from header
     pub last_block_height: u64,
+    /// Bootstrap Era
+    pub era: Era,
+    /// Magic number from genesis params
+    pub magic_number: MagicNumber,
 }
 
 impl EpochContext {
@@ -57,12 +62,14 @@ impl EpochContext {
     /// * `header_slot` - Slot number from the target block header
     /// * `header_block_height` - Block height from the target block header
     /// * `epoch` - Target epoch number
+    /// * `era` - Era of the target block
     /// * `genesis` - Genesis values for timestamp calculations
     pub fn new(
         nonces: Nonces,
         header_slot: u64,
         header_block_height: u64,
         epoch: u64,
+        era: Era,
         genesis: &GenesisValues,
     ) -> Self {
         let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
@@ -76,6 +83,8 @@ impl EpochContext {
             epoch_end_time,
             last_block_time,
             last_block_height: header_block_height,
+            era,
+            magic_number: genesis.magic_number.clone(),
         }
     }
 }
@@ -378,7 +387,14 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
         _: RewardParams,
         params: ProtocolParamUpdate,
     ) -> Result<()> {
-        publish_gov_state(&self.context, &self.snapshot_topic, epoch, params);
+        publish_gov_state(
+            &self.context,
+            &self.snapshot_topic,
+            epoch,
+            self.epoch_context.era,
+            self.epoch_context.magic_number.clone(),
+            params,
+        );
 
         Ok(())
     }
@@ -388,19 +404,18 @@ fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
     epoch: u64,
+    era: Era,
+    magic_number: MagicNumber,
     params: ProtocolParamUpdate,
 ) {
     info!("Received governance protocol parameters for epoch {epoch}",);
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-        SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+        SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
             epoch,
             params,
-            era: Era::Conway,
-            network_name: "mainnet".to_string(),
-            // NOTE: The era is hardcoded to Conway. This code is currently
-            // Conway-focused and has not been tested on other eras. And the
-            // network name is hardcoded to mainnet for the same reason.
+            era,
+            network_name: magic_number.to_network_name().to_string(),
         }),
     )));
 
@@ -628,6 +643,7 @@ mod tests {
             134956789, // slot
             11000000,  // block height
             509,       // epoch
+            Era::Conway,
             &genesis,
         );
 
@@ -643,7 +659,14 @@ mod tests {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
 
-        let ctx = EpochContext::new(nonces.clone(), 134956789, 11000000, 509, &genesis);
+        let ctx = EpochContext::new(
+            nonces.clone(),
+            134956789,
+            11000000,
+            509,
+            Era::Conway,
+            &genesis,
+        );
 
         // Verify nonce conversion works
         assert_eq!(ctx.nonces, nonces);

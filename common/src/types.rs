@@ -1934,9 +1934,34 @@ impl From<HashMap<PoolId, GenesisDelegate>> for GenesisDelegates {
 #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
-    pub protocol_magic: u32,
+    pub protocol_magic: MagicNumber,
     pub vss_max_ttl: Option<u32>,
     pub vss_min_ttl: Option<u32>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MagicNumber(u32);
+
+impl MagicNumber {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn to_network_name(&self) -> &str {
+        match self.0 {
+            764824073 => "mainnet",
+            1 => "preprod",
+            2 => "preview",
+            4 => "sanchonet",
+            _ => "unknown",
+        }
+    }
+}
+
+impl From<MagicNumber> for u32 {
+    fn from(m: MagicNumber) -> Self {
+        m.0
+    }
 }
 
 #[bitmask(u8)]
