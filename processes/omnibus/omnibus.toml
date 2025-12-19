@@ -5,7 +5,7 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "mithril"  # Options: "mithril" | "snapshot"
+method = "snapshot"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -45,7 +45,7 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
-           "cardano.validation.spo"
+#           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -212,3 +212,7 @@ bulk-resume-capacity = 75
 [[message-router.route]]  # Everything is internal only
 pattern = "#"
 bus = "internal"
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0 
