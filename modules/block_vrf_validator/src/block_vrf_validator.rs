@@ -5,6 +5,7 @@ use acropolis_common::{
     caryatid::SubscriptionExt,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -17,9 +18,7 @@ mod state;
 use state::State;
 mod ouroboros;
 
-use crate::vrf_validation_publisher::VrfValidationPublisher;
 mod snapshot;
-mod vrf_validation_publisher;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
@@ -53,14 +52,15 @@ pub struct BlockVrfValidator;
 impl BlockVrfValidator {
     #[allow(clippy::too_many_arguments)]
     async fn run(
+        context: Arc<Context<Message>>,
         history: Arc<Mutex<StateHistory<State>>>,
-        mut vrf_validation_publisher: VrfValidationPublisher,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
+        publish_vrf_validation_topic: String,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -153,15 +153,15 @@ impl BlockVrfValidator {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
-                        let result = state
-                            .validate_block_vrf(block_info, &block_msg.header, &genesis)
-                            .map_err(|e| *e);
-                        if let Err(e) = vrf_validation_publisher
-                            .publish_vrf_validation(block_info, result)
-                            .await
-                        {
-                            error!("Failed to publish VRF validation: {e}")
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block_info, &block_msg.header, &genesis) {
+                            validation_outcomes.push(*e);
                         }
+
+                        validation_outcomes
+                            .publish(&context, &publish_vrf_validation_topic, block_info)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
                     }
                     .instrument(span)
                     .await;
@@ -213,10 +213,6 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
 
-        // publishers
-        let vrf_validation_publisher =
-            VrfValidationPublisher::new(context.clone(), validation_vrf_publisher_topic);
-
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
@@ -233,16 +229,18 @@ impl BlockVrfValidator {
         )));
 
         // Start run task
+        let context_run = context.clone();
         context.run(async move {
             Self::run(
+                context_run,
                 history,
-                vrf_validation_publisher,
                 bootstrapped_subscription,
                 block_subscription,
                 protocol_parameters_subscription,
                 epoch_nonce_subscription,
                 spo_state_subscription,
                 spdd_subscription,
+                validation_vrf_publisher_topic,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

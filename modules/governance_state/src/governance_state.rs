@@ -1,14 +1,15 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
-        StateTransitionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse, StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -43,6 +44,9 @@ const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
 const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -62,6 +66,7 @@ pub struct GovernanceStateConfig {
     enact_state_topic: String,
     governance_query_topic: String,
     validation_outcome_topic: String,
+    snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
 }
 
@@ -81,6 +86,7 @@ impl GovernanceStateConfig {
             enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             validation_outcome_topic: Self::conf(config, DEFAULT_VALIDATION_OUTCOME_TOPIC),
+            snapshot_subscribe_topic: Self::conf(config, DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
@@ -103,9 +109,54 @@ impl GovernanceState {
     );
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        state: Arc<Mutex<State>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for governance state snapshot bootstrap messages...");
+
+        loop {
+            let Ok((_, message)) = snapshot_subscription.read().await else {
+                info!("Snapshot subscription closed");
+                return Ok(());
+            };
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Snapshot Startup message received");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::GovernanceState(gov_msg),
+                )) => {
+                    let mut locked = state.lock().await;
+                    // Use a default voting length if conway params not yet available
+                    // The actual voting length will be set when protocol params arrive
+                    let voting_length = locked
+                        .get_conway_voting()
+                        .get_conway_params()
+                        .map(|p| p.gov_action_lifetime as u64)
+                        .unwrap_or(6); // Default to 6 epochs if not set
+
+                    locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                    info!(
+                        "Snapshot Bootstrap message received, {} proposals loaded",
+                        gov_msg.proposals.len()
+                    );
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting bootstrap loop");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_s: Box<dyn Subscription<Message>>,
         mut drep_s: Box<dyn Subscription<Message>>,
         mut spo_s: Box<dyn Subscription<Message>>,
@@ -116,6 +167,11 @@ impl GovernanceState {
             config.enact_state_topic.clone(),
             config.verification_output_file.clone(),
         )));
+
+        // Wait for snapshot bootstrap if subscription is provided
+        if let Some(subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(state.clone(), subscription).await?;
+        }
 
         // Ticker to log stats
         let state_tick = state.clone();
@@ -281,13 +337,23 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
+
+        // Subscribe for snapshot bootstrap if starting from snapshot
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            Some(context.subscribe(&cfg.snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
         let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
         let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
         let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, st, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, snapshot_subscription, gt, dt, st, pt)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

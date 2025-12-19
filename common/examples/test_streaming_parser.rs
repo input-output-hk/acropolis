@@ -337,6 +337,21 @@ impl GovernanceProtocolParametersCallback for CountingCallbacks {
     }
 }
 
+impl acropolis_common::snapshot::GovernanceStateCallback for CountingCallbacks {
+    fn on_governance_state(
+        &mut self,
+        state: acropolis_common::snapshot::GovernanceState,
+    ) -> Result<()> {
+        eprintln!(
+            "Governance State: epoch {}, {} proposals, {} votes",
+            state.epoch,
+            state.proposals.len(),
+            state.votes.len()
+        );
+        Ok(())
+    }
+}
+
 impl EpochCallback for CountingCallbacks {
     fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
         info!(

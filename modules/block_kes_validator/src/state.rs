@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{ProtocolParamsMessage, SPOStateMessage},
-    validation::KesValidationError,
+    validation::{KesValidationError, ValidationError},
     BlockInfo, PoolId,
 };
 use imbl::HashMap;
@@ -49,12 +49,12 @@ impl State {
         self.ocert_counters.insert(pool_id, declared_sequence_number);
     }
 
-    pub fn validate_block_kes(
+    pub fn validate(
         &self,
         block_info: &BlockInfo,
         raw_header: &[u8],
         genesis: &GenesisValues,
-    ) -> Result<Option<(PoolId, u64)>, Box<KesValidationError>> {
+    ) -> Result<Option<(PoolId, u64)>, Box<ValidationError>> {
         // Validation starts after Shelley Era
         if block_info.epoch < genesis.shelley_epoch {
             return Ok(None);
@@ -64,22 +64,23 @@ impl State {
             Ok(header) => header,
             Err(e) => {
                 error!("Can't decode header {}: {e}", block_info.slot);
-                return Err(Box::new(KesValidationError::Other(format!(
-                    "Can't decode header {}: {e}",
-                    block_info.slot
-                ))));
+                return Err(Box::new(ValidationError::CborDecodeError {
+                    era: block_info.era,
+                    slot: block_info.slot,
+                    reason: e.to_string(),
+                }));
             }
         };
 
         let Some(slots_per_kes_period) = self.slots_per_kes_period else {
-            return Err(Box::new(KesValidationError::Other(
-                "Slots per KES period is not set".to_string(),
-            )));
+            return Err(Box::new(
+                KesValidationError::Other("Slots per KES period is not set".to_string()).into(),
+            ));
         };
         let Some(max_kes_evolutions) = self.max_kes_evolutions else {
-            return Err(Box::new(KesValidationError::Other(
-                "Max KES evolutions is not set".to_string(),
-            )));
+            return Err(Box::new(
+                KesValidationError::Other("Max KES evolutions is not set".to_string()).into(),
+            ));
         };
 
         let result = ouroboros::kes_validation::validate_block_kes(
@@ -95,6 +96,6 @@ impl State {
             Ok(Some((pool_id, declared_sequence_number)))
         });
 
-        result
+        result.map_err(|e| Box::new((*e).into()))
     }
 }

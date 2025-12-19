@@ -448,6 +448,41 @@ pub struct UTxOPartialState {
     pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
 }
 
+/// Governance bootstrap message containing all governance state from snapshot
+/// Includes proposals, votes, committee, and constitution
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceBootstrapMessage {
+    /// Current epoch when snapshot was taken
+    pub epoch: u64,
+    /// Active proposals with their voting epochs
+    pub proposals: Vec<(u64, ProposalProcedure)>,
+    /// Votes cast on proposals (action_id -> voter -> procedure)
+    pub votes: HashMap<GovActionId, HashMap<Voter, VotingProcedure>>,
+    /// Current committee (if any)
+    pub committee: Option<Committee>,
+    /// Current constitution
+    pub constitution: Constitution,
+    /// Proposal roots (previous action IDs by purpose)
+    pub proposal_roots: GovernanceProposalRoots,
+    /// Actions that have been enacted but not yet applied
+    pub enacted_action_ids: Vec<GovActionId>,
+    /// Actions that have expired
+    pub expired_action_ids: Vec<GovActionId>,
+}
+
+/// Previous governance action IDs by purpose (for proposal chaining)
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProposalRoots {
+    /// Previous parameter update action ID
+    pub pparam_update: Option<GovActionId>,
+    /// Previous hard fork action ID
+    pub hard_fork: Option<GovActionId>,
+    /// Previous committee action ID
+    pub committee: Option<GovActionId>,
+    /// Previous constitution action ID
+    pub constitution: Option<GovActionId>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
@@ -457,6 +492,7 @@ pub enum SnapshotStateMessage {
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
     ParametersState(GovernanceProtocolParametersBootstrapMessage),
+    GovernanceState(GovernanceBootstrapMessage),
 }
 
 // === Global message enum ===
