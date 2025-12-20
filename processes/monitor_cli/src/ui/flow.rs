@@ -9,7 +9,7 @@ use ratatui::{
 use crate::app::App;
 use crate::data::{DataFlowGraph, HealthStatus};
 
-/// Render the module-centric data flow view with ASCII boxes
+/// Render the data flow view as a dependency graph centered on the selected module
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;
@@ -22,231 +22,328 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let graph = DataFlowGraph::from_monitor_data(data);
 
     // Find topics this module reads from (inputs) and writes to (outputs)
-    let mut inputs: Vec<(&str, Vec<&str>)> = Vec::new(); // (topic, producers)
-    let mut outputs: Vec<(&str, Vec<&str>)> = Vec::new(); // (topic, consumers)
+    let mut inputs: Vec<InputInfo> = Vec::new();
+    let mut outputs: Vec<OutputInfo> = Vec::new();
 
     for read in &module.reads {
-        let producers: Vec<&str> = graph
-            .producers
-            .get(&read.topic)
-            .map(|v| v.iter().map(|s| s.as_str()).collect())
-            .unwrap_or_default();
-        inputs.push((&read.topic, producers));
+        let producers: Vec<String> = graph.producers.get(&read.topic).cloned().unwrap_or_default();
+        inputs.push(InputInfo {
+            topic: read.topic.clone(),
+            producers,
+            status: read.status,
+            pending: read.pending_for,
+            unread: read.unread,
+        });
     }
 
     for write in &module.writes {
-        let consumers: Vec<&str> = graph
-            .consumers
-            .get(&write.topic)
-            .map(|v| v.iter().map(|s| s.as_str()).collect())
-            .unwrap_or_default();
-        outputs.push((&write.topic, consumers));
+        let consumers: Vec<String> = graph.consumers.get(&write.topic).cloned().unwrap_or_default();
+        outputs.push(OutputInfo {
+            topic: write.topic.clone(),
+            consumers,
+            status: write.status,
+            pending: write.pending_for,
+        });
     }
 
-    // Build the ASCII art display
     let mut lines: Vec<Line> = Vec::new();
-
-    // Module header box
-    let module_box_width = module.name.len() + 4;
     let health_style = app.theme.status_style(module.health);
 
+    // === UPSTREAM SECTION (modules that feed into this one) ===
     lines.push(Line::from(""));
 
-    // Center the module box
-    let center_padding = (area.width as usize).saturating_sub(module_box_width) / 2;
-    let pad = " ".repeat(center_padding);
+    if inputs.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  (no inputs)",
+            Style::default().add_modifier(Modifier::DIM),
+        )]));
+    } else {
+        // Show upstream producers
+        let mut all_producers: Vec<&str> =
+            inputs.iter().flat_map(|i| i.producers.iter().map(|s| s.as_str())).collect();
+        all_producers.sort();
+        all_producers.dedup();
+
+        if !all_producers.is_empty() {
+            let producers_line = all_producers
+                .iter()
+                .map(|p| {
+                    // Check if this producer has health issues
+                    let producer_module = data.modules.iter().find(|m| &m.name == *p);
+                    let style = producer_module
+                        .map(|m| app.theme.status_style(m.health))
+                        .unwrap_or_default();
+                    (p.to_string(), style)
+                })
+                .collect::<Vec<_>>();
+
+            let mut spans: Vec<Span> = vec![Span::raw("  ")];
+            for (i, (name, style)) in producers_line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
+                spans.push(Span::styled(
+                    format!("┌{}┐", "─".repeat(name.len() + 2)),
+                    style.add_modifier(Modifier::DIM),
+                ));
+            }
+            lines.push(Line::from(spans));
+
+            let mut spans: Vec<Span> = vec![Span::raw("  ")];
+            for (i, (name, style)) in producers_line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
+                spans.push(Span::styled(format!("│ {} │", name), *style));
+            }
+            lines.push(Line::from(spans));
+
+            let mut spans: Vec<Span> = vec![Span::raw("  ")];
+            for (i, (name, style)) in producers_line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
+                spans.push(Span::styled(
+                    format!("└{}┘", "─".repeat(name.len() + 2)),
+                    style.add_modifier(Modifier::DIM),
+                ));
+            }
+            lines.push(Line::from(spans));
+
+            // Arrows pointing down
+            let mut spans: Vec<Span> = vec![Span::raw("  ")];
+            for (i, (name, _)) in producers_line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
+                let padding = (name.len() + 4) / 2;
+                spans.push(Span::styled(
+                    format!(
+                        "{:>width$}│{:<width2$}",
+                        "",
+                        "",
+                        width = padding,
+                        width2 = padding
+                    ),
+                    Style::default().fg(app.theme.border),
+                ));
+            }
+            lines.push(Line::from(spans));
+
+            let mut spans: Vec<Span> = vec![Span::raw("  ")];
+            for (i, (name, _)) in producers_line.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
+                let padding = (name.len() + 4) / 2;
+                spans.push(Span::styled(
+                    format!(
+                        "{:>width$}▼{:<width2$}",
+                        "",
+                        "",
+                        width = padding,
+                        width2 = padding
+                    ),
+                    Style::default().fg(app.theme.border),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Show input topics
+        for input in &inputs {
+            let status_style = app.theme.status_style(input.status);
+            let pending = input
+                .pending
+                .map(|d| crate::data::duration::format_duration(d))
+                .unwrap_or_else(|| "-".to_string());
+            let unread = input.unread.map(|u| u.to_string()).unwrap_or_else(|| "-".to_string());
+
+            lines.push(Line::from(vec![
+                Span::styled("  ╭─ ", Style::default().fg(app.theme.border)),
+                Span::styled(truncate(&input.topic, 35), Style::default()),
+                Span::styled(" ─╮", Style::default().fg(app.theme.border)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  │  ", Style::default().fg(app.theme.border)),
+                Span::styled(
+                    format!("pending: {:>8}  unread: {:>6}  ", pending, unread),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled(input.status.symbol(), status_style),
+                Span::styled(" │", Style::default().fg(app.theme.border)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  ╰", Style::default().fg(app.theme.border)),
+                Span::styled(
+                    "───────────────────────────────────────────",
+                    Style::default().fg(app.theme.border),
+                ),
+                Span::styled("╯", Style::default().fg(app.theme.border)),
+            ]));
+        }
+    }
+
+    // Arrow into main module
+    lines.push(Line::from(vec![Span::styled(
+        "                    │",
+        Style::default().fg(app.theme.border),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        "                    ▼",
+        Style::default().fg(app.theme.border),
+    )]));
+
+    // === MAIN MODULE (center) ===
+    let module_width = module.name.len().max(20) + 4;
+    let pad_left = 20usize.saturating_sub(module_width / 2);
+    let padding = " ".repeat(pad_left);
 
     lines.push(Line::from(vec![
-        Span::raw(pad.clone()),
+        Span::raw(padding.clone()),
         Span::styled(
-            format!("╭{}╮", "─".repeat(module_box_width - 2)),
+            format!("╔{}╗", "═".repeat(module_width)),
             Style::default().fg(app.theme.highlight),
         ),
     ]));
 
+    let name_pad = module_width.saturating_sub(module.name.len()) / 2;
     lines.push(Line::from(vec![
-        Span::raw(pad.clone()),
-        Span::styled("│ ", Style::default().fg(app.theme.highlight)),
+        Span::raw(padding.clone()),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
+        Span::raw(format!("{:>width$}", "", width = name_pad)),
         Span::styled(
             module.name.clone(),
             Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" │", Style::default().fg(app.theme.highlight)),
+        Span::raw(format!(
+            "{:<width$}",
+            "",
+            width = module_width - name_pad - module.name.len()
+        )),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    let stats = format!(
+        "R:{} W:{}",
+        format_count(module.total_read),
+        format_count(module.total_written)
+    );
+    let stats_pad = module_width.saturating_sub(stats.len()) / 2;
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
+        Span::raw(format!("{:>width$}", "", width = stats_pad)),
+        Span::styled(stats.clone(), Style::default().add_modifier(Modifier::DIM)),
+        Span::raw(format!(
+            "{:<width$}",
+            "",
+            width = module_width - stats_pad - stats.len()
+        )),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    let health_text = format!(
+        "{} {}",
+        module.health.symbol(),
+        match module.health {
+            HealthStatus::Healthy => "healthy",
+            HealthStatus::Warning => "warning",
+            HealthStatus::Critical => "critical",
+        }
+    );
+    let health_pad = module_width.saturating_sub(health_text.len()) / 2;
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
+        Span::raw(format!("{:>width$}", "", width = health_pad)),
+        Span::styled(health_text.clone(), health_style),
+        Span::raw(format!(
+            "{:<width$}",
+            "",
+            width = module_width - health_pad - health_text.len()
+        )),
+        Span::styled("║", Style::default().fg(app.theme.highlight)),
     ]));
 
     lines.push(Line::from(vec![
-        Span::raw(pad.clone()),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
+        Span::raw(padding.clone()),
         Span::styled(
-            format!(
-                " R:{:<5} W:{:<5}",
-                format_count(module.total_read),
-                format_count(module.total_written)
-            ),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    lines.push(Line::from(vec![
-        Span::raw(pad.clone()),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
-        Span::raw("    "),
-        Span::styled(module.health.symbol(), health_style),
-        Span::raw("      "),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    lines.push(Line::from(vec![
-        Span::raw(pad.clone()),
-        Span::styled(
-            format!("╰{}╯", "─".repeat(module_box_width - 2)),
+            format!("╚{}╝", "═".repeat(module_width)),
             Style::default().fg(app.theme.highlight),
         ),
     ]));
 
-    lines.push(Line::from(""));
-
-    // Show inputs and outputs sections
-    let section_width = (area.width as usize).saturating_sub(4) / 2;
-
-    // Divider
+    // Arrow out of main module
     lines.push(Line::from(vec![Span::styled(
-        format!("  {:─<width$}┬{:─<width$}", "", "", width = section_width),
+        "                    │",
+        Style::default().fg(app.theme.border),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        "                    ▼",
         Style::default().fg(app.theme.border),
     )]));
 
-    // Section headers
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!(
-                "  {:^width$}",
-                format!("INPUTS ({})", inputs.len()),
-                width = section_width
-            ),
-            app.theme.header,
-        ),
-        Span::styled("│", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!(
-                "{:^width$}",
-                format!("OUTPUTS ({})", outputs.len()),
-                width = section_width
-            ),
-            app.theme.header,
-        ),
-    ]));
-
-    lines.push(Line::from(vec![Span::styled(
-        format!("  {:─<width$}┼{:─<width$}", "", "", width = section_width),
-        Style::default().fg(app.theme.border),
-    )]));
-
-    // Render inputs and outputs side by side
-    let max_rows = inputs.len().max(outputs.len()).max(1);
-
-    for i in 0..max_rows {
-        let mut spans: Vec<Span> = Vec::new();
-
-        // Left side (inputs)
-        if let Some((topic, producers)) = inputs.get(i) {
-            let producer_str = if producers.is_empty() {
-                "(external)".to_string()
-            } else {
-                producers.join(", ")
-            };
-
-            // Find the read data for health info
-            let read_data = module.reads.iter().find(|r| &r.topic == *topic);
-            let status = read_data.map(|r| r.status).unwrap_or(HealthStatus::Healthy);
-            let pending = read_data
-                .and_then(|r| r.pending_for)
-                .map(|d| crate::data::duration::format_duration(d))
-                .unwrap_or_else(|| "-".to_string());
-            let topic_truncated = truncate(topic, 25);
-            let producer_truncated = truncate(&producer_str, 15);
-
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                format!("{:<15}", producer_truncated),
-                Style::default().add_modifier(Modifier::DIM),
-            ));
-            spans.push(Span::styled(" → ", Style::default().fg(app.theme.border)));
-            spans.push(Span::styled(
-                format!("{:<25}", topic_truncated),
-                Style::default(),
-            ));
-            spans.push(Span::styled(
-                format!(" {:>6} ", pending),
-                app.theme.status_style(status),
-            ));
-            spans.push(Span::styled(
-                status.symbol(),
-                app.theme.status_style(status),
-            ));
-        } else {
-            spans.push(Span::raw(format!("  {:width$}", "", width = section_width)));
-        }
-
-        spans.push(Span::styled("│", Style::default().fg(app.theme.border)));
-
-        // Right side (outputs)
-        if let Some((topic, consumers)) = outputs.get(i) {
-            let consumer_str = if consumers.is_empty() {
-                "(no consumers)".to_string()
-            } else {
-                consumers.join(", ")
-            };
-
-            // Find the write data for health info
-            let write_data = module.writes.iter().find(|w| &w.topic == *topic);
-            let status = write_data.map(|w| w.status).unwrap_or(HealthStatus::Healthy);
-            let pending = write_data
-                .and_then(|w| w.pending_for)
+    // === DOWNSTREAM SECTION (topics this module writes to) ===
+    if outputs.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  (no outputs)",
+            Style::default().add_modifier(Modifier::DIM),
+        )]));
+    } else {
+        // Show output topics
+        for output in &outputs {
+            let status_style = app.theme.status_style(output.status);
+            let pending = output
+                .pending
                 .map(|d| crate::data::duration::format_duration(d))
                 .unwrap_or_else(|| "-".to_string());
 
-            let topic_truncated = truncate(topic, 25);
-            let consumer_truncated = truncate(&consumer_str, 15);
-
-            spans.push(Span::styled(
-                status.symbol(),
-                app.theme.status_style(status),
-            ));
-            spans.push(Span::styled(
-                format!(" {:>6}", pending),
-                app.theme.status_style(status),
-            ));
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("{:<25}", topic_truncated),
-                Style::default(),
-            ));
-            spans.push(Span::styled(" → ", Style::default().fg(app.theme.border)));
-            spans.push(Span::styled(
-                format!("{:<15}", consumer_truncated),
-                Style::default().add_modifier(Modifier::DIM),
-            ));
+            lines.push(Line::from(vec![
+                Span::styled("  ╭─ ", Style::default().fg(app.theme.border)),
+                Span::styled(truncate(&output.topic, 35), Style::default()),
+                Span::styled(" ─╮", Style::default().fg(app.theme.border)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  │  ", Style::default().fg(app.theme.border)),
+                Span::styled(
+                    format!("pending: {:>8}  ", pending),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled(output.status.symbol(), status_style),
+                Span::styled(
+                    format!(
+                        "  → {}",
+                        if output.consumers.is_empty() {
+                            "(no consumers)".to_string()
+                        } else {
+                            output.consumers.join(", ")
+                        }
+                    ),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled(" │", Style::default().fg(app.theme.border)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("  ╰", Style::default().fg(app.theme.border)),
+                Span::styled(
+                    "───────────────────────────────────────────",
+                    Style::default().fg(app.theme.border),
+                ),
+                Span::styled("╯", Style::default().fg(app.theme.border)),
+            ]));
         }
-
-        lines.push(Line::from(spans));
     }
 
-    // Footer with navigation hint
+    // Footer
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        " ↑/↓: select module  Enter: details  /: filter ",
+        " ↑/↓: change module   Enter: details   /:filter",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
     // Build the block
-    let selected_name = &module.name;
-    let title = format!(
-        " Data Flow: {} ({} inputs, {} outputs) ",
-        selected_name,
-        inputs.len(),
-        outputs.len()
-    );
+    let title = format!(" Data Flow: {} ", module.name);
 
     let block = Block::default()
         .title(title)
@@ -256,6 +353,21 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
+}
+
+struct InputInfo {
+    topic: String,
+    producers: Vec<String>,
+    status: HealthStatus,
+    pending: Option<std::time::Duration>,
+    unread: Option<u64>,
+}
+
+struct OutputInfo {
+    topic: String,
+    consumers: Vec<String>,
+    status: HealthStatus,
+    pending: Option<std::time::Duration>,
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
