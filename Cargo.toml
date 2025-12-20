@@ -38,6 +38,7 @@ members = [
     "processes/golden_tests",       # All-inclusive golden tests process
     "processes/tx_submitter_cli",   # CLI wrapper for TX submitter
     "processes/indexer",            # Minimal example indexer
+    "processes/monitor_cli",        # TUI monitoring tool
 ]
 resolver = "2"
 

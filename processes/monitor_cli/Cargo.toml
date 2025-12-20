@@ -1,0 +1,35 @@
+[package]
+name = "acropolis_monitor_cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Acropolis Team"]
+description = "TUI monitoring tool for Acropolis processes"
+license = "Apache-2.0"
+
+[[bin]]
+name = "monitor-cli"
+path = "src/main.rs"
+
+[dependencies]
+# CLI argument parsing
+clap = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# TUI framework
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Terminal color detection
+terminal-light = "1.4"
+
+# Time formatting
+humantime = "2.1"

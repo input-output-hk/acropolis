@@ -192,6 +192,10 @@ port = 4340
 # Enable for message spying
 #topic = "cardano.#"
 
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0    # every 5 seconds
+
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
