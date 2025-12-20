@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::data::{MonitorData, Thresholds};
+use crate::data::{History, MonitorData, Thresholds};
 use crate::ui::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +41,7 @@ pub struct App {
     // Data
     pub monitor_path: PathBuf,
     pub data: Option<MonitorData>,
+    pub history: History,
     pub load_error: Option<String>,
     pub thresholds: Thresholds,
 
@@ -60,6 +61,7 @@ impl App {
             show_help: false,
             monitor_path,
             data: None,
+            history: History::new(),
             load_error: None,
             thresholds: Thresholds::default(),
             selected_module_index: 0,
@@ -72,6 +74,8 @@ impl App {
     pub fn reload_data(&mut self) -> Result<()> {
         match MonitorData::load(&self.monitor_path, &self.thresholds) {
             Ok(data) => {
+                // Record history before updating
+                self.history.record(&data);
                 self.data = Some(data);
                 self.load_error = None;
                 // Clamp selection indices
