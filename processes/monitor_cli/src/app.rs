@@ -193,7 +193,7 @@ impl App {
             }
             View::Bottleneck => {
                 if let Some(ref data) = self.data {
-                    let count = data.unhealthy_topics().len();
+                    let count = self.filtered_bottleneck_count(data);
                     if self.selected_topic_index < count.saturating_sub(1) {
                         self.selected_topic_index += 1;
                     }
@@ -291,6 +291,21 @@ impl App {
             return true;
         }
         name.to_lowercase().contains(&self.filter_text.to_lowercase())
+    }
+
+    /// Get count of bottlenecks after applying filter
+    fn filtered_bottleneck_count(&self, data: &MonitorData) -> usize {
+        if self.filter_text.is_empty() {
+            return data.unhealthy_topics().len();
+        }
+        let search = self.filter_text.to_lowercase();
+        data.unhealthy_topics()
+            .iter()
+            .filter(|(module, topic)| {
+                module.name.to_lowercase().contains(&search)
+                    || topic.topic().to_lowercase().contains(&search)
+            })
+            .count()
     }
 
     pub fn quit(&mut self) {
