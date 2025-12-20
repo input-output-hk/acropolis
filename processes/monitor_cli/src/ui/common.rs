@@ -129,23 +129,30 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Render the status bar at the bottom
 pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let back_hint = if !app.view_stack.is_empty() {
-        "Esc:back "
-    } else {
-        ""
-    };
-
     let status = if let Some(ref data) = app.data {
         let elapsed = data.last_updated.elapsed();
 
-        // Show breadcrumb if we have navigation history
+        // Show breadcrumb
         let breadcrumb = app.breadcrumb();
 
+        // Context-sensitive controls
+        let controls = match app.current_view {
+            View::Summary | View::Bottleneck => {
+                if app.filter_active {
+                    "Type to search | Enter:apply Esc:cancel"
+                } else {
+                    "/:search s:sort Tab:switch Enter:detail ?:help q:quit"
+                }
+            }
+            View::DataFlow => "↑↓:select Tab:switch Enter:detail ?:help q:quit",
+            View::ModuleDetail => "Esc:back ?:help q:quit",
+        };
+
         format!(
-            " {} | Updated {:.1}s ago | {}Enter:detail Tab:switch ?:help q:quit",
+            " {} | Updated {:.1}s ago | {}",
             breadcrumb,
             elapsed.as_secs_f64(),
-            back_hint,
+            controls,
         )
     } else if let Some(ref err) = app.load_error {
         format!(" Error: {} | q:quit r:retry", err)
@@ -173,10 +180,10 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
         Line::from("  Esc       Go back"),
         Line::from(""),
         Line::from(vec![Span::styled(
-            " Summary View",
+            " Summary & Bottlenecks",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
-        Line::from("  /         Start filter"),
+        Line::from("  /         Start filter/search"),
         Line::from("  c         Clear filter"),
         Line::from("  s         Cycle sort column"),
         Line::from("  S         Toggle sort direction"),

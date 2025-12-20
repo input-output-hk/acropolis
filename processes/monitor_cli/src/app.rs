@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::data::{History, MonitorData, Thresholds};
 use crate::ui::summary::SortColumn;
+use crate::ui::BottleneckSortColumn;
 use crate::ui::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,9 +71,13 @@ pub struct App {
     pub selected_topic_index: usize,
     pub view_stack: Vec<ViewState>,
 
-    // Sorting
+    // Sorting (Summary view)
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
+
+    // Sorting (Bottleneck view)
+    pub bottleneck_sort_column: BottleneckSortColumn,
+    pub bottleneck_sort_ascending: bool,
 
     // Search/filter
     pub filter_text: String,
@@ -99,6 +104,8 @@ impl App {
             view_stack: Vec::new(),
             sort_column: SortColumn::default(),
             sort_ascending: true,
+            bottleneck_sort_column: BottleneckSortColumn::default(),
+            bottleneck_sort_ascending: false, // Default descending (critical first)
             filter_text: String::new(),
             filter_active: false,
             theme: Theme::auto_detect(),
@@ -242,11 +249,19 @@ impl App {
     }
 
     pub fn cycle_sort(&mut self) {
-        self.sort_column = self.sort_column.next();
+        match self.current_view {
+            View::Summary => self.sort_column = self.sort_column.next(),
+            View::Bottleneck => self.bottleneck_sort_column = self.bottleneck_sort_column.next(),
+            _ => {}
+        }
     }
 
     pub fn toggle_sort_direction(&mut self) {
-        self.sort_ascending = !self.sort_ascending;
+        match self.current_view {
+            View::Summary => self.sort_ascending = !self.sort_ascending,
+            View::Bottleneck => self.bottleneck_sort_ascending = !self.bottleneck_sort_ascending,
+            _ => {}
+        }
     }
 
     pub fn start_filter(&mut self) {

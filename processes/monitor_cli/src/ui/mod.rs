@@ -5,4 +5,5 @@ pub mod flow;
 pub mod summary;
 pub mod theme;
 
+pub use bottleneck::BottleneckSortColumn;
 pub use theme::Theme;
