@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -34,6 +34,14 @@ impl BottleneckSortColumn {
         }
     }
 }
+
+// Fixed column widths
+const COL_STATUS: usize = 8;
+const COL_MODULE: usize = 20;
+const COL_TOPIC: usize = 28;
+const COL_KIND: usize = 4;
+const COL_PENDING: usize = 10;
+const COL_UNREAD: usize = 8;
 
 /// Render the bottleneck view - list of unhealthy topics with headers, search, and sorting
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -74,33 +82,47 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         sorted.iter().filter(|(_, t)| t.status() == HealthStatus::Critical).count();
     let warning_count = sorted.iter().filter(|(_, t)| t.status() == HealthStatus::Warning).count();
 
-    let mut items: Vec<ListItem> = Vec::new();
+    let mut lines: Vec<Line> = Vec::new();
 
-    // Column header row
-    items.push(render_header(app));
-    items.push(ListItem::new(Line::from(vec![Span::styled(
-        "─".repeat(100),
+    // Header row
+    lines.push(render_header(app));
+
+    // Separator
+    let sep_width = COL_STATUS + COL_MODULE + COL_TOPIC + COL_KIND + COL_PENDING + COL_UNREAD + 18; // 18 for separators and padding
+    lines.push(Line::from(vec![Span::styled(
+        format!(" {:─<w$}", "", w = sep_width),
         Style::default().fg(app.theme.border),
-    )])));
+    )]));
 
     // Data rows
-    for (module, topic) in &sorted {
-        items.push(render_topic_item(app, module, topic));
+    for (idx, (module, topic)) in sorted.iter().enumerate() {
+        let is_selected = idx == app.selected_topic_index;
+        lines.push(render_topic_item(app, module, topic, is_selected));
+    }
+
+    // Empty state when filter has no matches
+    if sorted.is_empty() && !app.filter_text.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            format!("   No matches for \"{}\"", app.filter_text),
+            Style::default().add_modifier(Modifier::DIM),
+        )]));
     }
 
     // Build title
-    let mut title = format!(
-        " Bottlenecks ({} critical, {} warning) ",
-        critical_count, warning_count
-    );
-    if !app.filter_text.is_empty() {
-        title = format!(
+    let title = if !app.filter_text.is_empty() {
+        format!(
             " Bottlenecks [filter: \"{}\"] ({}/{} shown) ",
             app.filter_text,
             sorted.len(),
             all_unhealthy.len()
-        );
-    }
+        )
+    } else {
+        format!(
+            " Bottlenecks ({} critical, {} warning) ",
+            critical_count, warning_count
+        )
+    };
 
     let border_color = if critical_count > 0 {
         app.theme.critical
@@ -116,18 +138,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .border_type(app.theme.border_type)
         .border_style(Style::default().fg(border_color));
 
-    let list =
-        List::new(items).block(block).highlight_style(app.theme.selected).highlight_symbol("▶ ");
-
-    // Selection state (offset by 2 for header + separator)
-    let selectable_count = sorted.len();
-    let mut state = ListState::default();
-    if selectable_count > 0 {
-        let selected_idx = app.selected_topic_index.min(selectable_count.saturating_sub(1));
-        state.select(Some(selected_idx + 2)); // +2 for header and separator
-    }
-
-    frame.render_stateful_widget(list, area, &mut state);
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_healthy_message(frame: &mut Frame, app: &App, area: Rect) {
@@ -137,128 +149,87 @@ fn render_healthy_message(frame: &mut Frame, app: &App, area: Rect) {
         .border_type(app.theme.border_type)
         .border_style(Style::default().fg(app.theme.border));
 
-    let items = vec![
-        ListItem::new(Line::from("")),
-        ListItem::new(Line::from(vec![
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
             Span::styled("  ✓ ", Style::default().fg(app.theme.healthy)),
             Span::styled(
                 "All systems healthy!",
                 Style::default().fg(app.theme.healthy).add_modifier(Modifier::BOLD),
             ),
-        ])),
-        ListItem::new(Line::from("")),
-        ListItem::new(Line::from(vec![Span::styled(
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
             "    No modules reporting warnings or critical issues.",
             Style::default().add_modifier(Modifier::DIM),
-        )])),
+        )]),
     ];
 
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
-fn render_header(app: &App) -> ListItem<'static> {
+fn render_header(app: &App) -> Line<'static> {
     let col = app.bottleneck_sort_column;
     let asc = app.bottleneck_sort_ascending;
 
     let header_style = app.theme.header;
-    let sort_arrow = |c: BottleneckSortColumn| -> &'static str {
-        if col == c {
+
+    let fmt_header = |name: &str,
+                      width: usize,
+                      sort_col: BottleneckSortColumn,
+                      right_align: bool|
+     -> Span<'static> {
+        let arrow = if col == sort_col {
             if asc {
                 "↑"
             } else {
                 "↓"
             }
         } else {
-            ""
-        }
+            " "
+        };
+        let style = if col == sort_col {
+            header_style.add_modifier(Modifier::BOLD)
+        } else {
+            header_style
+        };
+        let text = if right_align {
+            format!("{:>w$}{}", name, arrow, w = width - 1)
+        } else {
+            format!("{:<w$}{}", name, arrow, w = width - 1)
+        };
+        Span::styled(text, style)
     };
 
-    let line = Line::from(vec![
-        Span::raw("    "), // Space for selection indicator
-        Span::styled(
-            format!(
-                "{:<8}{}",
-                "Status",
-                sort_arrow(BottleneckSortColumn::Status)
-            ),
-            if col == BottleneckSortColumn::Status {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!(
-                "{:<24}{}",
-                "Module",
-                sort_arrow(BottleneckSortColumn::Module)
-            ),
-            if col == BottleneckSortColumn::Module {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!("{:<30}{}", "Topic", sort_arrow(BottleneckSortColumn::Topic)),
-            if col == BottleneckSortColumn::Topic {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!("{:<4}{}", "Kind", sort_arrow(BottleneckSortColumn::Kind)),
-            if col == BottleneckSortColumn::Kind {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!(
-                "{:>12}{}",
-                "Pending",
-                sort_arrow(BottleneckSortColumn::Pending)
-            ),
-            if col == BottleneckSortColumn::Pending {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!(
-                "{:>8}{}",
-                "Unread",
-                sort_arrow(BottleneckSortColumn::Unread)
-            ),
-            if col == BottleneckSortColumn::Unread {
-                header_style.add_modifier(Modifier::BOLD)
-            } else {
-                header_style
-            },
-        ),
-    ]);
+    let sep = Span::styled("│", Style::default().fg(app.theme.border));
 
-    ListItem::new(line)
+    Line::from(vec![
+        Span::raw("   "), // Selection indicator space
+        fmt_header("Status", COL_STATUS, BottleneckSortColumn::Status, false),
+        sep.clone(),
+        fmt_header("Module", COL_MODULE, BottleneckSortColumn::Module, false),
+        sep.clone(),
+        fmt_header("Topic", COL_TOPIC, BottleneckSortColumn::Topic, false),
+        sep.clone(),
+        fmt_header("Kind", COL_KIND, BottleneckSortColumn::Kind, false),
+        sep.clone(),
+        fmt_header("Pending", COL_PENDING, BottleneckSortColumn::Pending, true),
+        sep.clone(),
+        fmt_header("Unread", COL_UNREAD, BottleneckSortColumn::Unread, true),
+    ])
 }
 
 fn render_topic_item<'a>(
     app: &App,
     module: &'a crate::data::ModuleData,
     topic: &'a UnhealthyTopic,
-) -> ListItem<'a> {
+    is_selected: bool,
+) -> Line<'a> {
     let status_style = app.theme.status_style(topic.status());
     let status_label = match topic.status() {
-        HealthStatus::Critical => "CRITICAL",
-        HealthStatus::Warning => "WARNING",
+        HealthStatus::Critical => "CRIT",
+        HealthStatus::Warning => "WARN",
         HealthStatus::Healthy => "OK",
     };
 
@@ -276,30 +247,53 @@ fn render_topic_item<'a>(
         UnhealthyTopic::Write(_) => "W",
     };
 
-    let line = Line::from(vec![
-        Span::styled(format!("{:<8}", status_label), status_style),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!("{:<24}", truncate(&module.name, 24)),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!("{:<30}", truncate(topic.topic(), 30)),
-            Style::default(),
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(
-            format!("{:<4}", kind_label),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(format!("{:>12}", pending_info), status_style),
-        Span::styled(" │ ", Style::default().fg(app.theme.border)),
-        Span::styled(format!("{:>8}", unread_info), status_style),
-    ]);
+    let sep = Span::styled("│", Style::default().fg(app.theme.border));
 
-    ListItem::new(line)
+    let row_style = if is_selected {
+        app.theme.selected
+    } else {
+        Style::default()
+    };
+
+    let selector = if is_selected { " ▶ " } else { "   " };
+
+    Line::from(vec![
+        Span::styled(selector, row_style),
+        Span::styled(
+            format!("{:<w$}", status_label, w = COL_STATUS),
+            status_style,
+        ),
+        sep.clone(),
+        Span::styled(
+            format!(
+                "{:<w$}",
+                truncate(&module.name, COL_MODULE - 1),
+                w = COL_MODULE
+            ),
+            row_style.add_modifier(Modifier::BOLD),
+        ),
+        sep.clone(),
+        Span::styled(
+            format!(
+                "{:<w$}",
+                truncate(topic.topic(), COL_TOPIC - 1),
+                w = COL_TOPIC
+            ),
+            row_style,
+        ),
+        sep.clone(),
+        Span::styled(
+            format!("{:<w$}", kind_label, w = COL_KIND),
+            row_style.add_modifier(Modifier::DIM),
+        ),
+        sep.clone(),
+        Span::styled(
+            format!("{:>w$}", pending_info, w = COL_PENDING),
+            status_style,
+        ),
+        sep.clone(),
+        Span::styled(format!("{:>w$}", unread_info, w = COL_UNREAD), status_style),
+    ])
 }
 
 fn sort_bottlenecks(
@@ -309,12 +303,17 @@ fn sort_bottlenecks(
 ) {
     items.sort_by(|a, b| {
         let cmp = match column {
-            BottleneckSortColumn::Status => a.1.status().cmp(&b.1.status()),
-            BottleneckSortColumn::Module => a.0.name.cmp(&b.0.name),
-            BottleneckSortColumn::Topic => a.1.topic().cmp(b.1.topic()),
+            BottleneckSortColumn::Status => {
+                // Critical > Warning > Healthy (so reverse the natural order for descending = critical first)
+                a.1.status().cmp(&b.1.status())
+            }
+            BottleneckSortColumn::Module => a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase()),
+            BottleneckSortColumn::Topic => {
+                a.1.topic().to_lowercase().cmp(&b.1.topic().to_lowercase())
+            }
             BottleneckSortColumn::Kind => {
-                let a_kind = matches!(a.1, UnhealthyTopic::Read(_));
-                let b_kind = matches!(b.1, UnhealthyTopic::Read(_));
+                let a_kind = matches!(a.1, UnhealthyTopic::Write(_)); // W before R
+                let b_kind = matches!(b.1, UnhealthyTopic::Write(_));
                 a_kind.cmp(&b_kind)
             }
             BottleneckSortColumn::Pending => {
