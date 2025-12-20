@@ -212,7 +212,7 @@ fn render_header(app: &App) -> Line<'static> {
     let sep = Span::styled("│", Style::default().fg(app.theme.border));
 
     Line::from(vec![
-        Span::raw("   "), // Selection indicator space
+        Span::raw("  "), // Selection indicator space (2 chars to match "▶ ")
         fmt_header("Status", COL_STATUS, BottleneckSortColumn::Status, false),
         sep.clone(),
         fmt_header("Module", COL_MODULE, BottleneckSortColumn::Module, false),
@@ -262,7 +262,7 @@ fn render_topic_item<'a>(
         Style::default()
     };
 
-    let selector = if is_selected { " ▶ " } else { "   " };
+    let selector = if is_selected { "▶ " } else { "  " };
 
     Line::from(vec![
         Span::styled(selector, row_style),
