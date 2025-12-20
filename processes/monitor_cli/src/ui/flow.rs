@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
@@ -47,11 +47,29 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     }
 
-    // Layout constants - reduced for tighter spacing
-    let col_w = 6usize;
-    let row_header_w = 12usize;
+    // Calculate responsive column width based on terminal width and module count
+    let available_width = area.width as usize;
+    let row_header_w = 14usize;
+    let matrix_overhead = row_header_w + 4; // borders and padding
+    let remaining_for_cols = available_width.saturating_sub(matrix_overhead);
+    let col_w = if module_names.len() > 0 {
+        (remaining_for_cols / module_names.len()).clamp(4, 10)
+    } else {
+        6
+    };
 
-    let mut lines: Vec<Line> = Vec::new();
+    // Calculate matrix height: header(1) + border(1) + rows(n) + border(1)
+    let matrix_height = (module_names.len() + 3).min(area.height as usize / 2);
+
+    // Split area: matrix on top, details panel below
+    let chunks = Layout::vertical([
+        Constraint::Length(matrix_height as u16 + 2), // +2 for block borders
+        Constraint::Min(6),                           // Details panel fills remaining space
+    ])
+    .split(area);
+
+    // ===== RENDER MATRIX PANEL =====
+    let mut matrix_lines: Vec<Line> = Vec::new();
 
     // Column headers
     let mut header: Vec<Span> = vec![
@@ -71,11 +89,11 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         ));
     }
     header.push(Span::styled("│", Style::default().fg(app.theme.border)));
-    lines.push(Line::from(header));
+    matrix_lines.push(Line::from(header));
 
     // Top border of matrix
     let matrix_width = col_w * module_names.len();
-    lines.push(Line::from(vec![Span::styled(
+    matrix_lines.push(Line::from(vec![Span::styled(
         format!(
             "{:─<row_header_w$}┼{:─<matrix_width$}┤",
             "",
@@ -139,11 +157,11 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         }
 
         row.push(Span::styled("│", Style::default().fg(app.theme.border)));
-        lines.push(Line::from(row));
+        matrix_lines.push(Line::from(row));
     }
 
     // Bottom border of matrix
-    lines.push(Line::from(vec![Span::styled(
+    matrix_lines.push(Line::from(vec![Span::styled(
         format!(
             "{:─<row_header_w$}┴{:─<matrix_width$}╯",
             "",
@@ -154,9 +172,21 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(app.theme.border),
     )]));
 
-    // Legend with module count
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
+    let matrix_block = Block::default()
+        .title(format!(" Data Flow ({} modules) ", module_names.len()))
+        .borders(Borders::ALL)
+        .border_type(app.theme.border_type)
+        .border_style(Style::default().fg(app.theme.highlight));
+
+    let matrix_paragraph = Paragraph::new(matrix_lines).block(matrix_block);
+    frame.render_widget(matrix_paragraph, chunks[0]);
+
+    // ===== RENDER DETAILS PANEL =====
+    let details_width = chunks[1].width.saturating_sub(2) as usize; // Account for borders
+    let mut detail_lines: Vec<Line> = Vec::new();
+
+    // Legend row
+    detail_lines.push(Line::from(vec![
         Span::styled(" Legend: ", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled("→", Style::default().fg(app.theme.healthy)),
         Span::raw(" sends  "),
@@ -165,37 +195,54 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled("↔", Style::default().fg(app.theme.highlight)),
         Span::raw(" both  "),
         Span::styled("·", Style::default().add_modifier(Modifier::DIM)),
-        Span::raw(" self  │  "),
-        Span::styled(
-            format!("{} modules", module_names.len()),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
+        Span::raw(" self"),
     ]));
+    detail_lines.push(Line::from(""));
 
     // Selected module connections
-    lines.push(Line::from(""));
     if let Some(selected) = data.modules.get(app.selected_module_index) {
-        // Calculate box width based on available space
-        let box_width = 55usize;
+        // Module header with stats
+        let total_out: usize = selected
+            .writes
+            .iter()
+            .filter_map(|w| graph.consumers.get(&w.topic).map(|c| c.len().saturating_sub(1)))
+            .sum();
+        let total_in: usize = selected
+            .reads
+            .iter()
+            .filter_map(|r| graph.producers.get(&r.topic).map(|p| p.len().saturating_sub(1)))
+            .sum();
 
-        lines.push(Line::from(vec![
+        detail_lines.push(Line::from(vec![
             Span::styled(
-                format!(" ╭─ {} ", selected.name),
+                format!(" {} ", selected.name),
                 Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
             ),
+            Span::styled("│ ", Style::default().fg(app.theme.border)),
             Span::styled(
-                format!(
-                    "{:─<w$}╮",
-                    "",
-                    w = box_width.saturating_sub(selected.name.len() + 5)
-                ),
-                Style::default().fg(app.theme.border),
+                format!("{}→ ", total_out),
+                Style::default().fg(app.theme.healthy),
+            ),
+            Span::raw("out  "),
+            Span::styled(
+                format!("{}← ", total_in),
+                Style::default().fg(app.theme.warning),
+            ),
+            Span::raw("in  "),
+            Span::styled("│ ", Style::default().fg(app.theme.border)),
+            Span::styled(
+                format!("R:{} W:{}", selected.reads.len(), selected.writes.len()),
+                Style::default().add_modifier(Modifier::DIM),
             ),
         ]));
 
-        let mut connection_lines: Vec<String> = Vec::new();
+        detail_lines.push(Line::from(vec![Span::styled(
+            format!(" {:─<w$}", "", w = details_width.saturating_sub(2)),
+            Style::default().fg(app.theme.border),
+        )]));
 
-        // Outgoing
+        // Outgoing connections
+        let mut has_connections = false;
         for w in &selected.writes {
             let consumers: Vec<&str> = graph
                 .consumers
@@ -206,15 +253,23 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 .unwrap_or_default();
 
             if !consumers.is_empty() {
-                connection_lines.push(format!(
-                    "→ {} → {}",
-                    truncate(&w.topic, 20),
-                    consumers.join(", ")
-                ));
+                has_connections = true;
+                let topic_display = truncate(&w.topic, 25);
+                let consumers_display =
+                    truncate(&consumers.join(", "), details_width.saturating_sub(35));
+                detail_lines.push(Line::from(vec![
+                    Span::styled(" → ", Style::default().fg(app.theme.healthy)),
+                    Span::styled(
+                        format!("{:<25}", topic_display),
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
+                    Span::raw(" → "),
+                    Span::raw(consumers_display),
+                ]));
             }
         }
 
-        // Incoming
+        // Incoming connections
         for r in &selected.reads {
             let producers: Vec<&str> = graph
                 .producers
@@ -225,77 +280,52 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 .unwrap_or_default();
 
             if !producers.is_empty() {
-                connection_lines.push(format!(
-                    "← {} → {}",
-                    producers.join(", "),
-                    truncate(&r.topic, 20)
-                ));
+                has_connections = true;
+                let topic_display = truncate(&r.topic, 25);
+                let producers_display =
+                    truncate(&producers.join(", "), details_width.saturating_sub(35));
+                detail_lines.push(Line::from(vec![
+                    Span::styled(" ← ", Style::default().fg(app.theme.warning)),
+                    Span::styled(
+                        format!("{:<25}", topic_display),
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
+                    Span::raw(" ← "),
+                    Span::raw(producers_display),
+                ]));
             }
         }
 
-        if connection_lines.is_empty() {
-            connection_lines.push("(no external connections)".to_string());
+        if !has_connections {
+            detail_lines.push(Line::from(vec![Span::styled(
+                "   (no external connections)",
+                Style::default().add_modifier(Modifier::DIM),
+            )]));
         }
-
-        // Render connection lines with proper box borders
-        let content_width = box_width.saturating_sub(6); // Account for " │  " and " │"
-        for line_text in connection_lines.iter() {
-            let truncated = truncate(line_text, content_width);
-            let padding = content_width.saturating_sub(truncated.chars().count());
-
-            // Color the arrow at the start
-            let (arrow, rest) = if truncated.starts_with("→") {
-                ("→", &truncated[3..]) // UTF-8: → is 3 bytes
-            } else if truncated.starts_with("←") {
-                ("←", &truncated[3..])
-            } else {
-                ("", truncated.as_str())
-            };
-
-            let arrow_style = if arrow == "→" {
-                Style::default().fg(app.theme.healthy)
-            } else if arrow == "←" {
-                Style::default().fg(app.theme.warning)
-            } else {
-                Style::default().add_modifier(Modifier::DIM)
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(" │  ", Style::default().fg(app.theme.border)),
-                Span::styled(format!("{} ", arrow), arrow_style),
-                Span::raw(rest.to_string()),
-                Span::raw(format!("{:w$}", "", w = padding)),
-                Span::styled(" │", Style::default().fg(app.theme.border)),
-            ]));
-        }
-
-        lines.push(Line::from(vec![Span::styled(
-            format!(" ╰{:─<w$}╯", "", w = box_width.saturating_sub(3)),
-            Style::default().fg(app.theme.border),
-        )]));
     }
 
-    // Footer
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![Span::styled(
-        " ↑/↓ select module    Enter details    Tab switch view",
+    // Footer with controls
+    detail_lines.push(Line::from(""));
+    detail_lines.push(Line::from(vec![Span::styled(
+        " ↑/↓ select    Enter details    Tab switch view",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
-    let block = Block::default()
-        .title(" Data Flow ")
+    let details_block = Block::default()
+        .title(" Module Connections ")
         .borders(Borders::ALL)
         .border_type(app.theme.border_type)
-        .border_style(Style::default().fg(app.theme.highlight));
+        .border_style(Style::default().fg(app.theme.border));
 
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, area);
+    let details_paragraph = Paragraph::new(detail_lines).block(details_block);
+    frame.render_widget(details_paragraph, chunks[1]);
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}…", &s[..max_len.saturating_sub(1)])
+        let truncated: String = s.chars().take(max_len.saturating_sub(1)).collect();
+        format!("{}…", truncated)
     }
 }
