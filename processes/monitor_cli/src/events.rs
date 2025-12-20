@@ -60,9 +60,11 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         KeyCode::Char('2') => app.set_view(View::Bottleneck),
         KeyCode::Char('3') => app.set_view(View::DataFlow),
 
-        // Navigation
+        // Navigation (up/down for items, left/right for tabs)
         KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
+        KeyCode::Left | KeyCode::Char('h') => app.prev_view(),
+        KeyCode::Right | KeyCode::Char('l') => app.next_view(),
         KeyCode::PageUp => app.select_prev_n(10),
         KeyCode::PageDown => app.select_next_n(10),
         KeyCode::Home => app.select_first(),
