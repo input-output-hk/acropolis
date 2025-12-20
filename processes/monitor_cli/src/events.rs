@@ -30,6 +30,13 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             KeyCode::Esc | KeyCode::Enter | KeyCode::Backspace | KeyCode::Char('q') => {
                 app.close_overlay();
             }
+            // Allow scrolling through modules while overlay is open
+            KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+            KeyCode::Down | KeyCode::Char('j') => app.select_next(),
+            KeyCode::PageUp => app.select_prev_n(10),
+            KeyCode::PageDown => app.select_next_n(10),
+            KeyCode::Home => app.select_first(),
+            KeyCode::End => app.select_last(),
             _ => {}
         }
         return;
