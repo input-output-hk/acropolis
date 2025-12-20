@@ -8,85 +8,234 @@ use ratatui::{
 
 use crate::app::App;
 use crate::data::DataFlowGraph;
+use std::collections::HashSet;
 
-/// Render the data flow view as a clean dependency graph
+/// Render the data flow as an adjacency matrix showing module-to-module communication
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;
     };
 
-    let Some(module) = data.modules.get(app.selected_module_index) else {
-        return;
-    };
-
     let graph = DataFlowGraph::from_monitor_data(data);
 
-    // Find topics this module reads from (inputs) and writes to (outputs)
-    let input_topics: Vec<&str> = module.reads.iter().map(|r| r.topic.as_str()).collect();
-    let output_topics: Vec<&str> = module.writes.iter().map(|w| w.topic.as_str()).collect();
+    // Get all module names
+    let module_names: Vec<&str> = data.modules.iter().map(|m| m.name.as_str()).collect();
 
-    // Find upstream producers (modules that write to topics we read)
-    let mut upstream_modules: Vec<&str> = Vec::new();
-    for topic in &input_topics {
-        if let Some(producers) = graph.producers.get(*topic) {
-            for p in producers {
-                if p != &module.name && !upstream_modules.contains(&p.as_str()) {
-                    upstream_modules.push(p.as_str());
-                }
-            }
-        }
+    if module_names.is_empty() {
+        let block = Block::default()
+            .title(" Data Flow ")
+            .borders(Borders::ALL)
+            .border_type(app.theme.border_type)
+            .border_style(Style::default().fg(app.theme.border));
+        let paragraph = Paragraph::new("No modules loaded").block(block);
+        frame.render_widget(paragraph, area);
+        return;
     }
 
-    // Find downstream consumers (modules that read from topics we write)
-    let mut downstream_modules: Vec<&str> = Vec::new();
-    for topic in &output_topics {
-        if let Some(consumers) = graph.consumers.get(*topic) {
-            for c in consumers {
-                if c != &module.name && !downstream_modules.contains(&c.as_str()) {
-                    downstream_modules.push(c.as_str());
-                }
-            }
-        }
+    // Build adjacency: for each pair (row_module, col_module), determine relationship
+    // → = row writes to a topic that col reads
+    // ← = row reads from a topic that col writes
+    // ↔ = both directions
+
+    // First, build topic relationships
+    // writes[module] = set of topics it writes to
+    // reads[module] = set of topics it reads from
+    let mut writes_to: std::collections::HashMap<&str, HashSet<&str>> =
+        std::collections::HashMap::new();
+    let mut reads_from: std::collections::HashMap<&str, HashSet<&str>> =
+        std::collections::HashMap::new();
+
+    for module in &data.modules {
+        let w: HashSet<&str> = module.writes.iter().map(|w| w.topic.as_str()).collect();
+        let r: HashSet<&str> = module.reads.iter().map(|r| r.topic.as_str()).collect();
+        writes_to.insert(&module.name, w);
+        reads_from.insert(&module.name, r);
     }
+
+    // Calculate column width based on longest module name
+    let max_name_len = module_names.iter().map(|n| n.len()).max().unwrap_or(10);
+    let col_width = max_name_len.min(12) + 1;
+    let row_header_width = max_name_len.min(14) + 2;
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    // === UPSTREAM MODULES ===
-    if !upstream_modules.is_empty() {
-        lines.extend(render_module_row(&upstream_modules, app, false));
-        lines.push(render_arrows_down(upstream_modules.len()));
+    // Header row with column module names (abbreviated)
+    let mut header_spans: Vec<Span> = vec![
+        Span::raw(format!(
+            "{:row_header_width$}",
+            "",
+            row_header_width = row_header_width
+        )),
+        Span::styled("│", Style::default().fg(app.theme.border)),
+    ];
+
+    for (col_idx, col_name) in module_names.iter().enumerate() {
+        let display = truncate(col_name, col_width - 1);
+        let is_selected = col_idx == app.selected_module_index;
+        let style = if is_selected {
+            Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        };
+        header_spans.push(Span::styled(
+            format!("{:^col_width$}", display, col_width = col_width),
+            style,
+        ));
+    }
+    lines.push(Line::from(header_spans));
+
+    // Separator line
+    lines.push(Line::from(vec![Span::styled(
+        format!(
+            "{:─<row_header_width$}┼{:─<rest$}",
+            "",
+            "",
+            row_header_width = row_header_width,
+            rest = col_width * module_names.len()
+        ),
+        Style::default().fg(app.theme.border),
+    )]));
+
+    // Data rows
+    for (row_idx, row_name) in module_names.iter().enumerate() {
+        let is_row_selected = row_idx == app.selected_module_index;
+        let row_style = if is_row_selected {
+            Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+
+        let mut row_spans: Vec<Span> = vec![
+            Span::styled(
+                format!(
+                    "{:>row_header_width$}",
+                    truncate(row_name, row_header_width - 1),
+                    row_header_width = row_header_width
+                ),
+                row_style,
+            ),
+            Span::styled("│", Style::default().fg(app.theme.border)),
+        ];
+
+        let row_writes = writes_to.get(row_name).cloned().unwrap_or_default();
+        let row_reads = reads_from.get(row_name).cloned().unwrap_or_default();
+
+        for (col_idx, col_name) in module_names.iter().enumerate() {
+            if row_idx == col_idx {
+                // Self - show dot
+                row_spans.push(Span::styled(
+                    format!("{:^col_width$}", "·", col_width = col_width),
+                    Style::default().add_modifier(Modifier::DIM),
+                ));
+                continue;
+            }
+
+            let col_writes = writes_to.get(col_name).cloned().unwrap_or_default();
+            let col_reads = reads_from.get(col_name).cloned().unwrap_or_default();
+
+            // row → col: row writes to a topic that col reads
+            let row_to_col = row_writes.iter().any(|topic| col_reads.contains(topic));
+            // col → row: col writes to a topic that row reads
+            let col_to_row = col_writes.iter().any(|topic| row_reads.contains(topic));
+
+            let (symbol, style) = match (row_to_col, col_to_row) {
+                (true, true) => ("↔", Style::default().fg(app.theme.highlight)),
+                (true, false) => ("→", Style::default().fg(app.theme.healthy)),
+                (false, true) => ("←", Style::default().fg(app.theme.warning)),
+                (false, false) => ("", Style::default().add_modifier(Modifier::DIM)),
+            };
+
+            row_spans.push(Span::styled(
+                format!("{:^col_width$}", symbol, col_width = col_width),
+                style,
+            ));
+        }
+
+        lines.push(Line::from(row_spans));
     }
 
-    // === INPUT TOPICS ===
-    if !input_topics.is_empty() {
-        lines.extend(render_topic_boxes(&input_topics, app));
-        lines.push(render_arrow_down_single());
-    }
+    // Legend
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled(" Legend: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("→", Style::default().fg(app.theme.healthy)),
+        Span::raw(" sends to  "),
+        Span::styled("←", Style::default().fg(app.theme.warning)),
+        Span::raw(" receives from  "),
+        Span::styled("↔", Style::default().fg(app.theme.highlight)),
+        Span::raw(" bidirectional  "),
+        Span::styled("·", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw(" self"),
+    ]));
 
-    // === MAIN MODULE (highlighted) ===
-    lines.extend(render_main_module(&module.name, app));
+    // Topic detail for selected module
+    lines.push(Line::from(""));
+    if let Some(selected) = data.modules.get(app.selected_module_index) {
+        lines.push(Line::from(vec![Span::styled(
+            format!(" {} connections:", selected.name),
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
 
-    // === OUTPUT TOPICS ===
-    if !output_topics.is_empty() {
-        lines.push(render_arrow_down_single());
-        lines.extend(render_topic_boxes(&output_topics, app));
-    }
+        // Show what this module writes to and who reads it
+        for w in &selected.writes {
+            let consumers: Vec<&str> = graph
+                .consumers
+                .get(&w.topic)
+                .map(|v| {
+                    v.iter().map(|s| s.as_str()).filter(|s| *s != selected.name.as_str()).collect()
+                })
+                .unwrap_or_default();
 
-    // === DOWNSTREAM MODULES ===
-    if !downstream_modules.is_empty() {
-        lines.push(render_arrows_down(downstream_modules.len()));
-        lines.extend(render_module_row(&downstream_modules, app, false));
+            if !consumers.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(&selected.name, Style::default().fg(app.theme.highlight)),
+                    Span::styled(" ──", Style::default().fg(app.theme.border)),
+                    Span::styled(
+                        truncate(&w.topic, 25),
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled("──► ", Style::default().fg(app.theme.border)),
+                    Span::raw(consumers.join(", ")),
+                ]));
+            }
+        }
+
+        // Show what this module reads from and who writes it
+        for r in &selected.reads {
+            let producers: Vec<&str> = graph
+                .producers
+                .get(&r.topic)
+                .map(|v| {
+                    v.iter().map(|s| s.as_str()).filter(|s| *s != selected.name.as_str()).collect()
+                })
+                .unwrap_or_default();
+
+            if !producers.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::raw("   "),
+                    Span::raw(producers.join(", ")),
+                    Span::styled(" ──", Style::default().fg(app.theme.border)),
+                    Span::styled(
+                        truncate(&r.topic, 25),
+                        Style::default().add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled("──► ", Style::default().fg(app.theme.border)),
+                    Span::styled(&selected.name, Style::default().fg(app.theme.highlight)),
+                ]));
+            }
+        }
     }
 
     // Footer
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        " ↑/↓: change module   Enter: details",
+        " ↑/↓: select module   Enter: details",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
-    let title = format!(" Data Flow: {} ", module.name);
+    let title = " Data Flow (Adjacency Matrix) ";
 
     let block = Block::default()
         .title(title)
@@ -96,159 +245,6 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
-}
-
-/// Render a row of module boxes
-fn render_module_row(modules: &[&str], app: &App, _highlighted: bool) -> Vec<Line<'static>> {
-    if modules.is_empty() {
-        return vec![];
-    }
-
-    let box_width = 16;
-    let total_width = modules.len() * (box_width + 2);
-    let left_pad = 40usize.saturating_sub(total_width / 2);
-    let padding = " ".repeat(left_pad);
-
-    let mut top_line: Vec<Span> = vec![Span::raw(padding.clone())];
-    let mut mid_line: Vec<Span> = vec![Span::raw(padding.clone())];
-    let mut bot_line: Vec<Span> = vec![Span::raw(padding.clone())];
-
-    for (i, name) in modules.iter().enumerate() {
-        if i > 0 {
-            top_line.push(Span::raw("  "));
-            mid_line.push(Span::raw("  "));
-            bot_line.push(Span::raw("  "));
-        }
-
-        let display_name = truncate(name, box_width - 4);
-        let name_pad = (box_width - 2).saturating_sub(display_name.len()) / 2;
-        let name_pad_right = (box_width - 2).saturating_sub(display_name.len()) - name_pad;
-
-        let style = Style::default().fg(app.theme.border);
-
-        top_line.push(Span::styled(
-            format!("┌{}┐", "─".repeat(box_width - 2)),
-            style,
-        ));
-        mid_line.push(Span::styled("│".to_string(), style));
-        mid_line.push(Span::raw(format!("{:>w$}", "", w = name_pad)));
-        mid_line.push(Span::raw(display_name));
-        mid_line.push(Span::raw(format!("{:<w$}", "", w = name_pad_right)));
-        mid_line.push(Span::styled("│".to_string(), style));
-        bot_line.push(Span::styled(
-            format!("└{}┘", "─".repeat(box_width - 2)),
-            style,
-        ));
-    }
-
-    vec![
-        Line::from(top_line),
-        Line::from(mid_line),
-        Line::from(bot_line),
-    ]
-}
-
-/// Render topic boxes (can show multiple topics)
-fn render_topic_boxes(topics: &[&str], app: &App) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-
-    for topic in topics {
-        let box_width = topic.len().max(20) + 4;
-        let left_pad = 40usize.saturating_sub(box_width / 2);
-        let padding = " ".repeat(left_pad);
-
-        let style = Style::default().fg(app.theme.border);
-
-        lines.push(Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled(format!("┌{}┐", "─".repeat(box_width - 2)), style),
-        ]));
-
-        let topic_display = truncate(topic, box_width - 4);
-        let topic_pad = (box_width - 2).saturating_sub(topic_display.len()) / 2;
-        let topic_pad_right = (box_width - 2).saturating_sub(topic_display.len()) - topic_pad;
-
-        lines.push(Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled("│".to_string(), style),
-            Span::raw(format!("{:>w$}", "", w = topic_pad)),
-            Span::styled(topic_display, Style::default().add_modifier(Modifier::DIM)),
-            Span::raw(format!("{:<w$}", "", w = topic_pad_right)),
-            Span::styled("│".to_string(), style),
-        ]));
-
-        lines.push(Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled(format!("└{}┘", "─".repeat(box_width - 2)), style),
-        ]));
-    }
-
-    lines
-}
-
-/// Render the main highlighted module
-fn render_main_module(name: &str, app: &App) -> Vec<Line<'static>> {
-    let box_width = name.len().max(14) + 6;
-    let left_pad = 40usize.saturating_sub(box_width / 2);
-    let padding = " ".repeat(left_pad);
-
-    let style = Style::default().fg(app.theme.highlight);
-    let name_pad = (box_width - 2).saturating_sub(name.len()) / 2;
-    let name_pad_right = (box_width - 2).saturating_sub(name.len()) - name_pad;
-
-    vec![
-        Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled(format!("╔{}╗", "═".repeat(box_width - 2)), style),
-        ]),
-        Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled("║".to_string(), style),
-            Span::raw(format!("{:>w$}", "", w = name_pad)),
-            Span::styled(name.to_string(), style.add_modifier(Modifier::BOLD)),
-            Span::raw(format!("{:<w$}", "", w = name_pad_right)),
-            Span::styled("║".to_string(), style),
-        ]),
-        Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled(format!("╚{}╝", "═".repeat(box_width - 2)), style),
-        ]),
-    ]
-}
-
-/// Render multiple arrows pointing down
-fn render_arrows_down(count: usize) -> Line<'static> {
-    if count == 0 {
-        return Line::from("");
-    }
-
-    let box_width = 16;
-    let total_width = count * (box_width + 2);
-    let left_pad = 40usize.saturating_sub(total_width / 2);
-    let padding = " ".repeat(left_pad);
-
-    let mut spans: Vec<Span> = vec![Span::raw(padding)];
-
-    for i in 0..count {
-        if i > 0 {
-            spans.push(Span::raw("  "));
-        }
-        let arrow_pad = box_width / 2;
-        spans.push(Span::styled(
-            format!("{:>w$}│{:<w2$}", "", "", w = arrow_pad - 1, w2 = arrow_pad),
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-
-    Line::from(spans)
-}
-
-/// Render a single centered arrow pointing down
-fn render_arrow_down_single() -> Line<'static> {
-    Line::from(vec![Span::styled(
-        "                                        │",
-        Style::default().add_modifier(Modifier::DIM),
-    )])
 }
 
 fn truncate(s: &str, max_len: usize) -> String {

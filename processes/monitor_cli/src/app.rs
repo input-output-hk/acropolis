@@ -10,7 +10,8 @@ use crate::ui::Theme;
 pub enum View {
     Summary,
     Bottleneck,
-    ModuleDetail,
+    #[allow(dead_code)]
+    ModuleDetail, // Legacy - now handled as overlay, kept for pattern matching
     DataFlow,
 }
 
@@ -18,8 +19,8 @@ impl View {
     pub fn next(self) -> Self {
         match self {
             View::Summary => View::Bottleneck,
-            View::Bottleneck => View::ModuleDetail,
-            View::ModuleDetail => View::DataFlow,
+            View::Bottleneck => View::DataFlow,
+            View::ModuleDetail => View::Summary, // Fallback - shouldn't be used for tab nav
             View::DataFlow => View::Summary,
         }
     }
@@ -28,8 +29,8 @@ impl View {
         match self {
             View::Summary => View::DataFlow,
             View::Bottleneck => View::Summary,
-            View::ModuleDetail => View::Bottleneck,
-            View::DataFlow => View::ModuleDetail,
+            View::ModuleDetail => View::Summary, // Fallback - shouldn't be used for tab nav
+            View::DataFlow => View::Bottleneck,
         }
     }
 

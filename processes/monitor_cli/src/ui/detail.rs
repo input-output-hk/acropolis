@@ -19,8 +19,18 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    // Calculate overlay size (85% of screen, max dimensions)
-    let overlay_width = (area.width * 85 / 100).min(100).max(70);
+    // Fixed column widths for consistent layout
+    const TOPIC_W: usize = 28;
+    const COUNT_W: usize = 10;
+    const PENDING_W: usize = 10;
+    const UNREAD_W: usize = 8;
+    const STATUS_W: usize = 6;
+
+    // Total inner width = columns + separators + padding
+    let inner_content_width = TOPIC_W + COUNT_W + PENDING_W + UNREAD_W + STATUS_W + 4; // +4 for spacing
+
+    // Calculate overlay size
+    let overlay_width = (inner_content_width + 6) as u16; // +6 for borders and padding
     let overlay_height = (area.height * 85 / 100).min(40).max(15);
     let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
     let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
@@ -29,7 +39,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Clear the area behind the overlay
     frame.render_widget(Clear, overlay_area);
 
-    let inner_width = overlay_width.saturating_sub(4) as usize;
+    let box_inner = inner_content_width;
 
     // Build content lines
     let mut lines: Vec<Line> = Vec::new();
@@ -40,75 +50,90 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         crate::data::HealthStatus::Warning => "Warning",
         crate::data::HealthStatus::Critical => "Critical",
     };
-    let header_text = format!(
-        "Total Reads: {}    Total Writes: {}    {} {}",
+
+    lines.push(Line::from(vec![Span::styled(
+        format!(" ╭{:─<w$}╮", "", w = box_inner),
+        Style::default().fg(app.theme.highlight),
+    )]));
+
+    lines.push(Line::from(vec![
+        Span::styled(" │ ", Style::default().fg(app.theme.highlight)),
+        Span::styled(
+            module.name.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(
+            "{:w$}",
+            "",
+            w = box_inner.saturating_sub(module.name.len() + 1)
+        )),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    let stats_line = format!(
+        "Reads: {}  Writes: {}  {} {}",
         format_count(module.total_read),
         format_count(module.total_written),
         module.health.symbol(),
         health_label
     );
-
-    lines.push(Line::from(vec![Span::styled(
-        format!(" ╭{:─<width$}╮", "", width = inner_width - 2),
-        Style::default().fg(app.theme.highlight),
-    )]));
-
-    let name_padding = inner_width.saturating_sub(module.name.len() + 4);
     lines.push(Line::from(vec![
-        Span::styled(" │ ".to_string(), Style::default().fg(app.theme.highlight)),
-        Span::styled(
-            module.name.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!("{:width$}", "", width = name_padding)),
-        Span::styled(" │".to_string(), Style::default().fg(app.theme.highlight)),
-    ]));
-
-    let header_padding = inner_width.saturating_sub(header_text.len() + 4);
-    lines.push(Line::from(vec![
-        Span::styled(" │ ".to_string(), Style::default().fg(app.theme.highlight)),
-        Span::raw(header_text),
-        Span::raw(format!("{:width$}", "", width = header_padding)),
-        Span::styled(" │".to_string(), Style::default().fg(app.theme.highlight)),
+        Span::styled(" │ ", Style::default().fg(app.theme.highlight)),
+        Span::raw(stats_line.clone()),
+        Span::raw(format!(
+            "{:w$}",
+            "",
+            w = box_inner.saturating_sub(stats_line.len() + 1)
+        )),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
     ]));
 
     lines.push(Line::from(vec![Span::styled(
-        format!(" ╰{:─<width$}╯", "", width = inner_width - 2),
+        format!(" ╰{:─<w$}╯", "", w = box_inner),
         Style::default().fg(app.theme.highlight),
     )]));
 
     lines.push(Line::from(""));
 
-    // Reads section with border
+    // Reads section
     if !module.reads.is_empty() {
-        let reads_title = format!(" Reads ({}) ", module.reads.len());
-        let title_padding = inner_width.saturating_sub(reads_title.len() + 2);
+        let title = format!(" Reads ({}) ", module.reads.len());
+        let title_pad = box_inner.saturating_sub(title.len());
 
         lines.push(Line::from(vec![
-            Span::styled(" ╭".to_string(), Style::default().fg(app.theme.border)),
-            Span::styled(reads_title, app.theme.header),
+            Span::styled(" ╭", Style::default().fg(app.theme.border)),
+            Span::styled(title, app.theme.header),
             Span::styled(
-                format!("{:─<width$}╮", "", width = title_padding),
+                format!("{:─<w$}╮", "", w = title_pad),
                 Style::default().fg(app.theme.border),
             ),
         ]));
 
         // Header row
         lines.push(Line::from(vec![
-            Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
+            Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<30} {:>8} {:>10} {:>8} {:>6}",
-                    "Topic", "Read", "Pending", "Unread", "Status"
+                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} {:>STATUS_W$}",
+                    "Topic",
+                    "Read",
+                    "Pending",
+                    "Unread",
+                    "Status",
+                    TOPIC_W = TOPIC_W,
+                    COUNT_W = COUNT_W,
+                    PENDING_W = PENDING_W,
+                    UNREAD_W = UNREAD_W,
+                    STATUS_W = STATUS_W
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
-            Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
+            Span::styled(" │", Style::default().fg(app.theme.border)),
         ]));
 
         // Separator
         lines.push(Line::from(vec![Span::styled(
-            format!(" ├{:─<width$}┤", "", width = inner_width - 2),
+            format!(" ├{:─<w$}┤", "", w = box_inner),
             Style::default().fg(app.theme.border),
         )]));
 
@@ -116,83 +141,107 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             let status_style = app.theme.status_style(r.status);
             let pending = r.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
             let unread = r.unread.map(|u| format_count(u)).unwrap_or_else(|| "-".to_string());
-            let topic_display = truncate(&r.topic, 30);
+            let topic = truncate(&r.topic, TOPIC_W);
 
             lines.push(Line::from(vec![
-                Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
+                Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<30} {:>8} {:>10} {:>8} ",
-                    topic_display,
+                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} ",
+                    topic,
                     format_count(r.read),
                     pending,
-                    unread
+                    unread,
+                    TOPIC_W = TOPIC_W,
+                    COUNT_W = COUNT_W,
+                    PENDING_W = PENDING_W,
+                    UNREAD_W = UNREAD_W
                 )),
-                Span::styled(format!("{:^6}", r.status.symbol()), status_style),
-                Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
+                Span::styled(
+                    format!("{:^STATUS_W$}", r.status.symbol(), STATUS_W = STATUS_W),
+                    status_style,
+                ),
+                Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
 
         lines.push(Line::from(vec![Span::styled(
-            format!(" ╰{:─<width$}╯", "", width = inner_width - 2),
+            format!(" ╰{:─<w$}╯", "", w = box_inner),
             Style::default().fg(app.theme.border),
         )]));
 
         lines.push(Line::from(""));
     }
 
-    // Writes section with border
+    // Writes section
     if !module.writes.is_empty() {
-        let writes_title = format!(" Writes ({}) ", module.writes.len());
-        let title_padding = inner_width.saturating_sub(writes_title.len() + 2);
+        let title = format!(" Writes ({}) ", module.writes.len());
+        let title_pad = box_inner.saturating_sub(title.len());
 
         lines.push(Line::from(vec![
-            Span::styled(" ╭".to_string(), Style::default().fg(app.theme.border)),
-            Span::styled(writes_title, app.theme.header),
+            Span::styled(" ╭", Style::default().fg(app.theme.border)),
+            Span::styled(title, app.theme.header),
             Span::styled(
-                format!("{:─<width$}╮", "", width = title_padding),
+                format!("{:─<w$}╮", "", w = title_pad),
                 Style::default().fg(app.theme.border),
             ),
         ]));
 
-        // Header row
+        // Header row - writes don't have unread
         lines.push(Line::from(vec![
-            Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
+            Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<30} {:>10} {:>12} {:>6}",
-                    "Topic", "Written", "Pending", "Status"
+                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} {:>STATUS_W$}",
+                    "Topic",
+                    "Written",
+                    "Pending",
+                    "",
+                    "Status",
+                    TOPIC_W = TOPIC_W,
+                    COUNT_W = COUNT_W,
+                    PENDING_W = PENDING_W,
+                    UNREAD_W = UNREAD_W,
+                    STATUS_W = STATUS_W
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
-            Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
+            Span::styled(" │", Style::default().fg(app.theme.border)),
         ]));
 
         // Separator
         lines.push(Line::from(vec![Span::styled(
-            format!(" ├{:─<width$}┤", "", width = inner_width - 2),
+            format!(" ├{:─<w$}┤", "", w = box_inner),
             Style::default().fg(app.theme.border),
         )]));
 
         for w in &module.writes {
             let status_style = app.theme.status_style(w.status);
             let pending = w.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
-            let topic_display = truncate(&w.topic, 30);
+            let topic = truncate(&w.topic, TOPIC_W);
 
             lines.push(Line::from(vec![
-                Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
+                Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<30} {:>10} {:>12} ",
-                    topic_display,
+                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} ",
+                    topic,
                     format_count(w.written),
-                    pending
+                    pending,
+                    "",
+                    TOPIC_W = TOPIC_W,
+                    COUNT_W = COUNT_W,
+                    PENDING_W = PENDING_W,
+                    UNREAD_W = UNREAD_W
                 )),
-                Span::styled(format!("{:^6}", w.status.symbol()), status_style),
-                Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
+                Span::styled(
+                    format!("{:^STATUS_W$}", w.status.symbol(), STATUS_W = STATUS_W),
+                    status_style,
+                ),
+                Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
 
         lines.push(Line::from(vec![Span::styled(
-            format!(" ╰{:─<width$}╯", "", width = inner_width - 2),
+            format!(" ╰{:─<w$}╯", "", w = box_inner),
             Style::default().fg(app.theme.border),
         )]));
     }
@@ -200,7 +249,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Footer hint
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        "                    Press Esc to close".to_string(),
+        "                Press Esc to close",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
