@@ -21,6 +21,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         let block = Block::default()
             .title(" Bottlenecks ")
             .borders(Borders::ALL)
+            .border_type(app.theme.border_type)
             .border_style(Style::default().fg(app.theme.border));
 
         let items = vec![
@@ -93,6 +94,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             warning.len()
         ))
         .borders(Borders::ALL)
+        .border_type(app.theme.border_type)
         .border_style(Style::default().fg(if !critical.is_empty() {
             app.theme.critical
         } else {

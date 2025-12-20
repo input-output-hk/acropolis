@@ -33,7 +33,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     ))
     .style(app.theme.header)
     .block(
-        Block::default().borders(Borders::ALL).border_style(Style::default().fg(app.theme.border)),
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(app.theme.border_type)
+            .border_style(Style::default().fg(app.theme.border)),
     );
     frame.render_widget(header, chunks[0]);
 
@@ -80,6 +83,7 @@ fn render_reads_table(frame: &mut Frame, app: &App, area: Rect, module: &crate::
         Block::default()
             .title(format!(" Reads ({}) ", module.reads.len()))
             .borders(Borders::ALL)
+            .border_type(app.theme.border_type)
             .border_style(Style::default().fg(app.theme.border)),
     );
 
@@ -119,6 +123,7 @@ fn render_writes_table(frame: &mut Frame, app: &App, area: Rect, module: &crate:
         Block::default()
             .title(format!(" Writes ({}) ", module.writes.len()))
             .borders(Borders::ALL)
+            .border_type(app.theme.border_type)
             .border_style(Style::default().fg(app.theme.border)),
     );
 

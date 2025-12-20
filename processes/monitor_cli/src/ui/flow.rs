@@ -145,6 +145,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
+        .border_type(app.theme.border_type)
         .border_style(Style::default().fg(app.theme.border));
 
     let list =

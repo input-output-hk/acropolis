@@ -1,4 +1,5 @@
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::block::BorderType;
 
 use crate::data::HealthStatus;
 
@@ -13,6 +14,7 @@ pub struct Theme {
     pub selected: Style,
     pub tab_active: Style,
     pub tab_inactive: Style,
+    pub border_type: BorderType,
 }
 
 impl Theme {
@@ -27,6 +29,7 @@ impl Theme {
             selected: Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD),
             tab_active: Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             tab_inactive: Style::default().fg(Color::Gray),
+            border_type: BorderType::Rounded,
         }
     }
 
@@ -41,6 +44,7 @@ impl Theme {
             selected: Style::default().bg(Color::LightBlue).add_modifier(Modifier::BOLD),
             tab_active: Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
             tab_inactive: Style::default().fg(Color::DarkGray),
+            border_type: BorderType::Rounded,
         }
     }
 

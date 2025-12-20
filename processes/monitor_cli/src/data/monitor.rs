@@ -280,11 +280,4 @@ impl UnhealthyTopic {
             UnhealthyTopic::Write(w) => w.pending_for,
         }
     }
-
-    pub fn kind(&self) -> &'static str {
-        match self {
-            UnhealthyTopic::Read(_) => "read",
-            UnhealthyTopic::Write(_) => "write",
-        }
-    }
 }

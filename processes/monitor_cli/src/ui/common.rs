@@ -181,6 +181,7 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().add_modifier(Modifier::BOLD),
         )]),
         Line::from("  r         Reload data"),
+        Line::from("  e         Export to JSON"),
         Line::from("  q         Quit"),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -192,6 +193,7 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(" Help ")
         .borders(Borders::ALL)
+        .border_type(app.theme.border_type)
         .border_style(Style::default().fg(app.theme.highlight));
 
     let paragraph = Paragraph::new(help_text).block(block);
