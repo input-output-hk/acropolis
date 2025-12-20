@@ -1377,14 +1377,11 @@ impl StreamingSnapshotParser {
         // Note: Stake key deposit refunds happen immediately when the deregistration tx is processed,
         // not at epoch boundary. The snapshot's us_deposited already reflects these refunds.
         // We only track deregistered_with_rewards for the unclaimed rewards -> treasury calculation.
-        let stake_key_deposit_refunds: u64 = 0;
-
         if deregistered_with_rewards > 0 {
             info!(
-                "Deregistered accounts with rewards: {} accounts, {} ADA unclaimed rewards -> treasury, {} ADA deposit refunds",
+                "Deregistered accounts with rewards: {} accounts, {} ADA unclaimed rewards -> treasury",
                 deregistered_with_rewards,
-                unclaimed_rewards / 1_000_000,
-                stake_key_deposit_refunds / 1_000_000
+                unclaimed_rewards / 1_000_000
             );
         }
 
@@ -1405,7 +1402,7 @@ impl StreamingSnapshotParser {
             );
         }
 
-        let total_deposit_refunds = stake_key_deposit_refunds + gov_deposit_refunds;
+        let total_deposit_refunds = gov_deposit_refunds;
 
         // Combine pot deltas from pulsing_rew_update and instant_rewards
         // Plus adjustments for deregistered accounts with pending rewards
@@ -1423,11 +1420,10 @@ impl StreamingSnapshotParser {
         };
 
         info!(
-            "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (stake_key={}, gov={}), delta_fees={}",
+            "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (gov={})",
             pot_deltas.delta_treasury, donations,
             pot_deltas.delta_reserves, pot_deltas.delta_deposits,
-            stake_key_deposit_refunds, gov_deposit_refunds,
-            pulsing_result.delta_fees
+            gov_deposit_refunds
         );
 
         // Build the accounts bootstrap data

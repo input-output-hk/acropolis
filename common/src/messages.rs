@@ -440,7 +440,7 @@ pub struct AccountsBootstrapMessage {
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
 
-    /// Pot balances (treasury, reserves, deposits) for the snapshot epoch
+    /// Pot balances (treasury, reserves, deposits) for the set epoch
     pub pots: Pots,
 
     /// Pot deltas to apply at epoch boundary transition

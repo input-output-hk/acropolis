@@ -86,7 +86,7 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = true
+store-spdd = false
 
 [module.historical-accounts-state]
 # Clear state on start up (default true)
