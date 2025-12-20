@@ -245,7 +245,7 @@ fn sort_bottlenecks(
     ascending: bool,
 ) {
     items.sort_by(|a, b| {
-        let cmp = match column {
+        let primary = match column {
             BottleneckSortColumn::Status => a.1.status().cmp(&b.1.status()),
             BottleneckSortColumn::Module => a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase()),
             BottleneckSortColumn::Topic => {
@@ -267,10 +267,24 @@ fn sort_bottlenecks(
                 a_unread.cmp(&b_unread)
             }
         };
-        if ascending {
-            cmp
+
+        // Apply direction to primary comparison
+        let primary = if ascending {
+            primary
         } else {
-            cmp.reverse()
+            primary.reverse()
+        };
+
+        // Use secondary sort by module name, then topic for stability
+        if primary == std::cmp::Ordering::Equal {
+            let by_module = a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase());
+            if by_module == std::cmp::Ordering::Equal {
+                a.1.topic().to_lowercase().cmp(&b.1.topic().to_lowercase())
+            } else {
+                by_module
+            }
+        } else {
+            primary
         }
     });
 }

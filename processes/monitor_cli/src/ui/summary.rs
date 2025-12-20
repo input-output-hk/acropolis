@@ -201,7 +201,7 @@ fn format_header(name: &str, col: SortColumn, app: &App) -> Span<'static> {
 /// Sort modules by the given column and direction (public for use in events.rs)
 pub fn sort_modules_by(modules: &mut [(usize, &ModuleData)], column: SortColumn, ascending: bool) {
     modules.sort_by(|a, b| {
-        let cmp = match column {
+        let primary = match column {
             SortColumn::Name => a.1.name.cmp(&b.1.name),
             SortColumn::Reads => a.1.total_read.cmp(&b.1.total_read),
             SortColumn::Writes => a.1.total_written.cmp(&b.1.total_written),
@@ -212,10 +212,19 @@ pub fn sort_modules_by(modules: &mut [(usize, &ModuleData)], column: SortColumn,
             }
             SortColumn::Status => a.1.health.cmp(&b.1.health),
         };
-        if ascending {
-            cmp
+
+        // Apply direction to primary comparison
+        let primary = if ascending {
+            primary
         } else {
-            cmp.reverse()
+            primary.reverse()
+        };
+
+        // Use secondary sort by name for stability when primary values are equal
+        if primary == std::cmp::Ordering::Equal {
+            a.1.name.cmp(&b.1.name)
+        } else {
+            primary
         }
     });
 }
