@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 
 use crate::data::{History, MonitorData, Thresholds};
+use crate::ui::summary::SortColumn;
 use crate::ui::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,10 @@ pub struct App {
     pub selected_module_index: usize,
     pub selected_topic_index: usize,
 
+    // Sorting
+    pub sort_column: SortColumn,
+    pub sort_ascending: bool,
+
     // UI
     pub theme: Theme,
 }
@@ -66,6 +71,8 @@ impl App {
             thresholds: Thresholds::default(),
             selected_module_index: 0,
             selected_topic_index: 0,
+            sort_column: SortColumn::default(),
+            sort_ascending: true,
             theme: Theme::auto_detect(),
         }
     }
@@ -165,6 +172,14 @@ impl App {
 
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    pub fn cycle_sort(&mut self) {
+        self.sort_column = self.sort_column.next();
+    }
+
+    pub fn toggle_sort_direction(&mut self) {
+        self.sort_ascending = !self.sort_ascending;
     }
 
     pub fn quit(&mut self) {

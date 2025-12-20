@@ -60,6 +60,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Help
         KeyCode::Char('?') => app.toggle_help(),
 
+        // Sorting (Summary view)
+        KeyCode::Char('s') => {
+            if app.current_view == View::Summary {
+                app.cycle_sort();
+            }
+        }
+        KeyCode::Char('S') => {
+            if app.current_view == View::Summary {
+                app.toggle_sort_direction();
+            }
+        }
+
         _ => {}
     }
 }
