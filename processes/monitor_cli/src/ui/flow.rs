@@ -2,194 +2,260 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
 use crate::app::App;
-use crate::data::DataFlowGraph;
+use crate::data::{DataFlowGraph, HealthStatus};
 
-/// Render the data flow view with module highlighting
+/// Render the module-centric data flow view with ASCII boxes
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;
     };
 
+    let Some(module) = data.modules.get(app.selected_module_index) else {
+        return;
+    };
+
     let graph = DataFlowGraph::from_monitor_data(data);
-    let lines = graph.to_lines();
 
-    // Get the currently selected module name (from summary view selection)
-    let selected_module = data.modules.get(app.selected_module_index).map(|m| &m.name);
+    // Find topics this module reads from (inputs) and writes to (outputs)
+    let mut inputs: Vec<(&str, Vec<&str>)> = Vec::new(); // (topic, producers)
+    let mut outputs: Vec<(&str, Vec<&str>)> = Vec::new(); // (topic, consumers)
 
-    // Filter lines based on filter text or show all
-    let filtered_lines: Vec<_> = if app.filter_text.is_empty() {
-        lines.iter().enumerate().collect()
-    } else {
-        lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| {
-                l.topic.to_lowercase().contains(&app.filter_text.to_lowercase())
-                    || l.producers
-                        .iter()
-                        .any(|p| p.to_lowercase().contains(&app.filter_text.to_lowercase()))
-                    || l.consumers
-                        .iter()
-                        .any(|c| c.to_lowercase().contains(&app.filter_text.to_lowercase()))
-            })
-            .collect()
-    };
+    for read in &module.reads {
+        let producers: Vec<&str> = graph
+            .producers
+            .get(&read.topic)
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        inputs.push((&read.topic, producers));
+    }
 
-    // Calculate column widths
-    let max_producer_width = filtered_lines
-        .iter()
-        .map(|(_, l)| {
-            if l.producers.is_empty() {
-                6 // "(none)"
+    for write in &module.writes {
+        let consumers: Vec<&str> = graph
+            .consumers
+            .get(&write.topic)
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        outputs.push((&write.topic, consumers));
+    }
+
+    // Build the ASCII art display
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Module header box
+    let module_box_width = module.name.len() + 4;
+    let health_style = app.theme.status_style(module.health);
+
+    lines.push(Line::from(""));
+
+    // Center the module box
+    let center_padding = (area.width as usize).saturating_sub(module_box_width) / 2;
+    let pad = " ".repeat(center_padding);
+
+    lines.push(Line::from(vec![
+        Span::raw(pad.clone()),
+        Span::styled(
+            format!("╭{}╮", "─".repeat(module_box_width - 2)),
+            Style::default().fg(app.theme.highlight),
+        ),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::raw(pad.clone()),
+        Span::styled("│ ", Style::default().fg(app.theme.highlight)),
+        Span::styled(
+            module.name.clone(),
+            Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" │", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::raw(pad.clone()),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
+        Span::styled(
+            format!(
+                " R:{:<5} W:{:<5}",
+                format_count(module.total_read),
+                format_count(module.total_written)
+            ),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::raw(pad.clone()),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
+        Span::raw("    "),
+        Span::styled(module.health.symbol(), health_style),
+        Span::raw("      "),
+        Span::styled("│", Style::default().fg(app.theme.highlight)),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::raw(pad.clone()),
+        Span::styled(
+            format!("╰{}╯", "─".repeat(module_box_width - 2)),
+            Style::default().fg(app.theme.highlight),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Show inputs and outputs sections
+    let section_width = (area.width as usize).saturating_sub(4) / 2;
+
+    // Divider
+    lines.push(Line::from(vec![Span::styled(
+        format!("  {:─<width$}┬{:─<width$}", "", "", width = section_width),
+        Style::default().fg(app.theme.border),
+    )]));
+
+    // Section headers
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(
+                "  {:^width$}",
+                format!("INPUTS ({})", inputs.len()),
+                width = section_width
+            ),
+            app.theme.header,
+        ),
+        Span::styled("│", Style::default().fg(app.theme.border)),
+        Span::styled(
+            format!(
+                "{:^width$}",
+                format!("OUTPUTS ({})", outputs.len()),
+                width = section_width
+            ),
+            app.theme.header,
+        ),
+    ]));
+
+    lines.push(Line::from(vec![Span::styled(
+        format!("  {:─<width$}┼{:─<width$}", "", "", width = section_width),
+        Style::default().fg(app.theme.border),
+    )]));
+
+    // Render inputs and outputs side by side
+    let max_rows = inputs.len().max(outputs.len()).max(1);
+
+    for i in 0..max_rows {
+        let mut spans: Vec<Span> = Vec::new();
+
+        // Left side (inputs)
+        if let Some((topic, producers)) = inputs.get(i) {
+            let producer_str = if producers.is_empty() {
+                "(external)".to_string()
             } else {
-                l.producers.join(", ").len()
-            }
-        })
-        .max()
-        .unwrap_or(10)
-        .min(30);
-
-    let max_topic_width =
-        filtered_lines.iter().map(|(_, l)| l.topic.len()).max().unwrap_or(20).min(40);
-
-    let items: Vec<ListItem> = filtered_lines
-        .iter()
-        .map(|(_, line)| {
-            // Check if this topic is connected to the selected module
-            let is_connected = selected_module.map_or(false, |m| {
-                line.producers.contains(m) || line.consumers.contains(m)
-            });
-
-            let producers = if line.producers.is_empty() {
-                "(none)".to_string()
-            } else {
-                truncate(&line.producers.join(", "), max_producer_width)
+                producers.join(", ")
             };
 
-            let consumers = if line.consumers.is_empty() {
-                "(none)".to_string()
-            } else {
-                line.consumers.join(", ")
-            };
+            // Find the read data for health info
+            let read_data = module.reads.iter().find(|r| &r.topic == *topic);
+            let status = read_data.map(|r| r.status).unwrap_or(HealthStatus::Healthy);
+            let pending = read_data
+                .and_then(|r| r.pending_for)
+                .map(|d| crate::data::duration::format_duration(d))
+                .unwrap_or_else(|| "-".to_string());
+            let topic_truncated = truncate(topic, 25);
+            let producer_truncated = truncate(&producer_str, 15);
 
-            let topic_display = truncate(&line.topic, max_topic_width);
-
-            // Style based on connection to selected module
-            let (producer_style, arrow_style, topic_style, consumer_style) = if is_connected {
-                (
-                    Style::default().fg(app.theme.highlight),
-                    Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
-                    Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
-                    Style::default().fg(app.theme.highlight),
-                )
-            } else {
-                (
-                    Style::default().add_modifier(Modifier::DIM),
-                    Style::default().fg(app.theme.border),
-                    Style::default(),
-                    Style::default().add_modifier(Modifier::DIM),
-                )
-            };
-
-            // Highlight the selected module name in producers/consumers
-            let producer_spans = if let Some(module) = selected_module {
-                highlight_module(&producers, module, producer_style, app.theme.healthy)
-            } else {
-                vec![Span::styled(
-                    format!("{:>width$}", producers, width = max_producer_width),
-                    producer_style,
-                )]
-            };
-
-            let consumer_spans = if let Some(module) = selected_module {
-                highlight_module(&consumers, module, consumer_style, app.theme.healthy)
-            } else {
-                vec![Span::styled(consumers, consumer_style)]
-            };
-
-            let mut spans = producer_spans;
-            spans.push(Span::styled(" → ", arrow_style));
+            spans.push(Span::raw("  "));
             spans.push(Span::styled(
-                format!("{:<width$}", topic_display, width = max_topic_width),
-                topic_style,
+                format!("{:<15}", producer_truncated),
+                Style::default().add_modifier(Modifier::DIM),
             ));
-            spans.push(Span::styled(" → ", arrow_style));
-            spans.extend(consumer_spans);
+            spans.push(Span::styled(" → ", Style::default().fg(app.theme.border)));
+            spans.push(Span::styled(
+                format!("{:<25}", topic_truncated),
+                Style::default(),
+            ));
+            spans.push(Span::styled(
+                format!(" {:>6} ", pending),
+                app.theme.status_style(status),
+            ));
+            spans.push(Span::styled(
+                status.symbol(),
+                app.theme.status_style(status),
+            ));
+        } else {
+            spans.push(Span::raw(format!("  {:width$}", "", width = section_width)));
+        }
 
-            ListItem::new(Line::from(spans))
-        })
-        .collect();
+        spans.push(Span::styled("│", Style::default().fg(app.theme.border)));
 
-    // Build title
-    let filter_info = if !app.filter_text.is_empty() {
-        format!(" /{}/", app.filter_text)
-    } else {
-        String::new()
-    };
+        // Right side (outputs)
+        if let Some((topic, consumers)) = outputs.get(i) {
+            let consumer_str = if consumers.is_empty() {
+                "(no consumers)".to_string()
+            } else {
+                consumers.join(", ")
+            };
 
-    let module_info = selected_module.map(|m| format!(" [{}]", m)).unwrap_or_default();
+            // Find the write data for health info
+            let write_data = module.writes.iter().find(|w| &w.topic == *topic);
+            let status = write_data.map(|w| w.status).unwrap_or(HealthStatus::Healthy);
+            let pending = write_data
+                .and_then(|w| w.pending_for)
+                .map(|d| crate::data::duration::format_duration(d))
+                .unwrap_or_else(|| "-".to_string());
 
+            let topic_truncated = truncate(topic, 25);
+            let consumer_truncated = truncate(&consumer_str, 15);
+
+            spans.push(Span::styled(
+                status.symbol(),
+                app.theme.status_style(status),
+            ));
+            spans.push(Span::styled(
+                format!(" {:>6}", pending),
+                app.theme.status_style(status),
+            ));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("{:<25}", topic_truncated),
+                Style::default(),
+            ));
+            spans.push(Span::styled(" → ", Style::default().fg(app.theme.border)));
+            spans.push(Span::styled(
+                format!("{:<15}", consumer_truncated),
+                Style::default().add_modifier(Modifier::DIM),
+            ));
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    // Footer with navigation hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        " ↑/↓: select module  Enter: details  /: filter ",
+        Style::default().add_modifier(Modifier::DIM),
+    )]));
+
+    // Build the block
+    let selected_name = &module.name;
     let title = format!(
-        " Data Flow ({}/{} topics){}{} ",
-        filtered_lines.len(),
-        lines.len(),
-        filter_info,
-        module_info
+        " Data Flow: {} ({} inputs, {} outputs) ",
+        selected_name,
+        inputs.len(),
+        outputs.len()
     );
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_type(app.theme.border_type)
-        .border_style(Style::default().fg(app.theme.border));
+        .border_style(Style::default().fg(app.theme.highlight));
 
-    let list =
-        List::new(items).block(block).highlight_style(app.theme.selected).highlight_symbol("▶ ");
-
-    let mut state = ListState::default();
-    state.select(Some(
-        app.selected_topic_index.min(filtered_lines.len().saturating_sub(1)),
-    ));
-
-    frame.render_stateful_widget(list, area, &mut state);
-}
-
-/// Highlight occurrences of a module name in text
-fn highlight_module(
-    text: &str,
-    module: &str,
-    base_style: Style,
-    highlight_color: ratatui::style::Color,
-) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let text_lower = text.to_lowercase();
-    let module_lower = module.to_lowercase();
-
-    let mut last_end = 0;
-    for (start, _) in text_lower.match_indices(&module_lower) {
-        if start > last_end {
-            spans.push(Span::styled(text[last_end..start].to_string(), base_style));
-        }
-        spans.push(Span::styled(
-            text[start..start + module.len()].to_string(),
-            Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
-        ));
-        last_end = start + module.len();
-    }
-    if last_end < text.len() {
-        spans.push(Span::styled(text[last_end..].to_string(), base_style));
-    }
-
-    if spans.is_empty() {
-        spans.push(Span::styled(text.to_string(), base_style));
-    }
-
-    spans
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
@@ -197,5 +263,15 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max_len.saturating_sub(1)])
+    }
+}
+
+fn format_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
     }
 }

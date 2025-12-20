@@ -40,29 +40,4 @@ impl DataFlowGraph {
             topics,
         }
     }
-
-    /// Generate lines for ASCII display
-    /// Format: producer(s) -> topic -> consumer(s)
-    pub fn to_lines(&self) -> Vec<FlowLine> {
-        self.topics
-            .iter()
-            .map(|topic| {
-                let producers = self.producers.get(topic).cloned().unwrap_or_default();
-                let consumers = self.consumers.get(topic).cloned().unwrap_or_default();
-
-                FlowLine {
-                    topic: topic.clone(),
-                    producers,
-                    consumers,
-                }
-            })
-            .collect()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FlowLine {
-    pub topic: String,
-    pub producers: Vec<String>,
-    pub consumers: Vec<String>,
 }
