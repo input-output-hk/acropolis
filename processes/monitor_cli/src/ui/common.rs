@@ -7,6 +7,101 @@ use ratatui::{
 };
 
 use crate::app::{App, View};
+use crate::data::HealthStatus;
+
+/// Render the header bar with system health overview
+pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(ref data) = app.data else {
+        let line = Line::from(vec![
+            Span::styled(
+                " ACROPOLIS MONITOR ",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("| Loading..."),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    };
+
+    // Count modules by health status
+    let mut healthy = 0;
+    let mut warning = 0;
+    let mut critical = 0;
+
+    for module in &data.modules {
+        match module.health {
+            HealthStatus::Healthy => healthy += 1,
+            HealthStatus::Warning => warning += 1,
+            HealthStatus::Critical => critical += 1,
+        }
+    }
+
+    let total = data.modules.len();
+
+    // Calculate total throughput
+    let total_reads: u64 = data.modules.iter().map(|m| m.total_read).sum();
+    let total_writes: u64 = data.modules.iter().map(|m| m.total_written).sum();
+
+    // Overall status indicator
+    let (status_icon, status_style) = if critical > 0 {
+        ("●", app.theme.status_style(HealthStatus::Critical))
+    } else if warning > 0 {
+        ("●", app.theme.status_style(HealthStatus::Warning))
+    } else {
+        ("●", app.theme.status_style(HealthStatus::Healthy))
+    };
+
+    let line = Line::from(vec![
+        Span::styled(format!(" {} ", status_icon), status_style),
+        Span::styled("ACROPOLIS ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw("│ "),
+        Span::styled(
+            format!("{}", healthy),
+            Style::default().fg(app.theme.healthy),
+        ),
+        Span::raw(" ok "),
+        if warning > 0 {
+            Span::styled(
+                format!("{}", warning),
+                Style::default().fg(app.theme.warning),
+            )
+        } else {
+            Span::styled("0", Style::default().add_modifier(Modifier::DIM))
+        },
+        Span::raw(" warn "),
+        if critical > 0 {
+            Span::styled(
+                format!("{}", critical),
+                Style::default().fg(app.theme.critical).add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled("0", Style::default().add_modifier(Modifier::DIM))
+        },
+        Span::raw(" crit │ "),
+        Span::styled(
+            format!("{}", total),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" modules │ "),
+        Span::raw(format!(
+            "R:{} W:{}",
+            format_count(total_reads),
+            format_count(total_writes)
+        )),
+    ]);
+
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn format_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
 
 /// Render the tab bar at the top
 pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
@@ -63,16 +158,28 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     let help_text = vec![
         Line::from(vec![Span::styled("Keyboard Shortcuts", app.theme.header)]),
         Line::from(""),
-        Line::from("  q         Quit"),
-        Line::from("  Tab       Next view"),
-        Line::from("  Shift+Tab Previous view"),
-        Line::from("  1-4       Jump to view"),
-        Line::from("  Up/k      Select previous"),
-        Line::from("  Down/j    Select next"),
-        Line::from("  Enter     View module detail"),
+        Line::from(vec![Span::styled(
+            " Navigation",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
+        Line::from("  Tab/1-4   Switch views"),
+        Line::from("  ↑/k ↓/j   Navigate list"),
+        Line::from("  Enter     View detail"),
         Line::from("  Esc       Go back"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " Summary View",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
+        Line::from("  s         Cycle sort column"),
+        Line::from("  S         Toggle sort direction"),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " General",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from("  r         Reload data"),
-        Line::from("  ?         Toggle this help"),
+        Line::from("  q         Quit"),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Press any key to close",
@@ -89,7 +196,7 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
 
     // Center the help overlay
     let help_width = 40;
-    let help_height = 16;
+    let help_height = 20;
     let x = area.x + (area.width.saturating_sub(help_width)) / 2;
     let y = area.y + (area.height.saturating_sub(help_height)) / 2;
     let help_area = Rect::new(

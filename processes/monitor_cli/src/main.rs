@@ -79,25 +79,29 @@ fn run_app(
         // Draw UI
         terminal.draw(|frame| {
             let chunks = Layout::vertical([
+                Constraint::Length(1), // Header bar
                 Constraint::Length(1), // Tabs
                 Constraint::Min(10),   // Content
                 Constraint::Length(1), // Status bar
             ])
             .split(frame.area());
 
+            // Render header with system health
+            ui::common::render_header(frame, app, chunks[0]);
+
             // Render tabs
-            ui::common::render_tabs(frame, app, chunks[0]);
+            ui::common::render_tabs(frame, app, chunks[1]);
 
             // Render current view
             match app.current_view {
-                View::Summary => ui::summary::render(frame, app, chunks[1]),
-                View::Bottleneck => ui::bottleneck::render(frame, app, chunks[1]),
-                View::ModuleDetail => ui::detail::render(frame, app, chunks[1]),
-                View::DataFlow => ui::flow::render(frame, app, chunks[1]),
+                View::Summary => ui::summary::render(frame, app, chunks[2]),
+                View::Bottleneck => ui::bottleneck::render(frame, app, chunks[2]),
+                View::ModuleDetail => ui::detail::render(frame, app, chunks[2]),
+                View::DataFlow => ui::flow::render(frame, app, chunks[2]),
             }
 
             // Render status bar
-            ui::common::render_status_bar(frame, app, chunks[2]);
+            ui::common::render_status_bar(frame, app, chunks[3]);
 
             // Render help overlay if active
             if app.show_help {
