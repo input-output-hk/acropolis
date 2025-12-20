@@ -92,14 +92,12 @@ Visualizes module-to-module communication:
 ### Navigation
 | Key | Action |
 |-----|--------|
+| `Left` / `Right` / `h` / `l` | Switch between views |
 | `Tab` / `Shift+Tab` | Switch between views |
 | `1`, `2`, `3` | Jump to specific view |
-| `Up` / `k` | Move selection up |
-| `Down` / `j` | Move selection down |
-| `Page Up` | Move selection up by 10 |
-| `Page Down` | Move selection down by 10 |
-| `Home` | Jump to first item |
-| `End` | Jump to last item |
+| `Up` / `Down` / `j` / `k` | Move selection up/down |
+| `Page Up` / `Page Down` | Move selection by 10 |
+| `Home` / `End` | Jump to first/last item |
 | `Enter` | Open detail overlay |
 | `Esc` / `Backspace` | Go back / close overlay |
 
