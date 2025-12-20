@@ -445,7 +445,7 @@ pub struct AccountsBootstrapMessage {
 
     /// Pot deltas to apply at epoch boundary transition
     /// These come from pulsing_rew_update and instantaneous_rewards in the snapshot
-    pub pot_deltas: PotDeltas,
+    pub pot_deltas: BootstrapPotDeltas,
 
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
@@ -453,9 +453,9 @@ pub struct AccountsBootstrapMessage {
     pub bootstrap_snapshots: SnapshotsContainer,
 }
 
-/// Deltas to apply to pots at epoch boundary
+/// Deltas to apply to pots at epoch boundary during snapshot bootstrap
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct PotDeltas {
+pub struct BootstrapPotDeltas {
     /// Delta to treasury (positive = increase)
     pub delta_treasury: i64,
     /// Delta to reserves (positive = increase, typically negative due to monetary expansion)

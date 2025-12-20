@@ -634,7 +634,7 @@ pub struct AccountsBootstrapData {
     /// Treasury, reserves, and deposits for the snapshot epoch
     pub pots: Pots,
     /// Pot deltas to apply at epoch boundary transition
-    pub pot_deltas: crate::messages::PotDeltas,
+    pub pot_deltas: crate::messages::BootstrapPotDeltas,
     /// Fully processed bootstrap snapshots (mark/set/go) for rewards calculation.
     /// Empty (default) for pre-Shelley eras.
     pub snapshots: SnapshotsContainer,
@@ -1218,7 +1218,7 @@ impl StreamingSnapshotParser {
             deposits,
         };
 
-        // Log the deltas from pulsing_rew_update (these will be applied at epoch boundary)
+        // Log the deltas from pulsing_rew_update (applied during bootstrap to adjust pots)
         info!(
             "Pulsing reward update deltas: delta_treasury={}, delta_reserves={}",
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
@@ -1411,14 +1411,31 @@ impl StreamingSnapshotParser {
         // Plus governance proposal deposit refunds
         // Plus treasury donations
         //
-        // Note: delta_fees affects the fees pot (us_fees), NOT deposits (us_deposited)
-        let pot_deltas = crate::messages::PotDeltas {
-            delta_treasury: pulsing_result.delta_treasury
-                + instant_rewards_result.delta_treasury
-                + unclaimed_rewards as i64 // Unclaimed rewards go to treasury
-                + donations as i64, // Treasury donations
-            delta_reserves: pulsing_result.delta_reserves + instant_rewards_result.delta_reserves,
-            delta_deposits: -(total_deposit_refunds as i64),
+        // Use checked arithmetic to detect overflow
+        let unclaimed_rewards_i64 =
+            i64::try_from(unclaimed_rewards).expect("unclaimed_rewards exceeds i64::MAX");
+        let donations_i64 = i64::try_from(donations).expect("donations exceeds i64::MAX");
+        let total_deposit_refunds_i64 =
+            i64::try_from(total_deposit_refunds).expect("total_deposit_refunds exceeds i64::MAX");
+
+        let delta_treasury = pulsing_result
+            .delta_treasury
+            .checked_add(instant_rewards_result.delta_treasury)
+            .and_then(|v| v.checked_add(unclaimed_rewards_i64))
+            .and_then(|v| v.checked_add(donations_i64))
+            .expect("overflow computing delta_treasury");
+
+        let delta_reserves = pulsing_result
+            .delta_reserves
+            .checked_add(instant_rewards_result.delta_reserves)
+            .expect("overflow computing delta_reserves");
+
+        let delta_deposits = -total_deposit_refunds_i64;
+
+        let pot_deltas = crate::messages::BootstrapPotDeltas {
+            delta_treasury,
+            delta_reserves,
+            delta_deposits,
         };
 
         info!(

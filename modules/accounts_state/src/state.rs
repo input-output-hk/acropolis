@@ -101,7 +101,7 @@ pub struct State {
 
 impl State {
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
-    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) {
+    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
         let num_accounts = bootstrap_msg.accounts.len();
         let num_pools = bootstrap_msg.pools.len();
         let num_retiring = bootstrap_msg.retiring_pools.len();
@@ -172,9 +172,40 @@ impl State {
             "Applying pot deltas: treasury={}, reserves={}, deposits={}",
             deltas.delta_treasury, deltas.delta_reserves, deltas.delta_deposits,
         );
-        self.pots.treasury = (self.pots.treasury as i64 + deltas.delta_treasury) as u64;
-        self.pots.reserves = (self.pots.reserves as i64 + deltas.delta_reserves) as u64;
-        self.pots.deposits = (self.pots.deposits as i64 + deltas.delta_deposits) as u64;
+
+        // Apply deltas with overflow checks
+        let new_treasury = self.pots.treasury as i128 + deltas.delta_treasury as i128;
+        let new_reserves = self.pots.reserves as i128 + deltas.delta_reserves as i128;
+        let new_deposits = self.pots.deposits as i128 + deltas.delta_deposits as i128;
+
+        if new_treasury < 0 || new_treasury > u64::MAX as i128 {
+            anyhow::bail!(
+                "treasury pot overflow: {} + {} = {}",
+                self.pots.treasury,
+                deltas.delta_treasury,
+                new_treasury
+            );
+        }
+        if new_reserves < 0 || new_reserves > u64::MAX as i128 {
+            anyhow::bail!(
+                "reserves pot overflow: {} + {} = {}",
+                self.pots.reserves,
+                deltas.delta_reserves,
+                new_reserves
+            );
+        }
+        if new_deposits < 0 || new_deposits > u64::MAX as i128 {
+            anyhow::bail!(
+                "deposits pot overflow: {} + {} = {}",
+                self.pots.deposits,
+                deltas.delta_deposits,
+                new_deposits
+            );
+        }
+
+        self.pots.treasury = new_treasury as u64;
+        self.pots.reserves = new_reserves as u64;
+        self.pots.deposits = new_deposits as u64;
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
@@ -187,6 +218,8 @@ impl State {
             self.pots.treasury,
             self.pots.deposits,
         );
+
+        Ok(())
     }
 
     /// Get the stake address state for a give stake key

@@ -77,17 +77,19 @@ pub struct AccountsState;
 
 impl AccountsState {
     /// Handle bootstrap message from snapshot
-    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) {
+    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) -> Result<()> {
         let epoch = accounts_data.epoch;
         let accounts_len = accounts_data.accounts.len();
 
         // Initialize accounts state from snapshot data
-        state.bootstrap(accounts_data);
+        state.bootstrap(accounts_data)?;
 
         info!(
             "Accounts state bootstrapped successfully for epoch {} with {} accounts",
             epoch, accounts_len
         );
+
+        Ok(())
     }
 
     /// Wait for and process snapshot bootstrap messages
@@ -118,7 +120,7 @@ impl AccountsState {
                     info!("Received AccountsState bootstrap message");
                     let epoch = accounts_data.epoch;
                     let mut state = history.lock().await.get_or_init_with(State::default);
-                    Self::handle_bootstrap(&mut state, accounts_data);
+                    Self::handle_bootstrap(&mut state, accounts_data)?;
                     history.lock().await.commit(epoch, state);
                     info!("Accounts state bootstrap complete");
                 }
