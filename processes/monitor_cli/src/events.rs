@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use crate::app::{App, View};
 
@@ -121,6 +123,85 @@ fn handle_filter_input(app: &mut App, key: KeyEvent) {
         // Type characters
         KeyCode::Char(c) => {
             app.filter_push(c);
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle mouse events
+pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, content_start_row: u16) {
+    match mouse.kind {
+        // Scroll wheel
+        MouseEventKind::ScrollUp => {
+            app.select_prev();
+        }
+        MouseEventKind::ScrollDown => {
+            app.select_next();
+        }
+
+        // Click to select
+        MouseEventKind::Down(MouseButton::Left) => {
+            // Calculate which row was clicked (accounting for header/tabs)
+            let clicked_row = mouse.row;
+
+            // Check if clicking in content area (after header, tabs, table header)
+            if clicked_row > content_start_row {
+                let item_row = (clicked_row - content_start_row - 1) as usize;
+
+                match app.current_view {
+                    View::Summary => {
+                        if let Some(ref data) = app.data {
+                            // Account for filtered modules
+                            let filtered_count =
+                                data.modules.iter().filter(|m| app.matches_filter(&m.name)).count();
+                            if item_row < filtered_count {
+                                app.selected_module_index = item_row;
+                            }
+                        }
+                    }
+                    View::Bottleneck => {
+                        if let Some(ref data) = app.data {
+                            let count = data.unhealthy_topics().len();
+                            if item_row < count {
+                                app.selected_topic_index = item_row;
+                            }
+                        }
+                    }
+                    View::DataFlow => {
+                        if let Some(ref data) = app.data {
+                            let graph = crate::data::DataFlowGraph::from_monitor_data(data);
+                            if item_row < graph.topics.len() {
+                                app.selected_topic_index = item_row;
+                            }
+                        }
+                    }
+                    View::ModuleDetail => {
+                        // Module detail doesn't have selectable items currently
+                    }
+                }
+            }
+
+            // Check for tab clicks (row 1, after header)
+            if clicked_row == 1 {
+                let col = mouse.column;
+                // Approximate tab positions based on tab widths
+                if col < 12 {
+                    app.set_view(View::Summary);
+                } else if col < 28 {
+                    app.set_view(View::Bottleneck);
+                } else if col < 40 {
+                    app.set_view(View::ModuleDetail);
+                } else if col < 50 {
+                    app.set_view(View::DataFlow);
+                }
+            }
+        }
+
+        // Double-click to enter detail
+        MouseEventKind::Down(MouseButton::Right) => {
+            // Right-click goes back
+            app.go_back();
         }
 
         _ => {}

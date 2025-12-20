@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::Event,
+    event::{DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -41,7 +41,7 @@ fn main() -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -62,7 +62,11 @@ fn main() -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
 
     result
@@ -113,6 +117,10 @@ fn run_app(
         if let Some(event) = events::poll_event(Duration::from_millis(100))? {
             match event {
                 Event::Key(key) => events::handle_key_event(app, key),
+                Event::Mouse(mouse) => {
+                    // Content starts after header (1) + tabs (1) + table header (1)
+                    events::handle_mouse_event(app, mouse, 3);
+                }
                 Event::Resize(_, _) => {
                     // Terminal will redraw on next iteration
                 }
