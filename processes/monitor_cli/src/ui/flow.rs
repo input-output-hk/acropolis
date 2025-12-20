@@ -193,7 +193,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
         ]));
 
-        let mut has_connections = false;
+        let mut connection_lines: Vec<String> = Vec::new();
 
         // Outgoing
         for w in &selected.writes {
@@ -206,17 +206,11 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 .unwrap_or_default();
 
             if !consumers.is_empty() {
-                has_connections = true;
-                lines.push(Line::from(vec![
-                    Span::styled(" │  ", Style::default().fg(app.theme.border)),
-                    Span::styled("→ ", Style::default().fg(app.theme.healthy)),
-                    Span::styled(
-                        truncate(&w.topic, 30),
-                        Style::default().add_modifier(Modifier::DIM),
-                    ),
-                    Span::raw(" → "),
-                    Span::raw(consumers.join(", ")),
-                ]));
+                connection_lines.push(format!(
+                    "→ {} → {}",
+                    truncate(&w.topic, 20),
+                    consumers.join(", ")
+                ));
             }
         }
 
@@ -231,37 +225,54 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
                 .unwrap_or_default();
 
             if !producers.is_empty() {
-                has_connections = true;
-                lines.push(Line::from(vec![
-                    Span::styled(" │  ", Style::default().fg(app.theme.border)),
-                    Span::styled("← ", Style::default().fg(app.theme.warning)),
-                    Span::raw(producers.join(", ")),
-                    Span::raw(" → "),
-                    Span::styled(
-                        truncate(&r.topic, 30),
-                        Style::default().add_modifier(Modifier::DIM),
-                    ),
-                ]));
+                connection_lines.push(format!(
+                    "← {} → {}",
+                    producers.join(", "),
+                    truncate(&r.topic, 20)
+                ));
             }
         }
 
-        if !has_connections {
+        if connection_lines.is_empty() {
+            connection_lines.push("(no external connections)".to_string());
+        }
+
+        // Render connection lines with proper box borders
+        let content_width = box_width.saturating_sub(6); // Account for " │  " and " │"
+        for line_text in connection_lines.iter() {
+            let truncated = truncate(line_text, content_width);
+            let padding = content_width.saturating_sub(truncated.chars().count());
+
+            // Color the arrow at the start
+            let (arrow, rest) = if truncated.starts_with("→") {
+                ("→", &truncated[3..]) // UTF-8: → is 3 bytes
+            } else if truncated.starts_with("←") {
+                ("←", &truncated[3..])
+            } else {
+                ("", truncated.as_str())
+            };
+
+            let arrow_style = if arrow == "→" {
+                Style::default().fg(app.theme.healthy)
+            } else if arrow == "←" {
+                Style::default().fg(app.theme.warning)
+            } else {
+                Style::default().add_modifier(Modifier::DIM)
+            };
+
             lines.push(Line::from(vec![
                 Span::styled(" │  ", Style::default().fg(app.theme.border)),
-                Span::styled(
-                    "(no external connections)",
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
+                Span::styled(format!("{} ", arrow), arrow_style),
+                Span::raw(rest.to_string()),
+                Span::raw(format!("{:w$}", "", w = padding)),
+                Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
 
-        lines.push(Line::from(vec![
-            Span::styled(" ╰", Style::default().fg(app.theme.border)),
-            Span::styled(
-                format!("{:─<60}", ""),
-                Style::default().fg(app.theme.border),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            format!(" ╰{:─<w$}╯", "", w = box_width.saturating_sub(3)),
+            Style::default().fg(app.theme.border),
+        )]));
     }
 
     // Footer
