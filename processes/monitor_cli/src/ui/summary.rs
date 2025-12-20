@@ -120,15 +120,16 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
+    // Use Fill to distribute space evenly while respecting minimum widths
     let widths = [
-        Constraint::Length(22), // Module - fixed width, truncate long names
-        Constraint::Length(9),  // Reads
-        Constraint::Length(7),  // Rate
-        Constraint::Length(9),  // Writes
-        Constraint::Length(10), // Pending
-        Constraint::Length(7),  // Unread
-        Constraint::Length(8),  // Trend/Sparkline
-        Constraint::Length(6),  // Status
+        Constraint::Fill(3), // Module - gets 3x share (largest)
+        Constraint::Fill(1), // Reads
+        Constraint::Fill(1), // Rate
+        Constraint::Fill(1), // Writes
+        Constraint::Fill(1), // Pending
+        Constraint::Fill(1), // Unread
+        Constraint::Min(8),  // Trend/Sparkline - fixed 8 for sparkline chars
+        Constraint::Min(6),  // Status - fixed minimum
     ];
 
     // selected_module_index is now treated as visual index directly

@@ -47,9 +47,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     }
 
-    // Layout constants
-    let col_w = 10usize;
-    let row_header_w = 14usize;
+    // Layout constants - reduced for tighter spacing
+    let col_w = 6usize;
+    let row_header_w = 12usize;
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -154,28 +154,41 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(app.theme.border),
     )]));
 
-    // Legend
+    // Legend with module count
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled(" Legend: ", Style::default().add_modifier(Modifier::BOLD)),
         Span::styled("→", Style::default().fg(app.theme.healthy)),
-        Span::raw(" sends to   "),
+        Span::raw(" sends  "),
         Span::styled("←", Style::default().fg(app.theme.warning)),
-        Span::raw(" receives from   "),
+        Span::raw(" receives  "),
         Span::styled("↔", Style::default().fg(app.theme.highlight)),
-        Span::raw(" bidirectional"),
+        Span::raw(" both  "),
+        Span::styled("·", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw(" self  │  "),
+        Span::styled(
+            format!("{} modules", module_names.len()),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
     ]));
 
     // Selected module connections
     lines.push(Line::from(""));
     if let Some(selected) = data.modules.get(app.selected_module_index) {
+        // Calculate box width based on available space
+        let box_width = 55usize;
+
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" ╭─ {} ", selected.name),
                 Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:─<50}", ""),
+                format!(
+                    "{:─<w$}╮",
+                    "",
+                    w = box_width.saturating_sub(selected.name.len() + 5)
+                ),
                 Style::default().fg(app.theme.border),
             ),
         ]));
