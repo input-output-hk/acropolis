@@ -117,16 +117,36 @@ fn run_app(
 ) -> Result<()> {
     let mut last_refresh = Instant::now();
 
+    // Minimum terminal size for usable display
+    const MIN_WIDTH: u16 = 60;
+    const MIN_HEIGHT: u16 = 12;
+
     while app.running {
         // Draw UI
         terminal.draw(|frame| {
+            let area = frame.area();
+
+            // Check for minimum terminal size
+            if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+                let msg = format!(
+                    "Terminal too small: {}x{}\nMinimum: {}x{}\n\nResize to continue",
+                    area.width, area.height, MIN_WIDTH, MIN_HEIGHT
+                );
+                let paragraph = ratatui::widgets::Paragraph::new(msg)
+                    .alignment(ratatui::layout::Alignment::Center)
+                    .style(ratatui::style::Style::default().fg(ratatui::style::Color::Yellow));
+                let centered = ratatui::layout::Rect::new(0, area.height / 2 - 2, area.width, 5);
+                frame.render_widget(paragraph, centered);
+                return;
+            }
+
             let chunks = Layout::vertical([
                 Constraint::Length(1), // Header bar
                 Constraint::Length(1), // Tabs
-                Constraint::Min(10),   // Content
+                Constraint::Min(8),    // Content (reduced from 10)
                 Constraint::Length(1), // Status bar
             ])
-            .split(frame.area());
+            .split(area);
 
             // Render header with system health
             ui::common::render_header(frame, app, chunks[0]);
@@ -146,12 +166,12 @@ fn run_app(
 
             // Render detail overlay if active
             if app.show_detail_overlay {
-                ui::detail::render_overlay(frame, app, frame.area());
+                ui::detail::render_overlay(frame, app, area);
             }
 
             // Render help overlay if active
             if app.show_help {
-                ui::common::render_help(frame, app, frame.area());
+                ui::common::render_help(frame, app, area);
             }
         })?;
 
