@@ -196,6 +196,10 @@ impl AccountsState {
             }
         }
 
+        // Track if this is the first epoch after snapshot bootstrap
+        // We skip rewards calculation on the first epoch since pot deltas were already applied
+        let mut skip_first_epoch_rewards = is_snapshot_mode;
+
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
@@ -238,9 +242,9 @@ impl AccountsState {
             // Read from epoch-boundary messages only when it's a new epoch
             // NEWEPOCH ticks
             if new_epoch {
-                // Applies reewards from previous epoch
+                // Applies rewards from previous epoch
                 let previous_epoch_rewards_result = state
-                    .complete_previous_epoch_rewards_calculation(verifier)
+                    .complete_previous_epoch_rewards_calculation(verifier, skip_first_epoch_rewards)
                     .await
                     .inspect_err(|e| {
                         vld.push_anyhow(anyhow!("Previous epoch rewards calculation error: {e:#}"))
@@ -401,6 +405,9 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+
+                // Clear the skip flag after first epoch transition
+                skip_first_epoch_rewards = false;
             }
 
             // Now handle the certs_message properly
