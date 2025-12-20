@@ -1178,6 +1178,9 @@ impl StreamingSnapshotParser {
             enacted_proposal_count, expired_proposal_count,
         );
 
+        // Extract pool deposit from protocol parameters before consuming governance_state
+        let stake_pool_deposit = governance_state.current_pparams.stake_pool_deposit;
+
         // Emit governance state callback
         callbacks.on_governance_state(governance_state)?;
 
@@ -1265,7 +1268,7 @@ impl StreamingSnapshotParser {
 
         // Calculate total DRep deposits
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
-        let total_pool_deposits: u64 = (pool_registrations.len() as u64) * 500_000_000; // 500 ADA per pool
+        let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
         // Subtract DRep deposits from us_deposited
         // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
@@ -1385,20 +1388,19 @@ impl StreamingSnapshotParser {
             );
         }
 
-        // Calculate governance proposal deposit refunds
-        // Each enacted or expired governance action gets its deposit (100,000 ADA) refunded
-        // TODO: Get actual gov_action_deposit from protocol parameters
-        const GOV_ACTION_DEPOSIT: u64 = 100_000_000_000; // 100,000 ADA
-        let total_gov_proposals_refunded = enacted_proposal_count + expired_proposal_count;
-        let gov_deposit_refunds = (total_gov_proposals_refunded as u64) * GOV_ACTION_DEPOSIT;
+        // Calculate governance proposal deposit refunds for enacted proposals
+        // We use enacted_proposal_deposits which was calculated earlier by summing each proposal's
+        // actual deposit field. For expired proposals, we only have IDs (no deposit amounts),
+        // so we cannot include them here. This is acceptable because expired proposal refunds
+        // should be tracked when proposals are processed, not at epoch boundary.
+        let gov_deposit_refunds = enacted_proposal_deposits;
 
-        if total_gov_proposals_refunded > 0 {
+        if enacted_proposal_count > 0 || expired_proposal_count > 0 {
             info!(
-                "Governance deposit refunds: {} enacted + {} expired = {} proposals, {} ADA refunded",
+                "Governance deposit refunds: {} enacted ({} ADA), {} expired (not included - IDs only)",
                 enacted_proposal_count,
-                expired_proposal_count,
-                total_gov_proposals_refunded,
-                gov_deposit_refunds / 1_000_000
+                gov_deposit_refunds / 1_000_000,
+                expired_proposal_count
             );
         }
 
