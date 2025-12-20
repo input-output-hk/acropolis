@@ -98,8 +98,8 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<30} {:>8} {:>10} {:>8} {:>4}",
-                    "Topic", "Read", "Pending", "Unread", ""
+                    "{:<30} {:>8} {:>10} {:>8} {:>6}",
+                    "Topic", "Read", "Pending", "Unread", "Status"
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
@@ -127,7 +127,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
                     pending,
                     unread
                 )),
-                Span::styled(format!("{:>4}", r.status.symbol()), status_style),
+                Span::styled(format!("{:^6}", r.status.symbol()), status_style),
                 Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
             ]));
         }
@@ -159,8 +159,8 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" │  ".to_string(), Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<30} {:>10} {:>12} {:>8}",
-                    "Topic", "Written", "Pending", ""
+                    "{:<30} {:>10} {:>12} {:>6}",
+                    "Topic", "Written", "Pending", "Status"
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
@@ -186,7 +186,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
                     format_count(w.written),
                     pending
                 )),
-                Span::styled(format!("{:>4}", w.status.symbol()), status_style),
+                Span::styled(format!("{:^6}", w.status.symbol()), status_style),
                 Span::styled(" │".to_string(), Style::default().fg(app.theme.border)),
             ]));
         }

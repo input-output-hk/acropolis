@@ -7,9 +7,9 @@ use ratatui::{
 };
 
 use crate::app::App;
-use crate::data::{DataFlowGraph, HealthStatus};
+use crate::data::DataFlowGraph;
 
-/// Render the data flow view as a dependency graph centered on the selected module
+/// Render the data flow view as a clean dependency graph
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;
@@ -22,327 +22,70 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let graph = DataFlowGraph::from_monitor_data(data);
 
     // Find topics this module reads from (inputs) and writes to (outputs)
-    let mut inputs: Vec<InputInfo> = Vec::new();
-    let mut outputs: Vec<OutputInfo> = Vec::new();
+    let input_topics: Vec<&str> = module.reads.iter().map(|r| r.topic.as_str()).collect();
+    let output_topics: Vec<&str> = module.writes.iter().map(|w| w.topic.as_str()).collect();
 
-    for read in &module.reads {
-        let producers: Vec<String> = graph.producers.get(&read.topic).cloned().unwrap_or_default();
-        inputs.push(InputInfo {
-            topic: read.topic.clone(),
-            producers,
-            status: read.status,
-            pending: read.pending_for,
-            unread: read.unread,
-        });
+    // Find upstream producers (modules that write to topics we read)
+    let mut upstream_modules: Vec<&str> = Vec::new();
+    for topic in &input_topics {
+        if let Some(producers) = graph.producers.get(*topic) {
+            for p in producers {
+                if p != &module.name && !upstream_modules.contains(&p.as_str()) {
+                    upstream_modules.push(p.as_str());
+                }
+            }
+        }
     }
 
-    for write in &module.writes {
-        let consumers: Vec<String> = graph.consumers.get(&write.topic).cloned().unwrap_or_default();
-        outputs.push(OutputInfo {
-            topic: write.topic.clone(),
-            consumers,
-            status: write.status,
-            pending: write.pending_for,
-        });
+    // Find downstream consumers (modules that read from topics we write)
+    let mut downstream_modules: Vec<&str> = Vec::new();
+    for topic in &output_topics {
+        if let Some(consumers) = graph.consumers.get(*topic) {
+            for c in consumers {
+                if c != &module.name && !downstream_modules.contains(&c.as_str()) {
+                    downstream_modules.push(c.as_str());
+                }
+            }
+        }
     }
 
     let mut lines: Vec<Line> = Vec::new();
-    let health_style = app.theme.status_style(module.health);
-
-    // === UPSTREAM SECTION (modules that feed into this one) ===
     lines.push(Line::from(""));
 
-    if inputs.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "  (no inputs)",
-            Style::default().add_modifier(Modifier::DIM),
-        )]));
-    } else {
-        // Show upstream producers
-        let mut all_producers: Vec<&str> =
-            inputs.iter().flat_map(|i| i.producers.iter().map(|s| s.as_str())).collect();
-        all_producers.sort();
-        all_producers.dedup();
-
-        if !all_producers.is_empty() {
-            let producers_line = all_producers
-                .iter()
-                .map(|p| {
-                    // Check if this producer has health issues
-                    let producer_module = data.modules.iter().find(|m| &m.name == *p);
-                    let style = producer_module
-                        .map(|m| app.theme.status_style(m.health))
-                        .unwrap_or_default();
-                    (p.to_string(), style)
-                })
-                .collect::<Vec<_>>();
-
-            let mut spans: Vec<Span> = vec![Span::raw("  ")];
-            for (i, (name, style)) in producers_line.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", Style::default()));
-                }
-                spans.push(Span::styled(
-                    format!("┌{}┐", "─".repeat(name.len() + 2)),
-                    style.add_modifier(Modifier::DIM),
-                ));
-            }
-            lines.push(Line::from(spans));
-
-            let mut spans: Vec<Span> = vec![Span::raw("  ")];
-            for (i, (name, style)) in producers_line.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", Style::default()));
-                }
-                spans.push(Span::styled(format!("│ {} │", name), *style));
-            }
-            lines.push(Line::from(spans));
-
-            let mut spans: Vec<Span> = vec![Span::raw("  ")];
-            for (i, (name, style)) in producers_line.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", Style::default()));
-                }
-                spans.push(Span::styled(
-                    format!("└{}┘", "─".repeat(name.len() + 2)),
-                    style.add_modifier(Modifier::DIM),
-                ));
-            }
-            lines.push(Line::from(spans));
-
-            // Arrows pointing down
-            let mut spans: Vec<Span> = vec![Span::raw("  ")];
-            for (i, (name, _)) in producers_line.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", Style::default()));
-                }
-                let padding = (name.len() + 4) / 2;
-                spans.push(Span::styled(
-                    format!(
-                        "{:>width$}│{:<width2$}",
-                        "",
-                        "",
-                        width = padding,
-                        width2 = padding
-                    ),
-                    Style::default().fg(app.theme.border),
-                ));
-            }
-            lines.push(Line::from(spans));
-
-            let mut spans: Vec<Span> = vec![Span::raw("  ")];
-            for (i, (name, _)) in producers_line.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled("  ", Style::default()));
-                }
-                let padding = (name.len() + 4) / 2;
-                spans.push(Span::styled(
-                    format!(
-                        "{:>width$}▼{:<width2$}",
-                        "",
-                        "",
-                        width = padding,
-                        width2 = padding
-                    ),
-                    Style::default().fg(app.theme.border),
-                ));
-            }
-            lines.push(Line::from(spans));
-        }
-
-        // Show input topics
-        for input in &inputs {
-            let status_style = app.theme.status_style(input.status);
-            let pending = input
-                .pending
-                .map(|d| crate::data::duration::format_duration(d))
-                .unwrap_or_else(|| "-".to_string());
-            let unread = input.unread.map(|u| u.to_string()).unwrap_or_else(|| "-".to_string());
-
-            lines.push(Line::from(vec![
-                Span::styled("  ╭─ ", Style::default().fg(app.theme.border)),
-                Span::styled(truncate(&input.topic, 35), Style::default()),
-                Span::styled(" ─╮", Style::default().fg(app.theme.border)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  │  ", Style::default().fg(app.theme.border)),
-                Span::styled(
-                    format!("pending: {:>8}  unread: {:>6}  ", pending, unread),
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
-                Span::styled(input.status.symbol(), status_style),
-                Span::styled(" │", Style::default().fg(app.theme.border)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  ╰", Style::default().fg(app.theme.border)),
-                Span::styled(
-                    "───────────────────────────────────────────",
-                    Style::default().fg(app.theme.border),
-                ),
-                Span::styled("╯", Style::default().fg(app.theme.border)),
-            ]));
-        }
+    // === UPSTREAM MODULES ===
+    if !upstream_modules.is_empty() {
+        lines.extend(render_module_row(&upstream_modules, app, false));
+        lines.push(render_arrows_down(upstream_modules.len()));
     }
 
-    // Arrow into main module
-    lines.push(Line::from(vec![Span::styled(
-        "                    │",
-        Style::default().fg(app.theme.border),
-    )]));
-    lines.push(Line::from(vec![Span::styled(
-        "                    ▼",
-        Style::default().fg(app.theme.border),
-    )]));
+    // === INPUT TOPICS ===
+    if !input_topics.is_empty() {
+        lines.extend(render_topic_boxes(&input_topics, app));
+        lines.push(render_arrow_down_single());
+    }
 
-    // === MAIN MODULE (center) ===
-    let module_width = module.name.len().max(20) + 4;
-    let pad_left = 20usize.saturating_sub(module_width / 2);
-    let padding = " ".repeat(pad_left);
+    // === MAIN MODULE (highlighted) ===
+    lines.extend(render_main_module(&module.name, app));
 
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled(
-            format!("╔{}╗", "═".repeat(module_width)),
-            Style::default().fg(app.theme.highlight),
-        ),
-    ]));
+    // === OUTPUT TOPICS ===
+    if !output_topics.is_empty() {
+        lines.push(render_arrow_down_single());
+        lines.extend(render_topic_boxes(&output_topics, app));
+    }
 
-    let name_pad = module_width.saturating_sub(module.name.len()) / 2;
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-        Span::raw(format!("{:>width$}", "", width = name_pad)),
-        Span::styled(
-            module.name.clone(),
-            Style::default().fg(app.theme.highlight).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!(
-            "{:<width$}",
-            "",
-            width = module_width - name_pad - module.name.len()
-        )),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    let stats = format!(
-        "R:{} W:{}",
-        format_count(module.total_read),
-        format_count(module.total_written)
-    );
-    let stats_pad = module_width.saturating_sub(stats.len()) / 2;
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-        Span::raw(format!("{:>width$}", "", width = stats_pad)),
-        Span::styled(stats.clone(), Style::default().add_modifier(Modifier::DIM)),
-        Span::raw(format!(
-            "{:<width$}",
-            "",
-            width = module_width - stats_pad - stats.len()
-        )),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    let health_text = format!(
-        "{} {}",
-        module.health.symbol(),
-        match module.health {
-            HealthStatus::Healthy => "healthy",
-            HealthStatus::Warning => "warning",
-            HealthStatus::Critical => "critical",
-        }
-    );
-    let health_pad = module_width.saturating_sub(health_text.len()) / 2;
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-        Span::raw(format!("{:>width$}", "", width = health_pad)),
-        Span::styled(health_text.clone(), health_style),
-        Span::raw(format!(
-            "{:<width$}",
-            "",
-            width = module_width - health_pad - health_text.len()
-        )),
-        Span::styled("║", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled(
-            format!("╚{}╝", "═".repeat(module_width)),
-            Style::default().fg(app.theme.highlight),
-        ),
-    ]));
-
-    // Arrow out of main module
-    lines.push(Line::from(vec![Span::styled(
-        "                    │",
-        Style::default().fg(app.theme.border),
-    )]));
-    lines.push(Line::from(vec![Span::styled(
-        "                    ▼",
-        Style::default().fg(app.theme.border),
-    )]));
-
-    // === DOWNSTREAM SECTION (topics this module writes to) ===
-    if outputs.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "  (no outputs)",
-            Style::default().add_modifier(Modifier::DIM),
-        )]));
-    } else {
-        // Show output topics
-        for output in &outputs {
-            let status_style = app.theme.status_style(output.status);
-            let pending = output
-                .pending
-                .map(|d| crate::data::duration::format_duration(d))
-                .unwrap_or_else(|| "-".to_string());
-
-            lines.push(Line::from(vec![
-                Span::styled("  ╭─ ", Style::default().fg(app.theme.border)),
-                Span::styled(truncate(&output.topic, 35), Style::default()),
-                Span::styled(" ─╮", Style::default().fg(app.theme.border)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  │  ", Style::default().fg(app.theme.border)),
-                Span::styled(
-                    format!("pending: {:>8}  ", pending),
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
-                Span::styled(output.status.symbol(), status_style),
-                Span::styled(
-                    format!(
-                        "  → {}",
-                        if output.consumers.is_empty() {
-                            "(no consumers)".to_string()
-                        } else {
-                            output.consumers.join(", ")
-                        }
-                    ),
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
-                Span::styled(" │", Style::default().fg(app.theme.border)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  ╰", Style::default().fg(app.theme.border)),
-                Span::styled(
-                    "───────────────────────────────────────────",
-                    Style::default().fg(app.theme.border),
-                ),
-                Span::styled("╯", Style::default().fg(app.theme.border)),
-            ]));
-        }
+    // === DOWNSTREAM MODULES ===
+    if !downstream_modules.is_empty() {
+        lines.push(render_arrows_down(downstream_modules.len()));
+        lines.extend(render_module_row(&downstream_modules, app, false));
     }
 
     // Footer
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        " ↑/↓: change module   Enter: details   /:filter",
+        " ↑/↓: change module   Enter: details",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
-    // Build the block
     let title = format!(" Data Flow: {} ", module.name);
 
     let block = Block::default()
@@ -355,19 +98,157 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-struct InputInfo {
-    topic: String,
-    producers: Vec<String>,
-    status: HealthStatus,
-    pending: Option<std::time::Duration>,
-    unread: Option<u64>,
+/// Render a row of module boxes
+fn render_module_row(modules: &[&str], app: &App, _highlighted: bool) -> Vec<Line<'static>> {
+    if modules.is_empty() {
+        return vec![];
+    }
+
+    let box_width = 16;
+    let total_width = modules.len() * (box_width + 2);
+    let left_pad = 40usize.saturating_sub(total_width / 2);
+    let padding = " ".repeat(left_pad);
+
+    let mut top_line: Vec<Span> = vec![Span::raw(padding.clone())];
+    let mut mid_line: Vec<Span> = vec![Span::raw(padding.clone())];
+    let mut bot_line: Vec<Span> = vec![Span::raw(padding.clone())];
+
+    for (i, name) in modules.iter().enumerate() {
+        if i > 0 {
+            top_line.push(Span::raw("  "));
+            mid_line.push(Span::raw("  "));
+            bot_line.push(Span::raw("  "));
+        }
+
+        let display_name = truncate(name, box_width - 4);
+        let name_pad = (box_width - 2).saturating_sub(display_name.len()) / 2;
+        let name_pad_right = (box_width - 2).saturating_sub(display_name.len()) - name_pad;
+
+        let style = Style::default().fg(app.theme.border);
+
+        top_line.push(Span::styled(
+            format!("┌{}┐", "─".repeat(box_width - 2)),
+            style,
+        ));
+        mid_line.push(Span::styled("│".to_string(), style));
+        mid_line.push(Span::raw(format!("{:>w$}", "", w = name_pad)));
+        mid_line.push(Span::raw(display_name));
+        mid_line.push(Span::raw(format!("{:<w$}", "", w = name_pad_right)));
+        mid_line.push(Span::styled("│".to_string(), style));
+        bot_line.push(Span::styled(
+            format!("└{}┘", "─".repeat(box_width - 2)),
+            style,
+        ));
+    }
+
+    vec![
+        Line::from(top_line),
+        Line::from(mid_line),
+        Line::from(bot_line),
+    ]
 }
 
-struct OutputInfo {
-    topic: String,
-    consumers: Vec<String>,
-    status: HealthStatus,
-    pending: Option<std::time::Duration>,
+/// Render topic boxes (can show multiple topics)
+fn render_topic_boxes(topics: &[&str], app: &App) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    for topic in topics {
+        let box_width = topic.len().max(20) + 4;
+        let left_pad = 40usize.saturating_sub(box_width / 2);
+        let padding = " ".repeat(left_pad);
+
+        let style = Style::default().fg(app.theme.border);
+
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(format!("┌{}┐", "─".repeat(box_width - 2)), style),
+        ]));
+
+        let topic_display = truncate(topic, box_width - 4);
+        let topic_pad = (box_width - 2).saturating_sub(topic_display.len()) / 2;
+        let topic_pad_right = (box_width - 2).saturating_sub(topic_display.len()) - topic_pad;
+
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled("│".to_string(), style),
+            Span::raw(format!("{:>w$}", "", w = topic_pad)),
+            Span::styled(topic_display, Style::default().add_modifier(Modifier::DIM)),
+            Span::raw(format!("{:<w$}", "", w = topic_pad_right)),
+            Span::styled("│".to_string(), style),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(format!("└{}┘", "─".repeat(box_width - 2)), style),
+        ]));
+    }
+
+    lines
+}
+
+/// Render the main highlighted module
+fn render_main_module(name: &str, app: &App) -> Vec<Line<'static>> {
+    let box_width = name.len().max(14) + 6;
+    let left_pad = 40usize.saturating_sub(box_width / 2);
+    let padding = " ".repeat(left_pad);
+
+    let style = Style::default().fg(app.theme.highlight);
+    let name_pad = (box_width - 2).saturating_sub(name.len()) / 2;
+    let name_pad_right = (box_width - 2).saturating_sub(name.len()) - name_pad;
+
+    vec![
+        Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(format!("╔{}╗", "═".repeat(box_width - 2)), style),
+        ]),
+        Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled("║".to_string(), style),
+            Span::raw(format!("{:>w$}", "", w = name_pad)),
+            Span::styled(name.to_string(), style.add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{:<w$}", "", w = name_pad_right)),
+            Span::styled("║".to_string(), style),
+        ]),
+        Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(format!("╚{}╝", "═".repeat(box_width - 2)), style),
+        ]),
+    ]
+}
+
+/// Render multiple arrows pointing down
+fn render_arrows_down(count: usize) -> Line<'static> {
+    if count == 0 {
+        return Line::from("");
+    }
+
+    let box_width = 16;
+    let total_width = count * (box_width + 2);
+    let left_pad = 40usize.saturating_sub(total_width / 2);
+    let padding = " ".repeat(left_pad);
+
+    let mut spans: Vec<Span> = vec![Span::raw(padding)];
+
+    for i in 0..count {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        let arrow_pad = box_width / 2;
+        spans.push(Span::styled(
+            format!("{:>w$}│{:<w2$}", "", "", w = arrow_pad - 1, w2 = arrow_pad),
+            Style::default().add_modifier(Modifier::DIM),
+        ));
+    }
+
+    Line::from(spans)
+}
+
+/// Render a single centered arrow pointing down
+fn render_arrow_down_single() -> Line<'static> {
+    Line::from(vec![Span::styled(
+        "                                        │",
+        Style::default().add_modifier(Modifier::DIM),
+    )])
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
@@ -375,15 +256,5 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max_len.saturating_sub(1)])
-    }
-}
-
-fn format_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
     }
 }
