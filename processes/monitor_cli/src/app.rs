@@ -176,7 +176,8 @@ impl App {
 
     pub fn select_next(&mut self) {
         match self.current_view {
-            View::Summary | View::ModuleDetail => {
+            View::Summary | View::ModuleDetail | View::DataFlow => {
+                // Navigate by module
                 if let Some(ref data) = self.data {
                     if self.selected_module_index < data.modules.len().saturating_sub(1) {
                         self.selected_module_index += 1;
@@ -191,25 +192,18 @@ impl App {
                     }
                 }
             }
-            View::DataFlow => {
-                if let Some(ref data) = self.data {
-                    let graph = crate::data::DataFlowGraph::from_monitor_data(data);
-                    if self.selected_topic_index < graph.topics.len().saturating_sub(1) {
-                        self.selected_topic_index += 1;
-                    }
-                }
-            }
         }
     }
 
     pub fn select_prev(&mut self) {
         match self.current_view {
-            View::Summary | View::ModuleDetail => {
+            View::Summary | View::ModuleDetail | View::DataFlow => {
+                // Navigate by module
                 if self.selected_module_index > 0 {
                     self.selected_module_index -= 1;
                 }
             }
-            View::Bottleneck | View::DataFlow => {
+            View::Bottleneck => {
                 if self.selected_topic_index > 0 {
                     self.selected_topic_index -= 1;
                 }

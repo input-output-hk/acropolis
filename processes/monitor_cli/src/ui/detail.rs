@@ -19,18 +19,8 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    // Fixed column widths for consistent layout
-    const TOPIC_W: usize = 28;
-    const COUNT_W: usize = 10;
-    const PENDING_W: usize = 10;
-    const UNREAD_W: usize = 8;
-    const STATUS_W: usize = 6;
-
-    // Total inner width = columns + separators + padding
-    let inner_content_width = TOPIC_W + COUNT_W + PENDING_W + UNREAD_W + STATUS_W + 4; // +4 for spacing
-
     // Calculate overlay size
-    let overlay_width = (inner_content_width + 6) as u16; // +6 for borders and padding
+    let overlay_width = 76u16;
     let overlay_height = (area.height * 85 / 100).min(40).max(15);
     let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
     let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
@@ -39,217 +29,121 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Clear the area behind the overlay
     frame.render_widget(Clear, overlay_area);
 
-    let box_inner = inner_content_width;
+    let inner_w = 72usize; // inner content width
 
-    // Build content lines
     let mut lines: Vec<Line> = Vec::new();
 
-    // Module header box
+    // Module header
     let health_label = match module.health {
         crate::data::HealthStatus::Healthy => "Healthy",
         crate::data::HealthStatus::Warning => "Warning",
         crate::data::HealthStatus::Critical => "Critical",
     };
 
-    lines.push(Line::from(vec![Span::styled(
-        format!(" ╭{:─<w$}╮", "", w = box_inner),
-        Style::default().fg(app.theme.highlight),
-    )]));
-
-    lines.push(Line::from(vec![
-        Span::styled(" │ ", Style::default().fg(app.theme.highlight)),
-        Span::styled(
-            module.name.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!(
-            "{:w$}",
-            "",
-            w = box_inner.saturating_sub(module.name.len() + 1)
-        )),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    let stats_line = format!(
-        "Reads: {}  Writes: {}  {} {}",
+    lines.push(make_box_top(inner_w, app.theme.highlight));
+    lines.push(make_box_row(
+        &module.name,
+        inner_w,
+        app.theme.highlight,
+        true,
+    ));
+    let stats = format!(
+        "Reads: {}   Writes: {}   {} {}",
         format_count(module.total_read),
         format_count(module.total_written),
         module.health.symbol(),
         health_label
     );
-    lines.push(Line::from(vec![
-        Span::styled(" │ ", Style::default().fg(app.theme.highlight)),
-        Span::raw(stats_line.clone()),
-        Span::raw(format!(
-            "{:w$}",
-            "",
-            w = box_inner.saturating_sub(stats_line.len() + 1)
-        )),
-        Span::styled("│", Style::default().fg(app.theme.highlight)),
-    ]));
-
-    lines.push(Line::from(vec![Span::styled(
-        format!(" ╰{:─<w$}╯", "", w = box_inner),
-        Style::default().fg(app.theme.highlight),
-    )]));
-
+    lines.push(make_box_row(&stats, inner_w, app.theme.highlight, false));
+    lines.push(make_box_bottom(inner_w, app.theme.highlight));
     lines.push(Line::from(""));
 
     // Reads section
     if !module.reads.is_empty() {
-        let title = format!(" Reads ({}) ", module.reads.len());
-        let title_pad = box_inner.saturating_sub(title.len());
+        let title = format!("Reads ({})", module.reads.len());
+        lines.push(make_section_top(&title, inner_w, app));
 
-        lines.push(Line::from(vec![
-            Span::styled(" ╭", Style::default().fg(app.theme.border)),
-            Span::styled(title, app.theme.header),
-            Span::styled(
-                format!("{:─<w$}╮", "", w = title_pad),
-                Style::default().fg(app.theme.border),
-            ),
-        ]));
-
-        // Header row
+        // Header
         lines.push(Line::from(vec![
             Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} {:>STATUS_W$}",
-                    "Topic",
-                    "Read",
-                    "Pending",
-                    "Unread",
-                    "Status",
-                    TOPIC_W = TOPIC_W,
-                    COUNT_W = COUNT_W,
-                    PENDING_W = PENDING_W,
-                    UNREAD_W = UNREAD_W,
-                    STATUS_W = STATUS_W
+                    "{:<26} {:>10} {:>10} {:>8} {:>8}",
+                    "Topic", "Read", "Pending", "Unread", "Status"
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
             Span::styled(" │", Style::default().fg(app.theme.border)),
         ]));
 
-        // Separator
-        lines.push(Line::from(vec![Span::styled(
-            format!(" ├{:─<w$}┤", "", w = box_inner),
-            Style::default().fg(app.theme.border),
-        )]));
+        lines.push(make_separator(inner_w, app.theme.border));
 
         for r in &module.reads {
+            let topic = truncate(&r.topic, 26);
+            let read = format_count(r.read);
+            let pending = r.pending_for.map(format_duration).unwrap_or("-".into());
+            let unread = r.unread.map(format_count).unwrap_or("-".into());
             let status_style = app.theme.status_style(r.status);
-            let pending = r.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
-            let unread = r.unread.map(|u| format_count(u)).unwrap_or_else(|| "-".to_string());
-            let topic = truncate(&r.topic, TOPIC_W);
 
             lines.push(Line::from(vec![
                 Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} ",
-                    topic,
-                    format_count(r.read),
-                    pending,
-                    unread,
-                    TOPIC_W = TOPIC_W,
-                    COUNT_W = COUNT_W,
-                    PENDING_W = PENDING_W,
-                    UNREAD_W = UNREAD_W
+                    "{:<26} {:>10} {:>10} {:>8} ",
+                    topic, read, pending, unread
                 )),
-                Span::styled(
-                    format!("{:^STATUS_W$}", r.status.symbol(), STATUS_W = STATUS_W),
-                    status_style,
-                ),
+                Span::styled(format!("{:^8}", r.status.symbol()), status_style),
                 Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
 
-        lines.push(Line::from(vec![Span::styled(
-            format!(" ╰{:─<w$}╯", "", w = box_inner),
-            Style::default().fg(app.theme.border),
-        )]));
-
+        lines.push(make_section_bottom(inner_w, app.theme.border));
         lines.push(Line::from(""));
     }
 
     // Writes section
     if !module.writes.is_empty() {
-        let title = format!(" Writes ({}) ", module.writes.len());
-        let title_pad = box_inner.saturating_sub(title.len());
+        let title = format!("Writes ({})", module.writes.len());
+        lines.push(make_section_top(&title, inner_w, app));
 
-        lines.push(Line::from(vec![
-            Span::styled(" ╭", Style::default().fg(app.theme.border)),
-            Span::styled(title, app.theme.header),
-            Span::styled(
-                format!("{:─<w$}╮", "", w = title_pad),
-                Style::default().fg(app.theme.border),
-            ),
-        ]));
-
-        // Header row - writes don't have unread
+        // Header
         lines.push(Line::from(vec![
             Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} {:>STATUS_W$}",
-                    "Topic",
-                    "Written",
-                    "Pending",
-                    "",
-                    "Status",
-                    TOPIC_W = TOPIC_W,
-                    COUNT_W = COUNT_W,
-                    PENDING_W = PENDING_W,
-                    UNREAD_W = UNREAD_W,
-                    STATUS_W = STATUS_W
+                    "{:<26} {:>10} {:>10} {:>8} {:>8}",
+                    "Topic", "Written", "Pending", "", "Status"
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
             Span::styled(" │", Style::default().fg(app.theme.border)),
         ]));
 
-        // Separator
-        lines.push(Line::from(vec![Span::styled(
-            format!(" ├{:─<w$}┤", "", w = box_inner),
-            Style::default().fg(app.theme.border),
-        )]));
+        lines.push(make_separator(inner_w, app.theme.border));
 
         for w in &module.writes {
+            let topic = truncate(&w.topic, 26);
+            let written = format_count(w.written);
+            let pending = w.pending_for.map(format_duration).unwrap_or("-".into());
             let status_style = app.theme.status_style(w.status);
-            let pending = w.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
-            let topic = truncate(&w.topic, TOPIC_W);
 
             lines.push(Line::from(vec![
                 Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<TOPIC_W$} {:>COUNT_W$} {:>PENDING_W$} {:>UNREAD_W$} ",
-                    topic,
-                    format_count(w.written),
-                    pending,
-                    "",
-                    TOPIC_W = TOPIC_W,
-                    COUNT_W = COUNT_W,
-                    PENDING_W = PENDING_W,
-                    UNREAD_W = UNREAD_W
+                    "{:<26} {:>10} {:>10} {:>8} ",
+                    topic, written, pending, ""
                 )),
-                Span::styled(
-                    format!("{:^STATUS_W$}", w.status.symbol(), STATUS_W = STATUS_W),
-                    status_style,
-                ),
+                Span::styled(format!("{:^8}", w.status.symbol()), status_style),
                 Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
 
-        lines.push(Line::from(vec![Span::styled(
-            format!(" ╰{:─<w$}╯", "", w = box_inner),
-            Style::default().fg(app.theme.border),
-        )]));
+        lines.push(make_section_bottom(inner_w, app.theme.border));
     }
 
-    // Footer hint
+    // Footer
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
-        "                Press Esc to close",
+        "              Press Esc to close",
         Style::default().add_modifier(Modifier::DIM),
     )]));
 
@@ -261,6 +155,67 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, overlay_area);
+}
+
+fn make_box_top(width: usize, color: ratatui::style::Color) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!(" ╭{:─<w$}╮", "", w = width),
+        Style::default().fg(color),
+    )])
+}
+
+fn make_box_row(
+    content: &str,
+    width: usize,
+    color: ratatui::style::Color,
+    bold: bool,
+) -> Line<'static> {
+    let style = if bold {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let padding = width.saturating_sub(content.len());
+    Line::from(vec![
+        Span::styled(" │ ", Style::default().fg(color)),
+        Span::styled(content.to_string(), style),
+        Span::raw(format!("{:w$}", "", w = padding)),
+        Span::styled(" │", Style::default().fg(color)),
+    ])
+}
+
+fn make_box_bottom(width: usize, color: ratatui::style::Color) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!(" ╰{:─<w$}╯", "", w = width),
+        Style::default().fg(color),
+    )])
+}
+
+fn make_section_top(title: &str, width: usize, app: &App) -> Line<'static> {
+    let title_display = format!(" {} ", title);
+    let remaining = width.saturating_sub(title_display.len());
+    Line::from(vec![
+        Span::styled(" ╭", Style::default().fg(app.theme.border)),
+        Span::styled(title_display, app.theme.header),
+        Span::styled(
+            format!("{:─<w$}╮", "", w = remaining),
+            Style::default().fg(app.theme.border),
+        ),
+    ])
+}
+
+fn make_separator(width: usize, color: ratatui::style::Color) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!(" ├{:─<w$}┤", "", w = width),
+        Style::default().fg(color),
+    )])
+}
+
+fn make_section_bottom(width: usize, color: ratatui::style::Color) -> Line<'static> {
+    Line::from(vec![Span::styled(
+        format!(" ╰{:─<w$}╯", "", w = width),
+        Style::default().fg(color),
+    )])
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
