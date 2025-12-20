@@ -52,7 +52,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let row_header_w = 14usize;
     let matrix_overhead = row_header_w + 4; // borders and padding
     let remaining_for_cols = available_width.saturating_sub(matrix_overhead);
-    let col_w = if module_names.len() > 0 {
+    let col_w = if !module_names.is_empty() {
         (remaining_for_cols / module_names.len()).clamp(4, 10)
     } else {
         6

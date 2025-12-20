@@ -36,14 +36,13 @@ impl History {
     pub fn record(&mut self, data: &MonitorData) {
         // Record historical values for sparklines
         for module in &data.modules {
-            let reads = self.module_reads.entry(module.name.clone()).or_insert_with(VecDeque::new);
+            let reads = self.module_reads.entry(module.name.clone()).or_default();
             reads.push_back(module.total_read);
             if reads.len() > MAX_HISTORY_SIZE {
                 reads.pop_front();
             }
 
-            let writes =
-                self.module_writes.entry(module.name.clone()).or_insert_with(VecDeque::new);
+            let writes = self.module_writes.entry(module.name.clone()).or_default();
             writes.push_back(module.total_written);
             if writes.len() > MAX_HISTORY_SIZE {
                 writes.pop_front();
