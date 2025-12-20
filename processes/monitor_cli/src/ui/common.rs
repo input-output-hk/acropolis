@@ -171,6 +171,8 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
             " Summary View",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
+        Line::from("  /         Start filter"),
+        Line::from("  c         Clear filter"),
         Line::from("  s         Cycle sort column"),
         Line::from("  S         Toggle sort direction"),
         Line::from(""),
@@ -196,7 +198,7 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
 
     // Center the help overlay
     let help_width = 40;
-    let help_height = 20;
+    let help_height = 22;
     let x = area.x + (area.width.saturating_sub(help_width)) / 2;
     let y = area.y + (area.height.saturating_sub(help_height)) / 2;
     let help_area = Rect::new(

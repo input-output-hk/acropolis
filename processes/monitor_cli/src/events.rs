@@ -22,6 +22,12 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // If filter input is active, handle text input
+    if app.filter_active {
+        handle_filter_input(app, key);
+        return;
+    }
+
     match key.code {
         // Quit
         KeyCode::Char('q') => app.quit(),
@@ -70,6 +76,51 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             if app.current_view == View::Summary {
                 app.toggle_sort_direction();
             }
+        }
+
+        // Filter (start typing to filter)
+        KeyCode::Char('/') => app.start_filter(),
+
+        // Clear filter
+        KeyCode::Char('c') => {
+            if !app.filter_text.is_empty() {
+                app.clear_filter();
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key input while filter is active
+fn handle_filter_input(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Confirm filter
+        KeyCode::Enter => {
+            app.filter_active = false;
+        }
+
+        // Cancel filter (keep text but exit input mode)
+        KeyCode::Esc => {
+            app.cancel_filter();
+        }
+
+        // Clear and exit
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.clear_filter();
+        }
+
+        // Backspace
+        KeyCode::Backspace => {
+            app.filter_pop();
+            if app.filter_text.is_empty() {
+                app.filter_active = false;
+            }
+        }
+
+        // Type characters
+        KeyCode::Char(c) => {
+            app.filter_push(c);
         }
 
         _ => {}

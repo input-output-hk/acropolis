@@ -44,8 +44,9 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
 
-    // Get sorted module indices
-    let mut modules: Vec<(usize, &ModuleData)> = data.modules.iter().enumerate().collect();
+    // Get filtered and sorted module indices
+    let mut modules: Vec<(usize, &ModuleData)> =
+        data.modules.iter().enumerate().filter(|(_, m)| app.matches_filter(&m.name)).collect();
     sort_modules(&mut modules, app.sort_column, app.sort_ascending);
 
     let header = Row::new(vec![
@@ -139,16 +140,29 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     };
     let sort_dir = if app.sort_ascending { "↑" } else { "↓" };
 
+    // Build title with filter info
+    let filter_info = if app.filter_active {
+        format!(" /{}_", app.filter_text)
+    } else if !app.filter_text.is_empty() {
+        format!(" /{}/ [c:clear]", app.filter_text)
+    } else {
+        String::new()
+    };
+
+    let title = format!(
+        " Modules ({}/{}) [s:sort {}{}]{} ",
+        modules.len(),
+        data.modules.len(),
+        sort_indicator,
+        sort_dir,
+        filter_info
+    );
+
     let table = Table::new(rows, widths)
         .header(header)
         .block(
             Block::default()
-                .title(format!(
-                    " Modules Summary ({}) [s:sort {}{}] ",
-                    data.modules.len(),
-                    sort_indicator,
-                    sort_dir
-                ))
+                .title(title)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(app.theme.border)),
         )

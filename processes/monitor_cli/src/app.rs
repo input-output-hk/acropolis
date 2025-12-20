@@ -54,6 +54,10 @@ pub struct App {
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
 
+    // Search/filter
+    pub filter_text: String,
+    pub filter_active: bool,
+
     // UI
     pub theme: Theme,
 }
@@ -73,6 +77,8 @@ impl App {
             selected_topic_index: 0,
             sort_column: SortColumn::default(),
             sort_ascending: true,
+            filter_text: String::new(),
+            filter_active: false,
             theme: Theme::auto_detect(),
         }
     }
@@ -180,6 +186,35 @@ impl App {
 
     pub fn toggle_sort_direction(&mut self) {
         self.sort_ascending = !self.sort_ascending;
+    }
+
+    pub fn start_filter(&mut self) {
+        self.filter_active = true;
+    }
+
+    pub fn cancel_filter(&mut self) {
+        self.filter_active = false;
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.filter_text.clear();
+        self.filter_active = false;
+    }
+
+    pub fn filter_push(&mut self, c: char) {
+        self.filter_text.push(c);
+    }
+
+    pub fn filter_pop(&mut self) {
+        self.filter_text.pop();
+    }
+
+    /// Check if a module name matches the current filter
+    pub fn matches_filter(&self, name: &str) -> bool {
+        if self.filter_text.is_empty() {
+            return true;
+        }
+        name.to_lowercase().contains(&self.filter_text.to_lowercase())
     }
 
     pub fn quit(&mut self) {
