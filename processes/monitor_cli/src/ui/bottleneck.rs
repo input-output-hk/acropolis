@@ -35,13 +35,47 @@ impl BottleneckSortColumn {
     }
 }
 
-// Fixed column widths - optimized for 80-column terminals
-const COL_STATUS: usize = 6; // "CRIT" / "WARN"
-const COL_MODULE: usize = 18;
-const COL_TOPIC: usize = 24;
-const COL_KIND: usize = 3; // "R" / "W"
-const COL_PENDING: usize = 10;
-const COL_UNREAD: usize = 7;
+/// Calculate dynamic column widths based on available width
+fn calc_column_widths(available_width: usize) -> ColumnWidths {
+    // Fixed columns that don't scale
+    const FIXED_STATUS: usize = 6; // "CRIT" / "WARN"
+    const FIXED_KIND: usize = 3; // "R" / "W"
+    const FIXED_PENDING: usize = 10;
+    const FIXED_UNREAD: usize = 7;
+    // Selector(2) + separators(5) + padding(4) = 11
+    const OVERHEAD: usize = 11;
+
+    let fixed_total = FIXED_STATUS + FIXED_KIND + FIXED_PENDING + FIXED_UNREAD + OVERHEAD;
+    let remaining = available_width.saturating_sub(fixed_total);
+
+    // Split remaining space: 40% module, 60% topic
+    let module_w = (remaining * 40 / 100).max(12);
+    let topic_w = remaining.saturating_sub(module_w).max(16);
+
+    ColumnWidths {
+        status: FIXED_STATUS,
+        module: module_w,
+        topic: topic_w,
+        kind: FIXED_KIND,
+        pending: FIXED_PENDING,
+        unread: FIXED_UNREAD,
+    }
+}
+
+struct ColumnWidths {
+    status: usize,
+    module: usize,
+    topic: usize,
+    kind: usize,
+    pending: usize,
+    unread: usize,
+}
+
+impl ColumnWidths {
+    fn total(&self) -> usize {
+        self.status + self.module + self.topic + self.kind + self.pending + self.unread
+    }
+}
 
 /// Render the bottleneck view - list of unhealthy topics with headers, search, and sorting
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -82,13 +116,16 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         sorted.iter().filter(|(_, t)| t.status() == HealthStatus::Critical).count();
     let warning_count = sorted.iter().filter(|(_, t)| t.status() == HealthStatus::Warning).count();
 
+    // Calculate dynamic column widths based on available area
+    let cols = calc_column_widths(area.width as usize);
+
     let mut lines: Vec<Line> = Vec::new();
 
     // Header row
-    lines.push(render_header(app));
+    lines.push(render_header(app, &cols));
 
-    // Separator - cols + separators(5) + selector(2) + borders(6) + spacing(5)
-    let sep_width = COL_STATUS + COL_MODULE + COL_TOPIC + COL_KIND + COL_PENDING + COL_UNREAD + 16;
+    // Separator width based on dynamic columns
+    let sep_width = cols.total() + 16; // +16 for separators, selector, borders, spacing
     lines.push(Line::from(vec![Span::styled(
         format!(" {:─<w$}", "", w = sep_width),
         Style::default().fg(app.theme.border),
@@ -97,7 +134,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Data rows
     for (idx, (module, topic)) in sorted.iter().enumerate() {
         let is_selected = idx == app.selected_topic_index;
-        lines.push(render_topic_item(app, module, topic, is_selected));
+        lines.push(render_topic_item(app, module, topic, is_selected, &cols));
     }
 
     // Empty state when filter has no matches
@@ -176,7 +213,7 @@ fn render_healthy_message(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_header(app: &App) -> Line<'static> {
+fn render_header(app: &App, cols: &ColumnWidths) -> Line<'static> {
     let col = app.bottleneck_sort_column;
     let asc = app.bottleneck_sort_ascending;
 
@@ -213,17 +250,17 @@ fn render_header(app: &App) -> Line<'static> {
 
     Line::from(vec![
         Span::raw("  "), // Selection indicator space (2 chars to match "▶ ")
-        fmt_header("Status", COL_STATUS, BottleneckSortColumn::Status, false),
+        fmt_header("Status", cols.status, BottleneckSortColumn::Status, false),
         sep.clone(),
-        fmt_header("Module", COL_MODULE, BottleneckSortColumn::Module, false),
+        fmt_header("Module", cols.module, BottleneckSortColumn::Module, false),
         sep.clone(),
-        fmt_header("Topic", COL_TOPIC, BottleneckSortColumn::Topic, false),
+        fmt_header("Topic", cols.topic, BottleneckSortColumn::Topic, false),
         sep.clone(),
-        fmt_header("Kind", COL_KIND, BottleneckSortColumn::Kind, false),
+        fmt_header("Kind", cols.kind, BottleneckSortColumn::Kind, false),
         sep.clone(),
-        fmt_header("Pending", COL_PENDING, BottleneckSortColumn::Pending, true),
+        fmt_header("Pending", cols.pending, BottleneckSortColumn::Pending, true),
         sep.clone(),
-        fmt_header("Unread", COL_UNREAD, BottleneckSortColumn::Unread, true),
+        fmt_header("Unread", cols.unread, BottleneckSortColumn::Unread, true),
     ])
 }
 
@@ -232,6 +269,7 @@ fn render_topic_item<'a>(
     module: &'a crate::data::ModuleData,
     topic: &'a UnhealthyTopic,
     is_selected: bool,
+    cols: &ColumnWidths,
 ) -> Line<'a> {
     let status_style = app.theme.status_style(topic.status());
     let status_label = match topic.status() {
@@ -267,15 +305,15 @@ fn render_topic_item<'a>(
     Line::from(vec![
         Span::styled(selector, row_style),
         Span::styled(
-            format!("{:<w$}", status_label, w = COL_STATUS),
+            format!("{:<w$}", status_label, w = cols.status),
             status_style,
         ),
         sep.clone(),
         Span::styled(
             format!(
                 "{:<w$}",
-                truncate(&module.name, COL_MODULE - 1),
-                w = COL_MODULE
+                truncate(&module.name, cols.module - 1),
+                w = cols.module
             ),
             row_style.add_modifier(Modifier::BOLD),
         ),
@@ -283,23 +321,26 @@ fn render_topic_item<'a>(
         Span::styled(
             format!(
                 "{:<w$}",
-                truncate(topic.topic(), COL_TOPIC - 1),
-                w = COL_TOPIC
+                truncate(topic.topic(), cols.topic - 1),
+                w = cols.topic
             ),
             row_style,
         ),
         sep.clone(),
         Span::styled(
-            format!("{:<w$}", kind_label, w = COL_KIND),
+            format!("{:<w$}", kind_label, w = cols.kind),
             row_style.add_modifier(Modifier::DIM),
         ),
         sep.clone(),
         Span::styled(
-            format!("{:>w$}", pending_info, w = COL_PENDING),
+            format!("{:>w$}", pending_info, w = cols.pending),
             status_style,
         ),
         sep.clone(),
-        Span::styled(format!("{:>w$}", unread_info, w = COL_UNREAD), status_style),
+        Span::styled(
+            format!("{:>w$}", unread_info, w = cols.unread),
+            status_style,
+        ),
     ])
 }
 
