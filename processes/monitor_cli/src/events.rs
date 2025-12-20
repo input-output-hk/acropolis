@@ -90,6 +90,12 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
             }
         }
 
+        // Export
+        KeyCode::Char('e') => {
+            let export_path = std::path::PathBuf::from("monitor_export.json");
+            let _ = app.export_state(&export_path);
+        }
+
         _ => {}
     }
 }

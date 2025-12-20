@@ -33,10 +33,48 @@ struct Args {
     /// Refresh interval in seconds
     #[arg(short, long, default_value = "1")]
     refresh: u64,
+
+    /// Pending duration warning threshold (e.g., "1s", "500ms")
+    #[arg(long, default_value = "1s")]
+    pending_warn: String,
+
+    /// Pending duration critical threshold (e.g., "10s", "5s")
+    #[arg(long, default_value = "10s")]
+    pending_crit: String,
+
+    /// Unread count warning threshold
+    #[arg(long, default_value = "1000")]
+    unread_warn: u64,
+
+    /// Unread count critical threshold
+    #[arg(long, default_value = "5000")]
+    unread_crit: u64,
+
+    /// Export current state to JSON file and exit
+    #[arg(short, long)]
+    export: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Parse threshold durations
+    let pending_warn = data::duration::parse_duration(&args.pending_warn)
+        .unwrap_or(std::time::Duration::from_secs(1));
+    let pending_crit = data::duration::parse_duration(&args.pending_crit)
+        .unwrap_or(std::time::Duration::from_secs(10));
+
+    let thresholds = data::Thresholds {
+        pending_warning: pending_warn,
+        pending_critical: pending_crit,
+        unread_warning: args.unread_warn,
+        unread_critical: args.unread_crit,
+    };
+
+    // Handle export mode (non-interactive)
+    if let Some(export_path) = args.export {
+        return export_to_file(&args.file, &export_path, &thresholds);
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -54,7 +92,7 @@ fn main() -> Result<()> {
     }));
 
     // Create app and load initial data
-    let mut app = App::new(args.file);
+    let mut app = App::new(args.file, thresholds);
     let _ = app.reload_data();
 
     // Run the main loop
@@ -135,5 +173,102 @@ fn run_app(
         }
     }
 
+    Ok(())
+}
+
+/// Export current monitor state to a JSON file
+fn export_to_file(
+    monitor_path: &std::path::Path,
+    export_path: &std::path::Path,
+    thresholds: &data::Thresholds,
+) -> Result<()> {
+    use std::io::Write;
+
+    let monitor_data = data::MonitorData::load(monitor_path, thresholds)?;
+
+    // Build export structure
+    let mut export = serde_json::Map::new();
+
+    // Summary
+    let mut summary = serde_json::Map::new();
+    summary.insert(
+        "total_modules".to_string(),
+        serde_json::json!(monitor_data.modules.len()),
+    );
+
+    let healthy =
+        monitor_data.modules.iter().filter(|m| m.health == data::HealthStatus::Healthy).count();
+    let warning =
+        monitor_data.modules.iter().filter(|m| m.health == data::HealthStatus::Warning).count();
+    let critical =
+        monitor_data.modules.iter().filter(|m| m.health == data::HealthStatus::Critical).count();
+
+    summary.insert("healthy".to_string(), serde_json::json!(healthy));
+    summary.insert("warning".to_string(), serde_json::json!(warning));
+    summary.insert("critical".to_string(), serde_json::json!(critical));
+
+    let total_reads: u64 = monitor_data.modules.iter().map(|m| m.total_read).sum();
+    let total_writes: u64 = monitor_data.modules.iter().map(|m| m.total_written).sum();
+    summary.insert("total_reads".to_string(), serde_json::json!(total_reads));
+    summary.insert("total_writes".to_string(), serde_json::json!(total_writes));
+
+    export.insert("summary".to_string(), serde_json::Value::Object(summary));
+
+    // Modules
+    let modules: Vec<serde_json::Value> = monitor_data
+        .modules
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "name": m.name,
+                "total_read": m.total_read,
+                "total_written": m.total_written,
+                "health": format!("{:?}", m.health),
+                "reads": m.reads.iter().map(|r| {
+                    serde_json::json!({
+                        "topic": r.topic,
+                        "read": r.read,
+                        "pending_for": r.pending_for.map(|d| format!("{:?}", d)),
+                        "unread": r.unread,
+                        "status": format!("{:?}", r.status)
+                    })
+                }).collect::<Vec<_>>(),
+                "writes": m.writes.iter().map(|w| {
+                    serde_json::json!({
+                        "topic": w.topic,
+                        "written": w.written,
+                        "pending_for": w.pending_for.map(|d| format!("{:?}", d)),
+                        "status": format!("{:?}", w.status)
+                    })
+                }).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    export.insert("modules".to_string(), serde_json::Value::Array(modules));
+
+    // Bottlenecks
+    let bottlenecks: Vec<serde_json::Value> = monitor_data
+        .unhealthy_topics()
+        .iter()
+        .map(|(module, topic)| {
+            serde_json::json!({
+                "module": module.name,
+                "topic": topic.topic(),
+                "status": format!("{:?}", topic.status()),
+                "pending_for": topic.pending_for().map(|d| format!("{:?}", d))
+            })
+        })
+        .collect();
+    export.insert(
+        "bottlenecks".to_string(),
+        serde_json::Value::Array(bottlenecks),
+    );
+
+    // Write to file
+    let json = serde_json::to_string_pretty(&serde_json::Value::Object(export))?;
+    let mut file = std::fs::File::create(export_path)?;
+    file.write_all(json.as_bytes())?;
+
+    println!("Exported monitor state to: {}", export_path.display());
     Ok(())
 }

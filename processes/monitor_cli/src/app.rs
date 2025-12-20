@@ -63,7 +63,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(monitor_path: PathBuf) -> Self {
+    pub fn new(monitor_path: PathBuf, thresholds: Thresholds) -> Self {
         Self {
             running: true,
             current_view: View::Summary,
@@ -72,7 +72,7 @@ impl App {
             data: None,
             history: History::new(),
             load_error: None,
-            thresholds: Thresholds::default(),
+            thresholds,
             selected_module_index: 0,
             selected_topic_index: 0,
             sort_column: SortColumn::default(),
@@ -219,5 +219,57 @@ impl App {
 
     pub fn quit(&mut self) {
         self.running = false;
+    }
+
+    /// Export current state to a file
+    pub fn export_state(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        use std::io::Write;
+
+        let Some(ref data) = self.data else {
+            anyhow::bail!("No data to export");
+        };
+
+        let mut export = serde_json::Map::new();
+
+        // Summary
+        let mut summary = serde_json::Map::new();
+        summary.insert(
+            "total_modules".to_string(),
+            serde_json::json!(data.modules.len()),
+        );
+
+        let healthy =
+            data.modules.iter().filter(|m| m.health == crate::data::HealthStatus::Healthy).count();
+        let warning =
+            data.modules.iter().filter(|m| m.health == crate::data::HealthStatus::Warning).count();
+        let critical =
+            data.modules.iter().filter(|m| m.health == crate::data::HealthStatus::Critical).count();
+
+        summary.insert("healthy".to_string(), serde_json::json!(healthy));
+        summary.insert("warning".to_string(), serde_json::json!(warning));
+        summary.insert("critical".to_string(), serde_json::json!(critical));
+
+        export.insert("summary".to_string(), serde_json::Value::Object(summary));
+
+        // Modules (simplified for in-app export)
+        let modules: Vec<serde_json::Value> = data
+            .modules
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "name": m.name,
+                    "total_read": m.total_read,
+                    "total_written": m.total_written,
+                    "health": format!("{:?}", m.health)
+                })
+            })
+            .collect();
+        export.insert("modules".to_string(), serde_json::Value::Array(modules));
+
+        let json = serde_json::to_string_pretty(&serde_json::Value::Object(export))?;
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(json.as_bytes())?;
+
+        Ok(())
     }
 }
