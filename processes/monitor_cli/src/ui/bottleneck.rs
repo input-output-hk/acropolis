@@ -35,13 +35,13 @@ impl BottleneckSortColumn {
     }
 }
 
-// Fixed column widths
-const COL_STATUS: usize = 8;
-const COL_MODULE: usize = 20;
-const COL_TOPIC: usize = 28;
-const COL_KIND: usize = 4;
+// Fixed column widths - optimized for 80-column terminals
+const COL_STATUS: usize = 6; // "CRIT" / "WARN"
+const COL_MODULE: usize = 18;
+const COL_TOPIC: usize = 24;
+const COL_KIND: usize = 3; // "R" / "W"
 const COL_PENDING: usize = 10;
-const COL_UNREAD: usize = 8;
+const COL_UNREAD: usize = 7;
 
 /// Render the bottleneck view - list of unhealthy topics with headers, search, and sorting
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -87,8 +87,8 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Header row
     lines.push(render_header(app));
 
-    // Separator
-    let sep_width = COL_STATUS + COL_MODULE + COL_TOPIC + COL_KIND + COL_PENDING + COL_UNREAD + 18; // 18 for separators and padding
+    // Separator - cols + separators(5) + selector(2) + borders(6) + spacing(5)
+    let sep_width = COL_STATUS + COL_MODULE + COL_TOPIC + COL_KIND + COL_PENDING + COL_UNREAD + 16;
     lines.push(Line::from(vec![Span::styled(
         format!(" {:─<w$}", "", w = sep_width),
         Style::default().fg(app.theme.border),
