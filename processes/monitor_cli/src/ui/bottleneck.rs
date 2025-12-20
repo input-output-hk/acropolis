@@ -109,18 +109,25 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         )]));
     }
 
-    // Build title
+    // Build title with position indicator
+    let position_info = if !sorted.is_empty() {
+        format!(" [{}/{}]", app.selected_topic_index + 1, sorted.len())
+    } else {
+        String::new()
+    };
+
     let title = if !app.filter_text.is_empty() {
         format!(
-            " Bottlenecks [filter: \"{}\"] ({}/{} shown) ",
+            " Bottlenecks [filter: \"{}\"] ({}/{} shown){} ",
             app.filter_text,
             sorted.len(),
-            all_unhealthy.len()
+            all_unhealthy.len(),
+            position_info
         )
     } else {
         format!(
-            " Bottlenecks ({} critical, {} warning) ",
-            critical_count, warning_count
+            " Bottlenecks ({} critical, {} warning){} ",
+            critical_count, warning_count, position_info
         )
     };
 

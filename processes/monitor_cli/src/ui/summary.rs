@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     // Get filtered and sorted module indices
     let mut modules: Vec<(usize, &ModuleData)> =
         data.modules.iter().enumerate().filter(|(_, m)| app.matches_filter(&m.name)).collect();
-    sort_modules(&mut modules, app.sort_column, app.sort_ascending);
+    sort_modules_by(&mut modules, app.sort_column, app.sort_ascending);
 
     let header = Row::new(vec![
         Cell::from(format_header("Module", SortColumn::Name, app)),
@@ -131,6 +131,10 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(6),  // Status
     ];
 
+    // selected_module_index is now treated as visual index directly
+    // Clamp it to valid range
+    let selected_visual_index = app.selected_module_index.min(modules.len().saturating_sub(1));
+
     let sort_indicator = match app.sort_column {
         SortColumn::Name => "name",
         SortColumn::Reads => "reads",
@@ -149,13 +153,21 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         String::new()
     };
 
+    // Show scroll position if there are items
+    let position_info = if !modules.is_empty() {
+        format!(" [{}/{}]", selected_visual_index + 1, modules.len())
+    } else {
+        String::new()
+    };
+
     let title = format!(
-        " Modules ({}/{}) [s:sort {}{}]{} ",
+        " Modules ({}/{}) [s:sort {}{}]{}{} ",
         modules.len(),
         data.modules.len(),
         sort_indicator,
         sort_dir,
-        filter_info
+        filter_info,
+        position_info
     );
 
     let table = Table::new(rows, widths)
@@ -169,10 +181,6 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .row_highlight_style(app.theme.selected)
         .highlight_symbol("▶ ");
-
-    // Find the visual index of the selected module
-    let selected_visual_index =
-        modules.iter().position(|(idx, _)| *idx == app.selected_module_index).unwrap_or(0);
 
     let mut state = TableState::default();
     state.select(Some(selected_visual_index));
@@ -189,7 +197,8 @@ fn format_header(name: &str, col: SortColumn, app: &App) -> Span<'static> {
     }
 }
 
-fn sort_modules(modules: &mut [(usize, &ModuleData)], column: SortColumn, ascending: bool) {
+/// Sort modules by the given column and direction (public for use in events.rs)
+pub fn sort_modules_by(modules: &mut [(usize, &ModuleData)], column: SortColumn, ascending: bool) {
     modules.sort_by(|a, b| {
         let cmp = match column {
             SortColumn::Name => a.1.name.cmp(&b.1.name),

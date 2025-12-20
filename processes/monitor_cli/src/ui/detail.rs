@@ -15,7 +15,11 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    let Some(module) = data.modules.get(app.selected_module_index) else {
+    // Get the actual module from the visual index
+    let Some(raw_index) = app.get_selected_module_raw_index() else {
+        return;
+    };
+    let Some(module) = data.modules.get(raw_index) else {
         return;
     };
 

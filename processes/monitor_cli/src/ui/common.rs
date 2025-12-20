@@ -129,6 +129,14 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Render the status bar at the bottom
 pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    // Check for temporary status message first
+    if let Some(msg) = app.get_status_message() {
+        let paragraph =
+            Paragraph::new(format!(" {} ", msg)).style(Style::default().fg(app.theme.highlight));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
     let status = if let Some(ref data) = app.data {
         let elapsed = data.last_updated.elapsed();
 
@@ -137,11 +145,18 @@ pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
         // Context-sensitive controls
         let controls = match app.current_view {
-            View::Summary | View::Bottleneck => {
+            View::Summary => {
                 if app.filter_active {
                     "Type to search | Enter:apply Esc:cancel"
                 } else {
                     "/:search s:sort Tab:switch Enter:detail ?:help q:quit"
+                }
+            }
+            View::Bottleneck => {
+                if app.filter_active {
+                    "Type to search | Enter:apply Esc:cancel"
+                } else {
+                    "/:search s:sort S:reverse Tab:switch Enter:detail ?:help q:quit"
                 }
             }
             View::DataFlow => "↑↓:select Tab:switch Enter:detail ?:help q:quit",
@@ -174,10 +189,12 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
             " Navigation",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
-        Line::from("  Tab/1-4   Switch views"),
-        Line::from("  ↑/k ↓/j   Navigate list"),
-        Line::from("  Enter     View detail"),
-        Line::from("  Esc       Go back"),
+        Line::from("  Tab/1-3     Switch views"),
+        Line::from("  ↑/k ↓/j     Navigate list"),
+        Line::from("  PgUp/PgDn   Jump 10 items"),
+        Line::from("  Home/End    Jump to first/last"),
+        Line::from("  Enter       View detail"),
+        Line::from("  Esc         Go back"),
         Line::from(""),
         Line::from(vec![Span::styled(
             " Summary & Bottlenecks",
@@ -212,7 +229,7 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
 
     // Center the help overlay
     let help_width = 40;
-    let help_height = 22;
+    let help_height = 24;
     let x = area.x + (area.width.saturating_sub(help_width)) / 2;
     let y = area.y + (area.height.saturating_sub(help_height)) / 2;
     let help_area = Rect::new(

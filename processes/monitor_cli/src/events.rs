@@ -63,6 +63,10 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Navigation
         KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
+        KeyCode::PageUp => app.select_prev_n(10),
+        KeyCode::PageDown => app.select_next_n(10),
+        KeyCode::Home => app.select_first(),
+        KeyCode::End => app.select_last(),
 
         // Enter detail overlay
         KeyCode::Enter => app.enter_detail(),
@@ -78,14 +82,14 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Help
         KeyCode::Char('?') => app.toggle_help(),
 
-        // Sorting (Summary view)
+        // Sorting (Summary and Bottleneck views)
         KeyCode::Char('s') => {
-            if app.current_view == View::Summary {
+            if app.current_view == View::Summary || app.current_view == View::Bottleneck {
                 app.cycle_sort();
             }
         }
         KeyCode::Char('S') => {
-            if app.current_view == View::Summary {
+            if app.current_view == View::Summary || app.current_view == View::Bottleneck {
                 app.toggle_sort_direction();
             }
         }
@@ -103,7 +107,14 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Export
         KeyCode::Char('e') => {
             let export_path = std::path::PathBuf::from("monitor_export.json");
-            let _ = app.export_state(&export_path);
+            match app.export_state(&export_path) {
+                Ok(()) => {
+                    app.set_status_message(format!("Exported to {}", export_path.display()));
+                }
+                Err(e) => {
+                    app.set_status_message(format!("Export failed: {}", e));
+                }
+            }
         }
 
         _ => {}
@@ -168,9 +179,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, content_start_row: u
                 match app.current_view {
                     View::Summary => {
                         if let Some(ref data) = app.data {
-                            // Account for filtered modules
+                            // Get filtered module count
                             let filtered_count =
                                 data.modules.iter().filter(|m| app.matches_filter(&m.name)).count();
+                            // Set visual index directly
                             if item_row < filtered_count {
                                 app.selected_module_index = item_row;
                             }

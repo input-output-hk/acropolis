@@ -85,6 +85,9 @@ pub struct App {
 
     // UI
     pub theme: Theme,
+
+    // Status message (temporary feedback)
+    pub status_message: Option<(String, std::time::Instant)>,
 }
 
 impl App {
@@ -109,7 +112,23 @@ impl App {
             filter_text: String::new(),
             filter_active: false,
             theme: Theme::auto_detect(),
+            status_message: None,
         }
+    }
+
+    /// Set a temporary status message that will be shown for a few seconds
+    pub fn set_status_message(&mut self, message: String) {
+        self.status_message = Some((message, std::time::Instant::now()));
+    }
+
+    /// Get the current status message if it hasn't expired (3 seconds)
+    pub fn get_status_message(&self) -> Option<&str> {
+        if let Some((msg, time)) = &self.status_message {
+            if time.elapsed() < std::time::Duration::from_secs(3) {
+                return Some(msg);
+            }
+        }
+        None
     }
 
     /// Push current state to stack and navigate to a new view
@@ -182,38 +201,126 @@ impl App {
     }
 
     pub fn select_next(&mut self) {
+        self.select_next_n(1);
+    }
+
+    pub fn select_prev(&mut self) {
+        self.select_prev_n(1);
+    }
+
+    pub fn select_next_n(&mut self, n: usize) {
         match self.current_view {
-            View::Summary | View::ModuleDetail | View::DataFlow => {
-                // Navigate by module
+            View::Summary | View::ModuleDetail => {
+                // Navigate by visual position in filtered/sorted list
                 if let Some(ref data) = self.data {
-                    if self.selected_module_index < data.modules.len().saturating_sub(1) {
-                        self.selected_module_index += 1;
-                    }
+                    let filtered_count = self.filtered_module_count(data);
+                    let max = filtered_count.saturating_sub(1);
+                    self.selected_module_index = (self.selected_module_index + n).min(max);
+                }
+            }
+            View::DataFlow => {
+                // DataFlow doesn't use filtering, navigate by raw module count
+                if let Some(ref data) = self.data {
+                    let max = data.modules.len().saturating_sub(1);
+                    self.selected_module_index = (self.selected_module_index + n).min(max);
                 }
             }
             View::Bottleneck => {
                 if let Some(ref data) = self.data {
                     let count = self.filtered_bottleneck_count(data);
-                    if self.selected_topic_index < count.saturating_sub(1) {
-                        self.selected_topic_index += 1;
-                    }
+                    let max = count.saturating_sub(1);
+                    self.selected_topic_index = (self.selected_topic_index + n).min(max);
                 }
             }
         }
     }
 
-    pub fn select_prev(&mut self) {
+    pub fn select_prev_n(&mut self, n: usize) {
         match self.current_view {
             View::Summary | View::ModuleDetail | View::DataFlow => {
                 // Navigate by module
-                if self.selected_module_index > 0 {
-                    self.selected_module_index -= 1;
+                self.selected_module_index = self.selected_module_index.saturating_sub(n);
+            }
+            View::Bottleneck => {
+                self.selected_topic_index = self.selected_topic_index.saturating_sub(n);
+            }
+        }
+    }
+
+    pub fn select_first(&mut self) {
+        match self.current_view {
+            View::Summary | View::ModuleDetail | View::DataFlow => {
+                self.selected_module_index = 0;
+            }
+            View::Bottleneck => {
+                self.selected_topic_index = 0;
+            }
+        }
+    }
+
+    pub fn select_last(&mut self) {
+        match self.current_view {
+            View::Summary | View::ModuleDetail => {
+                if let Some(ref data) = self.data {
+                    let filtered_count = self.filtered_module_count(data);
+                    self.selected_module_index = filtered_count.saturating_sub(1);
+                }
+            }
+            View::DataFlow => {
+                if let Some(ref data) = self.data {
+                    self.selected_module_index = data.modules.len().saturating_sub(1);
                 }
             }
             View::Bottleneck => {
-                if self.selected_topic_index > 0 {
-                    self.selected_topic_index -= 1;
+                if let Some(ref data) = self.data {
+                    let count = self.filtered_bottleneck_count(data);
+                    self.selected_topic_index = count.saturating_sub(1);
                 }
+            }
+        }
+    }
+
+    /// Get count of modules after applying filter
+    fn filtered_module_count(&self, data: &MonitorData) -> usize {
+        if self.filter_text.is_empty() {
+            return data.modules.len();
+        }
+        data.modules.iter().filter(|m| self.matches_filter(&m.name)).count()
+    }
+
+    /// Get the actual module index from the visual index (after sorting/filtering)
+    /// Returns the raw index into data.modules for the currently selected visual row
+    pub fn get_selected_module_raw_index(&self) -> Option<usize> {
+        let data = self.data.as_ref()?;
+
+        match self.current_view {
+            View::Summary | View::ModuleDetail => {
+                // Build sorted/filtered list and look up raw index
+                let mut modules: Vec<(usize, &crate::data::ModuleData)> = data
+                    .modules
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| self.matches_filter(&m.name))
+                    .collect();
+                crate::ui::summary::sort_modules_by(
+                    &mut modules,
+                    self.sort_column,
+                    self.sort_ascending,
+                );
+
+                modules.get(self.selected_module_index).map(|(idx, _)| *idx)
+            }
+            View::DataFlow => {
+                // DataFlow uses raw index directly
+                if self.selected_module_index < data.modules.len() {
+                    Some(self.selected_module_index)
+                } else {
+                    None
+                }
+            }
+            View::Bottleneck => {
+                // Bottleneck view doesn't select modules the same way
+                None
             }
         }
     }
