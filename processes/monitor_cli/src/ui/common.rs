@@ -108,15 +108,14 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles: Vec<Line> = vec![
         Line::from(" 1:Summary "),
         Line::from(" 2:Bottlenecks "),
-        Line::from(" 3:Detail "),
-        Line::from(" 4:Flow "),
+        Line::from(" 3:Flow "),
     ];
 
     let selected = match app.current_view {
         View::Summary => 0,
         View::Bottleneck => 1,
-        View::ModuleDetail => 2,
-        View::DataFlow => 3,
+        View::ModuleDetail => 0, // Falls back to Summary
+        View::DataFlow => 2,
     };
 
     let tabs = Tabs::new(titles)
@@ -130,17 +129,23 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 /// Render the status bar at the bottom
 pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let back_hint = if !app.view_stack.is_empty() {
+        "Esc:back "
+    } else {
+        ""
+    };
+
     let status = if let Some(ref data) = app.data {
         let elapsed = data.last_updated.elapsed();
-        let healthy_count =
-            data.modules.iter().filter(|m| m.health == crate::data::HealthStatus::Healthy).count();
-        let total_count = data.modules.len();
+
+        // Show breadcrumb if we have navigation history
+        let breadcrumb = app.breadcrumb();
 
         format!(
-            " {} modules ({} healthy) | Updated {:.1}s ago | q:quit Tab:switch ?:help",
-            total_count,
-            healthy_count,
-            elapsed.as_secs_f64()
+            " {} | Updated {:.1}s ago | {}Enter:detail Tab:switch ?:help q:quit",
+            breadcrumb,
+            elapsed.as_secs_f64(),
+            back_hint,
         )
     } else if let Some(ref err) = app.load_error {
         format!(" Error: {} | q:quit r:retry", err)

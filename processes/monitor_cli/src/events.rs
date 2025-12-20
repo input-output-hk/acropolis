@@ -24,6 +24,17 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // If detail overlay is shown, handle overlay-specific keys
+    if app.show_detail_overlay {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Backspace | KeyCode::Char('q') => {
+                app.close_overlay();
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // If filter input is active, handle text input
     if app.filter_active {
         handle_filter_input(app, key);
@@ -34,7 +45,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         // Quit
         KeyCode::Char('q') => app.quit(),
 
-        // View switching
+        // View switching (now uses push_view for history)
         KeyCode::Tab => {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
                 app.prev_view();
@@ -44,20 +55,19 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         }
         KeyCode::BackTab => app.prev_view(),
 
-        // Direct view access
+        // Direct view access (Detail is now overlay-only, accessed via Enter)
         KeyCode::Char('1') => app.set_view(View::Summary),
         KeyCode::Char('2') => app.set_view(View::Bottleneck),
-        KeyCode::Char('3') => app.set_view(View::ModuleDetail),
-        KeyCode::Char('4') => app.set_view(View::DataFlow),
+        KeyCode::Char('3') => app.set_view(View::DataFlow),
 
         // Navigation
         KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
 
-        // Enter detail view
+        // Enter detail overlay
         KeyCode::Enter => app.enter_detail(),
 
-        // Go back
+        // Go back (Esc and Backspace)
         KeyCode::Esc | KeyCode::Backspace => app.go_back(),
 
         // Reload
@@ -191,14 +201,12 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, content_start_row: u
             // Check for tab clicks (row 1, after header)
             if clicked_row == 1 {
                 let col = mouse.column;
-                // Approximate tab positions based on tab widths
-                if col < 12 {
+                // Approximate tab positions: Summary (0-12), Bottlenecks (13-28), Flow (29-38)
+                if col < 13 {
                     app.set_view(View::Summary);
-                } else if col < 28 {
+                } else if col < 29 {
                     app.set_view(View::Bottleneck);
-                } else if col < 40 {
-                    app.set_view(View::ModuleDetail);
-                } else if col < 50 {
+                } else if col < 39 {
                     app.set_view(View::DataFlow);
                 }
             }

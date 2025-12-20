@@ -1,15 +1,16 @@
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
-    style::Style,
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::app::App;
 use crate::data::duration::format_duration;
 
-/// Render the module detail view
-pub fn render(frame: &mut Frame, app: &App, area: Rect) {
+/// Render the module detail as a modal overlay
+pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     let Some(ref data) = app.data else {
         return;
     };
@@ -18,114 +19,118 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    // Split into header, reads section, writes section
-    let chunks = Layout::vertical([
-        Constraint::Length(3), // Header
-        Constraint::Min(5),    // Reads
-        Constraint::Min(5),    // Writes
-    ])
-    .split(area);
+    // Calculate overlay size (80% of screen, max dimensions)
+    let overlay_width = (area.width * 85 / 100).min(120).max(60);
+    let overlay_height = (area.height * 85 / 100).min(40).max(15);
+    let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
+    let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
 
-    // Header with module name
-    let header = Paragraph::new(format!(
-        " Module: {}  |  Total Reads: {}  |  Total Writes: {}",
-        module.name, module.total_read, module.total_written
-    ))
-    .style(app.theme.header)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_type(app.theme.border_type)
-            .border_style(Style::default().fg(app.theme.border)),
-    );
-    frame.render_widget(header, chunks[0]);
+    // Clear the area behind the overlay
+    frame.render_widget(Clear, overlay_area);
 
-    // Reads table
-    render_reads_table(frame, app, chunks[1], module);
+    // Build content lines
+    let mut lines: Vec<Line> = Vec::new();
 
-    // Writes table
-    render_writes_table(frame, app, chunks[2], module);
-}
+    // Module header
+    lines.push(Line::from(vec![Span::styled(
+        format!(" {} ", module.name),
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![
+        Span::styled("  Reads: ", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw(format!("{}", module.total_read)),
+        Span::styled("  Writes: ", Style::default().add_modifier(Modifier::DIM)),
+        Span::raw(format!("{}", module.total_written)),
+        Span::styled("  Status: ", Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            module.health.symbol(),
+            app.theme.status_style(module.health),
+        ),
+    ]));
+    lines.push(Line::from(""));
 
-fn render_reads_table(frame: &mut Frame, app: &App, area: Rect, module: &crate::data::ModuleData) {
-    let header = Row::new(vec![
-        Cell::from("Topic").style(app.theme.header),
-        Cell::from("Read").style(app.theme.header),
-        Cell::from("Pending").style(app.theme.header),
-        Cell::from("Unread").style(app.theme.header),
-        Cell::from("Status").style(app.theme.header),
-    ]);
+    // Reads section
+    if !module.reads.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!(" Reads ({}) ", module.reads.len()),
+            app.theme.header,
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "  {:<35} {:>10} {:>12} {:>8} {:>6}",
+                "Topic", "Read", "Pending", "Unread", "Status"
+            ),
+            Style::default().add_modifier(Modifier::DIM),
+        )]));
 
-    let rows: Vec<Row> = module
-        .reads
-        .iter()
-        .map(|r| {
+        for r in &module.reads {
             let status_style = app.theme.status_style(r.status);
-            Row::new(vec![
-                Cell::from(r.topic.clone()),
-                Cell::from(r.read.to_string()),
-                Cell::from(r.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string())),
-                Cell::from(r.unread.map(|u| u.to_string()).unwrap_or_else(|| "-".to_string())),
-                Cell::from(r.status.symbol()).style(status_style),
-            ])
-        })
-        .collect();
+            let pending = r.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
+            let unread = r.unread.map(|u| u.to_string()).unwrap_or_else(|| "-".to_string());
+            let topic_display = truncate(&r.topic, 35);
 
-    let widths = [
-        Constraint::Min(30),
-        Constraint::Length(12),
-        Constraint::Length(14),
-        Constraint::Length(10),
-        Constraint::Length(8),
-    ];
+            lines.push(Line::from(vec![
+                Span::raw(format!(
+                    "  {:<35} {:>10} {:>12} {:>8} ",
+                    topic_display, r.read, pending, unread
+                )),
+                Span::styled(format!("{:>6}", r.status.symbol()), status_style),
+            ]));
+        }
+        lines.push(Line::from(""));
+    }
 
-    let table = Table::new(rows, widths).header(header).block(
-        Block::default()
-            .title(format!(" Reads ({}) ", module.reads.len()))
-            .borders(Borders::ALL)
-            .border_type(app.theme.border_type)
-            .border_style(Style::default().fg(app.theme.border)),
-    );
+    // Writes section
+    if !module.writes.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!(" Writes ({}) ", module.writes.len()),
+            app.theme.header,
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "  {:<35} {:>10} {:>12} {:>6}",
+                "Topic", "Written", "Pending", "Status"
+            ),
+            Style::default().add_modifier(Modifier::DIM),
+        )]));
 
-    frame.render_widget(table, area);
+        for w in &module.writes {
+            let status_style = app.theme.status_style(w.status);
+            let pending = w.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string());
+            let topic_display = truncate(&w.topic, 35);
+
+            lines.push(Line::from(vec![
+                Span::raw(format!(
+                    "  {:<35} {:>10} {:>12} ",
+                    topic_display, w.written, pending
+                )),
+                Span::styled(format!("{:>6}", w.status.symbol()), status_style),
+            ]));
+        }
+    }
+
+    // Footer hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        " Press Esc or Enter to close ",
+        Style::default().add_modifier(Modifier::DIM),
+    )]));
+
+    let block = Block::default()
+        .title(format!(" Module Detail "))
+        .borders(Borders::ALL)
+        .border_type(app.theme.border_type)
+        .border_style(Style::default().fg(app.theme.highlight));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, overlay_area);
 }
 
-fn render_writes_table(frame: &mut Frame, app: &App, area: Rect, module: &crate::data::ModuleData) {
-    let header = Row::new(vec![
-        Cell::from("Topic").style(app.theme.header),
-        Cell::from("Written").style(app.theme.header),
-        Cell::from("Pending").style(app.theme.header),
-        Cell::from("Status").style(app.theme.header),
-    ]);
-
-    let rows: Vec<Row> = module
-        .writes
-        .iter()
-        .map(|w| {
-            let status_style = app.theme.status_style(w.status);
-            Row::new(vec![
-                Cell::from(w.topic.clone()),
-                Cell::from(w.written.to_string()),
-                Cell::from(w.pending_for.map(format_duration).unwrap_or_else(|| "-".to_string())),
-                Cell::from(w.status.symbol()).style(status_style),
-            ])
-        })
-        .collect();
-
-    let widths = [
-        Constraint::Min(30),
-        Constraint::Length(12),
-        Constraint::Length(14),
-        Constraint::Length(8),
-    ];
-
-    let table = Table::new(rows, widths).header(header).block(
-        Block::default()
-            .title(format!(" Writes ({}) ", module.writes.len()))
-            .borders(Borders::ALL)
-            .border_type(app.theme.border_type)
-            .border_style(Style::default().fg(app.theme.border)),
-    );
-
-    frame.render_widget(table, area);
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len.saturating_sub(1)])
+    }
 }

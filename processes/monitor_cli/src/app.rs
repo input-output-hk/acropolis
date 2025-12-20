@@ -32,12 +32,30 @@ impl View {
             View::DataFlow => View::ModuleDetail,
         }
     }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            View::Summary => "Summary",
+            View::Bottleneck => "Bottlenecks",
+            View::ModuleDetail => "Detail",
+            View::DataFlow => "Flow",
+        }
+    }
+}
+
+/// Saved state for returning to a previous view
+#[derive(Debug, Clone)]
+pub struct ViewState {
+    pub view: View,
+    pub selected_module_index: usize,
+    pub selected_topic_index: usize,
 }
 
 pub struct App {
     pub running: bool,
     pub current_view: View,
     pub show_help: bool,
+    pub show_detail_overlay: bool,
 
     // Data
     pub monitor_path: PathBuf,
@@ -49,6 +67,7 @@ pub struct App {
     // Navigation state
     pub selected_module_index: usize,
     pub selected_topic_index: usize,
+    pub view_stack: Vec<ViewState>,
 
     // Sorting
     pub sort_column: SortColumn,
@@ -68,6 +87,7 @@ impl App {
             running: true,
             current_view: View::Summary,
             show_help: false,
+            show_detail_overlay: false,
             monitor_path,
             data: None,
             history: History::new(),
@@ -75,12 +95,44 @@ impl App {
             thresholds,
             selected_module_index: 0,
             selected_topic_index: 0,
+            view_stack: Vec::new(),
             sort_column: SortColumn::default(),
             sort_ascending: true,
             filter_text: String::new(),
             filter_active: false,
             theme: Theme::auto_detect(),
         }
+    }
+
+    /// Push current state to stack and navigate to a new view
+    #[allow(dead_code)]
+    pub fn push_view(&mut self, view: View) {
+        self.view_stack.push(ViewState {
+            view: self.current_view,
+            selected_module_index: self.selected_module_index,
+            selected_topic_index: self.selected_topic_index,
+        });
+        self.current_view = view;
+        self.selected_topic_index = 0;
+    }
+
+    /// Pop the view stack and restore previous state
+    pub fn pop_view(&mut self) -> bool {
+        if let Some(state) = self.view_stack.pop() {
+            self.current_view = state.view;
+            self.selected_module_index = state.selected_module_index;
+            self.selected_topic_index = state.selected_topic_index;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get breadcrumb trail for current navigation
+    pub fn breadcrumb(&self) -> String {
+        let mut parts: Vec<&str> = self.view_stack.iter().map(|s| s.view.label()).collect();
+        parts.push(self.current_view.label());
+        parts.join(" > ")
     }
 
     /// Load or reload the monitor data
@@ -165,15 +217,29 @@ impl App {
     }
 
     pub fn enter_detail(&mut self) {
-        if self.current_view == View::Summary {
-            self.current_view = View::ModuleDetail;
+        // Toggle the detail overlay instead of changing views
+        if self.current_view == View::Summary || self.current_view == View::Bottleneck {
+            self.show_detail_overlay = true;
         }
     }
 
     pub fn go_back(&mut self) {
-        if self.current_view == View::ModuleDetail {
-            self.current_view = View::Summary;
+        // First close any overlays
+        if self.show_detail_overlay {
+            self.show_detail_overlay = false;
+            return;
         }
+        // Then try to pop the view stack
+        if !self.pop_view() {
+            // If stack is empty, go to summary
+            if self.current_view != View::Summary {
+                self.current_view = View::Summary;
+            }
+        }
+    }
+
+    pub fn close_overlay(&mut self) {
+        self.show_detail_overlay = false;
     }
 
     pub fn toggle_help(&mut self) {

@@ -134,16 +134,20 @@ fn run_app(
             // Render tabs
             ui::common::render_tabs(frame, app, chunks[1]);
 
-            // Render current view
+            // Render current view (ModuleDetail falls back to Summary as it's now an overlay)
             match app.current_view {
-                View::Summary => ui::summary::render(frame, app, chunks[2]),
+                View::Summary | View::ModuleDetail => ui::summary::render(frame, app, chunks[2]),
                 View::Bottleneck => ui::bottleneck::render(frame, app, chunks[2]),
-                View::ModuleDetail => ui::detail::render(frame, app, chunks[2]),
                 View::DataFlow => ui::flow::render(frame, app, chunks[2]),
             }
 
             // Render status bar
             ui::common::render_status_bar(frame, app, chunks[3]);
+
+            // Render detail overlay if active
+            if app.show_detail_overlay {
+                ui::detail::render_overlay(frame, app, frame.area());
+            }
 
             // Render help overlay if active
             if app.show_help {
