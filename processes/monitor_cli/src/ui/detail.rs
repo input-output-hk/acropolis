@@ -23,9 +23,13 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         return;
     };
 
-    // Calculate overlay size
-    let overlay_width = 76u16;
-    let overlay_height = (area.height * 85 / 100).min(40).max(15);
+    // Calculate overlay size - responsive to terminal dimensions
+    // Use 90% of width (max 80 chars) with minimum 50 chars
+    let overlay_width =
+        ((area.width * 90 / 100) as u16).clamp(50, 80).min(area.width.saturating_sub(2));
+    // Use 85% of height, clamped between 15 and 42 lines
+    let overlay_height =
+        ((area.height * 85 / 100) as u16).clamp(15, 42).min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
     let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
     let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
@@ -33,7 +37,8 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Clear the area behind the overlay
     frame.render_widget(Clear, overlay_area);
 
-    let inner_w = 72usize; // inner content width
+    // Inner content width = overlay width minus borders and padding
+    let inner_w = (overlay_width as usize).saturating_sub(4);
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -62,6 +67,12 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(make_box_bottom(inner_w, app.theme.highlight));
     lines.push(Line::from(""));
 
+    // Calculate dynamic column widths based on available space
+    // Fixed columns: Read/Written(8), Pending(10), Unread(8), Status(6), spaces(4) = 36
+    // Topic gets the remaining space (minimum 16)
+    let fixed_cols = 36usize;
+    let topic_w = inner_w.saturating_sub(fixed_cols).max(16);
+
     // Reads section
     if !module.reads.is_empty() {
         let title = format!("Reads ({})", module.reads.len());
@@ -72,8 +83,13 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<26} {:>10} {:>10} {:>8} {:>8}",
-                    "Topic", "Read", "Pending", "Unread", "Status"
+                    "{:<topic_w$} {:>8} {:>10} {:>8} {:>6}",
+                    "Topic",
+                    "Read",
+                    "Pending",
+                    "Unread",
+                    "Status",
+                    topic_w = topic_w
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
@@ -83,7 +99,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(make_separator(inner_w, app.theme.border));
 
         for r in &module.reads {
-            let topic = truncate(&r.topic, 26);
+            let topic = truncate(&r.topic, topic_w);
             let read = format_count(r.read);
             let pending = r.pending_for.map(format_duration).unwrap_or("-".into());
             let unread = r.unread.map(format_count).unwrap_or("-".into());
@@ -92,10 +108,14 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![
                 Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<26} {:>10} {:>10} {:>8} ",
-                    topic, read, pending, unread
+                    "{:<topic_w$} {:>8} {:>10} {:>8} ",
+                    topic,
+                    read,
+                    pending,
+                    unread,
+                    topic_w = topic_w
                 )),
-                Span::styled(format!("{:^8}", r.status.symbol()), status_style),
+                Span::styled(format!("{:^6}", r.status.symbol()), status_style),
                 Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }
@@ -114,8 +134,13 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" │ ", Style::default().fg(app.theme.border)),
             Span::styled(
                 format!(
-                    "{:<26} {:>10} {:>10} {:>8} {:>8}",
-                    "Topic", "Written", "Pending", "", "Status"
+                    "{:<topic_w$} {:>8} {:>10} {:>8} {:>6}",
+                    "Topic",
+                    "Written",
+                    "Pending",
+                    "",
+                    "Status",
+                    topic_w = topic_w
                 ),
                 Style::default().add_modifier(Modifier::DIM),
             ),
@@ -125,7 +150,7 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(make_separator(inner_w, app.theme.border));
 
         for w in &module.writes {
-            let topic = truncate(&w.topic, 26);
+            let topic = truncate(&w.topic, topic_w);
             let written = format_count(w.written);
             let pending = w.pending_for.map(format_duration).unwrap_or("-".into());
             let status_style = app.theme.status_style(w.status);
@@ -133,10 +158,14 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(vec![
                 Span::styled(" │ ", Style::default().fg(app.theme.border)),
                 Span::raw(format!(
-                    "{:<26} {:>10} {:>10} {:>8} ",
-                    topic, written, pending, ""
+                    "{:<topic_w$} {:>8} {:>10} {:>8} ",
+                    topic,
+                    written,
+                    pending,
+                    "",
+                    topic_w = topic_w
                 )),
-                Span::styled(format!("{:^8}", w.status.symbol()), status_style),
+                Span::styled(format!("{:^6}", w.status.symbol()), status_style),
                 Span::styled(" │", Style::default().fg(app.theme.border)),
             ]));
         }

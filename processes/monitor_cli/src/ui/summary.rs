@@ -121,13 +121,13 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     let widths = [
-        Constraint::Min(25),    // Module
-        Constraint::Length(10), // Reads
-        Constraint::Length(8),  // Rate
-        Constraint::Length(10), // Writes
-        Constraint::Length(12), // Pending
+        Constraint::Min(20),    // Module - reduced minimum to fit more terminals
+        Constraint::Length(9),  // Reads
+        Constraint::Length(7),  // Rate
+        Constraint::Length(9),  // Writes
+        Constraint::Length(10), // Pending
         Constraint::Length(8),  // Unread
-        Constraint::Length(12), // Trend/Sparkline
+        Constraint::Length(8),  // Trend/Sparkline (matches actual sparkline width)
         Constraint::Length(6),  // Status
     ];
 

@@ -227,17 +227,12 @@ pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
 
     let paragraph = Paragraph::new(help_text).block(block);
 
-    // Center the help overlay
-    let help_width = 40;
-    let help_height = 24;
+    // Center the help overlay - responsive to terminal size
+    let help_width = 42u16.min(area.width.saturating_sub(4));
+    let help_height = 24u16.min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(help_width)) / 2;
     let y = area.y + (area.height.saturating_sub(help_height)) / 2;
-    let help_area = Rect::new(
-        x,
-        y,
-        help_width.min(area.width),
-        help_height.min(area.height),
-    );
+    let help_area = Rect::new(x, y, help_width, help_height);
 
     // Clear the area behind the help
     frame.render_widget(ratatui::widgets::Clear, help_area);
