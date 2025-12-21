@@ -1578,7 +1578,12 @@ dependencies = [
 [[package]]
 name = "caryatid_macros"
 version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64e4a0dac20a800a5b3b5dd90e019096d644724dcf96a780807680632f71d60a"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "proc-macro2",
  "quote",
  "syn 1.0.109",
 ]
@@ -1586,6 +1591,8 @@ dependencies = [
 [[package]]
 name = "caryatid_module_clock"
 version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9924a0e24e3589bd36f512938eb56bec29c78a69f2121ee1496c572ae7daa2ed"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1600,6 +1607,8 @@ dependencies = [
 [[package]]
 name = "caryatid_module_rest_server"
 version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0209d2e4c67aa210715d27e28951ddd7f41ad7a91dba737eba85c4d409d865d"
 dependencies = [
  "anyhow",
  "axum",
@@ -1617,6 +1626,8 @@ dependencies = [
 [[package]]
 name = "caryatid_module_spy"
 version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cd94aef4a9d3221de1f98e31ea3bcffece9fed9ea8239f194fdf61063b3f6a"
 dependencies = [
  "anyhow",
  "caryatid_sdk",
@@ -1627,6 +1638,8 @@ dependencies = [
 [[package]]
 name = "caryatid_process"
 version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3ce41105ccb2b0b1b656f6e1993d01a8ee55ff488c6e842bfba8a49a49a7f46"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1647,6 +1660,8 @@ dependencies = [
 [[package]]
 name = "caryatid_sdk"
 version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e196038230b4855acd5190baa2ee42927ea695e8e0c0c1ce37ce9e655af483a3"
 dependencies = [
  "anyhow",
  "async-trait",
