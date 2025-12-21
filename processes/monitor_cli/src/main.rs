@@ -18,9 +18,11 @@ use ratatui::{
 mod app;
 mod data;
 mod events;
+mod source;
 mod ui;
 
 use app::{App, View};
+use source::FileSource;
 
 #[derive(Parser, Debug)]
 #[command(name = "monitor-cli")]
@@ -91,8 +93,9 @@ fn main() -> Result<()> {
         original_hook(panic);
     }));
 
-    // Create app and load initial data
-    let mut app = App::new(args.file, thresholds);
+    // Create data source and app
+    let source = Box::new(FileSource::new(&args.file));
+    let mut app = App::new(source, thresholds);
     let _ = app.reload_data();
 
     // Run the main loop

@@ -1,19 +1,30 @@
-use std::collections::HashMap;
+//! Monitor data parsing and health computation.
+//!
+//! This module transforms raw monitor snapshots into processed data
+//! with health status computed based on configurable thresholds.
+
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use serde::Deserialize;
 
 use super::duration::parse_duration;
+use crate::source::MonitorSnapshot;
 
-/// Thresholds for health status
+/// Thresholds for health status computation.
+///
+/// These thresholds determine when a topic or module is considered
+/// in warning or critical state.
 #[derive(Debug, Clone)]
 pub struct Thresholds {
+    /// Duration after which a pending read/write triggers a warning.
     pub pending_warning: Duration,
+    /// Duration after which a pending read/write triggers critical status.
     pub pending_critical: Duration,
+    /// Unread message count that triggers a warning.
     pub unread_warning: u64,
+    /// Unread message count that triggers critical status.
     pub unread_critical: u64,
 }
 
@@ -28,7 +39,7 @@ impl Default for Thresholds {
     }
 }
 
-/// Health status for a module or topic
+/// Health status for a module or topic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HealthStatus {
     Healthy,
@@ -37,6 +48,7 @@ pub enum HealthStatus {
 }
 
 impl HealthStatus {
+    /// Returns a short symbol for display.
     pub fn symbol(&self) -> &'static str {
         match self {
             HealthStatus::Healthy => "OK",
@@ -46,29 +58,7 @@ impl HealthStatus {
     }
 }
 
-/// Raw JSON structure for reads
-#[derive(Debug, Deserialize)]
-pub struct TopicReadJson {
-    pub read: u64,
-    pub pending_for: Option<String>,
-    pub unread: Option<u64>,
-}
-
-/// Raw JSON structure for writes
-#[derive(Debug, Deserialize)]
-pub struct TopicWriteJson {
-    pub written: u64,
-    pub pending_for: Option<String>,
-}
-
-/// Raw JSON structure for a module
-#[derive(Debug, Deserialize)]
-pub struct ModuleDataJson {
-    pub reads: HashMap<String, TopicReadJson>,
-    pub writes: HashMap<String, TopicWriteJson>,
-}
-
-/// Parsed topic read data
+/// Parsed topic read data with computed health status.
 #[derive(Debug, Clone)]
 pub struct TopicRead {
     pub topic: String,
@@ -78,7 +68,7 @@ pub struct TopicRead {
     pub status: HealthStatus,
 }
 
-/// Parsed topic write data
+/// Parsed topic write data with computed health status.
 #[derive(Debug, Clone)]
 pub struct TopicWrite {
     pub topic: String,
@@ -87,7 +77,7 @@ pub struct TopicWrite {
     pub status: HealthStatus,
 }
 
-/// Parsed module data
+/// Parsed module data with aggregated statistics and health.
 #[derive(Debug, Clone)]
 pub struct ModuleData {
     pub name: String,
@@ -98,7 +88,7 @@ pub struct ModuleData {
     pub health: HealthStatus,
 }
 
-/// Complete parsed monitor data
+/// Complete parsed monitor data ready for display.
 #[derive(Debug, Clone)]
 pub struct MonitorData {
     pub modules: Vec<ModuleData>,
@@ -106,32 +96,44 @@ pub struct MonitorData {
 }
 
 impl MonitorData {
-    /// Load and parse monitor.json from a file path
+    /// Load and parse monitor data from a JSON file.
+    ///
+    /// This is the traditional file-based loading method.
     pub fn load(path: &Path, thresholds: &Thresholds) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Self::parse(&content, thresholds)
     }
 
-    /// Parse monitor.json content
+    /// Parse monitor data from a JSON string.
     pub fn parse(content: &str, thresholds: &Thresholds) -> Result<Self> {
-        let raw: HashMap<String, ModuleDataJson> = serde_json::from_str(content)?;
+        let snapshot: MonitorSnapshot = serde_json::from_str(content)?;
+        Ok(Self::from_snapshot(snapshot, thresholds))
+    }
 
-        let mut modules: Vec<ModuleData> = raw
+    /// Convert a MonitorSnapshot into processed MonitorData.
+    ///
+    /// This is the primary conversion method used by all data sources.
+    pub fn from_snapshot(snapshot: MonitorSnapshot, thresholds: &Thresholds) -> Self {
+        let mut modules: Vec<ModuleData> = snapshot
             .into_iter()
-            .map(|(name, data)| Self::parse_module(name, data, thresholds))
+            .map(|(name, state)| Self::parse_module(name, state, thresholds))
             .collect();
 
         // Sort by health status (critical first), then by name
         modules.sort_by(|a, b| b.health.cmp(&a.health).then_with(|| a.name.cmp(&b.name)));
 
-        Ok(Self {
+        Self {
             modules,
             last_updated: Instant::now(),
-        })
+        }
     }
 
-    fn parse_module(name: String, data: ModuleDataJson, thresholds: &Thresholds) -> ModuleData {
-        let mut reads: Vec<TopicRead> = data
+    fn parse_module(
+        name: String,
+        state: crate::source::SerializedModuleState,
+        thresholds: &Thresholds,
+    ) -> ModuleData {
+        let mut reads: Vec<TopicRead> = state
             .reads
             .into_iter()
             .map(|(topic, r)| {
@@ -147,7 +149,7 @@ impl MonitorData {
             })
             .collect();
 
-        let mut writes: Vec<TopicWrite> = data
+        let mut writes: Vec<TopicWrite> = state
             .writes
             .into_iter()
             .map(|(topic, w)| {
@@ -230,7 +232,7 @@ impl MonitorData {
         })
     }
 
-    /// Get all unhealthy topics across all modules
+    /// Get all unhealthy topics across all modules.
     pub fn unhealthy_topics(&self) -> Vec<(&ModuleData, UnhealthyTopic)> {
         let mut result = Vec::new();
 
@@ -253,6 +255,7 @@ impl MonitorData {
     }
 }
 
+/// An unhealthy topic (either read or write).
 #[derive(Debug, Clone)]
 pub enum UnhealthyTopic {
     Read(TopicRead),

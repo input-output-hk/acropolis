@@ -1,12 +1,14 @@
-use std::path::PathBuf;
+//! Application state and navigation logic.
 
 use anyhow::Result;
 
 use crate::data::{History, MonitorData, Thresholds};
+use crate::source::DataSource;
 use crate::ui::summary::SortColumn;
 use crate::ui::BottleneckSortColumn;
 use crate::ui::Theme;
 
+/// The current view/tab in the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Summary,
@@ -45,7 +47,7 @@ impl View {
     }
 }
 
-/// Saved state for returning to a previous view
+/// Saved state for returning to a previous view.
 #[derive(Debug, Clone)]
 pub struct ViewState {
     pub view: View,
@@ -53,14 +55,15 @@ pub struct ViewState {
     pub selected_topic_index: usize,
 }
 
+/// Main application state.
 pub struct App {
     pub running: bool,
     pub current_view: View,
     pub show_help: bool,
     pub show_detail_overlay: bool,
 
-    // Data
-    pub monitor_path: PathBuf,
+    // Data source
+    source: Box<dyn DataSource>,
     pub data: Option<MonitorData>,
     pub history: History,
     pub load_error: Option<String>,
@@ -91,13 +94,14 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(monitor_path: PathBuf, thresholds: Thresholds) -> Self {
+    /// Create a new App with the given data source and thresholds.
+    pub fn new(source: Box<dyn DataSource>, thresholds: Thresholds) -> Self {
         Self {
             running: true,
             current_view: View::Summary,
             show_help: false,
             show_detail_overlay: false,
-            monitor_path,
+            source,
             data: None,
             history: History::new(),
             load_error: None,
@@ -116,12 +120,17 @@ impl App {
         }
     }
 
-    /// Set a temporary status message that will be shown for a few seconds
+    /// Returns a description of the current data source.
+    pub fn source_description(&self) -> &str {
+        self.source.description()
+    }
+
+    /// Set a temporary status message that will be shown for a few seconds.
     pub fn set_status_message(&mut self, message: String) {
         self.status_message = Some((message, std::time::Instant::now()));
     }
 
-    /// Get the current status message if it hasn't expired (3 seconds)
+    /// Get the current status message if it hasn't expired (3 seconds).
     pub fn get_status_message(&self) -> Option<&str> {
         if let Some((msg, time)) = &self.status_message {
             if time.elapsed() < std::time::Duration::from_secs(3) {
@@ -131,7 +140,7 @@ impl App {
         None
     }
 
-    /// Push current state to stack and navigate to a new view
+    /// Push current state to stack and navigate to a new view.
     #[allow(dead_code)]
     pub fn push_view(&mut self, view: View) {
         self.view_stack.push(ViewState {
@@ -143,7 +152,7 @@ impl App {
         self.selected_topic_index = 0;
     }
 
-    /// Pop the view stack and restore previous state
+    /// Pop the view stack and restore previous state.
     pub fn pop_view(&mut self) -> bool {
         if let Some(state) = self.view_stack.pop() {
             self.current_view = state.view;
@@ -155,33 +164,42 @@ impl App {
         }
     }
 
-    /// Get breadcrumb trail for current navigation
+    /// Get breadcrumb trail for current navigation.
     pub fn breadcrumb(&self) -> String {
         let mut parts: Vec<&str> = self.view_stack.iter().map(|s| s.view.label()).collect();
         parts.push(self.current_view.label());
         parts.join(" > ")
     }
 
-    /// Load or reload the monitor data
-    pub fn reload_data(&mut self) -> Result<()> {
-        match MonitorData::load(&self.monitor_path, &self.thresholds) {
-            Ok(data) => {
-                // Record history before updating
-                self.history.record(&data);
-                self.data = Some(data);
-                self.load_error = None;
-                // Clamp selection indices
-                if let Some(ref data) = self.data {
-                    if self.selected_module_index >= data.modules.len() {
-                        self.selected_module_index = data.modules.len().saturating_sub(1);
-                    }
+    /// Poll the data source for new data.
+    ///
+    /// Returns Ok(true) if new data was received, Ok(false) if no new data,
+    /// or Err if there was an error.
+    pub fn reload_data(&mut self) -> Result<bool> {
+        // Check for errors from the source
+        if let Some(err) = self.source.error() {
+            self.load_error = Some(err.to_string());
+            return Ok(false);
+        }
+
+        // Poll for new data
+        if let Some(snapshot) = self.source.poll() {
+            let data = MonitorData::from_snapshot(snapshot, &self.thresholds);
+
+            // Record history before updating
+            self.history.record(&data);
+            self.data = Some(data);
+            self.load_error = None;
+
+            // Clamp selection indices
+            if let Some(ref data) = self.data {
+                if self.selected_module_index >= data.modules.len() {
+                    self.selected_module_index = data.modules.len().saturating_sub(1);
                 }
-                Ok(())
             }
-            Err(e) => {
-                self.load_error = Some(e.to_string());
-                Err(e)
-            }
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
@@ -280,7 +298,7 @@ impl App {
         }
     }
 
-    /// Get count of modules after applying filter
+    /// Get count of modules after applying filter.
     fn filtered_module_count(&self, data: &MonitorData) -> usize {
         if self.filter_text.is_empty() {
             return data.modules.len();
@@ -288,8 +306,8 @@ impl App {
         data.modules.iter().filter(|m| self.matches_filter(&m.name)).count()
     }
 
-    /// Get the actual module index from the visual index (after sorting/filtering)
-    /// Returns the raw index into data.modules for the currently selected visual row
+    /// Get the actual module index from the visual index (after sorting/filtering).
+    /// Returns the raw index into data.modules for the currently selected visual row.
     pub fn get_selected_module_raw_index(&self) -> Option<usize> {
         let data = self.data.as_ref()?;
 
@@ -392,7 +410,7 @@ impl App {
         self.filter_text.pop();
     }
 
-    /// Check if a module name matches the current filter
+    /// Check if a module name matches the current filter.
     pub fn matches_filter(&self, name: &str) -> bool {
         if self.filter_text.is_empty() {
             return true;
@@ -400,7 +418,7 @@ impl App {
         name.to_lowercase().contains(&self.filter_text.to_lowercase())
     }
 
-    /// Get count of bottlenecks after applying filter
+    /// Get count of bottlenecks after applying filter.
     fn filtered_bottleneck_count(&self, data: &MonitorData) -> usize {
         if self.filter_text.is_empty() {
             return data.unhealthy_topics().len();
@@ -419,7 +437,7 @@ impl App {
         self.running = false;
     }
 
-    /// Export current state to a file
+    /// Export current state to a file.
     pub fn export_state(&self, path: &std::path::Path) -> anyhow::Result<()> {
         use std::io::Write;
 
