@@ -16,18 +16,11 @@ use super::{DataSource, MonitorSnapshot};
 ///
 /// # Example
 ///
-/// ```ignore
-/// use tokio::sync::watch;
-/// use caryatid_doctor::{ChannelSource, MonitorSnapshot};
+/// ```
+/// use caryatid_doctor::ChannelSource;
 ///
-/// // Create channel with initial empty snapshot
-/// let (tx, rx) = watch::channel(MonitorSnapshot::default());
-///
-/// // Create the source
-/// let source = ChannelSource::new(rx, "rabbitmq://localhost");
-///
-/// // Elsewhere, send snapshots from message bus:
-/// // tx.send(snapshot)?;
+/// // Create a channel pair
+/// let (tx, source) = ChannelSource::create("rabbitmq://localhost");
 /// ```
 #[derive(Debug)]
 pub struct ChannelSource {

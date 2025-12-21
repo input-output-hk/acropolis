@@ -28,7 +28,7 @@
 //!
 //! ### As a library with file source
 //!
-//! ```ignore
+//! ```
 //! use caryatid_doctor::{App, FileSource, Thresholds};
 //!
 //! let source = Box::new(FileSource::new("monitor.json"));
@@ -37,42 +37,42 @@
 //!
 //! ### As a library with stream source (TCP, etc.)
 //!
-//! ```ignore
-//! use tokio::net::TcpStream;
+//! ```no_run
+//! use std::io::Cursor;
 //! use caryatid_doctor::{App, StreamSource, Thresholds};
 //!
-//! let stream = TcpStream::connect("localhost:9090").await?;
-//! let source = StreamSource::spawn(stream, "tcp://localhost:9090");
+//! # tokio_test::block_on(async {
+//! // Example with a cursor (in practice, use TcpStream)
+//! let data = b"{}\n";
+//! let stream = Cursor::new(data.to_vec());
+//! let source = StreamSource::spawn(stream, "example");
 //! let app = App::new(Box::new(source), Thresholds::default());
+//! # });
 //! ```
 //!
 //! ### As a library with channel source (for message bus integration)
 //!
-//! ```ignore
-//! use caryatid_doctor::{App, ChannelSource, MonitorSnapshot, Thresholds};
+//! ```
+//! use caryatid_doctor::{App, ChannelSource, Thresholds};
 //!
 //! // Create a channel for receiving snapshots
 //! let (tx, source) = ChannelSource::create("rabbitmq://localhost");
 //!
 //! // Create the app
 //! let app = App::new(Box::new(source), Thresholds::default());
-//!
-//! // Elsewhere, send snapshots from your message bus subscriber:
-//! // tx.send(snapshot)?;
 //! ```
 //!
 //! ### Bridging from a message bus
 //!
-//! ```ignore
-//! use caryatid_doctor::{StreamSource, MonitorSnapshot};
+//! ```no_run
+//! use caryatid_doctor::StreamSource;
 //! use tokio::sync::mpsc;
 //!
+//! # tokio_test::block_on(async {
 //! // Create a bytes channel
 //! let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
 //! let source = StreamSource::from_bytes_channel(rx, "rabbitmq");
-//!
-//! // In your message bus handler:
-//! // tx.send(message.as_json_bytes()).await?;
+//! # });
 //! ```
 
 pub mod app;

@@ -16,35 +16,17 @@ use super::{DataSource, MonitorSnapshot};
 /// This source spawns a background task that reads newline-delimited JSON
 /// from the provided async reader and makes snapshots available via `poll()`.
 ///
-/// # Example with TCP
+/// # Example with a byte stream
 ///
-/// ```ignore
-/// use tokio::net::TcpStream;
+/// ```
+/// use std::io::Cursor;
 /// use caryatid_doctor::StreamSource;
 ///
-/// let stream = TcpStream::connect("localhost:9090").await?;
-/// let source = StreamSource::spawn(stream, "tcp://localhost:9090");
-/// let app = App::new(Box::new(source), Thresholds::default());
-/// ```
-///
-/// # Example with message bus (bridging)
-///
-/// ```ignore
-/// use caryatid_doctor::{ChannelSource, MonitorSnapshot};
-///
-/// // Create channel source
-/// let (tx, source) = ChannelSource::create("rabbitmq");
-///
-/// // Bridge from your message bus subscription
-/// tokio::spawn(async move {
-///     let subscription = bus.subscribe("caryatid.monitor.snapshot").await?;
-///     loop {
-///         let (_, msg) = subscription.read().await?;
-///         // Assuming your message type can be converted to JSON bytes
-///         let snapshot: MonitorSnapshot = serde_json::from_slice(&msg.to_json())?;
-///         let _ = tx.send(snapshot);
-///     }
-/// });
+/// # tokio_test::block_on(async {
+/// let data = b"{}\n";
+/// let stream = Cursor::new(data.to_vec());
+/// let source = StreamSource::spawn(stream, "example");
+/// # });
 /// ```
 #[derive(Debug)]
 pub struct StreamSource {

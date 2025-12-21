@@ -24,12 +24,12 @@ use std::fmt::Debug;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use caryatid_doctor::{FileSource, DataSource};
 ///
-/// let source = FileSource::new("monitor.json");
+/// let mut source = FileSource::new("monitor.json");
 /// if let Some(snapshot) = source.poll() {
-///     println!("Got {} modules", snapshot.modules.len());
+///     println!("Got {} modules", snapshot.len());
 /// }
 /// ```
 pub trait DataSource: Send + Debug {
