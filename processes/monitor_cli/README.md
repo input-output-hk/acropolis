@@ -34,7 +34,8 @@ monitor-cli [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-f, --file <FILE>` | `monitor.json` | Path to the monitor.json data file |
-| `-r, --refresh <SECS>` | `1` | Refresh interval in seconds |
+| `-c, --connect <HOST:PORT>` | - | Connect to a TCP endpoint for live snapshots |
+| `-r, --refresh <SECS>` | `1` | Refresh interval in seconds (file mode only) |
 | `--pending-warn <DURATION>` | `1s` | Pending duration warning threshold |
 | `--pending-crit <DURATION>` | `10s` | Pending duration critical threshold |
 | `--unread-warn <COUNT>` | `1000` | Unread message count warning threshold |
@@ -44,8 +45,11 @@ monitor-cli [OPTIONS]
 ### Examples
 
 ```bash
-# Monitor with default settings
+# Monitor with default settings (file mode)
 monitor-cli -f /path/to/monitor.json
+
+# Connect to a live TCP stream
+monitor-cli --connect localhost:9090
 
 # Custom thresholds for sensitive monitoring
 monitor-cli -f monitor.json --pending-warn 500ms --pending-crit 2s
