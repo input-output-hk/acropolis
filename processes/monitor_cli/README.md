@@ -35,6 +35,8 @@ monitor-cli [OPTIONS]
 |--------|---------|-------------|
 | `-f, --file <FILE>` | `monitor.json` | Path to the monitor.json data file |
 | `-c, --connect <HOST:PORT>` | - | Connect to a TCP endpoint for live snapshots |
+| `-s, --subscribe <CONFIG>` | - | Subscribe to message bus (requires `subscribe` feature) |
+| `-t, --topic <TOPIC>` | `caryatid.monitor.snapshot` | Topic to subscribe to (with `--subscribe`) |
 | `-r, --refresh <SECS>` | `1` | Refresh interval in seconds (file mode only) |
 | `--pending-warn <DURATION>` | `1s` | Pending duration warning threshold |
 | `--pending-crit <DURATION>` | `10s` | Pending duration critical threshold |
@@ -50,6 +52,12 @@ monitor-cli -f /path/to/monitor.json
 
 # Connect to a live TCP stream
 monitor-cli --connect localhost:9090
+
+# Subscribe to message bus (requires subscribe feature)
+monitor-cli --subscribe rabbitmq.toml
+
+# Subscribe to a custom topic
+monitor-cli --subscribe rabbitmq.toml --topic my.custom.topic
 
 # Custom thresholds for sensitive monitoring
 monitor-cli -f monitor.json --pending-warn 500ms --pending-crit 2s
@@ -209,6 +217,59 @@ When using `-e/--export` or pressing `e` in the TUI, the tool outputs:
     }
   ]
 }
+```
+
+## Message Bus Subscription (Optional Feature)
+
+The `subscribe` feature enables real-time monitoring via RabbitMQ message bus, allowing you to monitor remote Caryatid processes.
+
+### Building with Subscribe Support
+
+```bash
+cargo build -p acropolis_monitor_cli --features subscribe --release
+```
+
+### Configuration
+
+Create a config file with RabbitMQ connection settings:
+
+```toml
+# rabbitmq.toml
+[rabbitmq]
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+```
+
+Alternatively, you can use the full Caryatid message-bus config format:
+
+```toml
+[message-bus.external]
+class = "rabbit-mq"
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+```
+
+### Enabling Monitor Publishing in Caryatid
+
+In your Caryatid process config, enable monitor topic publishing:
+
+```toml
+[monitor]
+topic = "caryatid.monitor.snapshot"
+frequency_secs = 5.0
+
+[message-bus.external]
+class = "rabbit-mq"
+url = "amqp://127.0.0.1:5672/%2f"
+exchange = "caryatid"
+```
+
+Make sure the topic is routed to the external bus:
+
+```toml
+[[message-router.route]]
+pattern = "caryatid.monitor.*"
+bus = "external"
 ```
 
 ## Tips
