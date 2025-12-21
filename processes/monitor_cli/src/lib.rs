@@ -112,6 +112,10 @@ pub mod events;
 pub mod source;
 pub mod ui;
 
+// Caryatid integration module (requires "subscribe" feature)
+#[cfg(feature = "subscribe")]
+pub mod subscribe;
+
 // Re-export main types for convenience
 pub use app::App;
 pub use data::{HealthStatus, ModuleData, MonitorData, Thresholds, TopicRead, TopicWrite};

@@ -24,6 +24,9 @@ mod events;
 mod source;
 mod ui;
 
+#[cfg(feature = "subscribe")]
+mod subscribe;
+
 use app::{App, View};
 use source::{DataSource, FileSource, StreamSource};
 
@@ -36,13 +39,25 @@ struct Args {
         short,
         long,
         default_value = "monitor.json",
-        conflicts_with = "connect"
+        conflicts_with_all = ["connect", "subscribe"]
     )]
     file: PathBuf,
 
     /// Connect to a TCP endpoint for live snapshots (host:port)
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with_all = ["file", "subscribe"])]
     connect: Option<String>,
+
+    /// Subscribe to monitor snapshots via caryatid message bus.
+    /// Requires a config file path (for message bus connection settings).
+    /// Use with --topic to specify the subscription topic.
+    #[cfg(feature = "subscribe")]
+    #[arg(short, long, conflicts_with_all = ["file", "connect"])]
+    subscribe: Option<PathBuf>,
+
+    /// Topic to subscribe to (used with --subscribe)
+    #[cfg(feature = "subscribe")]
+    #[arg(long, default_value = "caryatid.monitor", requires = "subscribe")]
+    topic: String,
 
     /// Refresh interval in seconds (only used with --file)
     #[arg(short, long, default_value = "1")]
@@ -65,7 +80,7 @@ struct Args {
     unread_crit: u64,
 
     /// Export current state to JSON file and exit
-    #[arg(short, long, conflicts_with = "connect")]
+    #[arg(short, long, conflicts_with_all = ["connect", "subscribe"])]
     export: Option<PathBuf>,
 }
 
@@ -95,6 +110,12 @@ fn main() -> Result<()> {
         return run_with_tcp(addr, thresholds);
     }
 
+    // Handle subscribe mode (caryatid message bus)
+    #[cfg(feature = "subscribe")]
+    if let Some(ref config_path) = args.subscribe {
+        return run_with_subscribe(config_path, &args.topic, thresholds);
+    }
+
     // Default: file-based mode
     run_with_file(&args.file, thresholds, Duration::from_secs(args.refresh))
 }
@@ -103,6 +124,39 @@ fn main() -> Result<()> {
 fn run_with_file(path: &PathBuf, thresholds: data::Thresholds, refresh: Duration) -> Result<()> {
     let source = Box::new(FileSource::new(path));
     run_tui(source, thresholds, refresh)
+}
+
+/// Run with a caryatid message bus subscription
+#[cfg(feature = "subscribe")]
+fn run_with_subscribe(
+    config_path: &std::path::Path,
+    topic: &str,
+    thresholds: data::Thresholds,
+) -> Result<()> {
+    use subscribe::{create_subscriber, Message, MonitorSubscriber};
+
+    // Initialize tracing for caryatid
+    tracing_subscriber::fmt::init();
+
+    // Build a tokio runtime
+    let rt = tokio::runtime::Runtime::new()?;
+
+    // Create the subscriber and get the channel source
+    let (source, handle) = rt.block_on(async {
+        println!("Connecting to message bus...");
+        let (_tx, source, handle) = create_subscriber(config_path, topic).await?;
+        println!("Subscribed to topic: {}", topic);
+        Ok::<_, anyhow::Error>((source, handle))
+    })?;
+
+    // Run the TUI in the main thread while the async runtime runs in the background
+    // The runtime is kept alive by the `rt` variable
+    let result = run_tui(Box::new(source), thresholds, Duration::from_millis(100));
+
+    // Signal shutdown (the handle will be dropped when rt is dropped)
+    drop(handle);
+
+    result
 }
 
 /// Run with a TCP stream data source
