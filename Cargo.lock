@@ -542,21 +542,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "acropolis_monitor_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 4.5.53",
- "crossterm 0.28.1",
- "humantime",
- "ratatui",
- "serde",
- "serde_json",
- "terminal-light",
- "tokio",
-]
-
-[[package]]
 name = "acropolis_process_indexer"
 version = "0.1.0"
 dependencies = [
@@ -1545,6 +1530,20 @@ name = "byteview"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
+
+[[package]]
+name = "caryatid-doctor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.53",
+ "crossterm 0.28.1",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "terminal-light",
+ "tokio",
+]
 
 [[package]]
 name = "caryatid_macros"

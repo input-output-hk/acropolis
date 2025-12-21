@@ -1,13 +1,20 @@
 [package]
-name = "acropolis_monitor_cli"
+name = "caryatid-doctor"
 version = "0.1.0"
 edition = "2021"
 authors = ["Acropolis Team"]
-description = "TUI monitoring tool for Acropolis processes"
+description = "Diagnostic TUI for monitoring Caryatid message bus activity"
 license = "Apache-2.0"
+repository = "https://github.com/pragma-org/caryatid"
+keywords = ["caryatid", "monitoring", "tui", "diagnostics", "message-bus"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+
+[lib]
+name = "caryatid_doctor"
+path = "src/lib.rs"
 
 [[bin]]
-name = "monitor-cli"
+name = "caryatid-doctor"
 path = "src/main.rs"
 
 [dependencies]
@@ -19,4 +26,3 @@ anyhow = { workspace = true }
 ratatui = "0.29"
 crossterm = "0.28"
 terminal-light = "1.4"
-humantime = "2.1"

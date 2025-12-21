@@ -33,6 +33,8 @@ use super::{DataSource, MonitorSnapshot};
 pub struct ChannelSource {
     receiver: watch::Receiver<MonitorSnapshot>,
     description: String,
+    /// Track if we've returned the initial value yet
+    initial_returned: bool,
 }
 
 impl ChannelSource {
@@ -48,6 +50,7 @@ impl ChannelSource {
         Self {
             receiver,
             description,
+            initial_returned: false,
         }
     }
 
@@ -64,6 +67,12 @@ impl ChannelSource {
 
 impl DataSource for ChannelSource {
     fn poll(&mut self) -> Option<MonitorSnapshot> {
+        // Return the initial value on first poll
+        if !self.initial_returned {
+            self.initial_returned = true;
+            self.receiver.mark_changed();
+        }
+
         // Check if there's a new value without blocking
         if self.receiver.has_changed().unwrap_or(false) {
             let snapshot = self.receiver.borrow_and_update().clone();
