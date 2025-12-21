@@ -1,12 +1,6 @@
-//! Caryatid message bus integration for monitor_cli.
-//!
-//! This module provides the ability to subscribe to monitor snapshots
-//! published on the Caryatid message bus, enabling real-time monitoring
-//! of a live system.
+//! RabbitMQ subscription for receiving monitor snapshots.
 //!
 //! # Configuration
-//!
-//! The subscribe feature requires a simple config file with RabbitMQ settings:
 //!
 //! ```toml
 //! [rabbitmq]
@@ -21,20 +15,22 @@
 //! ```
 
 use crate::source::{ChannelSource, MonitorSnapshot};
-use anyhow::Result;
-use caryatid_sdk::MessageBus;
+use anyhow::{Context, Result};
 use config::{Config, Environment, File};
+use futures_util::StreamExt;
+use lapin::{
+    options::{BasicConsumeOptions, QueueBindOptions, QueueDeclareOptions},
+    types::FieldTable,
+    Connection, ConnectionProperties,
+};
 use std::path::Path;
 
 /// Create a subscriber that connects directly to RabbitMQ.
 ///
-/// This bypasses the full caryatid Process machinery and just uses
-/// the RabbitMQ bus directly for subscribing to topics.
-///
 /// # Arguments
 ///
 /// * `config_path` - Path to config file with RabbitMQ settings
-/// * `topic` - The topic to subscribe to
+/// * `topic` - The topic pattern to subscribe to
 ///
 /// # Returns
 ///
@@ -45,64 +41,77 @@ pub async fn create_subscriber(
     config_path: &Path,
     topic: &str,
 ) -> Result<(ChannelSource, tokio::task::JoinHandle<()>)> {
-    use caryatid_process::rabbit_mq_bus::RabbitMQBus;
-
     // Load config
     let config = Config::builder()
         .add_source(File::from(config_path))
         .add_source(Environment::with_prefix("CARYATID"))
         .build()?;
 
-    // Extract RabbitMQ config - support both [rabbitmq] and [message-bus.external] formats
-    let bus_config = if let Ok(rabbitmq) = config.get_table("rabbitmq") {
-        caryatid_sdk::config::config_from_value(rabbitmq)
-    } else if let Ok(message_bus) = config.get_table("message-bus") {
-        // Find the first rabbit-mq bus
-        let mut found = None;
-        for (_id, bus_conf) in message_bus {
-            if let Ok(tbl) = bus_conf.into_table() {
-                let cfg = caryatid_sdk::config::config_from_value(tbl);
-                if cfg.get_string("class").ok() == Some("rabbit-mq".to_string()) {
-                    found = Some(cfg);
-                    break;
-                }
-            }
-        }
-        found.ok_or_else(|| anyhow::anyhow!("No rabbit-mq bus found in config"))?
-    } else {
-        return Err(anyhow::anyhow!(
-            "Config must contain [rabbitmq] or [message-bus.*.class = \"rabbit-mq\"]"
-        ));
-    };
+    // Extract RabbitMQ config - support both [rabbitmq] and [message-bus.*] formats
+    let (url, exchange) = extract_rabbitmq_config(&config)?;
 
-    // Create the RabbitMQ bus directly
-    let bus = RabbitMQBus::<serde_json::Value>::new(&bus_config).await?;
+    // Connect to RabbitMQ
+    let conn = Connection::connect(&url, ConnectionProperties::default())
+        .await
+        .context("Failed to connect to RabbitMQ")?;
 
-    // Subscribe to the topic
-    let mut subscription = bus.subscribe(topic).await?;
+    let channel = conn.create_channel().await?;
+
+    // Declare a temporary exclusive queue
+    let queue = channel
+        .queue_declare(
+            "",
+            QueueDeclareOptions {
+                exclusive: true,
+                auto_delete: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Bind queue to the exchange with the topic pattern
+    channel
+        .queue_bind(
+            queue.name().as_str(),
+            &exchange,
+            topic,
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
+    // Start consuming
+    let mut consumer = channel
+        .basic_consume(
+            queue.name().as_str(),
+            "caryatid-doctor",
+            BasicConsumeOptions {
+                no_ack: true,
+                ..Default::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
 
     // Create channel for forwarding to TUI
     let (tx, source) = ChannelSource::create(&format!("rabbitmq:{}", topic));
 
     // Spawn background task to read messages
     let handle = tokio::spawn(async move {
-        loop {
-            match subscription.read().await {
-                Ok((_, message)) => {
+        while let Some(delivery) = consumer.next().await {
+            match delivery {
+                Ok(delivery) => {
                     // Try to deserialize as MonitorSnapshot
-                    match serde_json::from_value::<MonitorSnapshot>(message.as_ref().clone()) {
-                        Ok(snapshot) => {
-                            if tx.send(snapshot).is_err() {
-                                // Receiver dropped
-                                break;
-                            }
-                        }
-                        Err(_e) => {
-                            // Not a valid snapshot, skip
+                    if let Ok(snapshot) = serde_json::from_slice::<MonitorSnapshot>(&delivery.data)
+                    {
+                        if tx.send(snapshot).is_err() {
+                            // Receiver dropped
+                            break;
                         }
                     }
                 }
-                Err(_e) => {
+                Err(_) => {
                     // Connection error, exit
                     break;
                 }
@@ -111,4 +120,48 @@ pub async fn create_subscriber(
     });
 
     Ok((source, handle))
+}
+
+/// Extract RabbitMQ URL and exchange from config.
+///
+/// Supports two formats:
+/// - `[rabbitmq]` with `url` and `exchange` fields
+/// - `[message-bus.*]` with `class = "rabbit-mq"`, `url`, and `exchange` fields
+fn extract_rabbitmq_config(config: &Config) -> Result<(String, String)> {
+    // Try [rabbitmq] format first
+    if let Ok(rabbitmq) = config.get_table("rabbitmq") {
+        let url = rabbitmq
+            .get("url")
+            .and_then(|v| v.clone().into_string().ok())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'url' in [rabbitmq]"))?;
+        let exchange = rabbitmq
+            .get("exchange")
+            .and_then(|v| v.clone().into_string().ok())
+            .unwrap_or_else(|| "caryatid".to_string());
+        return Ok((url, exchange));
+    }
+
+    // Try [message-bus.*] format
+    if let Ok(message_bus) = config.get_table("message-bus") {
+        for (_id, bus_conf) in message_bus {
+            if let Ok(tbl) = bus_conf.into_table() {
+                let class = tbl.get("class").and_then(|v| v.clone().into_string().ok());
+                if class.as_deref() == Some("rabbit-mq") {
+                    let url = tbl
+                        .get("url")
+                        .and_then(|v| v.clone().into_string().ok())
+                        .ok_or_else(|| anyhow::anyhow!("Missing 'url' in rabbit-mq bus config"))?;
+                    let exchange = tbl
+                        .get("exchange")
+                        .and_then(|v| v.clone().into_string().ok())
+                        .unwrap_or_else(|| "caryatid".to_string());
+                    return Ok((url, exchange));
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Config must contain [rabbitmq] or [message-bus.*.class = \"rabbit-mq\"]"
+    ))
 }
