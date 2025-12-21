@@ -9,8 +9,20 @@ use ratatui::{
 use crate::app::App;
 use crate::data::duration::format_duration;
 
-/// Render the module detail as a modal overlay
+/// Minimum dimensions required for the detail overlay to render properly.
+const MIN_OVERLAY_WIDTH: u16 = 50;
+const MIN_OVERLAY_HEIGHT: u16 = 16;
+
+/// Render the module detail as a modal overlay.
+///
+/// The overlay displays detailed information about the selected module including
+/// its health status, read/write counts, and per-topic statistics.
 pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    // Skip rendering if terminal is too small for the overlay
+    if area.width < MIN_OVERLAY_WIDTH || area.height < MIN_OVERLAY_HEIGHT {
+        return;
+    }
+
     let Some(ref data) = app.data else {
         return;
     };
@@ -24,10 +36,10 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     // Calculate overlay size - use most of the screen
-    // Width: 95% of screen, max 100 chars, min 60 chars
-    let overlay_width = (area.width * 95 / 100).clamp(60, 100).min(area.width.saturating_sub(2));
-    // Height: 90% of screen, max 50 lines, min 20 lines
-    let overlay_height = (area.height * 90 / 100).clamp(20, 50).min(area.height.saturating_sub(2));
+    // Width: 95% of screen, max 100 chars
+    let overlay_width = (area.width * 95 / 100).min(100).max(MIN_OVERLAY_WIDTH);
+    // Height: 90% of screen, max 50 lines
+    let overlay_height = (area.height * 90 / 100).min(50).max(MIN_OVERLAY_HEIGHT);
 
     let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
     let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
