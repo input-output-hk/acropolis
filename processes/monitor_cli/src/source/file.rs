@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use super::{DataSource, MonitorSnapshot};
 
@@ -11,11 +12,17 @@ use super::{DataSource, MonitorSnapshot};
 ///
 /// This is the traditional mode of operation where caryatid's Monitor
 /// writes snapshots to a file, and this source polls that file.
+///
+/// The source tracks the file's modification time and only returns
+/// new data when the file has been updated.
 #[derive(Debug)]
 pub struct FileSource {
     path: PathBuf,
     description: String,
     last_error: Option<String>,
+    last_modified: Option<SystemTime>,
+    /// Cached snapshot to return on first poll
+    cached_snapshot: Option<MonitorSnapshot>,
 }
 
 impl FileSource {
@@ -27,6 +34,8 @@ impl FileSource {
             path,
             description,
             last_error: None,
+            last_modified: None,
+            cached_snapshot: None,
         }
     }
 
@@ -34,10 +43,14 @@ impl FileSource {
     pub fn path(&self) -> &Path {
         &self.path
     }
-}
 
-impl DataSource for FileSource {
-    fn poll(&mut self) -> Option<MonitorSnapshot> {
+    /// Get the file's modification time.
+    fn get_modified_time(&self) -> Option<SystemTime> {
+        fs::metadata(&self.path).ok()?.modified().ok()
+    }
+
+    /// Read and parse the file.
+    fn read_file(&mut self) -> Option<MonitorSnapshot> {
         match fs::read_to_string(&self.path) {
             Ok(content) => match serde_json::from_str(&content) {
                 Ok(snapshot) => {
@@ -54,6 +67,29 @@ impl DataSource for FileSource {
                 None
             }
         }
+    }
+}
+
+impl DataSource for FileSource {
+    fn poll(&mut self) -> Option<MonitorSnapshot> {
+        let current_modified = self.get_modified_time();
+
+        // Check if file has been modified since last read
+        let file_changed = match (&self.last_modified, &current_modified) {
+            (None, _) => true,        // First poll, always read
+            (Some(_), None) => false, // File disappeared, don't update
+            (Some(last), Some(current)) => current > last,
+        };
+
+        if file_changed {
+            if let Some(snapshot) = self.read_file() {
+                self.last_modified = current_modified;
+                self.cached_snapshot = Some(snapshot.clone());
+                return Some(snapshot);
+            }
+        }
+
+        None
     }
 
     fn description(&self) -> &str {

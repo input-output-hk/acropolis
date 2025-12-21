@@ -1,0 +1,771 @@
+{
+  "accounts-state": {
+    "reads": {
+      "cardano.certificates": {
+        "read": 885794
+      },
+      "cardano.drep.state": {
+        "read": 41
+      },
+      "cardano.epoch.activity": {
+        "read": 41
+      },
+      "cardano.pot.deltas": {
+        "read": 1
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.query.accounts._request.*": {
+        "read": 0,
+        "pending_for": "155.050464458s"
+      },
+      "cardano.spo.state": {
+        "read": 41
+      },
+      "cardano.stake.deltas": {
+        "read": 885795
+      },
+      "cardano.withdrawals": {
+        "read": 885794
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.496208ms"
+      }
+    },
+    "writes": {
+      "cardano.drep.distribution": {
+        "written": 41
+      },
+      "cardano.spo.distribution": {
+        "written": 41
+      },
+      "cardano.spo.rewards": {
+        "written": 41
+      },
+      "cardano.stake.reward.deltas": {
+        "written": 41
+      },
+      "cardano.validation.accounts": {
+        "written": 885794
+      }
+    }
+  },
+  "address-state": {
+    "reads": {
+      "cardano.query.address._request.*": {
+        "read": 0,
+        "pending_for": "155.028606542s"
+      }
+    },
+    "writes": {}
+  },
+  "assets-state": {
+    "reads": {
+      "cardano.asset.deltas": {
+        "read": 885794,
+        "pending_for": "97.125µs"
+      },
+      "cardano.query.assets._request.*": {
+        "read": 0,
+        "pending_for": "155.063834333s"
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.509417ms"
+      }
+    },
+    "writes": {}
+  },
+  "block-kes-validator": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      },
+      "cardano.spo.state": {
+        "read": 41
+      }
+    },
+    "writes": {
+      "cardano.validation.kes": {
+        "written": 885794,
+        "pending_for": "12.708µs"
+      }
+    }
+  },
+  "block-unpacker": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795,
+        "pending_for": "0ns"
+      }
+    },
+    "writes": {
+      "cardano.txs": {
+        "written": 885795
+      }
+    }
+  },
+  "block-vrf-validator": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795
+      },
+      "cardano.epoch.nonce": {
+        "read": 41
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      },
+      "cardano.spo.distribution": {
+        "read": 41
+      },
+      "cardano.spo.state": {
+        "read": 41
+      }
+    },
+    "writes": {
+      "cardano.validation.vrf": {
+        "written": 885794,
+        "pending_for": "11.25µs"
+      }
+    }
+  },
+  "chain-store": {
+    "reads": {
+      "cardano.block.available": {
+        "read": 885805,
+        "pending_for": "35.333µs"
+      },
+      "cardano.protocol.parameters": {
+        "read": 41,
+        "unread": 1
+      },
+      "cardano.query.blocks._request.*": {
+        "read": 0,
+        "pending_for": "155.044585792s"
+      },
+      "cardano.query.transactions._request.*": {
+        "read": 0,
+        "pending_for": "155.05613675s"
+      }
+    },
+    "writes": {}
+  },
+  "clock": {
+    "reads": {},
+    "writes": {
+      "clock.tick": {
+        "written": 156
+      }
+    }
+  },
+  "consensus": {
+    "reads": {
+      "cardano.block.available": {
+        "read": 885795,
+        "unread": 10
+      },
+      "cardano.validation.spo": {
+        "read": 885794,
+        "pending_for": "24.75µs"
+      }
+    },
+    "writes": {
+      "cardano.block.proposed": {
+        "written": 885795
+      }
+    }
+  },
+  "drdd-state": {
+    "reads": {
+      "rest.get.drdd._request.*": {
+        "read": 0,
+        "pending_for": "155.04358075s"
+      }
+    },
+    "writes": {}
+  },
+  "drep-state": {
+    "reads": {
+      "cardano.certificates": {
+        "read": 885794,
+        "pending_for": "102.458µs"
+      },
+      "cardano.query.dreps._request.*": {
+        "read": 0,
+        "pending_for": "155.040031583s"
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.508125ms"
+      }
+    },
+    "writes": {
+      "cardano.drep.state": {
+        "written": 41
+      }
+    }
+  },
+  "epochs-state": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795
+      },
+      "cardano.block.txs": {
+        "read": 885794,
+        "pending_for": "7.042µs"
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.query.epochs._request.*": {
+        "read": 0,
+        "pending_for": "155.051518167s"
+      },
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      }
+    },
+    "writes": {
+      "cardano.epoch.activity": {
+        "written": 41
+      },
+      "cardano.epoch.nonce": {
+        "written": 41
+      }
+    }
+  },
+  "genesis-bootstrapper": {
+    "reads": {
+      "cardano.sequence.start": {
+        "read": 1
+      }
+    },
+    "writes": {
+      "cardano.genesis.utxos": {
+        "written": 1
+      },
+      "cardano.pot.deltas": {
+        "written": 1
+      },
+      "cardano.sequence.bootstrapped": {
+        "written": 1
+      },
+      "cardano.utxo.deltas": {
+        "written": 1
+      }
+    }
+  },
+  "governance-state": {
+    "reads": {
+      "cardano.drep.distribution": {
+        "read": 41
+      },
+      "cardano.governance": {
+        "read": 885794,
+        "pending_for": "37.167µs"
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.query.governance._request.*": {
+        "read": 0,
+        "pending_for": "155.036475583s"
+      },
+      "cardano.spo.distribution": {
+        "read": 41
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.496417ms"
+      }
+    },
+    "writes": {
+      "cardano.enact.state": {
+        "written": 42
+      },
+      "cardano.validation.governance": {
+        "written": 885794
+      }
+    }
+  },
+  "historical-accounts-state": {
+    "reads": {
+      "cardano.certificates": {
+        "read": 885794,
+        "pending_for": "54.333µs"
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.query.historical.accounts._request.*": {
+        "read": 0,
+        "pending_for": "155.045028167s"
+      },
+      "cardano.stake.deltas": {
+        "read": 885795
+      },
+      "cardano.stake.reward.deltas": {
+        "read": 41
+      },
+      "cardano.withdrawals": {
+        "read": 885794
+      }
+    },
+    "writes": {}
+  },
+  "historical-epochs-state": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795,
+        "pending_for": "23.75µs"
+      },
+      "cardano.epoch.activity": {
+        "read": 41
+      },
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.query.historical.epochs._request.*": {
+        "read": 0,
+        "pending_for": "155.065145125s"
+      }
+    },
+    "writes": {}
+  },
+  "mithril-snapshot-fetcher": {
+    "reads": {
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      }
+    },
+    "writes": {
+      "cardano.block.available": {
+        "written": 885805,
+        "pending_for": "59.792µs"
+      }
+    }
+  },
+  "parameters-state": {
+    "reads": {
+      "cardano.enact.state": {
+        "read": 42,
+        "pending_for": "48.963583ms"
+      },
+      "cardano.query.parameters._request.*": {
+        "read": 0,
+        "pending_for": "155.064507917s"
+      }
+    },
+    "writes": {
+      "cardano.protocol.parameters": {
+        "written": 42
+      }
+    }
+  },
+  "peer-network-interface": {
+    "reads": {
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      },
+      "cardano.sync.command": {
+        "read": 0,
+        "pending_for": "154.997021667s"
+      }
+    },
+    "writes": {}
+  },
+  "rest-blockfrost": {
+    "reads": {
+      "rest.get.accounts.*._request.*": {
+        "read": 0,
+        "pending_for": "155.0608375s"
+      },
+      "rest.get.accounts.*.addresses._request.*": {
+        "read": 0,
+        "pending_for": "155.039004333s"
+      },
+      "rest.get.accounts.*.addresses.assets._request.*": {
+        "read": 0,
+        "pending_for": "155.064655917s"
+      },
+      "rest.get.accounts.*.addresses.total._request.*": {
+        "read": 0,
+        "pending_for": "155.04901325s"
+      },
+      "rest.get.accounts.*.delegations._request.*": {
+        "read": 0,
+        "pending_for": "155.035886208s"
+      },
+      "rest.get.accounts.*.mirs._request.*": {
+        "read": 0,
+        "pending_for": "155.039795125s"
+      },
+      "rest.get.accounts.*.registrations._request.*": {
+        "read": 0,
+        "pending_for": "155.0534235s"
+      },
+      "rest.get.accounts.*.rewards._request.*": {
+        "read": 0,
+        "pending_for": "155.05506425s"
+      },
+      "rest.get.accounts.*.utxos._request.*": {
+        "read": 0,
+        "pending_for": "155.032526708s"
+      },
+      "rest.get.accounts.*.withdrawals._request.*": {
+        "read": 0,
+        "pending_for": "155.044048917s"
+      },
+      "rest.get.addresses.*._request.*": {
+        "read": 0,
+        "pending_for": "155.062256208s"
+      },
+      "rest.get.addresses.*.extended._request.*": {
+        "read": 0,
+        "pending_for": "155.040347167s"
+      },
+      "rest.get.addresses.*.total._request.*": {
+        "read": 0,
+        "pending_for": "155.046753833s"
+      },
+      "rest.get.addresses.*.transactions._request.*": {
+        "read": 0,
+        "pending_for": "155.029915s"
+      },
+      "rest.get.addresses.*.utxos.*._request.*": {
+        "read": 0,
+        "pending_for": "155.063242583s"
+      },
+      "rest.get.addresses.*.utxos._request.*": {
+        "read": 0,
+        "pending_for": "155.03356725s"
+      },
+      "rest.get.assets.*._request.*": {
+        "read": 0,
+        "pending_for": "155.053746875s"
+      },
+      "rest.get.assets.*.addresses._request.*": {
+        "read": 0,
+        "pending_for": "155.03600625s"
+      },
+      "rest.get.assets.*.history._request.*": {
+        "read": 0,
+        "pending_for": "155.0321825s"
+      },
+      "rest.get.assets.*.transactions._request.*": {
+        "read": 0,
+        "pending_for": "155.052969458s"
+      },
+      "rest.get.assets._request.*": {
+        "read": 0,
+        "pending_for": "155.062963458s"
+      },
+      "rest.get.assets.policy.*._request.*": {
+        "read": 0,
+        "pending_for": "155.048505167s"
+      },
+      "rest.get.blocks.*._request.*": {
+        "read": 0,
+        "pending_for": "155.054609417s"
+      },
+      "rest.get.blocks.*.addresses._request.*": {
+        "read": 0,
+        "pending_for": "155.048267833s"
+      },
+      "rest.get.blocks.*.next._request.*": {
+        "read": 0,
+        "pending_for": "155.059369958s"
+      },
+      "rest.get.blocks.*.previous._request.*": {
+        "read": 0,
+        "pending_for": "155.05018975s"
+      },
+      "rest.get.blocks.*.txs._request.*": {
+        "read": 0,
+        "pending_for": "155.042102667s"
+      },
+      "rest.get.blocks.*.txs.cbor._request.*": {
+        "read": 0,
+        "pending_for": "155.035511542s"
+      },
+      "rest.get.blocks.epoch.*.slot.*._request.*": {
+        "read": 0,
+        "pending_for": "155.03428725s"
+      },
+      "rest.get.blocks.slot.*._request.*": {
+        "read": 0,
+        "pending_for": "155.06047775s"
+      },
+      "rest.get.epochs.*._request.*": {
+        "read": 0,
+        "pending_for": "155.045188583s"
+      },
+      "rest.get.epochs.*.blocks.*._request.*": {
+        "read": 0,
+        "pending_for": "155.05635725s"
+      },
+      "rest.get.epochs.*.blocks._request.*": {
+        "read": 0,
+        "pending_for": "155.056778583s"
+      },
+      "rest.get.epochs.*.next._request.*": {
+        "read": 0,
+        "pending_for": "155.06442025s"
+      },
+      "rest.get.epochs.*.parameters._request.*": {
+        "read": 0,
+        "pending_for": "155.03967275s"
+      },
+      "rest.get.epochs.*.previous._request.*": {
+        "read": 0,
+        "pending_for": "155.057397375s"
+      },
+      "rest.get.epochs.*.stakes.*._request.*": {
+        "read": 0,
+        "pending_for": "155.04597425s"
+      },
+      "rest.get.epochs.*.stakes._request.*": {
+        "read": 0,
+        "pending_for": "155.038793625s"
+      },
+      "rest.get.governance.dreps.*._request.*": {
+        "read": 0,
+        "pending_for": "155.038611958s"
+      },
+      "rest.get.governance.dreps.*.delegators._request.*": {
+        "read": 0,
+        "pending_for": "155.059868042s"
+      },
+      "rest.get.governance.dreps.*.metadata._request.*": {
+        "read": 0,
+        "pending_for": "155.061547833s"
+      },
+      "rest.get.governance.dreps.*.updates._request.*": {
+        "read": 0,
+        "pending_for": "155.03705525s"
+      },
+      "rest.get.governance.dreps.*.votes._request.*": {
+        "read": 0,
+        "pending_for": "155.058306708s"
+      },
+      "rest.get.governance.dreps._request.*": {
+        "read": 0,
+        "pending_for": "155.047252833s"
+      },
+      "rest.get.governance.proposals.*.*._request.*": {
+        "read": 0,
+        "pending_for": "155.062662708s"
+      },
+      "rest.get.governance.proposals.*.*.metadata._request.*": {
+        "read": 0,
+        "pending_for": "155.047907458s"
+      },
+      "rest.get.governance.proposals.*.*.parameters._request.*": {
+        "read": 0,
+        "pending_for": "155.050656083s"
+      },
+      "rest.get.governance.proposals.*.*.votes._request.*": {
+        "read": 0,
+        "pending_for": "155.061157208s"
+      },
+      "rest.get.governance.proposals.*.*.withdrawals._request.*": {
+        "read": 0,
+        "pending_for": "155.029298875s"
+      },
+      "rest.get.governance.proposals._request.*": {
+        "read": 0,
+        "pending_for": "155.057558333s"
+      },
+      "rest.get.pools.*._request.*": {
+        "read": 0,
+        "pending_for": "155.041202708s"
+      },
+      "rest.get.pools.*.blocks._request.*": {
+        "read": 0,
+        "pending_for": "155.051817833s"
+      },
+      "rest.get.pools.*.delegators._request.*": {
+        "read": 0,
+        "pending_for": "155.05414275s"
+      },
+      "rest.get.pools.*.history._request.*": {
+        "read": 0,
+        "pending_for": "155.057863083s"
+      },
+      "rest.get.pools.*.metadata._request.*": {
+        "read": 0,
+        "pending_for": "155.033711875s"
+      },
+      "rest.get.pools.*.relays._request.*": {
+        "read": 0,
+        "pending_for": "155.043669375s"
+      },
+      "rest.get.pools.*.updates._request.*": {
+        "read": 0,
+        "pending_for": "155.047154458s"
+      },
+      "rest.get.pools.*.votes._request.*": {
+        "read": 0,
+        "pending_for": "155.058141875s"
+      },
+      "rest.get.pools._request.*": {
+        "read": 0,
+        "pending_for": "155.026814125s"
+      },
+      "rest.get.txs.*.*._request.*": {
+        "read": 0,
+        "pending_for": "155.037584167s"
+      },
+      "rest.get.txs.*._request.*": {
+        "read": 0,
+        "pending_for": "155.049953292s"
+      },
+      "rest.get.txs.metadata.*._request.*": {
+        "read": 0,
+        "pending_for": "155.054860833s"
+      }
+    },
+    "writes": {}
+  },
+  "rest-server": {
+    "reads": {},
+    "writes": {}
+  },
+  "snapshot-bootstrapper": {
+    "reads": {},
+    "writes": {}
+  },
+  "spdd-state": {
+    "reads": {
+      "cardano.query.spdd._request.*": {
+        "read": 0,
+        "pending_for": "155.056928333s"
+      }
+    },
+    "writes": {}
+  },
+  "spo-state": {
+    "reads": {
+      "cardano.block.proposed": {
+        "read": 885795
+      },
+      "cardano.certificates": {
+        "read": 885795,
+        "pending_for": "0ns"
+      },
+      "cardano.epoch.activity": {
+        "read": 41
+      },
+      "cardano.query.pools._request.*": {
+        "read": 0,
+        "pending_for": "155.049613208s"
+      },
+      "cardano.spo.distribution": {
+        "read": 41
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.504917ms"
+      }
+    },
+    "writes": {
+      "cardano.spo.state": {
+        "written": 41
+      },
+      "cardano.validation.spo": {
+        "written": 885795
+      }
+    }
+  },
+  "spy": {
+    "reads": {},
+    "writes": {}
+  },
+  "stake-delta-filter": {
+    "reads": {
+      "cardano.address.delta": {
+        "read": 885796
+      }
+    },
+    "writes": {
+      "cardano.stake.deltas": {
+        "written": 885795,
+        "pending_for": "0ns"
+      }
+    }
+  },
+  "tx-unpacker": {
+    "reads": {
+      "cardano.protocol.parameters": {
+        "read": 42
+      },
+      "cardano.sequence.bootstrapped": {
+        "read": 1
+      },
+      "cardano.txs": {
+        "read": 885795,
+        "pending_for": "0ns"
+      }
+    },
+    "writes": {
+      "cardano.asset.deltas": {
+        "written": 885795
+      },
+      "cardano.block.txs": {
+        "written": 885795
+      },
+      "cardano.certificates": {
+        "written": 885795
+      },
+      "cardano.governance": {
+        "written": 885795
+      },
+      "cardano.utxo.deltas": {
+        "written": 885795
+      },
+      "cardano.validation.tx": {
+        "written": 885795
+      },
+      "cardano.withdrawals": {
+        "written": 885795
+      }
+    }
+  },
+  "utxo-state": {
+    "reads": {
+      "cardano.query.utxos._request.*": {
+        "read": 0,
+        "pending_for": "155.063739042s"
+      },
+      "cardano.snapshot": {
+        "read": 0,
+        "pending_for": "155.055746458s"
+      },
+      "cardano.utxo.deltas": {
+        "read": 885796,
+        "pending_for": "0ns"
+      },
+      "clock.tick": {
+        "read": 156,
+        "pending_for": "62.502542ms"
+      }
+    },
+    "writes": {
+      "cardano.address.delta": {
+        "written": 885796
+      }
+    }
+  }
+}
