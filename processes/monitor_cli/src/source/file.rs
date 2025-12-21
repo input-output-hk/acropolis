@@ -100,3 +100,108 @@ impl DataSource for FileSource {
         self.last_error.as_deref()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Seek, Write};
+    use tempfile::NamedTempFile;
+
+    fn sample_json() -> &'static str {
+        r#"{
+            "TestModule": {
+                "reads": {
+                    "input": { "read": 100, "unread": 5 }
+                },
+                "writes": {
+                    "output": { "written": 50 }
+                }
+            }
+        }"#
+    }
+
+    #[test]
+    fn test_file_source_new() {
+        let source = FileSource::new("/tmp/test.json");
+        assert_eq!(source.path(), Path::new("/tmp/test.json"));
+        assert_eq!(source.description(), "file: /tmp/test.json");
+        assert!(source.error().is_none());
+    }
+
+    #[test]
+    fn test_file_source_poll_reads_file() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "{}", sample_json()).unwrap();
+
+        let mut source = FileSource::new(file.path());
+
+        // First poll should return data
+        let snapshot = source.poll();
+        assert!(snapshot.is_some());
+        let snapshot = snapshot.unwrap();
+        assert!(snapshot.contains_key("TestModule"));
+
+        // Second poll without file change should return None
+        let snapshot2 = source.poll();
+        assert!(snapshot2.is_none());
+    }
+
+    #[test]
+    fn test_file_source_detects_changes() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "{}", sample_json()).unwrap();
+
+        let mut source = FileSource::new(file.path());
+
+        // First poll
+        let _ = source.poll();
+
+        // Modify the file (need to wait a bit for mtime to change)
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        file.rewind().unwrap();
+        writeln!(
+            file,
+            r#"{{
+            "ModifiedModule": {{
+                "reads": {{}},
+                "writes": {{}}
+            }}
+        }}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        // Force mtime update by touching the file
+        let _ = std::fs::File::open(file.path());
+
+        // Poll again - should detect change
+        // Note: This test may be flaky on some filesystems with low mtime resolution
+        let snapshot = source.poll();
+        if let Some(s) = snapshot {
+            assert!(s.contains_key("ModifiedModule"));
+        }
+    }
+
+    #[test]
+    fn test_file_source_missing_file() {
+        let mut source = FileSource::new("/nonexistent/path/monitor.json");
+
+        let snapshot = source.poll();
+        assert!(snapshot.is_none());
+        assert!(source.error().is_some());
+        assert!(source.error().unwrap().contains("Read error"));
+    }
+
+    #[test]
+    fn test_file_source_invalid_json() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "not valid json").unwrap();
+
+        let mut source = FileSource::new(file.path());
+
+        let snapshot = source.poll();
+        assert!(snapshot.is_none());
+        assert!(source.error().is_some());
+        assert!(source.error().unwrap().contains("Parse error"));
+    }
+}

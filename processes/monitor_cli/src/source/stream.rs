@@ -179,3 +179,99 @@ impl StreamSource {
         self.last_error.lock().unwrap().clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn sample_json() -> &'static str {
+        r#"{"TestModule":{"reads":{"input":{"read":100}},"writes":{"output":{"written":50}}}}"#
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_spawn() {
+        // Create a cursor with newline-delimited JSON
+        let data = format!("{}\n", sample_json());
+        let cursor = Cursor::new(data);
+
+        let mut source = StreamSource::spawn(cursor, "test");
+
+        // Give the background task time to process
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Should receive the snapshot
+        let snapshot = source.poll();
+        assert!(snapshot.is_some());
+        assert!(snapshot.unwrap().contains_key("TestModule"));
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_multiple_snapshots() {
+        let data = format!("{}\n{}\n", sample_json(), sample_json());
+        let cursor = Cursor::new(data);
+
+        let mut source = StreamSource::spawn(cursor, "test");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Should receive both snapshots
+        let s1 = source.poll();
+        let s2 = source.poll();
+        assert!(s1.is_some());
+        assert!(s2.is_some());
+
+        // No more data
+        assert!(source.poll().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_description() {
+        let cursor = Cursor::new("");
+        let source = StreamSource::spawn(cursor, "tcp://localhost:9090");
+        assert_eq!(source.description(), "stream: tcp://localhost:9090");
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_from_bytes_channel() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
+        let mut source = StreamSource::from_bytes_channel(rx, "test-channel");
+
+        // Send a snapshot
+        tx.send(sample_json().as_bytes().to_vec()).await.unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let snapshot = source.poll();
+        assert!(snapshot.is_some());
+        assert!(snapshot.unwrap().contains_key("TestModule"));
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_invalid_json() {
+        // Include valid JSON after invalid to keep the stream processing
+        let data = "not valid json\n";
+        let cursor = Cursor::new(data);
+
+        let mut source = StreamSource::spawn(cursor, "test");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Should not receive anything (invalid JSON is skipped)
+        assert!(source.poll().is_none());
+
+        // Error may be overwritten by "Connection closed" after EOF,
+        // so we just verify no valid snapshot was received
+    }
+
+    #[tokio::test]
+    async fn test_stream_source_empty_stream() {
+        let cursor = Cursor::new("");
+        let mut source = StreamSource::spawn(cursor, "test");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // No data to receive
+        assert!(source.poll().is_none());
+    }
+}

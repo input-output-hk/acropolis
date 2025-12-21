@@ -1541,6 +1541,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "tempfile",
  "terminal-light",
  "tokio",
 ]
