@@ -65,7 +65,11 @@ struct Args {
 
     /// Topic to subscribe to (used with --subscribe)
     #[cfg(feature = "subscribe")]
-    #[arg(long, default_value = "caryatid.monitor", requires = "subscribe")]
+    #[arg(
+        long,
+        default_value = "caryatid.monitor.snapshot",
+        requires = "subscribe"
+    )]
     topic: String,
 
     /// Refresh interval in seconds (only used with --file)
