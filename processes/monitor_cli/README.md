@@ -1,237 +1,71 @@
-# Acropolis Monitor CLI
+# caryatid-doctor
 
-A Terminal User Interface (TUI) monitoring tool for tracking the health and performance of Acropolis processes.
-
-## Features
-
-- **Real-time Monitoring**: Automatically refreshes data at configurable intervals
-- **Health Status Tracking**: Color-coded health indicators (Healthy/Warning/Critical)
-- **Multiple Views**: Summary, Bottlenecks, and Data Flow visualization
-- **Search & Filter**: Quickly find specific modules or topics
-- **Sorting**: Customizable column sorting in all views
-- **Historical Trends**: Sparkline charts showing read/write activity
-- **Export**: Save current state to JSON for further analysis
-- **Theme Support**: Auto-detects terminal light/dark mode
+A diagnostic TUI for monitoring Caryatid message bus activity.
 
 ## Installation
 
-Build from the workspace root:
-
 ```bash
-cargo build -p acropolis_monitor_cli --release
+cargo build -p caryatid-doctor --release
 ```
-
-The binary will be available at `target/release/monitor-cli`.
 
 ## Usage
 
 ```bash
-monitor-cli [OPTIONS]
+# Monitor a JSON file (default mode)
+caryatid-doctor -f monitor.json
+
+# Connect to a TCP stream
+caryatid-doctor --connect localhost:9090
+
+# Subscribe to RabbitMQ (requires --features subscribe)
+caryatid-doctor --subscribe rabbitmq.toml --topic caryatid.monitor.snapshot
 ```
 
 ### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-f, --file <FILE>` | `monitor.json` | Path to the monitor.json data file |
-| `-c, --connect <HOST:PORT>` | - | Connect to a TCP endpoint for live snapshots |
-| `-s, --subscribe <CONFIG>` | - | Subscribe to message bus (requires `subscribe` feature) |
-| `-t, --topic <TOPIC>` | `caryatid.monitor.snapshot` | Topic to subscribe to (with `--subscribe`) |
-| `-r, --refresh <SECS>` | `1` | Refresh interval in seconds (file mode only) |
-| `--pending-warn <DURATION>` | `1s` | Pending duration warning threshold |
-| `--pending-crit <DURATION>` | `10s` | Pending duration critical threshold |
-| `--unread-warn <COUNT>` | `1000` | Unread message count warning threshold |
-| `--unread-crit <COUNT>` | `5000` | Unread message count critical threshold |
-| `-e, --export <FILE>` | - | Export state to JSON and exit (non-interactive) |
-
-### Examples
-
-```bash
-# Monitor with default settings (file mode)
-monitor-cli -f /path/to/monitor.json
-
-# Connect to a live TCP stream
-monitor-cli --connect localhost:9090
-
-# Subscribe to message bus (requires subscribe feature)
-monitor-cli --subscribe rabbitmq.toml
-
-# Subscribe to a custom topic
-monitor-cli --subscribe rabbitmq.toml --topic my.custom.topic
-
-# Custom thresholds for sensitive monitoring
-monitor-cli -f monitor.json --pending-warn 500ms --pending-crit 2s
-
-# Export current state without TUI
-monitor-cli -f monitor.json --export status.json
-
-# Fast refresh rate for debugging
-monitor-cli -f monitor.json -r 0.5
-```
+| `-f, --file` | `monitor.json` | Monitor JSON file path |
+| `-c, --connect` | - | TCP endpoint (host:port) |
+| `-s, --subscribe` | - | RabbitMQ config file |
+| `-t, --topic` | `caryatid.monitor.snapshot` | Subscription topic |
+| `-r, --refresh` | `1` | Refresh interval (seconds) |
+| `--pending-warn` | `1s` | Pending warning threshold |
+| `--pending-crit` | `10s` | Pending critical threshold |
+| `--unread-warn` | `1000` | Unread warning threshold |
+| `--unread-crit` | `5000` | Unread critical threshold |
+| `-e, --export` | - | Export to JSON and exit |
 
 ## Views
 
-### Summary View (Tab 1)
+| View | Key | Description |
+|------|-----|-------------|
+| Summary | `1` | Module overview with health status, rates, and sparklines |
+| Bottlenecks | `2` | Topics in warning/critical state |
+| Flow | `3` | Module communication patterns |
 
-Displays a table of all monitored modules with:
-- **Module**: Name of the module
-- **Reads**: Total messages read
-- **Rate**: Read rate (messages/second)
-- **Writes**: Total messages written
-- **Pending**: Maximum pending duration across topics
-- **Unread**: Total unread message count
-- **Trend**: Sparkline showing recent read activity
-- **Status**: Health indicator (Healthy/Warning/Critical)
+## Controls
 
-### Bottlenecks View (Tab 2)
-
-Lists all topics that are in Warning or Critical state:
-- Sorted by severity (Critical first by default)
-- Shows module name, topic, type (Read/Write), pending duration, and unread count
-- Displays "All systems healthy!" when no issues exist
-
-### Data Flow View (Tab 3)
-
-Visualizes module-to-module communication:
-- **Adjacency Matrix**: Shows relationships between all modules
-  - `->` Module sends data to another
-  - `<-` Module receives data from another
-  - `<->` Bidirectional communication
-- **Connection Detail**: Lists all connections for the selected module
-
-## Keyboard Controls
-
-### Navigation
 | Key | Action |
 |-----|--------|
-| `Left` / `Right` / `h` / `l` | Switch between views |
-| `Tab` / `Shift+Tab` | Switch between views |
-| `1`, `2`, `3` | Jump to specific view |
-| `Up` / `Down` / `j` / `k` | Move selection up/down |
-| `Page Up` / `Page Down` | Move selection by 10 |
-| `Home` / `End` | Jump to first/last item |
-| `Enter` | Open detail overlay |
-| `Esc` / `Backspace` | Go back / close overlay |
-
-### Search & Sort
-| Key | Action |
-|-----|--------|
-| `/` | Start filter/search |
-| `c` | Clear current filter |
-| `s` | Cycle sort column |
-| `S` | Toggle sort direction (asc/desc) |
-
-### General
-| Key | Action |
-|-----|--------|
-| `r` | Reload data from file |
-| `e` | Export current state to JSON |
-| `?` | Toggle help overlay |
+| `1` `2` `3` | Switch view |
+| `j`/`k` or arrows | Navigate |
+| `Enter` | Detail overlay |
+| `/` | Search |
+| `s` / `S` | Sort / reverse |
+| `e` | Export |
+| `?` | Help |
 | `q` | Quit |
 
-### Mouse Controls
-- **Scroll wheel**: Navigate up/down
-- **Left click**: Select item or switch tabs
-- **Right click**: Go back
+## RabbitMQ Subscription
 
-## Health Status Thresholds
-
-The tool evaluates health based on two metrics:
-
-1. **Pending Duration**: How long messages have been waiting
-   - Warning: >= `--pending-warn` (default: 1s)
-   - Critical: >= `--pending-crit` (default: 10s)
-
-2. **Unread Count**: Number of unread messages (reads only)
-   - Warning: >= `--unread-warn` (default: 1000)
-   - Critical: >= `--unread-crit` (default: 5000)
-
-A module's overall health is the **worst** status across all its topics.
-
-## Monitor Data Format
-
-The tool expects a `monitor.json` file with the following structure:
-
-```json
-{
-  "ModuleName": {
-    "reads": {
-      "TopicName": {
-        "read": 12345,
-        "pending_for": "1.234s",
-        "unread": 100
-      }
-    },
-    "writes": {
-      "TopicName": {
-        "written": 67890,
-        "pending_for": "0.5s"
-      }
-    }
-  }
-}
-```
-
-### Field Descriptions
-
-- **reads**: Map of topics this module reads from
-  - `read`: Total messages read
-  - `pending_for`: Duration since oldest pending message (optional)
-  - `unread`: Number of unread messages (optional)
-- **writes**: Map of topics this module writes to
-  - `written`: Total messages written
-  - `pending_for`: Duration since oldest pending write (optional)
-
-Duration values support: `ns`, `us`/`µs`, `ms`, `s` (e.g., `"1.5s"`, `"500ms"`)
-
-## Export Format
-
-When using `-e/--export` or pressing `e` in the TUI, the tool outputs:
-
-```json
-{
-  "summary": {
-    "total_modules": 10,
-    "healthy": 7,
-    "warning": 2,
-    "critical": 1,
-    "total_reads": 1234567,
-    "total_writes": 987654
-  },
-  "modules": [
-    {
-      "name": "ModuleName",
-      "total_read": 12345,
-      "total_written": 67890,
-      "health": "Healthy",
-      "reads": [...],
-      "writes": [...]
-    }
-  ],
-  "bottlenecks": [
-    {
-      "module": "ModuleName",
-      "topic": "TopicName",
-      "status": "Warning",
-      "pending_for": "1.5s"
-    }
-  ]
-}
-```
-
-## Message Bus Subscription (Optional Feature)
-
-The `subscribe` feature enables real-time monitoring via RabbitMQ message bus, allowing you to monitor remote Caryatid processes.
-
-### Building with Subscribe Support
+Build with the subscribe feature:
 
 ```bash
-cargo build -p acropolis_monitor_cli --features subscribe --release
+cargo build -p caryatid-doctor --features subscribe --release
 ```
 
-### Configuration
-
-Create a config file with RabbitMQ connection settings:
+Create a config file:
 
 ```toml
 # rabbitmq.toml
@@ -240,42 +74,23 @@ url = "amqp://127.0.0.1:5672/%2f"
 exchange = "caryatid"
 ```
 
-Alternatively, you can use the full Caryatid message-bus config format:
-
-```toml
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
-```
-
-### Enabling Monitor Publishing in Caryatid
-
-In your Caryatid process config, enable monitor topic publishing:
+Enable publishing in your Caryatid process:
 
 ```toml
 [monitor]
 topic = "caryatid.monitor.snapshot"
 frequency_secs = 5.0
 
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
-```
-
-Make sure the topic is routed to the external bus:
-
-```toml
 [[message-router.route]]
 pattern = "caryatid.monitor.*"
 bus = "external"
 ```
 
-## Tips
+## Health Thresholds
 
-- Use **Bottlenecks view** for quick triage of issues
-- Press `s` multiple times to cycle through sort columns
-- The **sparkline** in Summary view shows read activity trends over the last 60 samples
-- **Data Flow view** helps understand module dependencies and data pipelines
-- Set tighter thresholds (`--pending-warn`, etc.) for early warning detection
+Modules are marked unhealthy based on:
+
+- **Pending duration**: Time waiting on reads/writes
+- **Unread count**: Backlog of unread messages
+
+A module's status is the worst across all its topics.
