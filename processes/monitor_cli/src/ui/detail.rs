@@ -36,10 +36,10 @@ pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     // Calculate overlay size - use most of the screen
-    // Width: 95% of screen, max 100 chars
-    let overlay_width = (area.width * 95 / 100).min(100).max(MIN_OVERLAY_WIDTH);
-    // Height: 90% of screen, max 50 lines
-    let overlay_height = (area.height * 90 / 100).min(50).max(MIN_OVERLAY_HEIGHT);
+    // Width: 95% of screen, clamped to [MIN_OVERLAY_WIDTH, 100]
+    let overlay_width = (area.width * 95 / 100).clamp(MIN_OVERLAY_WIDTH, 100);
+    // Height: 90% of screen, clamped to [MIN_OVERLAY_HEIGHT, 50]
+    let overlay_height = (area.height * 90 / 100).clamp(MIN_OVERLAY_HEIGHT, 50);
 
     let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
     let y = area.y + (area.height.saturating_sub(overlay_height)) / 2;
