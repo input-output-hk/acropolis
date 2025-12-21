@@ -1,3 +1,6 @@
+// Binary includes library modules - some public API items are only for library consumers
+#![allow(unused)]
+
 use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};

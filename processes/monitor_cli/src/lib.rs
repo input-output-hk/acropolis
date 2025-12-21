@@ -1,3 +1,6 @@
+// Library crate: public API items may not be used by the binary
+#![allow(unused)]
+
 //! # caryatid-doctor
 //!
 //! A diagnostic TUI and library for monitoring Caryatid message bus activity.
