@@ -22,17 +22,26 @@ mod source;
 mod ui;
 
 use app::{App, View};
-use source::FileSource;
+use source::{DataSource, FileSource, StreamSource};
 
 #[derive(Parser, Debug)]
-#[command(name = "monitor-cli")]
-#[command(about = "TUI monitoring tool for Acropolis processes")]
+#[command(name = "caryatid-doctor")]
+#[command(about = "Diagnostic TUI for monitoring Caryatid message bus activity")]
 struct Args {
     /// Path to monitor.json file
-    #[arg(short, long, default_value = "monitor.json")]
+    #[arg(
+        short,
+        long,
+        default_value = "monitor.json",
+        conflicts_with = "connect"
+    )]
     file: PathBuf,
 
-    /// Refresh interval in seconds
+    /// Connect to a TCP endpoint for live snapshots (host:port)
+    #[arg(short, long)]
+    connect: Option<String>,
+
+    /// Refresh interval in seconds (only used with --file)
     #[arg(short, long, default_value = "1")]
     refresh: u64,
 
@@ -53,7 +62,7 @@ struct Args {
     unread_crit: u64,
 
     /// Export current state to JSON file and exit
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "connect")]
     export: Option<PathBuf>,
 }
 
@@ -78,6 +87,49 @@ fn main() -> Result<()> {
         return export_to_file(&args.file, &export_path, &thresholds);
     }
 
+    // Handle TCP connection mode
+    if let Some(ref addr) = args.connect {
+        return run_with_tcp(addr, thresholds);
+    }
+
+    // Default: file-based mode
+    run_with_file(&args.file, thresholds, Duration::from_secs(args.refresh))
+}
+
+/// Run with a file-based data source
+fn run_with_file(path: &PathBuf, thresholds: data::Thresholds, refresh: Duration) -> Result<()> {
+    let source = Box::new(FileSource::new(path));
+    run_tui(source, thresholds, refresh)
+}
+
+/// Run with a TCP stream data source
+fn run_with_tcp(addr: &str, thresholds: data::Thresholds) -> Result<()> {
+    // Build a tokio runtime for the TCP connection
+    let rt = tokio::runtime::Runtime::new()?;
+
+    let source = rt.block_on(async {
+        use tokio::net::TcpStream;
+
+        println!("Connecting to {}...", addr);
+        match TcpStream::connect(addr).await {
+            Ok(stream) => {
+                println!("Connected!");
+                Ok(Box::new(StreamSource::spawn(stream, addr)) as Box<dyn DataSource>)
+            }
+            Err(e) => Err(anyhow::anyhow!("Failed to connect to {}: {}", addr, e)),
+        }
+    })?;
+
+    // For TCP, we poll continuously (no refresh interval needed)
+    run_tui(source, thresholds, Duration::from_millis(100))
+}
+
+/// Run the TUI with the given data source
+fn run_tui(
+    source: Box<dyn DataSource>,
+    thresholds: data::Thresholds,
+    refresh_interval: Duration,
+) -> Result<()> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -93,13 +145,12 @@ fn main() -> Result<()> {
         original_hook(panic);
     }));
 
-    // Create data source and app
-    let source = Box::new(FileSource::new(&args.file));
+    // Create app and load initial data
     let mut app = App::new(source, thresholds);
     let _ = app.reload_data();
 
     // Run the main loop
-    let result = run_app(&mut terminal, &mut app, Duration::from_secs(args.refresh));
+    let result = run_app(&mut terminal, &mut app, refresh_interval);
 
     // Restore terminal
     disable_raw_mode()?;

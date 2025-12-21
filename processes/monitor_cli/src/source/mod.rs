@@ -1,17 +1,19 @@
 //! Data source abstraction for receiving monitor snapshots.
 //!
 //! This module provides a trait-based abstraction for receiving monitor data
-//! from various sources (files, message bus channels, etc.).
+//! from various sources (files, message bus channels, network streams, etc.).
 
 mod channel;
 mod file;
 mod snapshot;
+mod stream;
 
 pub use channel::ChannelSource;
 pub use file::FileSource;
 pub use snapshot::{
     MonitorSnapshot, SerializedModuleState, SerializedReadStreamState, SerializedWriteStreamState,
 };
+pub use stream::StreamSource;
 
 use std::fmt::Debug;
 
