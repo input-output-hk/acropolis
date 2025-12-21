@@ -4,94 +4,114 @@
 //! published on the Caryatid message bus, enabling real-time monitoring
 //! of a live system.
 //!
-//! # Architecture
+//! # Configuration
 //!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     Target Caryatid Process                     │
-//! │  ┌─────────┐    ┌─────────┐    ┌─────────────────────────────┐ │
-//! │  │ Module  │───▶│ Monitor │───▶│ Message Bus (topic publish) │ │
-//! │  └─────────┘    └─────────┘    └──────────────┬──────────────┘ │
-//! └───────────────────────────────────────────────┼────────────────┘
-//!                                                 │
-//!                                                 ▼
-//! ┌─────────────────────────────────────────────────────────────────┐
-//! │                     monitor_cli Process                         │
-//! │  ┌─────────────────────────────┐    ┌────────────────────────┐ │
-//! │  │ Message Bus (topic subscribe)│───▶│ MonitorSubscriber      │ │
-//! │  └─────────────────────────────┘    └───────────┬────────────┘ │
-//! │                                                 │ watch::Sender │
-//! │                                                 ▼               │
-//! │                                    ┌────────────────────────┐  │
-//! │                                    │ ChannelSource (TUI)    │  │
-//! │                                    └────────────────────────┘  │
-//! └─────────────────────────────────────────────────────────────────┘
+//! The subscribe feature requires a simple config file with RabbitMQ settings:
+//!
+//! ```toml
+//! [rabbitmq]
+//! url = "amqp://127.0.0.1:5672/%2f"
+//! exchange = "caryatid"
 //! ```
 //!
 //! # Usage
 //!
 //! ```bash
-//! # Subscribe to monitor snapshots from a caryatid process
-//! caryatid-doctor --subscribe config.toml --topic caryatid.monitor
+//! caryatid-doctor --subscribe config.toml --topic caryatid.monitor.snapshot
 //! ```
-
-mod message;
-mod subscriber;
-
-pub use message::Message;
-pub use subscriber::MonitorSubscriber;
 
 use crate::source::{ChannelSource, MonitorSnapshot};
 use anyhow::Result;
-use caryatid_process::Process;
+use caryatid_sdk::MessageBus;
 use config::{Config, Environment, File};
 use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::watch;
 
-/// Run monitor_cli as a caryatid subscriber.
+// Re-export for use in main.rs
+pub use caryatid_process::MonitorSnapshot as CaryatidMonitorSnapshot;
+
+/// Create a subscriber that connects directly to RabbitMQ.
 ///
-/// This creates a minimal caryatid process that subscribes to the monitor
-/// topic and forwards snapshots to the TUI via a channel.
+/// This bypasses the full caryatid Process machinery and just uses
+/// the RabbitMQ bus directly for subscribing to topics.
 ///
 /// # Arguments
 ///
-/// * `config_path` - Path to the caryatid config file (for message bus settings)
-/// * `topic` - The topic to subscribe to for monitor snapshots
+/// * `config_path` - Path to config file with RabbitMQ settings
+/// * `topic` - The topic to subscribe to
 ///
 /// # Returns
 ///
-/// A tuple of (sender, source) where:
-/// - sender is used internally by the subscriber module
-/// - source is a ChannelSource that can be used with the TUI
+/// A tuple of (source, handle) where:
+/// - source is a ChannelSource for the TUI
+/// - handle is the background task reading from RabbitMQ
 pub async fn create_subscriber(
     config_path: &Path,
     topic: &str,
-) -> Result<(
-    watch::Sender<MonitorSnapshot>,
-    ChannelSource,
-    tokio::task::JoinHandle<Result<()>>,
-)> {
-    // Create the channel for forwarding snapshots
-    let (tx, source) = ChannelSource::create(&format!("subscribe:{}", topic));
+) -> Result<(ChannelSource, tokio::task::JoinHandle<()>)> {
+    use caryatid_process::rabbit_mq_bus::RabbitMQBus;
 
     // Load config
-    let config = Arc::new(
-        Config::builder()
-            .add_source(File::from(config_path))
-            .add_source(Environment::with_prefix("CARYATID"))
-            .build()?,
-    );
+    let config = Config::builder()
+        .add_source(File::from(config_path))
+        .add_source(Environment::with_prefix("CARYATID"))
+        .build()?;
 
-    // Create the process
-    let mut process = Process::<Message>::create(config).await;
+    // Extract RabbitMQ config - support both [rabbitmq] and [message-bus.external] formats
+    let bus_config = if let Ok(rabbitmq) = config.get_table("rabbitmq") {
+        caryatid_sdk::config::config_from_value(rabbitmq)
+    } else if let Ok(message_bus) = config.get_table("message-bus") {
+        // Find the first rabbit-mq bus
+        let mut found = None;
+        for (_id, bus_conf) in message_bus {
+            if let Ok(tbl) = bus_conf.into_table() {
+                let cfg = caryatid_sdk::config::config_from_value(tbl);
+                if cfg.get_string("class").ok() == Some("rabbit-mq".to_string()) {
+                    found = Some(cfg);
+                    break;
+                }
+            }
+        }
+        found.ok_or_else(|| anyhow::anyhow!("No rabbit-mq bus found in config"))?
+    } else {
+        return Err(anyhow::anyhow!(
+            "Config must contain [rabbitmq] or [message-bus.*.class = \"rabbit-mq\"]"
+        ));
+    };
 
-    // Register our subscriber module with the channel sender
-    let tx_clone = tx.clone();
-    MonitorSubscriber::register_with_sender(&mut process, tx_clone, topic.to_string());
+    // Create the RabbitMQ bus directly
+    let bus = RabbitMQBus::<serde_json::Value>::new(&bus_config).await?;
 
-    // Start the process in a background task
-    let handle = tokio::spawn(async move { process.run().await });
+    // Subscribe to the topic
+    let mut subscription = bus.subscribe(topic).await?;
 
-    Ok((tx, source, handle))
+    // Create channel for forwarding to TUI
+    let (tx, source) = ChannelSource::create(&format!("rabbitmq:{}", topic));
+
+    // Spawn background task to read messages
+    let handle = tokio::spawn(async move {
+        loop {
+            match subscription.read().await {
+                Ok((_, message)) => {
+                    // Try to deserialize as MonitorSnapshot
+                    match serde_json::from_value::<MonitorSnapshot>(message.as_ref().clone()) {
+                        Ok(snapshot) => {
+                            if tx.send(snapshot).is_err() {
+                                // Receiver dropped
+                                break;
+                            }
+                        }
+                        Err(_e) => {
+                            // Not a valid snapshot, skip
+                        }
+                    }
+                }
+                Err(_e) => {
+                    // Connection error, exit
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok((source, handle))
 }
