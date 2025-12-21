@@ -2,28 +2,27 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 
+/// Suffix to nanoseconds multiplier (order matters: longer suffixes first)
+const UNITS: &[(&str, f64)] = &[
+    ("ns", 1.0),
+    ("µs", 1_000.0),
+    ("us", 1_000.0),
+    ("ms", 1_000_000.0),
+    ("s", 1_000_000_000.0),
+];
+
 /// Parse duration strings like "29.99s", "988.82ms", "16.958µs", "0ns"
 pub fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
 
-    if s.ends_with("ns") {
-        let val: f64 = s.trim_end_matches("ns").parse()?;
-        Ok(Duration::from_nanos(val as u64))
-    } else if s.ends_with("µs") {
-        let val: f64 = s.trim_end_matches("µs").parse()?;
-        Ok(Duration::from_nanos((val * 1_000.0) as u64))
-    } else if s.ends_with("us") {
-        let val: f64 = s.trim_end_matches("us").parse()?;
-        Ok(Duration::from_nanos((val * 1_000.0) as u64))
-    } else if s.ends_with("ms") {
-        let val: f64 = s.trim_end_matches("ms").parse()?;
-        Ok(Duration::from_nanos((val * 1_000_000.0) as u64))
-    } else if s.ends_with('s') {
-        let val: f64 = s.trim_end_matches('s').parse()?;
-        Ok(Duration::from_secs_f64(val))
-    } else {
-        bail!("Unknown duration format: {}", s)
+    for (suffix, multiplier) in UNITS {
+        if let Some(val_str) = s.strip_suffix(suffix) {
+            let val: f64 = val_str.parse()?;
+            return Ok(Duration::from_nanos((val * multiplier) as u64));
+        }
     }
+
+    bail!("Unknown duration format: {}", s)
 }
 
 /// Format a duration for display
