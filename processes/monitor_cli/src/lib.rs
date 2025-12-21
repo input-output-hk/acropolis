@@ -10,6 +10,34 @@
 //! snapshots from various sources (files, channels, network streams) and
 //! display them in an interactive terminal UI.
 //!
+//! ## Architecture
+//!
+//! The crate is organized into four main modules:
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────┐
+//! │                        Application                          │
+//! │  ┌─────────┐    ┌──────────┐    ┌─────────┐    ┌─────────┐ │
+//! │  │  app    │───▶│   data   │───▶│   ui    │───▶│ Terminal│ │
+//! │  │ (state) │    │(processing)   │(rendering)   │         │ │
+//! │  └────┬────┘    └──────────┘    └─────────┘    └─────────┘ │
+//! │       │                                                     │
+//! │       ▼                                                     │
+//! │  ┌─────────┐                                                │
+//! │  │ source  │◀── FileSource | StreamSource | ChannelSource  │
+//! │  │ (input) │                                                │
+//! │  └─────────┘                                                │
+//! └─────────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! - **[`app`]**: Application state, view navigation, and user interaction logic
+//! - **[`source`]**: Data source abstraction ([`DataSource`] trait) with implementations
+//!   for file polling, TCP streams, and channel-based input
+//! - **[`data`]**: Data models and processing - converts raw snapshots into health-annotated
+//!   [`MonitorData`], tracks history for sparklines, and builds data flow graphs
+//! - **[`ui`]**: Terminal rendering using ratatui - summary tables, bottleneck views,
+//!   flow matrices, and theme support
+//!
 //! ## Features
 //!
 //! - **Summary view**: Overview of all modules with health status
