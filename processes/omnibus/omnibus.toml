@@ -193,8 +193,8 @@ port = 4340
 #topic = "cardano.#"
 
 [monitor]
-topic = "caryatid.monitor.snapshot" # Publish snapshots to message bus
-frequency_secs = 5.0    # every 5 seconds
+topic = "caryatid.monitor.snapshot"
+frequency_secs = 5.0
 
 # ============================================================================
 # Message Bus Configuration
@@ -212,11 +212,6 @@ worker-queue-size = 100
 bulk-block-capacity = 50
 bulk-resume-capacity = 75
 
-# Message routing
-[[message-router.route]]  # Monitor snapshots go to external bus for remote monitoring
-pattern = "caryatid.monitor.*"
-bus = "external"
-
-[[message-router.route]]  # Everything else is internal only
+[[message-router.route]]
 pattern = "#"
 bus = "internal"
