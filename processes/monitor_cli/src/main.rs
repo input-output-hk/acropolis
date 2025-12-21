@@ -35,16 +35,25 @@ use source::{DataSource, FileSource, StreamSource};
 #[command(about = "Diagnostic TUI for monitoring Caryatid message bus activity")]
 struct Args {
     /// Path to monitor.json file
-    #[arg(
-        short,
-        long,
-        default_value = "monitor.json",
-        conflicts_with_all = ["connect", "subscribe"]
+    #[cfg_attr(
+        feature = "subscribe",
+        arg(short, long, default_value = "monitor.json", conflicts_with_all = ["connect", "subscribe"])
+    )]
+    #[cfg_attr(
+        not(feature = "subscribe"),
+        arg(short, long, default_value = "monitor.json", conflicts_with_all = ["connect"])
     )]
     file: PathBuf,
 
     /// Connect to a TCP endpoint for live snapshots (host:port)
-    #[arg(short, long, conflicts_with_all = ["file", "subscribe"])]
+    #[cfg_attr(
+        feature = "subscribe",
+        arg(short, long, conflicts_with_all = ["file", "subscribe"])
+    )]
+    #[cfg_attr(
+        not(feature = "subscribe"),
+        arg(short, long, conflicts_with_all = ["file"])
+    )]
     connect: Option<String>,
 
     /// Subscribe to monitor snapshots via caryatid message bus.
@@ -133,28 +142,22 @@ fn run_with_subscribe(
     topic: &str,
     thresholds: data::Thresholds,
 ) -> Result<()> {
-    use subscribe::{create_subscriber, Message, MonitorSubscriber};
-
-    // Initialize tracing for caryatid
-    tracing_subscriber::fmt::init();
+    use subscribe::create_subscriber;
 
     // Build a tokio runtime
     let rt = tokio::runtime::Runtime::new()?;
 
     // Create the subscriber and get the channel source
     let (source, handle) = rt.block_on(async {
-        println!("Connecting to message bus...");
-        let (_tx, source, handle) = create_subscriber(config_path, topic).await?;
-        println!("Subscribed to topic: {}", topic);
+        let (source, handle) = create_subscriber(config_path, topic).await?;
         Ok::<_, anyhow::Error>((source, handle))
     })?;
 
     // Run the TUI in the main thread while the async runtime runs in the background
-    // The runtime is kept alive by the `rt` variable
     let result = run_tui(Box::new(source), thresholds, Duration::from_millis(100));
 
-    // Signal shutdown (the handle will be dropped when rt is dropped)
-    drop(handle);
+    // Signal shutdown
+    handle.abort();
 
     result
 }

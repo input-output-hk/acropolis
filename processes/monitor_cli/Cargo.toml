@@ -29,9 +29,8 @@ terminal-light = "1.4"
 config = { workspace = true }
 
 # Caryatid integration (optional feature)
-# Using path dependencies for local development until MonitorSnapshot is published
-caryatid_sdk = { path = "../../../caryatid/sdk", optional = true }
-caryatid_process = { path = "../../../caryatid/process", optional = true }
+caryatid_sdk = { workspace = true, optional = true }
+caryatid_process = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }

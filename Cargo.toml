@@ -43,11 +43,11 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-caryatid_sdk = "0.14.1"
-caryatid_process = "0.14.1"
-caryatid_module_rest_server = "0.15.2"
-caryatid_module_clock = "0.13.2"
-caryatid_module_spy = "0.13.2"
+caryatid_sdk = { path = "../caryatid/sdk"}
+caryatid_process = { path = "../caryatid/process"}
+caryatid_module_rest_server = { path = "../caryatid/modules/rest_server" }
+caryatid_module_clock = { path = "../caryatid/modules/clock" }
+caryatid_module_spy = { path = "../caryatid/modules/spy" }
 anyhow = "1.0"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "string"] }
