@@ -213,9 +213,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, content_start_row: u
                             }
                         }
                     }
-                    View::ModuleDetail => {
-                        // Module detail doesn't have selectable items currently
-                    }
                 }
             }
 

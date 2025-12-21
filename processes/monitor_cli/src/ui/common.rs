@@ -114,7 +114,6 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let selected = match app.current_view {
         View::Summary => 0,
         View::Bottleneck => 1,
-        View::ModuleDetail => 0, // Falls back to Summary
         View::DataFlow => 2,
     };
 
@@ -160,7 +159,6 @@ pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 }
             }
             View::DataFlow => "↑↓:select Tab:switch Enter:detail ?:help q:quit",
-            View::ModuleDetail => "Esc:back ?:help q:quit",
         };
 
         format!(

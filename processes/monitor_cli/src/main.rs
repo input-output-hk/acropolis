@@ -211,9 +211,9 @@ fn run_app(
             // Render tabs
             ui::common::render_tabs(frame, app, chunks[1]);
 
-            // Render current view (ModuleDetail falls back to Summary as it's now an overlay)
+            // Render current view
             match app.current_view {
-                View::Summary | View::ModuleDetail => ui::summary::render(frame, app, chunks[2]),
+                View::Summary => ui::summary::render(frame, app, chunks[2]),
                 View::Bottleneck => ui::bottleneck::render(frame, app, chunks[2]),
                 View::DataFlow => ui::flow::render(frame, app, chunks[2]),
             }

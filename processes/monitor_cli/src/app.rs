@@ -9,39 +9,43 @@ use crate::ui::BottleneckSortColumn;
 use crate::ui::Theme;
 
 /// The current view/tab in the TUI.
+///
+/// Module detail is shown as an overlay (controlled by `App::show_detail_overlay`)
+/// rather than as a separate view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
+    /// Overview of all modules with health status.
     Summary,
+    /// Topics with pending reads/writes that need attention.
     Bottleneck,
-    #[allow(dead_code)]
-    ModuleDetail, // Legacy - now handled as overlay, kept for pattern matching
+    /// Adjacency matrix showing producer/consumer relationships.
     DataFlow,
 }
 
 impl View {
+    /// Cycle to the next view.
     pub fn next(self) -> Self {
         match self {
             View::Summary => View::Bottleneck,
             View::Bottleneck => View::DataFlow,
-            View::ModuleDetail => View::Summary, // Fallback - shouldn't be used for tab nav
             View::DataFlow => View::Summary,
         }
     }
 
+    /// Cycle to the previous view.
     pub fn prev(self) -> Self {
         match self {
             View::Summary => View::DataFlow,
             View::Bottleneck => View::Summary,
-            View::ModuleDetail => View::Summary, // Fallback - shouldn't be used for tab nav
             View::DataFlow => View::Bottleneck,
         }
     }
 
+    /// Returns the display label for this view.
     pub fn label(&self) -> &'static str {
         match self {
             View::Summary => "Summary",
             View::Bottleneck => "Bottlenecks",
-            View::ModuleDetail => "Detail",
             View::DataFlow => "Flow",
         }
     }
@@ -228,7 +232,7 @@ impl App {
 
     pub fn select_next_n(&mut self, n: usize) {
         match self.current_view {
-            View::Summary | View::ModuleDetail => {
+            View::Summary => {
                 // Navigate by visual position in filtered/sorted list
                 if let Some(ref data) = self.data {
                     let filtered_count = self.filtered_module_count(data);
@@ -255,8 +259,7 @@ impl App {
 
     pub fn select_prev_n(&mut self, n: usize) {
         match self.current_view {
-            View::Summary | View::ModuleDetail | View::DataFlow => {
-                // Navigate by module
+            View::Summary | View::DataFlow => {
                 self.selected_module_index = self.selected_module_index.saturating_sub(n);
             }
             View::Bottleneck => {
@@ -267,7 +270,7 @@ impl App {
 
     pub fn select_first(&mut self) {
         match self.current_view {
-            View::Summary | View::ModuleDetail | View::DataFlow => {
+            View::Summary | View::DataFlow => {
                 self.selected_module_index = 0;
             }
             View::Bottleneck => {
@@ -278,7 +281,7 @@ impl App {
 
     pub fn select_last(&mut self) {
         match self.current_view {
-            View::Summary | View::ModuleDetail => {
+            View::Summary => {
                 if let Some(ref data) = self.data {
                     let filtered_count = self.filtered_module_count(data);
                     self.selected_module_index = filtered_count.saturating_sub(1);
@@ -307,12 +310,15 @@ impl App {
     }
 
     /// Get the actual module index from the visual index (after sorting/filtering).
-    /// Returns the raw index into data.modules for the currently selected visual row.
+    ///
+    /// Returns the raw index into `data.modules` for the currently selected visual row.
+    /// This is needed because the Summary view applies sorting and filtering, so the
+    /// visual row index differs from the underlying data index.
     pub fn get_selected_module_raw_index(&self) -> Option<usize> {
         let data = self.data.as_ref()?;
 
         match self.current_view {
-            View::Summary | View::ModuleDetail => {
+            View::Summary => {
                 // Build sorted/filtered list and look up raw index
                 let mut modules: Vec<(usize, &crate::data::ModuleData)> = data
                     .modules
@@ -329,7 +335,7 @@ impl App {
                 modules.get(self.selected_module_index).map(|(idx, _)| *idx)
             }
             View::DataFlow => {
-                // DataFlow uses raw index directly
+                // DataFlow uses raw index directly (no filtering)
                 if self.selected_module_index < data.modules.len() {
                     Some(self.selected_module_index)
                 } else {
@@ -337,7 +343,7 @@ impl App {
                 }
             }
             View::Bottleneck => {
-                // Bottleneck view doesn't select modules the same way
+                // Bottleneck view selects topics, not modules
                 None
             }
         }
