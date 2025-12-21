@@ -1,3 +1,8 @@
+//! Event handling for keyboard and mouse input.
+//!
+//! Processes crossterm events and dispatches them to the appropriate
+//! App methods based on the current state (view, overlay, filter mode).
+
 use std::time::Duration;
 
 use anyhow::Result;
@@ -7,7 +12,10 @@ use crossterm::event::{
 
 use crate::app::{App, View};
 
-/// Poll for events with a timeout
+/// Poll for terminal events with a timeout.
+///
+/// Returns `Ok(Some(event))` if an event is available, `Ok(None)` if the
+/// timeout expired, or an error if polling failed.
 pub fn poll_event(timeout: Duration) -> Result<Option<Event>> {
     if event::poll(timeout)? {
         Ok(Some(event::read()?))
@@ -16,7 +24,13 @@ pub fn poll_event(timeout: Duration) -> Result<Option<Event>> {
     }
 }
 
-/// Handle a key event
+/// Handle a keyboard event.
+///
+/// Behavior depends on current state:
+/// - Help overlay shown: any key closes it
+/// - Detail overlay shown: Esc/Enter/q closes, arrows navigate
+/// - Filter active: text input mode
+/// - Normal: navigation, sorting, view switching
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     // If help is shown, any key closes it
     if app.show_help {
@@ -130,7 +144,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key input while filter is active
+/// Handle keyboard input while filter/search mode is active.
 fn handle_filter_input(app: &mut App, key: KeyEvent) {
     match key.code {
         // Confirm filter
@@ -165,7 +179,11 @@ fn handle_filter_input(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle mouse events
+/// Handle mouse events (scroll, click, right-click).
+///
+/// # Arguments
+///
+/// * `content_start_row` - The row where content starts (after header/tabs/table header)
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, content_start_row: u16) {
     match mouse.kind {
         // Scroll wheel

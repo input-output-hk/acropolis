@@ -1,3 +1,8 @@
+//! Bottleneck view rendering.
+//!
+//! Displays topics that are in Warning or Critical state, helping
+//! identify performance issues and backlogs.
+
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Modifier, Style},
@@ -10,19 +15,26 @@ use crate::app::App;
 use crate::data::{duration::format_duration, HealthStatus, UnhealthyTopic};
 use std::time::Duration;
 
-/// Column to sort bottlenecks by
+/// Column to sort bottlenecks by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BottleneckSortColumn {
+    /// Sort by health status (Critical first).
     #[default]
     Status,
+    /// Sort by module name.
     Module,
+    /// Sort by topic name.
     Topic,
+    /// Sort by type (Read/Write).
     Kind,
+    /// Sort by pending duration.
     Pending,
+    /// Sort by unread count.
     Unread,
 }
 
 impl BottleneckSortColumn {
+    /// Cycle to the next sort column.
     pub fn next(self) -> Self {
         match self {
             Self::Status => Self::Module,
@@ -35,7 +47,7 @@ impl BottleneckSortColumn {
     }
 }
 
-/// Render the bottleneck view as a table (like Summary view)
+/// Render the Bottleneck view showing unhealthy topics.
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;

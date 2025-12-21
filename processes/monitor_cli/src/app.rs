@@ -52,10 +52,15 @@ impl View {
 }
 
 /// Saved state for returning to a previous view.
+///
+/// Used by the view stack to restore navigation state when going back.
 #[derive(Debug, Clone)]
 pub struct ViewState {
+    /// The view that was active.
     pub view: View,
+    /// The selected module index in that view.
     pub selected_module_index: usize,
+    /// The selected topic index (for Bottleneck view).
     pub selected_topic_index: usize,
 }
 
@@ -207,29 +212,35 @@ impl App {
         }
     }
 
+    /// Switch to the next view (cycles through Summary → Bottleneck → Flow).
     pub fn next_view(&mut self) {
         self.current_view = self.current_view.next();
         self.selected_topic_index = 0;
     }
 
+    /// Switch to the previous view (cycles through Flow → Bottleneck → Summary).
     pub fn prev_view(&mut self) {
         self.current_view = self.current_view.prev();
         self.selected_topic_index = 0;
     }
 
+    /// Switch to a specific view.
     pub fn set_view(&mut self, view: View) {
         self.current_view = view;
         self.selected_topic_index = 0;
     }
 
+    /// Move selection down by one item.
     pub fn select_next(&mut self) {
         self.select_next_n(1);
     }
 
+    /// Move selection up by one item.
     pub fn select_prev(&mut self) {
         self.select_prev_n(1);
     }
 
+    /// Move selection down by n items.
     pub fn select_next_n(&mut self, n: usize) {
         match self.current_view {
             View::Summary => {
@@ -257,6 +268,7 @@ impl App {
         }
     }
 
+    /// Move selection up by n items.
     pub fn select_prev_n(&mut self, n: usize) {
         match self.current_view {
             View::Summary | View::DataFlow => {
@@ -268,6 +280,7 @@ impl App {
         }
     }
 
+    /// Jump to the first item in the list.
     pub fn select_first(&mut self) {
         match self.current_view {
             View::Summary | View::DataFlow => {
@@ -279,6 +292,7 @@ impl App {
         }
     }
 
+    /// Jump to the last item in the list.
     pub fn select_last(&mut self) {
         match self.current_view {
             View::Summary => {
@@ -349,6 +363,7 @@ impl App {
         }
     }
 
+    /// Open the detail overlay for the currently selected module.
     pub fn enter_detail(&mut self) {
         // Toggle the detail overlay instead of changing views
         if self.current_view == View::Summary || self.current_view == View::Bottleneck {
@@ -356,6 +371,7 @@ impl App {
         }
     }
 
+    /// Navigate back: close overlay first, then pop view stack, then go to Summary.
     pub fn go_back(&mut self) {
         // First close any overlays
         if self.show_detail_overlay {
@@ -371,14 +387,17 @@ impl App {
         }
     }
 
+    /// Close the detail overlay if open.
     pub fn close_overlay(&mut self) {
         self.show_detail_overlay = false;
     }
 
+    /// Toggle the help overlay.
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
     }
 
+    /// Cycle to the next sort column for the current view.
     pub fn cycle_sort(&mut self) {
         match self.current_view {
             View::Summary => self.sort_column = self.sort_column.next(),
@@ -387,6 +406,7 @@ impl App {
         }
     }
 
+    /// Toggle sort direction between ascending and descending.
     pub fn toggle_sort_direction(&mut self) {
         match self.current_view {
             View::Summary => self.sort_ascending = !self.sort_ascending,
@@ -395,23 +415,28 @@ impl App {
         }
     }
 
+    /// Enter filter input mode (starts capturing keystrokes for search).
     pub fn start_filter(&mut self) {
         self.filter_active = true;
     }
 
+    /// Exit filter input mode without clearing the filter text.
     pub fn cancel_filter(&mut self) {
         self.filter_active = false;
     }
 
+    /// Clear the filter text and exit filter mode.
     pub fn clear_filter(&mut self) {
         self.filter_text.clear();
         self.filter_active = false;
     }
 
+    /// Append a character to the filter text.
     pub fn filter_push(&mut self, c: char) {
         self.filter_text.push(c);
     }
 
+    /// Remove the last character from the filter text.
     pub fn filter_pop(&mut self) {
         self.filter_text.pop();
     }
@@ -439,6 +464,7 @@ impl App {
             .count()
     }
 
+    /// Signal the application to quit.
     pub fn quit(&mut self) {
         self.running = false;
     }

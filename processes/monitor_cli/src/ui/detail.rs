@@ -1,3 +1,7 @@
+//! Detail overlay rendering.
+//!
+//! Displays a modal overlay with detailed information about a selected module.
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -9,13 +13,14 @@ use ratatui::{
 use crate::app::App;
 use crate::data::duration::format_duration;
 
-/// Minimum dimensions required for the detail overlay to render properly.
+/// Minimum width required for the detail overlay to render properly.
 const MIN_OVERLAY_WIDTH: u16 = 50;
+/// Minimum height required for the detail overlay to render properly.
 const MIN_OVERLAY_HEIGHT: u16 = 16;
 
 /// Render the module detail as a modal overlay.
 ///
-/// The overlay displays detailed information about the selected module including
+/// Shows detailed information about the selected module including
 /// its health status, read/write counts, and per-topic statistics.
 pub fn render_overlay(frame: &mut Frame, app: &App, area: Rect) {
     // Skip rendering if terminal is too small for the overlay

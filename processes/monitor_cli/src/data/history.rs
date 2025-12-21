@@ -1,19 +1,24 @@
+//! Historical data tracking for sparklines and rate calculations.
+
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use super::monitor::MonitorData;
 
-/// Maximum number of historical snapshots to keep
+/// Maximum number of historical snapshots to keep.
 const MAX_HISTORY_SIZE: usize = 60;
 
-/// Tracks historical data for trending and sparklines
+/// Tracks historical data for trending and sparklines.
+///
+/// Records snapshots over time to enable rate calculations and
+/// visual trend indicators in the UI.
 #[derive(Debug, Clone)]
 pub struct History {
-    /// Historical read counts per module (module_name -> readings)
+    /// Historical read counts per module (module_name -> readings).
     pub module_reads: HashMap<String, VecDeque<u64>>,
-    /// Historical write counts per module
+    /// Historical write counts per module.
     pub module_writes: HashMap<String, VecDeque<u64>>,
-    /// Timestamps of snapshots
+    /// Timestamps of snapshots for rate calculations.
     pub timestamps: VecDeque<Instant>,
 }
 
@@ -24,6 +29,7 @@ impl Default for History {
 }
 
 impl History {
+    /// Create a new empty history.
     pub fn new() -> Self {
         Self {
             module_reads: HashMap::new(),
@@ -55,11 +61,14 @@ impl History {
         }
     }
 
-    /// Get sparkline data for reads (normalized to 0-7 for 8 bar levels)
+    /// Get sparkline data for reads (normalized to 0-7 for 8 bar levels).
+    ///
+    /// Returns an empty Vec if there's not enough history.
     pub fn get_reads_sparkline(&self, module_name: &str) -> Vec<u8> {
         self.normalize_sparkline(self.module_reads.get(module_name))
     }
 
+    /// Normalize values to 0-7 range for sparkline display.
     fn normalize_sparkline(&self, data: Option<&VecDeque<u64>>) -> Vec<u8> {
         let Some(values) = data else {
             return Vec::new();
@@ -90,7 +99,9 @@ impl History {
             .collect()
     }
 
-    /// Get the rate of change (messages per second) for reads
+    /// Get the rate of change (messages per second) for reads.
+    ///
+    /// Returns None if there's not enough history to calculate a rate.
     pub fn get_read_rate(&self, module_name: &str) -> Option<f64> {
         let reads = self.module_reads.get(module_name)?;
         if reads.len() < 2 || self.timestamps.len() < 2 {

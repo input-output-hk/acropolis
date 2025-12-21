@@ -1,20 +1,28 @@
+//! Data flow graph construction for visualizing producer/consumer relationships.
+
 use std::collections::{HashMap, HashSet};
 
 use super::monitor::MonitorData;
 
-/// Data flow graph showing producer/consumer relationships
+/// Data flow graph showing producer/consumer relationships.
+///
+/// Used by the Flow view to display which modules communicate
+/// with each other via message bus topics.
 #[derive(Debug, Clone)]
 pub struct DataFlowGraph {
-    /// topic -> list of modules that write to it
+    /// Mapping of topic -> modules that write to it.
     pub producers: HashMap<String, Vec<String>>,
-    /// topic -> list of modules that read from it
+    /// Mapping of topic -> modules that read from it.
     pub consumers: HashMap<String, Vec<String>>,
-    /// All unique topics
+    /// All unique topics, sorted alphabetically.
     pub topics: Vec<String>,
 }
 
 impl DataFlowGraph {
-    /// Build a flow graph from monitor data
+    /// Build a flow graph from monitor data.
+    ///
+    /// Extracts all read/write relationships and organizes them
+    /// by topic for efficient lookup.
     pub fn from_monitor_data(data: &MonitorData) -> Self {
         let mut producers: HashMap<String, Vec<String>> = HashMap::new();
         let mut consumers: HashMap<String, Vec<String>> = HashMap::new();

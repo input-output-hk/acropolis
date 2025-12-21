@@ -1,3 +1,7 @@
+//! Common UI components shared across views.
+//!
+//! This module contains the header bar, tab bar, status bar, and help overlay.
+
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -9,7 +13,9 @@ use ratatui::{
 use crate::app::{App, View};
 use crate::data::HealthStatus;
 
-/// Render the header bar with system health overview
+/// Render the header bar with system health overview.
+///
+/// Displays: status indicator, module counts by health, total throughput.
 pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     let Some(ref data) = app.data else {
         let line = Line::from(vec![
@@ -93,6 +99,7 @@ pub fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Format a count for display (e.g., 1234 -> "1.2K", 1234567 -> "1.2M").
 fn format_count(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
@@ -103,7 +110,9 @@ fn format_count(n: u64) -> String {
     }
 }
 
-/// Render the tab bar at the top
+/// Render the tab bar showing available views.
+///
+/// Highlights the currently active view.
 pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles: Vec<Line> = vec![
         Line::from(" 1:Summary "),
@@ -126,7 +135,10 @@ pub fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(tabs, area);
 }
 
-/// Render the status bar at the bottom
+/// Render the status bar at the bottom.
+///
+/// Shows: breadcrumb trail, time since last update, available controls.
+/// Also displays temporary status messages and errors.
 pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     // Check for temporary status message first
     if let Some(msg) = app.get_status_message() {
@@ -178,7 +190,9 @@ pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-/// Render the help overlay
+/// Render the help overlay with keyboard shortcuts.
+///
+/// Displayed as a centered modal on top of the current view.
 pub fn render_help(frame: &mut Frame, app: &App, area: Rect) {
     let help_text = vec![
         Line::from(vec![Span::styled("Keyboard Shortcuts", app.theme.header)]),

@@ -1,3 +1,8 @@
+//! Data Flow view rendering.
+//!
+//! Displays an adjacency matrix showing which modules communicate
+//! with each other via the message bus.
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -10,7 +15,7 @@ use crate::app::App;
 use crate::data::DataFlowGraph;
 use std::collections::HashSet;
 
-/// Render the data flow as an adjacency matrix showing module-to-module communication
+/// Render the Flow view showing module-to-module communication patterns.
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;

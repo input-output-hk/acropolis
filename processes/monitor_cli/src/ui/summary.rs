@@ -1,3 +1,8 @@
+//! Summary view rendering.
+//!
+//! Displays a table of all modules with health status, message counts,
+//! rates, and sparkline trends.
+
 use std::time::Duration;
 
 use ratatui::{
@@ -12,21 +17,27 @@ use crate::app::App;
 use crate::data::duration::format_duration;
 use crate::data::ModuleData;
 
-/// Sparkline characters (8 levels)
+/// Sparkline characters (8 levels of height).
 const SPARKLINE_CHARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
-/// Column to sort by
+/// Column to sort by in the Summary view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortColumn {
+    /// Sort by module name alphabetically.
     #[default]
     Name,
+    /// Sort by total read count.
     Reads,
+    /// Sort by total write count.
     Writes,
+    /// Sort by maximum pending duration.
     Pending,
+    /// Sort by health status.
     Status,
 }
 
 impl SortColumn {
+    /// Cycle to the next sort column.
     pub fn next(self) -> Self {
         match self {
             SortColumn::Name => SortColumn::Reads,
@@ -38,7 +49,7 @@ impl SortColumn {
     }
 }
 
-/// Render the summary view - table of all modules
+/// Render the Summary view showing all modules in a sortable table.
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
     let Some(ref data) = app.data else {
         return;

@@ -93,10 +93,12 @@ impl StreamSource {
         }
     }
 
-    /// Create a StreamSource from raw bytes channel.
+    /// Create a StreamSource from a raw bytes channel.
     ///
     /// This is useful when you want to push JSON bytes from another source
     /// (like a message bus) without using an AsyncRead.
+    ///
+    /// Each `Vec<u8>` sent through the channel should be a complete JSON snapshot.
     pub fn from_bytes_channel(mut rx: mpsc::Receiver<Vec<u8>>, description: &str) -> Self {
         let (tx, snapshot_rx) = mpsc::channel(16);
         let last_error = Arc::new(Mutex::new(None));

@@ -40,15 +40,20 @@ impl Default for Thresholds {
 }
 
 /// Health status for a module or topic.
+///
+/// Ordered from healthy to critical for use with `max()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HealthStatus {
+    /// No issues detected.
     Healthy,
+    /// Approaching threshold limits.
     Warning,
+    /// Exceeded critical thresholds.
     Critical,
 }
 
 impl HealthStatus {
-    /// Returns a short symbol for display.
+    /// Returns a short symbol for display (e.g., "OK", "WARN", "CRIT").
     pub fn symbol(&self) -> &'static str {
         match self {
             HealthStatus::Healthy => "OK",
@@ -61,37 +66,54 @@ impl HealthStatus {
 /// Parsed topic read data with computed health status.
 #[derive(Debug, Clone)]
 pub struct TopicRead {
+    /// The topic name being read from.
     pub topic: String,
+    /// Total number of messages read.
     pub read: u64,
+    /// How long the oldest message has been pending (if any).
     pub pending_for: Option<Duration>,
+    /// Number of unread messages waiting in the queue.
     pub unread: Option<u64>,
+    /// Computed health status based on thresholds.
     pub status: HealthStatus,
 }
 
 /// Parsed topic write data with computed health status.
 #[derive(Debug, Clone)]
 pub struct TopicWrite {
+    /// The topic name being written to.
     pub topic: String,
+    /// Total number of messages written.
     pub written: u64,
+    /// How long the oldest write has been pending (if any).
     pub pending_for: Option<Duration>,
+    /// Computed health status based on thresholds.
     pub status: HealthStatus,
 }
 
 /// Parsed module data with aggregated statistics and health.
 #[derive(Debug, Clone)]
 pub struct ModuleData {
+    /// The module name.
     pub name: String,
+    /// All topics this module reads from.
     pub reads: Vec<TopicRead>,
+    /// All topics this module writes to.
     pub writes: Vec<TopicWrite>,
+    /// Sum of all messages read across all topics.
     pub total_read: u64,
+    /// Sum of all messages written across all topics.
     pub total_written: u64,
+    /// Overall health (worst status across all topics).
     pub health: HealthStatus,
 }
 
 /// Complete parsed monitor data ready for display.
 #[derive(Debug, Clone)]
 pub struct MonitorData {
+    /// All modules sorted by health status (critical first).
     pub modules: Vec<ModuleData>,
+    /// When this snapshot was processed.
     pub last_updated: Instant,
 }
 
@@ -256,13 +278,18 @@ impl MonitorData {
 }
 
 /// An unhealthy topic (either read or write).
+///
+/// Used by the Bottleneck view to display topics that need attention.
 #[derive(Debug, Clone)]
 pub enum UnhealthyTopic {
+    /// A read subscription with warning or critical status.
     Read(TopicRead),
+    /// A write publication with warning or critical status.
     Write(TopicWrite),
 }
 
 impl UnhealthyTopic {
+    /// Returns the health status of this topic.
     pub fn status(&self) -> HealthStatus {
         match self {
             UnhealthyTopic::Read(r) => r.status,
@@ -270,6 +297,7 @@ impl UnhealthyTopic {
         }
     }
 
+    /// Returns the topic name.
     pub fn topic(&self) -> &str {
         match self {
             UnhealthyTopic::Read(r) => &r.topic,
@@ -277,6 +305,7 @@ impl UnhealthyTopic {
         }
     }
 
+    /// Returns how long the topic has been pending.
     pub fn pending_for(&self) -> Option<Duration> {
         match self {
             UnhealthyTopic::Read(r) => r.pending_for,
