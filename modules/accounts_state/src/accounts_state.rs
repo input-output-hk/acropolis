@@ -118,10 +118,12 @@ impl AccountsState {
                     SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
                     info!("Received AccountsState bootstrap message");
-                    let epoch = accounts_data.epoch;
-                    let mut state = history.lock().await.get_or_init_with(State::default);
+
+                    let block_number = accounts_data.block_number;
+                    let mut state = State::default();
+
                     Self::handle_bootstrap(&mut state, accounts_data)?;
-                    history.lock().await.commit(epoch, state);
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!("Accounts state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {

@@ -428,6 +428,9 @@ pub struct AccountsBootstrapMessage {
     /// Epoch number this snapshot is for
     pub epoch: u64,
 
+    /// Block number this snapshot is for
+    pub block_number: u64,
+
     /// All account states (stake addresses with delegations and balances)
     pub accounts: Vec<AccountState>,
 

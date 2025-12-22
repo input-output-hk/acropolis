@@ -286,6 +286,7 @@ impl AccountsCallback for SnapshotPublisher {
         // Convert the parsed data to the message type
         let message = AccountsBootstrapMessage {
             epoch: data.epoch,
+            block_number: self.epoch_context.last_block_height,
             accounts: data.accounts,
             pools: data.pools,
             retiring_pools: data.retiring_pools,
