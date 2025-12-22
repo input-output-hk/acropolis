@@ -128,8 +128,13 @@ store-votes = false
 store-drdd = false
 
 [module.governance-state]
+# Listen for DRep and SPO distributions
+stake-drep-distribution-topic = "cardano.drep.distribution"
+stake-spo-distribution-topic = "cardano.spo.distribution"
 
 [module.parameters-state]
+# Listen for governance actions
+enact-state-topic = "cardano.enact.state"
 store-history = false
 
 [module.stake-delta-filter]
@@ -139,6 +144,9 @@ write-full-cache = "false"
 [module.epochs-state]
 
 [module.accounts-state]
+# Optional subscription for when governance is active
+drep-state-topic = "cardano.drep.state"
+
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
@@ -188,25 +196,21 @@ store-transactions = false
 address = "0.0.0.0"
 port = 4340
 
-[module.spy]
 # Enable for message spying
+#[module.spy]
 #topic = "cardano.#"
 
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
+# Enable if external routing required
+#[message-bus.external]
+#class = "rabbit-mq"
+#url = "amqp://127.0.0.1:5672/%2f"
+#exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 50
-dispatch-queue-size = 1000
-worker-queue-size = 100
-bulk-block-capacity = 50
-bulk-resume-capacity = 75
 
 # Message routing
 [[message-router.route]]  # Everything is internal only

@@ -1158,7 +1158,7 @@ impl Ratio {
 /// Withdrawal
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Withdrawal {
-    /// Stake address to withdraw to
+    /// Stake address to withdraw from
     pub address: StakeAddress,
 
     /// Value to withdraw
