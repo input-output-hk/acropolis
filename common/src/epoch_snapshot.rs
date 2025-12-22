@@ -276,9 +276,6 @@ pub struct SnapshotsContainer {
 
     /// Go snapshot (current epoch)
     pub go: EpochSnapshot,
-
-    /// Fee from the snapshot
-    pub fee: u64,
 }
 
 impl Display for SnapshotsContainer {

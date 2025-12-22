@@ -507,10 +507,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             go_stake / 1_000_000
         );
 
-        // Store the fee for use in epoch bootstrap message
-        self.snapshot_fee = snapshots.fee;
-        info!("  Snapshot fee: {} lovelace", self.snapshot_fee);
-
         Ok(())
     }
 }

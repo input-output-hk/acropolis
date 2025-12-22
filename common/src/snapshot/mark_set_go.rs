@@ -141,8 +141,6 @@ pub struct RawSnapshotsContainer {
     pub set: RawSnapshot,
     /// Go snapshot (raw CBOR data)
     pub go: RawSnapshot,
-    /// Fee
-    pub fee: u64,
 }
 
 impl RawSnapshotsContainer {
@@ -185,7 +183,6 @@ impl RawSnapshotsContainer {
                 network.clone(),
             ),
             go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
-            fee: self.fee,
         }
     }
 }
