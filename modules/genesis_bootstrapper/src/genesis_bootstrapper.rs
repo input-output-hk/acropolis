@@ -6,12 +6,11 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
-        UTXODeltasMessage,
+        BootstrapPotDeltas, CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message,
+        PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
-    UTxOIdentifier, Value,
+    Lovelace, LovelaceDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -200,11 +199,13 @@ impl GenesisBootstrapper {
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                     // Send the pot update message with the remaining reserves
-                    let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
-                    pot_deltas_message.deltas.push(PotDelta {
-                        pot: Pot::Reserves,
-                        delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
-                    });
+                    let pot_deltas_message = PotDeltasMessage {
+                        deltas: BootstrapPotDeltas {
+                            delta_reserves: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
+                            delta_treasury: 0,
+                            delta_deposits: 0,
+                        },
+                    };
 
                     let message_enum = Message::Cardano((
                         block_info.clone(),

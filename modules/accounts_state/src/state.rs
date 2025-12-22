@@ -16,7 +16,7 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, Pot, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
+    PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
     StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
@@ -1066,23 +1066,31 @@ impl State {
     }
 
     /// Handle pots
-    pub fn handle_pot_deltas(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
-        for pot_delta in pot_deltas_msg.deltas.iter() {
-            let pot = match pot_delta.pot {
-                Pot::Reserves => &mut self.pots.reserves,
-                Pot::Treasury => &mut self.pots.treasury,
-                Pot::Deposits => &mut self.pots.deposits,
-            };
-
-            if let Err(e) = update_value_with_delta(pot, pot_delta.delta) {
-                error!("Applying pot delta {pot_delta:?}: {e}");
+    pub fn handle_pot_deltas(&mut self, pot_deltas: &PotDeltasMessage) -> Result<()> {
+        let pot_deltas = &pot_deltas.deltas;
+        let apply = |name: &str, pot: &mut u64, delta: i64| {
+            if let Err(e) = update_value_with_delta(pot, delta) {
+                error!("Applying {name} pot delta {delta}: {e}");
             } else {
-                info!(
-                    "Pot delta for {:?} {} => {}",
-                    pot_delta.pot, pot_delta.delta, *pot
-                );
+                info!("Pot delta for {name} {delta} => {pot}");
             }
-        }
+        };
+
+        apply(
+            "Treasury",
+            &mut self.pots.treasury,
+            pot_deltas.delta_treasury,
+        );
+        apply(
+            "Reserves",
+            &mut self.pots.reserves,
+            pot_deltas.delta_reserves,
+        );
+        apply(
+            "Deposits",
+            &mut self.pots.deposits,
+            pot_deltas.delta_deposits,
+        );
 
         Ok(())
     }
@@ -1093,11 +1101,12 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
+    use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
-        Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
-        StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
+        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
         VrfKeyHash, Withdrawal,
     };
@@ -1283,24 +1292,11 @@ mod tests {
     fn pot_delta_updates_pots() {
         let mut state = State::default();
         let pot_deltas = PotDeltasMessage {
-            deltas: vec![
-                PotDelta {
-                    pot: Pot::Reserves,
-                    delta: 43,
-                },
-                PotDelta {
-                    pot: Pot::Reserves,
-                    delta: -1,
-                },
-                PotDelta {
-                    pot: Pot::Treasury,
-                    delta: 99,
-                },
-                PotDelta {
-                    pot: Pot::Deposits,
-                    delta: 77,
-                },
-            ],
+            deltas: BootstrapPotDeltas {
+                delta_treasury: 99,
+                delta_reserves: 42,
+                delta_deposits: 77,
+            },
         };
 
         state.handle_pot_deltas(&pot_deltas).unwrap();
