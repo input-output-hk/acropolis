@@ -528,6 +528,7 @@ dependencies = [
 name = "acropolis_module_utxo_state"
 version = "0.1.0"
 dependencies = [
+ "acropolis_codec",
  "acropolis_common",
  "anyhow",
  "async-trait",
@@ -535,8 +536,13 @@ dependencies = [
  "config",
  "dashmap",
  "fjall",
+ "hex",
+ "pallas 0.33.0",
+ "serde",
  "serde_cbor",
+ "serde_json",
  "sled",
+ "test-case",
  "tokio",
  "tracing",
 ]

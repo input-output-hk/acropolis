@@ -135,3 +135,50 @@ pub fn validate(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::{test_utils::TestContext, validation_fixture};
+    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use test_case::test_case;
+
+    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+        matches Ok(());
+        "valid transaction 1 - with byron input & output"
+    )]
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+        matches Ok(());
+        "valid transaction 2"
+    )]
+    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0") =>
+        matches Ok(());
+        "valid transaction 3 - with mir certificates"
+    )]
+    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0", "mir_insufficient_genesis_sigs_utxow") =>
+        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
+        if genesis_keys.len() == 4;
+        "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
+    )]
+    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "invalid_witnesses_utxow") =>
+        matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
+        if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
+        "invalid_witnesses_utxow"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+        let mtx = tx.as_alonzo().unwrap();
+        let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
+        validate(
+            mtx,
+            TxHash::from(*tx.hash()),
+            &vkey_witnesses,
+            &ctx.shelley_params.gen_delegs,
+            ctx.shelley_params.update_quorum,
+        )
+        .map_err(|e| *e)
+    }
+}
