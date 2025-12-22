@@ -349,6 +349,7 @@ pub enum SnapshotMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepBootstrapMessage {
     pub epoch: u64,
+    pub block_number: u64,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
 }
 
@@ -510,10 +511,17 @@ pub struct GovernanceProposalRoots {
     pub constitution: Option<GovActionId>,
 }
 
+/// SPO bootstrap message containing pool state and block number
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPOBootstrapMessage {
+    pub block_number: u64,
+    pub spo_state: SPOState,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
-    SPOState(SPOState),
+    SPOState(SPOBootstrapMessage),
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),

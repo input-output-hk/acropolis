@@ -167,17 +167,18 @@ impl SPOState {
                     info!("Received snapshot startup signal, awaiting SPO bootstrap data...");
                 }
                 Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
-                    spo_state,
+                    spo_bootstrap,
                 ))) => {
                     info!(
                         "Bootstrapping SPO state: {} pools, {} pending updates, {} retiring",
-                        spo_state.pools.len(),
-                        spo_state.updates.len(),
-                        spo_state.retiring.len()
+                        spo_bootstrap.spo_state.pools.len(),
+                        spo_bootstrap.spo_state.updates.len(),
+                        spo_bootstrap.spo_state.retiring.len()
                     );
+                    let block_number = spo_bootstrap.block_number;
                     let mut guard = history.lock().await;
                     guard.clear();
-                    guard.commit_forced(spo_state.clone().into());
+                    guard.bootstrap_init_with(spo_bootstrap.spo_state.clone().into(), block_number);
                     info!("SPO state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
