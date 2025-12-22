@@ -2117,6 +2117,7 @@ impl StreamingSnapshotParser {
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
         let go_snapshot =
             RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
+        let _ = decoder.decode::<u64>().unwrap_or(0);
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
