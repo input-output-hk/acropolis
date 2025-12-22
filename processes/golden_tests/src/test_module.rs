@@ -86,10 +86,10 @@ impl TestModule {
                 };
 
                 if let Message::Snapshot(SnapshotMessage::Dump(SnapshotStateMessage::SPOState(
-                    spo_state,
+                    spo_bootstrap,
                 ))) = message.as_ref()
                 {
-                    assert_eq!(&expected_final_state.spo_state, spo_state);
+                    assert_eq!(&expected_final_state.spo_state, &spo_bootstrap.spo_state);
                     super::signal_test_completion();
                 }
             }

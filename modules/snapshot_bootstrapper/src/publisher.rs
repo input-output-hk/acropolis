@@ -8,7 +8,7 @@ use acropolis_common::{
         GovernanceBootstrapMessage, GovernanceProposalRoots,
         GovernanceProtocolParametersBootstrapMessage,
         GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
-        Message, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
+        Message, SPOBootstrapMessage, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
@@ -245,10 +245,14 @@ impl PoolCallback for SnapshotPublisher {
             pools.updates.len(),
             pools.retiring.len()
         );
+
         self.pools.extend(&pools);
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::SPOState(pools),
+            SnapshotStateMessage::SPOState(SPOBootstrapMessage {
+                block_number: self.epoch_context.last_block_height,
+                spo_state: pools,
+            }),
         )));
 
         let context = self.context.clone();
@@ -346,7 +350,11 @@ impl DRepCallback for SnapshotPublisher {
         self.dreps_len += dreps.len();
         // Send a message to the DRepState
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::DRepState(DRepBootstrapMessage { dreps, epoch }),
+            SnapshotStateMessage::DRepState(DRepBootstrapMessage {
+                dreps,
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+            }),
         )));
 
         // Clone what we need for the async task

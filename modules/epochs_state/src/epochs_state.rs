@@ -98,9 +98,10 @@ impl EpochsState {
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::EpochState(epoch_data),
                 )) => {
+                    let block_number = epoch_data.last_block_height;
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
-                    history.lock().await.commit(epoch_data.epoch, state);
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!("Epoch state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {

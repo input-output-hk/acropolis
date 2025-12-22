@@ -94,10 +94,11 @@ impl DRepState {
                         drep_msg.dreps.len(),
                         drep_msg.epoch
                     );
+                    let block_number = drep_msg.block_number;
                     let mut state = State::new(storage_config);
                     state.bootstrap(drep_msg);
                     let drep_count = state.dreps.len();
-                    history.lock().await.commit_forced(state);
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!(
                         "Bootstrap complete - {} DReps committed to state",
                         drep_count
