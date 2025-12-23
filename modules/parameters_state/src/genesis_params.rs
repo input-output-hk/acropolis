@@ -3,7 +3,8 @@ use acropolis_common::{
     protocol_params::{AlonzoParams, BabbageParams, ByronParams, ConwayParams, ShelleyParams},
     rational_number::{rational_number_from_f32, RationalNumber},
     Anchor, BlockVersionData, Committee, Constitution, CostModel, Credential, DRepVotingThresholds,
-    Era, HeavyDelegate, PoolId, PoolVotingThresholds, ProtocolConsts, SoftForkRule, TxFeePolicy,
+    Era, HeavyDelegate, MagicNumber, PoolId, PoolVotingThresholds, ProtocolConsts, SoftForkRule,
+    TxFeePolicy,
 };
 use anyhow::{anyhow, bail, Result};
 use base64::prelude::*;
@@ -193,7 +194,7 @@ fn map_block_version_data(bvd: &byron::BlockVersionData) -> Result<BlockVersionD
 fn map_protocol_consts(c: &byron::ProtocolConsts) -> Result<ProtocolConsts> {
     Ok(ProtocolConsts {
         k: c.k,
-        protocol_magic: c.protocol_magic,
+        protocol_magic: MagicNumber::new(c.protocol_magic),
         vss_max_ttl: c.vss_max_ttl,
         vss_min_ttl: c.vss_min_ttl,
     })

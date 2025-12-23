@@ -2,10 +2,7 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::configuration::StartupMethod;
-use acropolis_common::messages::{
-    GovernanceProtocolParametersSlice, SnapshotMessage, SnapshotStateMessage,
-    StateTransitionMessage,
-};
+use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -20,7 +17,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, warn, Instrument};
+use tracing::{error, info, info_span, Instrument};
 
 mod alonzo_genesis;
 mod genesis_params;
@@ -237,18 +234,15 @@ impl ParametersState {
                                 h.get_or_init_with(|| State::new(network_name.clone()))
                             };
                             info!("ParameterState: Snapshot Bootstrap message received");
-                            info!("ParameterState: got slice: {:?}", msg.slice);
-                            if msg.slice == GovernanceProtocolParametersSlice::Current {
-                                let epoch = state.bootstrap(msg);
-                                let mut h = history.lock().await;
-                                h.commit(epoch, state);
-                            } else {
-                                warn!(
-                                    "ParameterState: Unsupported slice in bootstrap: {:?}",
-                                    msg.slice
-                                );
-                                continue;
-                            }
+                            match state.bootstrap(msg) {
+                                Ok(epoch) => {
+                                    let mut h = history.lock().await;
+                                    h.commit(epoch, state);
+                                }
+                                Err(e) => {
+                                    panic!("ParametersState bootstrap failed: {e}");
+                                }
+                            };
                         }
                         Message::Snapshot(SnapshotMessage::Complete) => {
                             info!("Snapshot complete, exiting Parameters state bootstrap loop");

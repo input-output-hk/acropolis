@@ -38,7 +38,7 @@ impl ProtocolParams {
 //
 
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ByronParams {
     pub block_version_data: BlockVersionData,
     pub fts_seed: Option<Vec<u8>>,
@@ -53,7 +53,7 @@ pub struct ByronParams {
 // Alonzo protocol parameters
 //
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AlonzoParams {
     pub lovelace_per_utxo_word: u64, // Deprecated after transition to Babbage
     pub execution_prices: ExUnitPrices,
@@ -70,7 +70,7 @@ pub struct AlonzoParams {
 //
 
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShelleyProtocolParams {
     pub protocol_version: ProtocolVersion,
@@ -118,7 +118,7 @@ pub struct ShelleyProtocolParams {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShelleyParams {
     #[serde_as(as = "ChameleonFraction")]
@@ -222,7 +222,7 @@ impl From<&ShelleyParams> for PraosParams {
 // Babbage protocol parameters
 //
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BabbageParams {
     pub coins_per_utxo_byte: u64,
     pub plutus_v2_cost_model: Option<CostModel>,
@@ -232,7 +232,7 @@ pub struct BabbageParams {
 // Conway protocol parameters
 //
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ConwayParams {
     pub pool_voting_thresholds: PoolVotingThresholds,
     pub d_rep_voting_thresholds: DRepVotingThresholds,
@@ -248,7 +248,9 @@ pub struct ConwayParams {
     pub committee: Committee,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolVersion {
     pub major: u64,

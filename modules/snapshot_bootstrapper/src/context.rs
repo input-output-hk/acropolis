@@ -111,6 +111,7 @@ impl BootstrapContext {
             self.block_info.slot,
             self.block_info.number,
             self.block_info.epoch,
+            self.block_info.era,
             &self.genesis,
         )
     }

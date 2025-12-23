@@ -557,7 +557,11 @@ impl From<(u64, ProtocolParams)> for ProtocolParamsRest {
                 .unwrap_or_default(),
             protocol_major_ver: shelley_params.map(|p| p.protocol_version.major),
             protocol_minor_ver: shelley_params.map(|p| p.protocol_version.minor),
-            min_utxo: shelley_params.map(|p| p.min_utxo_value.to_string()),
+            min_utxo: match (&babbage, &shelley_params) {
+                (Some(b), _) => Some(b.coins_per_utxo_byte.to_string()),
+                (None, Some(s)) => Some(s.min_utxo_value.to_string()),
+                _ => None,
+            },
             min_pool_cost: shelley_params.map(|p| p.min_pool_cost.to_string()),
             // TODO: Calculate nonce, store in epoch state, and return here
             nonce: Some("Not implemented".to_string()),

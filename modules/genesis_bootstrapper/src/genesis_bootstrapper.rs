@@ -10,7 +10,8 @@ use acropolis_common::{
         PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
+    Lovelace, LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
+    UTxOIdentifier, Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -250,7 +251,7 @@ impl GenesisBootstrapper {
                             .collect::<Vec<(&str, (&str, &str))>>(),
                     )
                     .unwrap(),
-                    magic_number: byron_genesis.protocol_consts.protocol_magic,
+                    magic_number: MagicNumber::new(byron_genesis.protocol_consts.protocol_magic),
                 };
 
                 // Send completion message

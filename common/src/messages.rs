@@ -24,7 +24,6 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::AccountState;
 use crate::Pots;
 use std::collections::HashMap;
@@ -353,19 +352,11 @@ pub struct DRepBootstrapMessage {
     pub dreps: HashMap<DRepCredential, DRepRecord>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub enum GovernanceProtocolParametersSlice {
-    Previous,
-    Current,
-    Future,
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GovernanceProtocolParametersBootstrapMessage {
+pub struct ProtocolParametersBootstrapMessage {
     pub network_name: String,
-    pub era: Option<Era>,
-    pub slice: GovernanceProtocolParametersSlice,
-    pub params: ProtocolParameters,
+    pub era: Era,
+    pub params: ProtocolParamUpdate,
     pub epoch: u64,
 }
 
@@ -526,7 +517,7 @@ pub enum SnapshotStateMessage {
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
-    ParametersState(GovernanceProtocolParametersBootstrapMessage),
+    ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
 }
 

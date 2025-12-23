@@ -316,6 +316,15 @@ impl ParametersUpdater {
         }
     }
 
+    pub fn apply_bootstrap(&mut self, network: &str, params: ProtocolParamUpdate) -> Result<()> {
+        self.apply_genesis(network, &Era::Byron)?;
+        self.apply_genesis(network, &Era::Shelley)?;
+        self.apply_genesis(network, &Era::Alonzo)?;
+        self.apply_genesis(network, &Era::Babbage)?;
+        self.apply_genesis(network, &Era::Conway)?;
+        self.update_params(&params)
+    }
+
     pub fn get_params(&self) -> ProtocolParams {
         self.params.clone()
     }

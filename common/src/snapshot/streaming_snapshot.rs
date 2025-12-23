@@ -33,7 +33,6 @@ use tracing::info;
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
 use crate::ledger_state::SPOState;
-use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
@@ -42,7 +41,7 @@ pub use crate::{
     MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
     SingleHostName, StakeAddress, StakeCredential,
 };
-use crate::{PoolBlockProduction, Pots};
+use crate::{PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
@@ -664,9 +663,9 @@ pub trait GovernanceProtocolParametersCallback {
     fn on_gs_protocol_parameters(
         &mut self,
         epoch: u64,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()>;
 }
 
@@ -1141,9 +1140,9 @@ impl StreamingSnapshotParser {
         // Emit governance protocol parameters callback
         callbacks.on_gs_protocol_parameters(
             epoch,
-            governance_state.previous_pparams.clone(),
-            governance_state.current_pparams.clone(),
-            governance_state.future_pparams.clone(),
+            governance_state.previous_reward_params.clone(),
+            governance_state.current_reward_params.clone(),
+            governance_state.protocol_params.clone(),
         )?;
 
         // Extract governance deposit info before passing state to callback
@@ -1179,7 +1178,14 @@ impl StreamingSnapshotParser {
         );
 
         // Extract pool deposit from protocol parameters before consuming governance_state
-        let stake_pool_deposit = governance_state.current_pparams.stake_pool_deposit;
+        let stake_pool_deposit = match governance_state.protocol_params.pool_deposit {
+            Some(deposit) => deposit,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Stake pool deposit must exist in protocol params"
+                ))
+            }
+        };
 
         // Emit governance state callback
         callbacks.on_governance_state(governance_state)?;
@@ -2142,9 +2148,9 @@ pub struct CollectingCallbacks {
     pub proposals: Vec<GovernanceProposal>,
     pub epoch: EpochBootstrapData,
     pub snapshots: Option<RawSnapshotsContainer>,
-    pub gs_protocol_previous_parameters: Option<ProtocolParameters>,
-    pub gs_protocol_current_parameters: Option<ProtocolParameters>,
-    pub gs_protocol_future_parameters: Option<ProtocolParameters>,
+    pub previous_reward_params: RewardParams,
+    pub current_reward_params: RewardParams,
+    pub protocol_parameters: ProtocolParamUpdate,
     pub governance_state: Option<super::governance::GovernanceState>,
 }
 
@@ -2194,14 +2200,14 @@ impl GovernanceProtocolParametersCallback for CollectingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
         _epoch: u64,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()> {
         // epoch is already stored in metadata
-        self.gs_protocol_previous_parameters = Some(gs_previous_params);
-        self.gs_protocol_current_parameters = Some(gs_current_params);
-        self.gs_protocol_future_parameters = Some(gs_future_params);
+        self.previous_reward_params = previous_reward_params;
+        self.current_reward_params = current_reward_params;
+        self.protocol_parameters = params;
         Ok(())
     }
 }

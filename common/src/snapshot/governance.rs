@@ -23,13 +23,13 @@ use tracing::info;
 
 use crate::hash::Hash;
 use crate::protocol_params::ProtocolVersion;
-use crate::snapshot::protocol_parameters::ProtocolParameters;
+use crate::snapshot::protocol_parameters::{CurrentParams, FutureParams};
 use crate::snapshot::streaming_snapshot::Anchor;
 use crate::{
     CommitteeChange, CommitteeCredential, Constitution, Credential, GovActionId, GovernanceAction,
     HardForkInitiationAction, Lovelace, NewConstitutionAction, ParameterChangeAction, PoolId,
-    ProposalProcedure, ProtocolParamUpdate, StakeAddress, TreasuryWithdrawalsAction, TxHash,
-    UpdateCommitteeAction, Vote, Voter, VotingProcedure,
+    ProposalProcedure, ProtocolParamUpdate, RewardParams, StakeAddress, TreasuryWithdrawalsAction,
+    TxHash, UpdateCommitteeAction, Vote, Voter, VotingProcedure,
 };
 
 // Re-export types needed by consumers
@@ -66,12 +66,12 @@ pub struct GovernanceState {
     pub committee: Option<Committee>,
     /// Current constitution
     pub constitution: Constitution,
-    /// Current protocol parameters
-    pub current_pparams: ProtocolParameters,
-    /// Previous protocol parameters
-    pub previous_pparams: ProtocolParameters,
-    /// Future protocol parameters
-    pub future_pparams: ProtocolParameters,
+    /// Current reward parameters for E-1 reward calculation
+    pub current_reward_params: RewardParams,
+    /// Previous reward parameters for E-2 reward calculation
+    pub previous_reward_params: RewardParams,
+    /// Protocol parameters which will be valid after epoch transition
+    pub protocol_params: ProtocolParamUpdate,
     /// Votes cast on proposals (from drep_pulsing_state)
     pub votes: HashMap<GovActionId, HashMap<Voter, VotingProcedure>>,
     /// Actions that have been ratified but not yet enacted
@@ -160,12 +160,20 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
     info!("      Parsed constitution: {}", constitution.anchor.url);
 
     // Parse current_pparams [3], previous_pparams [4], future_pparams [5]
-    let current_pparams: ProtocolParameters =
+    let current_pparams: ProtocolParamUpdate =
         decoder.decode().context("Failed to decode gs_current_pparams")?;
-    let previous_pparams: ProtocolParameters =
-        decoder.decode().context("Failed to decode gs_previous_pparams")?;
-    let future_pparams: ProtocolParameters =
-        decoder.decode().context("Failed to decode gs_future_pparams")?;
+    let current_reward_params = current_pparams.to_reward_params()?;
+
+    let previous_reward_params: RewardParams = decoder
+        .decode::<ProtocolParamUpdate>()
+        .context("Failed to decode previous pparams")?
+        .to_reward_params()?;
+
+    let protocol_params: ProtocolParamUpdate = decoder
+        .decode_with::<CurrentParams, FutureParams>(&mut CurrentParams {
+            current: &current_pparams,
+        })?
+        .0;
 
     // Parse drep_pulsing_state [6]
     let (votes, enacted_actions, expired_action_ids) =
@@ -183,9 +191,9 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
         proposal_roots,
         committee,
         constitution,
-        current_pparams,
-        previous_pparams,
-        future_pparams,
+        current_reward_params,
+        previous_reward_params,
+        protocol_params,
         votes,
         enacted_actions,
         expired_action_ids,
