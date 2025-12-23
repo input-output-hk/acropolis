@@ -26,13 +26,13 @@ mod state;
 use parameters_updater::ParametersUpdater;
 use state::State;
 
-const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
+const CONFIG_ENACT_STATE_TOPIC: &str = "enact-state-topic";
+const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
-const DEFAULT_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
-const DEFAULT_STORE_HISTORY: (&str, bool) = ("store-history", false);
+const CONFIG_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
+const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
-const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Parameters State module
@@ -46,7 +46,7 @@ pub struct ParametersState;
 struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub network_name: String,
-    pub enact_state_topic: String,
+    pub enact_state_topic: Option<String>,
     pub protocol_parameters_topic: String,
     pub parameters_query_topic: String,
     pub store_history: bool,
@@ -59,6 +59,14 @@ impl ParametersStateConfig {
         actual
     }
 
+    fn conf_option(config: &Arc<Config>, key: &str) -> Option<String> {
+        let actual = config.get_string(key).ok();
+        if let Some(ref value) = actual {
+            info!("Parameter value '{}' for {}", value, key);
+        }
+        actual
+    }
+
     fn conf_bool(config: &Arc<Config>, keydef: (&str, bool)) -> bool {
         let actual = config.get_bool(keydef.0).unwrap_or(keydef.1);
         info!("Parameter value '{}' for {}", actual, keydef.0);
@@ -68,11 +76,11 @@ impl ParametersStateConfig {
     pub fn new(context: Arc<Context<Message>>, config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
             context,
-            network_name: Self::conf(config, DEFAULT_NETWORK_NAME),
-            enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
-            protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
+            network_name: Self::conf(config, CONFIG_NETWORK_NAME),
+            enact_state_topic: Self::conf_option(config, CONFIG_ENACT_STATE_TOPIC),
+            protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
             parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
-            store_history: Self::conf_bool(config, DEFAULT_STORE_HISTORY),
+            store_history: Self::conf_bool(config, CONFIG_STORE_HISTORY),
         })
     }
 }
@@ -104,69 +112,75 @@ impl ParametersState {
     async fn run(
         config: Arc<ParametersStateConfig>,
         history: Arc<Mutex<StateHistory<State>>>,
-        mut enact_s: Box<dyn Subscription<Message>>,
+        mut enact_s: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
         // Process the snapshot messages first to bootstrap state if needed
 
         loop {
-            let (_, message) = enact_s.read().await?;
-            match message.as_ref() {
-                Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
-                    let span = info_span!("parameters_state.handle", epoch = block.epoch);
-                    async {
-                        // Get current state and current params
-                        let mut state = {
-                            let mut h = history.lock().await;
-                            h.get_or_init_with(|| State::new(config.network_name.clone()))
-                        };
-
-                        // Handle rollback if needed
-                        if block.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block.epoch);
-                        }
-
-                        if block.new_epoch {
-                            // Get current params
-                            let current_params = state.current_params.get_params();
-
-                            // Process GovOutcomes message on era transition
-                            let new_params = state.handle_enact_state(&block.era, gov).await?;
-
-                            // Publish protocol params message
-                            Self::publish_update(&config, block, new_params.clone())?;
-
-                            // Commit state on params change
-                            if current_params != new_params.params {
-                                info!(
-                                    "New parameter set enacted [from epoch, params]: [{},{}]",
-                                    block.epoch,
-                                    serde_json::to_string(&new_params.params)?
-                                );
+            if let Some(ref mut sub) = enact_s {
+                let (_, message) = sub.read().await?;
+                match message.as_ref() {
+                    Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
+                        let span = info_span!("parameters_state.handle", epoch = block.epoch);
+                        async {
+                            // Get current state and current params
+                            let mut state = {
                                 let mut h = history.lock().await;
-                                h.commit(block.epoch, state);
-                            }
-                        }
+                                h.get_or_init_with(|| State::new(config.network_name.clone()))
+                            };
 
-                        Ok::<(), anyhow::Error>(())
+                            // Handle rollback if needed
+                            if block.status == BlockStatus::RolledBack {
+                                state = history.lock().await.get_rolled_back_state(block.epoch);
+                            }
+
+                            if block.new_epoch {
+                                // Get current params
+                                let current_params = state.current_params.get_params();
+
+                                // Process GovOutcomes message on epoch transition
+                                let new_params = state.handle_enact_state(&block.era, gov).await?;
+
+                                // Publish protocol params message
+                                Self::publish_update(&config, block, new_params.clone())?;
+
+                                // Commit state on params change
+                                if current_params != new_params.params {
+                                    info!(
+                                        "New parameter set enacted [from epoch, params]: [{},{}]",
+                                        block.epoch,
+                                        serde_json::to_string(&new_params.params)?
+                                    );
+                                    let mut h = history.lock().await;
+                                    h.commit(block.epoch, state);
+                                }
+                            }
+
+                            Ok::<(), anyhow::Error>(())
+                        }
+                        .instrument(span)
+                        .await?;
                     }
-                    .instrument(span)
-                    .await?;
+                    Message::Cardano((
+                        _,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => {
+                        // forward the rollback downstream
+                        config.context.publish(&config.protocol_parameters_topic, message).await?;
+                    }
+                    msg => error!("Unexpected message {msg:?} for enact state topic"),
                 }
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // forward the rollback downstream
-                    config.context.publish(&config.protocol_parameters_topic, message).await?;
-                }
-                msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
         }
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
-        let enact = cfg.context.subscribe(&cfg.enact_state_topic).await?;
+        let enact_s = match cfg.enact_state_topic {
+            Some(ref topic) => Some(cfg.context.subscribe(topic).await?),
+            None => None,
+        };
+
         let store_history = cfg.store_history;
 
         // Initalize state history
@@ -186,8 +200,8 @@ impl ParametersState {
 
         // Subscribe for snapshot messages, if booting from snapshot
         let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+            .get_string(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber on '{snapshot_subscribe_topic}'");
@@ -290,7 +304,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg_clone, history_clone, enact)
+            Self::run(cfg_clone, history_clone, enact_s)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
