@@ -6,11 +6,11 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
-        UTXODeltasMessage,
+        BootstrapPotDeltas, CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message,
+        PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
+    Lovelace, LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -174,8 +174,8 @@ impl GenesisBootstrapper {
 
                         utxo_deltas_message.deltas.push(TxUTxODeltas {
                             tx_identifier,
-                            inputs: Vec::new(),
-                            outputs: vec![tx_output],
+                            consumes: Vec::new(),
+                            produces: vec![tx_output],
                             vkey_hashes_needed: None,
                             script_hashes_needed: None,
                             vkey_hashes_provided: None,
@@ -200,11 +200,13 @@ impl GenesisBootstrapper {
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                     // Send the pot update message with the remaining reserves
-                    let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
-                    pot_deltas_message.deltas.push(PotDelta {
-                        pot: Pot::Reserves,
-                        delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
-                    });
+                    let pot_deltas_message = PotDeltasMessage {
+                        deltas: BootstrapPotDeltas {
+                            delta_reserves: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
+                            delta_treasury: 0,
+                            delta_deposits: 0,
+                        },
+                    };
 
                     let message_enum = Message::Cardano((
                         block_info.clone(),
@@ -249,7 +251,7 @@ impl GenesisBootstrapper {
                             .collect::<Vec<(&str, (&str, &str))>>(),
                     )
                     .unwrap(),
-                    magic_number: byron_genesis.protocol_consts.protocol_magic,
+                    magic_number: MagicNumber::new(byron_genesis.protocol_consts.protocol_magic),
                 };
 
                 // Send completion message

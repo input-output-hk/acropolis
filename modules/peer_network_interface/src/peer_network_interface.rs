@@ -84,7 +84,7 @@ impl PeerNetworkInterface {
                     tracing::info!("Starting sync from origin");
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
-                        genesis_values.magic_number,
+                        genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
                     );
@@ -95,7 +95,7 @@ impl PeerNetworkInterface {
                     tracing::info!("Starting sync from tip");
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
-                        genesis_values.magic_number,
+                        genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
                     );
@@ -109,7 +109,7 @@ impl PeerNetworkInterface {
                     tracing::info!("Starting sync from cache at {:?}", cache_sync_point);
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
-                        genesis_values.magic_number,
+                        genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
                     );
@@ -130,7 +130,7 @@ impl PeerNetworkInterface {
                             }
                             let mut manager = Self::init_manager(
                                 cfg.node_addresses,
-                                genesis_values.magic_number,
+                                genesis_values.magic_number.into(),
                                 sink,
                                 command_subscription,
                             );

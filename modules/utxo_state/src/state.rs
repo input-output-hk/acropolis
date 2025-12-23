@@ -1,10 +1,12 @@
 //! Acropolis UTXOState: State storage
+use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
+use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{Address, AddressDelta, UTXOValue, UTxOIdentifier, Value, ValueMap};
+use acropolis_common::{Address, AddressDelta, Era, UTXOValue, UTxOIdentifier, Value, ValueMap};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -134,8 +136,14 @@ impl State {
     /// Get the number of valid UTXOs - that is, that have a valid created_at
     /// but no spent_at
     pub async fn count_valid_utxos(&self) -> usize {
-        return self.volatile_utxos.len() - self.volatile_spent.len()
-            + self.immutable_utxos.len().await.unwrap_or_default();
+        let immutable = self.immutable_utxos.len().await.unwrap_or_default() as isize;
+        let v_created = self.volatile_created.len() as isize;
+        let v_spent = self.volatile_spent.len() as isize;
+
+        let total: usize =
+            (immutable + (v_created - v_spent)).try_into().expect("total UTxO count went negative");
+
+        total
     }
 
     /// Observe a block for statistics and handle rollbacks
@@ -328,7 +336,7 @@ impl State {
             // Temporary map to sum UTxO deltas efficiently
             let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
 
-            for input in &tx.inputs {
+            for input in &tx.consumes {
                 if let Some(utxo) = self.lookup_utxo(input).await? {
                     // Remove or mark spent
                     self.observe_input(input, block).await?;
@@ -341,7 +349,7 @@ impl State {
                 }
             }
 
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 self.observe_output(output, block).await?;
 
                 let addr = output.address.clone();
@@ -379,6 +387,79 @@ impl State {
             observer.rollback(message).await;
         }
         Ok(())
+    }
+
+    async fn collect_utxos(
+        &self,
+        inputs: &[&UTxOIdentifier],
+    ) -> HashMap<UTxOIdentifier, UTXOValue> {
+        let mut utxos = HashMap::new();
+        for input in inputs.iter().cloned() {
+            if utxos.contains_key(input) {
+                continue;
+            }
+            if let Ok(Some(utxo)) = self.lookup_utxo(input).await {
+                utxos.insert(*input, Some(utxo));
+            } else {
+                utxos.insert(*input, None);
+            }
+        }
+        utxos
+            .into_iter()
+            .filter_map(|(input, utxo)| utxo.map(|utxo| (input, utxo)))
+            .collect::<HashMap<_, _>>()
+    }
+
+    pub async fn validate(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<(), Box<ValidationError>> {
+        let mut bad_transactions = Vec::new();
+
+        // collect utxos needed for validation
+        // NOTE:
+        // Also consider collateral inputs and reference inputs
+        let all_inputs = deltas
+            .deltas
+            .iter()
+            .flat_map(|tx_deltas| tx_deltas.consumes.iter())
+            .collect::<Vec<_>>();
+        let mut utxos_needed = self.collect_utxos(&all_inputs).await;
+
+        for tx_deltas in deltas.deltas.iter() {
+            let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
+            let mut script_hashes_needed =
+                tx_deltas.script_hashes_needed.clone().unwrap_or_default();
+            let vkey_hashes_provided = tx_deltas.vkey_hashes_provided.clone().unwrap_or_default();
+            let script_hashes_provided =
+                tx_deltas.script_hashes_provided.clone().unwrap_or_default();
+            if block.era == Era::Shelley {
+                if let Err(e) = validations::validate_shelley_tx(
+                    &tx_deltas.consumes,
+                    &mut vkey_hashes_needed,
+                    &mut script_hashes_needed,
+                    &vkey_hashes_provided,
+                    &script_hashes_provided,
+                    &utxos_needed,
+                ) {
+                    bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
+                }
+            }
+
+            // add this transaction's outputs to the utxos needed
+            for output in &tx_deltas.produces {
+                utxos_needed.insert(output.utxo_identifier, output.utxo_value());
+            }
+        }
+
+        if bad_transactions.is_empty() {
+            Ok(())
+        } else {
+            Err(Box::new(ValidationError::BadTransactions {
+                bad_transactions,
+            }))
+        }
     }
 }
 
@@ -479,8 +560,8 @@ mod tests {
         let deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![],
-                outputs: vec![output.clone()],
+                consumes: vec![],
+                produces: vec![output.clone()],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -853,8 +934,8 @@ mod tests {
         let deltas1 = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![],
-                outputs: vec![output.clone()],
+                consumes: vec![],
+                produces: vec![output.clone()],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -873,8 +954,8 @@ mod tests {
         let deltas2 = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: Default::default(),
-                inputs: vec![input],
-                outputs: vec![],
+                consumes: vec![input],
+                produces: vec![],
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

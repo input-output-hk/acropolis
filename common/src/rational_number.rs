@@ -10,7 +10,9 @@ use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
 
-#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    serde::Deserialize, serde::Serialize, Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct RationalNumber(pub Ratio<u64>);
 
 pub fn rational_number_from_f32(f: f32) -> Result<RationalNumber> {

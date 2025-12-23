@@ -30,6 +30,7 @@ use std::{
     ops::{AddAssign, Neg},
     str::FromStr,
 };
+use tracing::error;
 
 /// Network identifier
 #[derive(
@@ -295,8 +296,8 @@ pub struct TxUTxODeltas {
     pub tx_identifier: TxIdentifier,
 
     // Created and spent UTxOs
-    pub inputs: Vec<UTxOIdentifier>,
-    pub outputs: Vec<TxOutput>,
+    pub consumes: Vec<UTxOIdentifier>,
+    pub produces: Vec<TxOutput>,
 
     // State needed for validation
     // This is missing UTxO Authors
@@ -897,6 +898,17 @@ pub struct TxOutput {
     pub reference_script: Option<ReferenceScript>,
 }
 
+impl TxOutput {
+    pub fn utxo_value(&self) -> UTXOValue {
+        UTXOValue {
+            address: self.address.clone(),
+            value: self.value.clone(),
+            datum: self.datum.clone(),
+            reference_script: self.reference_script.clone(),
+        }
+    }
+}
+
 /// Key hash
 pub type KeyHash = Hash<28>;
 
@@ -1146,7 +1158,7 @@ impl Ratio {
 /// Withdrawal
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Withdrawal {
-    /// Stake address to withdraw to
+    /// Stake address to withdraw from
     pub address: StakeAddress,
 
     /// Value to withdraw
@@ -1156,6 +1168,22 @@ pub struct Withdrawal {
     pub tx_identifier: TxIdentifier,
 }
 
+impl Withdrawal {
+    pub fn get_withdrawal_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
+        match self.address.credential {
+            StakeCredential::AddrKeyHash(vkey_hash) => {
+                vkey_hashes.insert(vkey_hash);
+            }
+            StakeCredential::ScriptHash(script_hash) => {
+                script_hashes.insert(script_hash);
+            }
+        }
+    }
+}
 /// Treasury pot account
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Pot {
@@ -1172,16 +1200,6 @@ impl fmt::Display for Pot {
             Pot::Deposits => write!(f, "deposits"),
         }
     }
-}
-
-/// Pot Delta - internal change of pot values at genesis / era boundaries
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PotDelta {
-    /// Stake address to withdraw to
-    pub pot: Pot,
-
-    /// Delta to apply
-    pub delta: LovelaceDelta,
 }
 
 #[serde_as]
@@ -1671,7 +1689,15 @@ pub struct ResignCommitteeCold {
 /// Governance actions data structures
 
 #[derive(
-    serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, Copy, minicbor::Decode,
+    serde::Serialize,
+    Default,
+    serde::Deserialize,
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    minicbor::Decode,
 )]
 pub struct ExUnits {
     #[n(0)]
@@ -1680,7 +1706,7 @@ pub struct ExUnits {
     pub steps: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize, Default, serde::Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct ExUnitPrices {
     pub mem_price: RationalNumber,
     pub step_price: RationalNumber,
@@ -1772,7 +1798,7 @@ impl Display for GovActionId {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+#[derive(Default, Serialize, Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
 pub struct CostModel(#[n(0)] Vec<i64>);
 
 impl CostModel {
@@ -1792,7 +1818,9 @@ pub struct CostModels {
     pub plutus_v3: Option<CostModel>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode)]
+#[derive(
+    Default, serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq, Clone, minicbor::Decode,
+)]
 pub struct PoolVotingThresholds {
     #[n(0)]
     pub motion_no_confidence: RationalNumber,
@@ -1806,20 +1834,20 @@ pub struct PoolVotingThresholds {
     pub security_voting_threshold: RationalNumber,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SoftForkRule {
     pub init_thd: u64,
     pub min_thd: u64,
     pub thd_decrement: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TxFeePolicy {
     pub multiplier: u64,
     pub summand: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BlockVersionData {
     pub script_version: u16,
     pub heavy_del_thd: u64,
@@ -1887,12 +1915,43 @@ impl AsRef<BTreeMap<GenesisKeyhash, GenesisDelegate>> for GenesisDelegates {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+impl From<HashMap<PoolId, GenesisDelegate>> for GenesisDelegates {
+    fn from(map: HashMap<PoolId, GenesisDelegate>) -> Self {
+        GenesisDelegates(map.into_iter().map(|(k, v)| (*k, v)).collect())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolConsts {
     pub k: usize,
-    pub protocol_magic: u32,
+    pub protocol_magic: MagicNumber,
     pub vss_max_ttl: Option<u32>,
     pub vss_min_ttl: Option<u32>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MagicNumber(u32);
+
+impl MagicNumber {
+    pub fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub fn to_network_name(&self) -> &str {
+        match self.0 {
+            764824073 => "mainnet",
+            1 => "preprod",
+            2 => "preview",
+            4 => "sanchonet",
+            _ => "unknown",
+        }
+    }
+}
+
+impl From<MagicNumber> for u32 {
+    fn from(m: MagicNumber) -> Self {
+        m.0
+    }
 }
 
 #[bitmask(u8)]
@@ -1903,6 +1962,15 @@ pub enum ProtocolParamType {
     TechnicalGroup,
     GovernanceGroup,
     SecurityProperty,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct RewardParams {
+    pub expansion_rate: RationalNumber,
+    pub treasury_growth_rate: RationalNumber,
+    pub desired_number_of_stake_pools: u64,
+    pub pool_pledge_influence: RationalNumber,
+    pub min_pool_cost: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2088,7 +2156,24 @@ pub struct AlonzoBabbageUpdateProposal {
     pub enactment_epoch: u64,
 }
 
-#[derive(Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
+impl AlonzoBabbageUpdateProposal {
+    pub fn get_governance_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        genesis_delegs: &GenesisDelegates,
+    ) {
+        for (genesis_key, _) in self.proposals.iter() {
+            let found_genesis = genesis_delegs.as_ref().get(genesis_key);
+            if let Some(genesis) = found_genesis {
+                vkey_hashes.insert(genesis.delegate);
+            } else {
+                error!("Genesis delegate not found: {genesis_key}");
+            }
+        }
+    }
+}
+
+#[derive(Default, Serialize, PartialEq, Eq, Deserialize, Debug, Clone)]
 pub struct Constitution {
     pub anchor: Anchor,
     pub guardrail_script: Option<ScriptHash>,
@@ -2136,7 +2221,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Constitution {
 }
 
 #[serde_as]
-#[derive(Serialize, PartialEq, Debug, Deserialize, Clone)]
+#[derive(Default, Serialize, PartialEq, Debug, Deserialize, Clone)]
 pub struct Committee {
     #[serde_as(as = "Vec<(_, _)>")]
     pub members: HashMap<CommitteeCredential, u64>,
@@ -2525,10 +2610,11 @@ impl TxCertificate {
     /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
     ///
     /// returns (vkey_hashes, script_hashes)
-    pub fn get_cert_authors(&self) -> (HashSet<KeyHash>, HashSet<ScriptHash>) {
-        let mut vkey_hashes = HashSet::new();
-        let mut script_hashes = HashSet::new();
-
+    pub fn get_cert_authors(
+        &self,
+        vkey_hashes: &mut HashSet<KeyHash>,
+        script_hashes: &mut HashSet<ScriptHash>,
+    ) {
         let mut parse_cred = |cred: &StakeCredential| match cred {
             StakeCredential::AddrKeyHash(vkey_hash) => {
                 vkey_hashes.insert(*vkey_hash);
@@ -2564,8 +2650,6 @@ impl TxCertificate {
             }
             _ => {}
         }
-
-        (vkey_hashes, script_hashes)
     }
 }
 

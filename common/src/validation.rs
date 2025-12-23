@@ -61,7 +61,7 @@ pub enum ValidationError {
     BadKES(#[from] KesValidationError),
 
     #[error(
-        "Invalid Transactions: {}", 
+        "bad_transactions: {}", 
         bad_transactions
             .iter()
             .map(|(tx_index, error)| format!("tx-index={tx_index}, error={error}"))
@@ -72,11 +72,15 @@ pub enum ValidationError {
         bad_transactions: Vec<(u16, TransactionValidationError)>,
     },
 
-    #[error("CBOR Decoding error")]
-    CborDecodeError(usize, String),
-
     #[error("Governance failure: {0}")]
     BadGovernance(#[from] GovernanceValidationError),
+
+    #[error("CBOR Decoding error")]
+    CborDecodeError {
+        era: Era,
+        slot: Slot,
+        reason: String,
+    },
 }
 
 /// Transaction Validation Error
@@ -195,10 +199,6 @@ pub enum UTxOValidationError {
         required_lovelace: Lovelace,
     },
 
-    /// **Cause:** The transaction size is too big.
-    #[error("Max tx size: supplied={supplied}, max={max}")]
-    MaxTxSizeUTxO { supplied: u32, max: u32 },
-
     /// **Cause:** Malformed UTxO
     #[error("Malformed UTxO: era={era}, reason={reason}")]
     MalformedUTxO { era: Era, reason: String },
@@ -285,37 +285,46 @@ pub enum VrfValidationError {
     /// **Cause:** Block issuer's pool ID is not registered in current stake distribution
     #[error("Unknown Pool: {}", hex::encode(pool_id))]
     UnknownPool { pool_id: PoolId },
+
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state for Overlay slot
     #[error("{0}")]
     WrongGenesisLeaderVrfKey(#[from] WrongGenesisLeaderVrfKeyError),
+
     /// **Cause:** The VRF key hash in the block header doesn't match the VRF key
     /// registered with this stake pool in the ledger state
     #[error("{0}")]
     WrongLeaderVrfKey(#[from] WrongLeaderVrfKeyError),
+
     /// VRF nonce proof verification failed (TPraos rho - nonce proof)
     /// **Cause:** The (rho - nonce) VRF proof failed verification
     #[error("{0}")]
     TPraosBadNonceVrfProof(#[from] TPraosBadNonceVrfProofError),
+
     /// VRF leader proof verification failed (TPraos y - leader proof)
     /// **Cause:** The (y - leader) VRF proof failed verification
     #[error("{0}")]
     TPraosBadLeaderVrfProof(#[from] TPraosBadLeaderVrfProofError),
+
     /// VRF proof cryptographic verification failed (Praos single proof)
     /// **Cause:** The cryptographic VRF proof is invalid
     #[error("{0}")]
     PraosBadVrfProof(#[from] PraosBadVrfProofError),
+
     /// **Cause:** The VRF output is too large for this pool's stake.
     /// The pool lost the slot lottery
     #[error("{0}")]
     VrfLeaderValueTooBig(#[from] VrfLeaderValueTooBigError),
+
     /// **Cause:** This slot is in the overlay schedule but marked as non-active.
     /// It's an intentional gap slot where no blocks should be produced.
     #[error("Not Active slot in overlay schedule: {slot}")]
     NotActiveSlotInOverlaySchedule { slot: Slot },
+
     /// **Cause:** Some data has incorrect bytes
     #[error("TryFromSlice: {0}")]
     TryFromSlice(String),
+
     /// **Cause:** Other errors (e.g. Invalid shelley params, praos params, missing data)
     #[error("{0}")]
     Other(String),

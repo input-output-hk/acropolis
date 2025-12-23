@@ -4,8 +4,8 @@ use crate::{
 };
 
 pub struct Transaction {
-    pub inputs: Vec<UTxOIdentifier>,
-    pub outputs: Vec<TxOutput>,
+    pub consumes: Vec<UTxOIdentifier>,
+    pub produces: Vec<TxOutput>,
     pub total_output: u128,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
