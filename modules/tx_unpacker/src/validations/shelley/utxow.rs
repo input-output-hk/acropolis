@@ -1,6 +1,5 @@
 //! Shelley era UTxOW Rules
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
-#![allow(dead_code)]
 
 use std::collections::HashSet;
 
@@ -94,25 +93,18 @@ pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
+    native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;
-    let transaction_witness_set = &mtx.transaction_witness_set;
-
-    // extract native scripts
-    let native_scripts = transaction_witness_set
-        .native_script
-        .as_ref()
-        .map(|scripts| acropolis_codec::map_native_scripts(scripts))
-        .unwrap_or_default();
 
     // Extract vkey hashes from vkey_witnesses
     let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
 
     // validate native scripts
     validate_failed_native_scripts(
-        &native_scripts,
+        native_scripts,
         &vkey_hashes_provided,
         transaction_body.validity_interval_start,
         transaction_body.ttl,
@@ -126,6 +118,7 @@ pub fn validate(
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
+        println!("has mir certificate");
         validate_mir_insufficient_genesis_sigs(
             &vkey_hashes_provided,
             genesis_delegs,
@@ -145,37 +138,56 @@ mod tests {
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e"
+    ) =>
         matches Ok(());
         "valid transaction 1 - with byron input & output"
     )]
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
+    ) =>
         matches Ok(());
         "valid transaction 2"
     )]
-    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0"
+    ) =>
         matches Ok(());
-        "valid transaction 3 - with mir certificates"
+        "valid transaction 2 - with mir certificates"
     )]
-    #[test_case(validation_fixture!("0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0", "mir_insufficient_genesis_sigs_utxow") =>
-        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
-        if genesis_keys.len() == 4;
-        "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
-    )]
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "invalid_witnesses_utxow") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", 
+        "invalid_witnesses_utxow"
+    ) =>
         matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
         if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
         "invalid_witnesses_utxow"
+    )]
+    #[test_case(validation_fixture!(
+        "shelley",
+        "0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0",
+        "mir_insufficient_genesis_sigs_utxow"
+    ) =>
+        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
+        if genesis_keys.len() == 4;
+        "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
+        let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
         validate(
             mtx,
             TxHash::from(*tx.hash()),
             &vkey_witnesses,
+            &native_scripts,
             &ctx.shelley_params.gen_delegs,
             ctx.shelley_params.update_quorum,
         )
