@@ -16,12 +16,12 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
     InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, Pot, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
+    PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
     StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
-use imbl::OrdMap;
+use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
@@ -101,7 +101,7 @@ pub struct State {
 
 impl State {
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
-    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) {
+    pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
         let num_accounts = bootstrap_msg.accounts.len();
         let num_pools = bootstrap_msg.pools.len();
         let num_retiring = bootstrap_msg.retiring_pools.len();
@@ -165,6 +165,48 @@ impl State {
             info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
         }
 
+        // Apply pot deltas immediately to adjust from epoch N (snapshot) to epoch N+1 values
+        // These come from pulsing_rew_update and instantaneous_rewards in the snapshot
+        let deltas = bootstrap_msg.pot_deltas;
+        info!(
+            "Applying pot deltas: treasury={}, reserves={}, deposits={}",
+            deltas.delta_treasury, deltas.delta_reserves, deltas.delta_deposits,
+        );
+
+        // Apply deltas with overflow checks
+        let new_treasury = self.pots.treasury as i128 + deltas.delta_treasury as i128;
+        let new_reserves = self.pots.reserves as i128 + deltas.delta_reserves as i128;
+        let new_deposits = self.pots.deposits as i128 + deltas.delta_deposits as i128;
+
+        if new_treasury < 0 || new_treasury > u64::MAX as i128 {
+            anyhow::bail!(
+                "treasury pot overflow: {} + {} = {}",
+                self.pots.treasury,
+                deltas.delta_treasury,
+                new_treasury
+            );
+        }
+        if new_reserves < 0 || new_reserves > u64::MAX as i128 {
+            anyhow::bail!(
+                "reserves pot overflow: {} + {} = {}",
+                self.pots.reserves,
+                deltas.delta_reserves,
+                new_reserves
+            );
+        }
+        if new_deposits < 0 || new_deposits > u64::MAX as i128 {
+            anyhow::bail!(
+                "deposits pot overflow: {} + {} = {}",
+                self.pots.deposits,
+                deltas.delta_deposits,
+                new_deposits
+            );
+        }
+
+        self.pots.treasury = new_treasury as u64;
+        self.pots.reserves = new_reserves as u64;
+        self.pots.deposits = new_deposits as u64;
+
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",
@@ -176,6 +218,8 @@ impl State {
             self.pots.treasury,
             self.pots.deposits,
         );
+
+        Ok(())
     }
 
     /// Get the stake address state for a give stake key
@@ -362,7 +406,7 @@ impl State {
             // Take and clear registration changes
             std::mem::take(&mut *self.current_epoch_registration_changes.lock().unwrap()),
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
-            self.epoch_snapshots.set.clone(), // Will become 'go' in the next line!
+            self.epoch_snapshots.set.clone(),
         );
         self.epoch_snapshots.push(snapshot);
 
@@ -379,7 +423,7 @@ impl State {
             total_fees,
             total_non_obft_blocks,
         )?;
-        self.pots = monetary_change.pots;
+        self.pots = monetary_change.pots.clone();
 
         info!(
             epoch,
@@ -449,13 +493,21 @@ impl State {
         self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
-        for id in self.retiring_spos.drain(..) {
-            info!(epoch, "SPO {id} has retired");
-            self.spos.remove(&id);
-
-            // Wipe any delegations to this pool
-            self.stake_addresses.lock().unwrap().remove_all_delegations_to(&id);
+        let retiring: OrdSet<PoolId> = self.retiring_spos.drain(..).collect();
+        {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            for id in retiring.iter() {
+                info!(epoch, "SPO {id} has retired");
+                stake_addresses.remove_all_delegations_to(id);
+            }
         }
+
+        self.spos = self
+            .spos
+            .iter()
+            .filter(|(id, _)| !retiring.contains(id))
+            .map(|(id, reg)| (*id, reg.clone()))
+            .collect();
 
         Ok(reward_deltas)
     }
@@ -649,10 +701,17 @@ impl State {
     pub async fn complete_previous_epoch_rewards_calculation(
         &mut self,
         verifier: &Verifier,
+        skip_rewards: bool,
     ) -> Result<(Vec<(PoolId, SPORewards)>, Vec<StakeRewardDelta>)> {
         // Collect stake addresses reward deltas
         let mut spo_rewards: Vec<(PoolId, SPORewards)> = Vec::new();
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
+        // Skip rewards calculation on first epoch after bootstrap
+        if skip_rewards {
+            info!("Skipping rewards calculation on first epoch after bootstrap");
+            return Ok((spo_rewards, reward_deltas));
+        }
 
         // Check previous epoch rewards calculation is done
         let mut task = {
@@ -1015,23 +1074,31 @@ impl State {
     }
 
     /// Handle pots
-    pub fn handle_pot_deltas(&mut self, pot_deltas_msg: &PotDeltasMessage) -> Result<()> {
-        for pot_delta in pot_deltas_msg.deltas.iter() {
-            let pot = match pot_delta.pot {
-                Pot::Reserves => &mut self.pots.reserves,
-                Pot::Treasury => &mut self.pots.treasury,
-                Pot::Deposits => &mut self.pots.deposits,
-            };
-
-            if let Err(e) = update_value_with_delta(pot, pot_delta.delta) {
-                error!("Applying pot delta {pot_delta:?}: {e}");
+    pub fn handle_pot_deltas(&mut self, pot_deltas: &PotDeltasMessage) -> Result<()> {
+        let pot_deltas = &pot_deltas.deltas;
+        let apply = |name: &str, pot: &mut u64, delta: i64| {
+            if let Err(e) = update_value_with_delta(pot, delta) {
+                error!("Applying {name} pot delta {delta}: {e}");
             } else {
-                info!(
-                    "Pot delta for {:?} {} => {}",
-                    pot_delta.pot, pot_delta.delta, *pot
-                );
+                info!("Pot delta for {name} {delta} => {pot}");
             }
-        }
+        };
+
+        apply(
+            "Treasury",
+            &mut self.pots.treasury,
+            pot_deltas.delta_treasury,
+        );
+        apply(
+            "Reserves",
+            &mut self.pots.reserves,
+            pot_deltas.delta_reserves,
+        );
+        apply(
+            "Deposits",
+            &mut self.pots.deposits,
+            pot_deltas.delta_deposits,
+        );
 
         Ok(())
     }
@@ -1042,11 +1109,12 @@ impl State {
 mod tests {
     use super::*;
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
+    use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
-        Pot, PotDelta, Ratio, Registration, StakeAddress, StakeAddressDelta,
-        StakeAndVoteDelegation, StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
+        Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
+        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
         VrfKeyHash, Withdrawal,
     };
@@ -1232,24 +1300,11 @@ mod tests {
     fn pot_delta_updates_pots() {
         let mut state = State::default();
         let pot_deltas = PotDeltasMessage {
-            deltas: vec![
-                PotDelta {
-                    pot: Pot::Reserves,
-                    delta: 43,
-                },
-                PotDelta {
-                    pot: Pot::Reserves,
-                    delta: -1,
-                },
-                PotDelta {
-                    pot: Pot::Treasury,
-                    delta: 99,
-                },
-                PotDelta {
-                    pot: Pot::Deposits,
-                    delta: 77,
-                },
-            ],
+            deltas: BootstrapPotDeltas {
+                delta_treasury: 99,
+                delta_reserves: 42,
+                delta_deposits: 77,
+            },
         };
 
         state.handle_pot_deltas(&pot_deltas).unwrap();
