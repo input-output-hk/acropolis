@@ -21,7 +21,7 @@ use acropolis_common::{
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
-use imbl::OrdMap;
+use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
@@ -493,13 +493,21 @@ impl State {
         self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
-        for id in self.retiring_spos.drain(..) {
-            info!(epoch, "SPO {id} has retired");
-            self.spos.remove(&id);
-
-            // Wipe any delegations to this pool
-            self.stake_addresses.lock().unwrap().remove_all_delegations_to(&id);
+        let retiring: OrdSet<PoolId> = self.retiring_spos.drain(..).collect();
+        {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            for id in retiring.iter() {
+                info!(epoch, "SPO {id} has retired");
+                stake_addresses.remove_all_delegations_to(id);
+            }
         }
+
+        self.spos = self
+            .spos
+            .iter()
+            .filter(|(id, _)| !retiring.contains(id))
+            .map(|(id, reg)| (*id, reg.clone()))
+            .collect();
 
         Ok(reward_deltas)
     }

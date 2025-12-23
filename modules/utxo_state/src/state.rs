@@ -134,8 +134,14 @@ impl State {
     /// Get the number of valid UTXOs - that is, that have a valid created_at
     /// but no spent_at
     pub async fn count_valid_utxos(&self) -> usize {
-        return self.volatile_utxos.len() - self.volatile_spent.len()
-            + self.immutable_utxos.len().await.unwrap_or_default();
+        let immutable = self.immutable_utxos.len().await.unwrap_or_default() as isize;
+        let v_created = self.volatile_created.len() as isize;
+        let v_spent = self.volatile_spent.len() as isize;
+
+        let total: usize =
+            (immutable + (v_created - v_spent)).try_into().expect("total UTxO count went negative");
+
+        total
     }
 
     /// Observe a block for statistics and handle rollbacks
