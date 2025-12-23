@@ -1,6 +1,6 @@
 use crate::genesis_params;
 use acropolis_common::protocol_params::{
-    AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyParams, ShelleyProtocolParams,
+    AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
 };
 use acropolis_common::{
     AlonzoBabbageVotingOutcome, Committee, CommitteeChange, EnactStateElem, Era,
@@ -316,11 +316,12 @@ impl ParametersUpdater {
         }
     }
 
-    pub fn apply_bootstrap(&mut self, params: ProtocolParamUpdate) -> Result<()> {
-        self.params.alonzo = Some(AlonzoParams::default());
-        self.params.shelley = Some(ShelleyParams::default());
-        self.params.babbage = Some(BabbageParams::default());
-        self.params.conway = Some(ConwayParams::default());
+    pub fn apply_bootstrap(&mut self, network: &str, params: ProtocolParamUpdate) -> Result<()> {
+        self.apply_genesis(network, &Era::Byron)?;
+        self.apply_genesis(network, &Era::Shelley)?;
+        self.apply_genesis(network, &Era::Alonzo)?;
+        self.apply_genesis(network, &Era::Babbage)?;
+        self.apply_genesis(network, &Era::Conway)?;
         self.update_params(&params)
     }
 

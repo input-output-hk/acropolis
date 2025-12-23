@@ -102,7 +102,7 @@ impl State {
         self.network_name = param_msg.network_name.clone();
         self.current_era = Some(param_msg.era);
 
-        self.current_params.apply_bootstrap(param_msg.params.clone())?;
+        self.current_params.apply_bootstrap(&self.network_name, param_msg.params.clone())?;
 
         info!(
             "Bootstrapped ParametersState to era {:?} with params: {:?}",
