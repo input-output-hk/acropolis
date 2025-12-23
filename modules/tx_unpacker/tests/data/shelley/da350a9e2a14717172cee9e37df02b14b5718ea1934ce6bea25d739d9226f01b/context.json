@@ -26,7 +26,7 @@
       "extraEntropy": {
         "tag": "NeutralNonce"
       },
-      "decentralisationParam": 1,
+      "decentralisationParam": 0.64,
       "rho": 0.003,
       "tau": 0.2,
       "a0": 0.3
@@ -69,8 +69,8 @@
   },
   "utxos": [
     [
-      ["278ec9a3dfb551288affd8d84b2d6c70b56a153ad1fd43e7b18a5528f687733e", 1],
-      [4616843, 0]
+      ["4a53dd78e0b2fd4f1ad6c95c3a06d35f00665edd627ed84ba7646f3c3b17ed68", 1],
+      [4720846, 0]
     ]
   ]
 }

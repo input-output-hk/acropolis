@@ -3,19 +3,18 @@
 
 use acropolis_common::{protocol_params::ShelleyParams, validation::Phase1ValidationError};
 use anyhow::Result;
-use pallas::ledger::primitives::alonzo;
 pub type Phase1ValidationResult = Result<(), Box<Phase1ValidationError>>;
 
 pub fn validate(
-    mtx: &alonzo::MintedTx,
     tx_size: u32,
+    fee: u64,
+    ttl: Option<u64>,
     shelley_params: &ShelleyParams,
     current_slot: u64,
 ) -> Phase1ValidationResult {
-    let transaction_body = &mtx.transaction_body;
-    let fee = transaction_body.fee;
-    let ttl = transaction_body.ttl;
+    // This check is only for shelley
     validate_time_to_live(ttl, current_slot)?;
+
     validate_fee_too_small_utxo(fee, tx_size, shelley_params)?;
     validate_max_tx_size_utxo(tx_size, shelley_params)?;
     Ok(())
@@ -85,30 +84,54 @@ mod tests {
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e"
+    ) =>
         matches Ok(());
         "valid transaction 1 - with byron input & output"
     )]
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
+    ) =>
         matches Ok(());
         "valid transaction 2"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "expired_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "expired_utxo"
+    ) =>
         matches Err(Phase1ValidationError::ExpiredUTxO { ttl: 7084747, current_slot: 7084748 });
         "expired_utxo"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "fee_too_small_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "fee_too_small_utxo"
+    ) =>
         matches Err(Phase1ValidationError::FeeTooSmallUTxO { supplied: 22541, required: 172277 });
         "fee_too_small_utxo"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "max_tx_size_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "max_tx_size_utxo"
+    ) =>
         matches Err(Phase1ValidationError::MaxTxSizeUTxO { supplied: 17983, max: 16384 });
         "max_tx_size_utxo"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), Phase1ValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
-        let mtx = tx.as_alonzo().unwrap();
-        validate(mtx, tx.size() as u32, &ctx.shelley_params, ctx.current_slot).map_err(|e| *e)
+        validate(
+            tx.size() as u32,
+            tx.fee().unwrap_or(0),
+            tx.ttl(),
+            &ctx.shelley_params,
+            ctx.current_slot,
+        )
+        .map_err(|e| *e)
     }
 }
