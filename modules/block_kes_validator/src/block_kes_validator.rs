@@ -2,11 +2,7 @@
 //! Validate KES signatures in the block header
 
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message},
-    state_history::{StateHistory, StateHistoryStore},
-    validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, caryatid::SubscriptionExt, configuration::StartupMethod, messages::{CardanoMessage, Message}, state_history::{StateHistory, StateHistoryStore}, validation::ValidationOutcomes
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
@@ -53,6 +49,7 @@ impl BlockKesValidator {
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         kes_validation_publisher_topic: String,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -63,7 +60,9 @@ impl BlockKesValidator {
         };
 
         // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
+        if !is_snapshot_mode {
+            let _ = protocol_parameters_subscription.read().await?;
+        }
 
         loop {
             // Get a mutable state
@@ -177,6 +176,8 @@ impl BlockKesValidator {
             .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let block_subscription = context.subscribe(&block_subscribe_topic).await?;
@@ -201,6 +202,7 @@ impl BlockKesValidator {
                 protocol_parameters_subscription,
                 spo_state_subscription,
                 validation_kes_publisher_topic,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
