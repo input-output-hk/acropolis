@@ -2,7 +2,12 @@
 //! Validate KES signatures in the block header
 
 use acropolis_common::{
-    BlockInfo, BlockStatus, caryatid::SubscriptionExt, configuration::StartupMethod, messages::{CardanoMessage, Message}, state_history::{StateHistory, StateHistoryStore}, validation::ValidationOutcomes
+    caryatid::SubscriptionExt,
+    configuration::StartupMethod,
+    messages::{CardanoMessage, Message},
+    state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
