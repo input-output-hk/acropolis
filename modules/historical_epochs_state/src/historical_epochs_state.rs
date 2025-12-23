@@ -4,6 +4,7 @@
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
 use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::configuration::StartupMethod;
 use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
@@ -19,7 +20,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 mod immutable_historical_epochs_state;
 mod state;
 mod volatile_historical_epochs_state;
@@ -50,9 +51,12 @@ impl HistoricalEpochsState {
         mut blocks_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
-        let _ = params_subscription.read().await?;
-        info!("Consumed initial genesis params from params_subscription");
+        if !is_snapshot_mode {
+            let _ = params_subscription.read().await?;
+            debug!("Consumed initial genesis params from params_subscription");
+        }
 
         // Background task to persist epoch sequentially
         const MAX_PENDING_PERSISTS: usize = 1;
@@ -166,6 +170,7 @@ impl HistoricalEpochsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
 
         // Subscription topics
         let blocks_subscribe_topic = config
@@ -284,6 +289,7 @@ impl HistoricalEpochsState {
                 blocks_subscription,
                 epoch_activity_subscription,
                 params_subscription,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
