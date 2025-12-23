@@ -209,7 +209,7 @@ impl DRepState {
         storage_config: DRepStorageConfig,
     ) -> Result<()> {
         let mut subscription = match snapshot_subscription {
-            Some(mut sub) => sub,
+            Some(sub) => sub,
             None => {
                 info!("No snapshot subscription, skipping bootstrap");
                 return Ok(());
@@ -269,10 +269,8 @@ impl DRepState {
             history.clone(), subs.snapshot, storage_config
         ).await?;
 
-        if storage_config.store_info {
-            if let Some(sub) = subs.params.read_opt().await? {
-                info!("Consumed initial genesis params from params_subscription");
-            }
+        if subs.params.read_opt().await?.is_some() {
+            info!("Consumed initial genesis params from params_subscription");
         }
 
         // Main loop of synchronised messages
