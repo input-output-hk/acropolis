@@ -20,7 +20,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 mod immutable_historical_epochs_state;
 mod state;
 mod volatile_historical_epochs_state;
@@ -55,7 +55,7 @@ impl HistoricalEpochsState {
     ) -> Result<()> {
         if !is_snapshot_mode {
             let _ = params_subscription.read().await?;
-            info!("Consumed initial genesis params from params_subscription");
+            debug!("Consumed initial genesis params from params_subscription");
         }
 
         // Background task to persist epoch sequentially

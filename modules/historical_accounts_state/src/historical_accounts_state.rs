@@ -16,7 +16,7 @@ use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info, info_span};
+use tracing::{debug, error, info, info_span};
 
 mod state;
 use state::State;
@@ -69,9 +69,9 @@ impl HistoricalAccountsState {
     ) -> Result<()> {
         if !is_snapshot_mode {
             let _ = params_subscription.read().await?;
-            info!("Consumed initial genesis params from params_subscription");
+            debug!("Consumed initial genesis params from params_subscription");
             let _ = stake_address_deltas_subscription.read().await?;
-            info!("Consumed initial stake deltas from stake_address_deltas_subscription");
+            debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
         }
 
         // Background task to persist epochs sequentially
