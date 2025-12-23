@@ -118,7 +118,6 @@ pub fn validate(
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
-        println!("has mir certificate");
         validate_mir_insufficient_genesis_sigs(
             &vkey_hashes_provided,
             genesis_delegs,

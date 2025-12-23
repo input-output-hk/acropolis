@@ -1,21 +1,24 @@
 use acropolis_common::{
     protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, GenesisDelegates, TxHash,
+    BlockInfo, Era, GenesisDelegates, TxHash,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
 mod allegra;
+mod alonzo;
+mod babbage;
+mod conway;
+mod mary;
 mod shelley;
 
-pub fn validate_alonzo_compatible_tx(
+pub fn validate_tx(
     raw_tx: &[u8],
     genesis_delegs: &GenesisDelegates,
-    shelley_params: &ShelleyParams,
-    current_slot: u64,
-    era: Era,
+    shelley_params: &Option<ShelleyParams>,
+    block_info: &BlockInfo,
 ) -> Result<(), Box<TransactionValidationError>> {
-    let pallas_era = match era {
+    let pallas_era = match block_info.era {
         Era::Shelley => PallasEra::Shelley,
         Era::Allegra => PallasEra::Allegra,
         Era::Mary => PallasEra::Mary,
@@ -27,10 +30,46 @@ pub fn validate_alonzo_compatible_tx(
 
     let tx = MultiEraTx::decode_for_era(pallas_era, raw_tx).map_err(|e| {
         TransactionValidationError::CborDecodeError {
-            era,
+            era: block_info.era,
             reason: e.to_string(),
         }
     })?;
+
+    match block_info.era {
+        Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo => {
+            validate_alonzo_compatible_tx(
+                &tx,
+                genesis_delegs,
+                shelley_params,
+                block_info.slot,
+                block_info.era,
+            )?;
+        }
+        Era::Babbage => {
+            validate_babbage_tx(&tx, genesis_delegs, shelley_params, block_info.era)?;
+        }
+        Era::Conway => {
+            validate_conway_tx(&tx, block_info.era)?;
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
+fn validate_alonzo_compatible_tx(
+    tx: &MultiEraTx,
+    genesis_delegs: &GenesisDelegates,
+    shelley_params: &Option<ShelleyParams>,
+    current_slot: u64,
+    era: Era,
+) -> Result<(), Box<TransactionValidationError>> {
+    let Some(shelley_params) = shelley_params else {
+        return Err(Box::new(TransactionValidationError::Other(
+            "Shelley params are not set".to_string(),
+        )));
+    };
+
     let tx_hash = TxHash::from(*tx.hash());
     let tx_size = tx.size() as u32;
 
@@ -84,8 +123,95 @@ pub fn validate_alonzo_compatible_tx(
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
+        Era::Mary => {
+            // NOTE:
+            // Need to add Tx and UTxO validation
+
+            mary::utxow::validate(
+                mtx,
+                tx_hash,
+                &vkey_witnesses,
+                &native_scripts,
+                genesis_delegs,
+                shelley_params.update_quorum,
+            )
+            .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+        }
+        Era::Alonzo => {
+            alonzo::utxow::validate(
+                mtx,
+                tx_hash,
+                &vkey_witnesses,
+                &native_scripts,
+                genesis_delegs,
+                shelley_params.update_quorum,
+            )
+            .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+        }
         _ => {}
     }
+
+    Ok(())
+}
+
+fn validate_babbage_tx(
+    tx: &MultiEraTx,
+    genesis_delegs: &GenesisDelegates,
+    shelley_params: &Option<ShelleyParams>,
+    era: Era,
+) -> Result<(), Box<TransactionValidationError>> {
+    let Some(shelley_params) = shelley_params else {
+        return Err(Box::new(TransactionValidationError::Other(
+            "Shelley params are not set".to_string(),
+        )));
+    };
+
+    let tx_hash = TxHash::from(*tx.hash());
+
+    let mtx = tx.as_babbage().ok_or_else(|| TransactionValidationError::CborDecodeError {
+        era,
+        reason: "Not Babbage Tx".to_string(),
+    })?;
+    let (vkey_witnesses, errors) = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses());
+    if !errors.is_empty() {
+        return Err(Box::new(
+            (Phase1ValidationError::MalformedTransaction { errors }).into(),
+        ));
+    }
+    let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+
+    if era == Era::Babbage {
+        babbage::utxow::validate(
+            mtx,
+            tx_hash,
+            &vkey_witnesses,
+            &native_scripts,
+            genesis_delegs,
+            shelley_params.update_quorum,
+        )
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
+    Ok(())
+}
+
+fn validate_conway_tx(tx: &MultiEraTx, era: Era) -> Result<(), Box<TransactionValidationError>> {
+    let tx_hash = TxHash::from(*tx.hash());
+
+    let mtx = tx.as_conway().ok_or_else(|| TransactionValidationError::CborDecodeError {
+        era,
+        reason: "Not Conway Tx".to_string(),
+    })?;
+    let (vkey_witnesses, errors) = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses());
+    if !errors.is_empty() {
+        return Err(Box::new(
+            (Phase1ValidationError::MalformedTransaction { errors }).into(),
+        ));
+    }
+    let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+
+    conway::utxow::validate(mtx, tx_hash, &vkey_witnesses, &native_scripts)
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
     Ok(())
 }

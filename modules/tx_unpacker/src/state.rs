@@ -3,7 +3,7 @@ use acropolis_common::{
     messages::{ProtocolParamsMessage, RawTxsMessage},
     protocol_params::ProtocolParams,
     validation::{TransactionValidationError, ValidationError},
-    BlockInfo, Era, GenesisDelegates,
+    BlockInfo, GenesisDelegates,
 };
 use anyhow::Result;
 
@@ -29,23 +29,12 @@ impl State {
         raw_tx: &[u8],
         genesis_delegs: &GenesisDelegates,
     ) -> Result<(), Box<TransactionValidationError>> {
-        match block_info.era {
-            Era::Shelley | Era::Allegra => {
-                let Some(shelley_params) = self.protocol_params.shelley.as_ref() else {
-                    return Err(Box::new(TransactionValidationError::Other(
-                        "Shelley params are not set".to_string(),
-                    )));
-                };
-                validations::validate_alonzo_compatible_tx(
-                    raw_tx,
-                    genesis_delegs,
-                    shelley_params,
-                    block_info.slot,
-                    block_info.era,
-                )
-            }
-            _ => Ok(()),
-        }
+        validations::validate_tx(
+            raw_tx,
+            genesis_delegs,
+            &self.protocol_params.shelley,
+            block_info,
+        )
     }
 
     pub fn validate(
