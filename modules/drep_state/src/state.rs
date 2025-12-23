@@ -10,10 +10,11 @@ use acropolis_common::{
     Anchor, DRepChoice, DRepCredential, DRepRecord, Lovelace, StakeAddress, TxCertificate,
     TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use std::{collections::HashMap, sync::Arc};
 use tracing::{error, info};
+use acropolis_common::validation::ValidationOutcomes;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoricalDRepState {
@@ -208,7 +209,8 @@ impl State {
         context: Arc<Context<Message>>,
         tx_certs: &Vec<TxCertificateWithPos>,
         epoch: u64,
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
+        let mut vld = ValidationOutcomes::new();
         let mut batched_delegators = Vec::new();
         let store_delegators = self.config.store_delegators;
 
@@ -220,27 +222,28 @@ impl State {
                 }
             }
 
-            if let Err(e) = self.process_one_cert(tx_cert, epoch) {
-                error!("Error processing tx_cert: {e}");
+            if let Err(e) = self.process_one_cert(tx_cert, epoch, &mut vld) {
+                vld.push_anyhow(anyhow!("Error processing tx_cert: {e}"));
             }
         }
 
         // Batched delegations to reduce redundant queries to accounts_state
         if store_delegators && !batched_delegators.is_empty() {
             if let Err(e) = self.update_delegators(&context, &batched_delegators).await {
-                error!("Error processing batched delegators: {e}");
+                vld.push_anyhow(anyhow!("Error processing batched delegators: {e}"));
             }
         }
 
-        Ok(())
+        Ok(vld)
     }
 
     pub fn process_votes(
         &mut self,
         voting_procedures: &[(TxHash, VotingProcedures)],
-    ) -> Result<()> {
+    ) -> Result<ValidationOutcomes> {
+        let vld = ValidationOutcomes::new();
         let Some(hist_map) = self.historical_dreps.as_mut() else {
-            return Ok(());
+            return Ok(vld);
         };
 
         let cfg = self.config;
@@ -267,7 +270,7 @@ impl State {
                 }
             }
         }
-        Ok(())
+        Ok(vld)
     }
 
     pub fn update_drep_expirations(
@@ -303,7 +306,7 @@ impl State {
         distribution
     }
 
-    fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64) -> Result<bool> {
+    fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64, vld: &mut ValidationOutcomes) -> Result<bool> {
         match &tx_cert.cert {
             TxCertificate::DRepRegistration(reg) => {
                 let new = match self.dreps.get_mut(&reg.credential) {
@@ -417,7 +420,7 @@ impl State {
                         }
                     }
                 }) {
-                    error!("Historical update failed: {err}");
+                    vld.push_anyhow(anyhow!("Historical update failed: {err}"));
                 }
 
                 Ok(false)
@@ -482,7 +485,7 @@ impl State {
                 AccountsStateQueryResponse::AccountsDrepDelegationsMap(map),
             )) => map,
             _ => {
-                return Err(anyhow!("Unexpected accounts-state response"));
+                bail!("Unexpected accounts-state response")
             }
         };
 
@@ -518,7 +521,7 @@ impl State {
                 }
             }) {
                 Ok(_) => {}
-                Err(err) => return Err(anyhow!("Failed to update new delegator: {err}")),
+                Err(err) => bail!("Failed to update new delegator: {err}"),
             }
         }
 
@@ -578,6 +581,7 @@ mod tests {
         Anchor, Credential, DRepDeregistration, DRepRegistration, DRepUpdate, TxCertificate,
         TxCertificateWithPos, TxIdentifier,
     };
+    use acropolis_common::validation::ValidationOutcomes;
 
     const CRED_1: [u8; 28] = [
         123, 222, 247, 170, 243, 201, 37, 233, 124, 164, 45, 54, 241, 25, 176, 70, 154, 18, 204,
@@ -590,6 +594,7 @@ mod tests {
 
     #[test]
     fn test_drep_process_one_certificate() {
+        let mut vld = ValidationOutcomes::default();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -601,7 +606,7 @@ mod tests {
             cert_index: 0,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
             deposit: 500000000,
@@ -611,10 +616,12 @@ mod tests {
             state.get_drep(&tx_cred).unwrap().deposit,
             tx_cert_record.deposit
         );
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn test_drep_do_not_replace_existing_certificate() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -627,7 +634,7 @@ mod tests {
         };
 
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
 
         let bad_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -638,7 +645,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&bad_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&bad_tx_cert, 1, &mut vld).is_err());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -649,10 +656,12 @@ mod tests {
             state.get_drep(&tx_cred).unwrap().deposit,
             tx_cert_record.deposit
         );
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn test_drep_update_certificate() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -664,7 +673,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -679,7 +688,7 @@ mod tests {
             cert_index: 1,
         };
 
-        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1).unwrap());
+        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1, &mut vld).unwrap());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -690,10 +699,12 @@ mod tests {
             state.get_drep(&tx_cred).unwrap().anchor,
             tx_cert_record.anchor
         );
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn test_drep_do_not_update_nonexistent_certificate() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -705,7 +716,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -719,7 +730,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&update_anchor_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&update_anchor_tx_cert, 1, &mut vld).is_err());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -730,10 +741,12 @@ mod tests {
             state.get_drep(&tx_cred).unwrap().deposit,
             tx_cert_record.deposit
         );
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn test_drep_deregister() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -745,7 +758,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -755,13 +768,15 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&unregister_tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&unregister_tx_cert, 1, &mut vld).unwrap());
         assert_eq!(state.get_count(), 0);
         assert!(state.get_drep(&tx_cred).is_none());
+        vld.as_result().unwrap();
     }
 
     #[test]
     fn test_drep_do_not_deregister_nonexistent_cert() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
         let tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -773,7 +788,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, &mut vld).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -783,8 +798,9 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&unregister_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&unregister_tx_cert, 1, &mut vld).is_err());
         assert_eq!(state.get_count(), 1);
         assert_eq!(state.get_drep(&tx_cred).unwrap().deposit, 500000000);
+        vld.as_result().unwrap();
     }
 }

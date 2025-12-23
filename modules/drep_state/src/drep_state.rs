@@ -1,25 +1,28 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
-use acropolis_common::caryatid::SubscriptionExt;
+use std::{marker::PhantomData, future::Future};
+use acropolis_common::caryatid::{RollbackWrapper, SubscriptionExt};
 use acropolis_common::configuration::StartupMethod;
-use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
+use acropolis_common::messages::{
+    GovernanceProceduresMessage, ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage, 
+    StateTransitionMessage, TxCertificatesMessage
+};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
+    declare_cardano_reader, declare_cardano_rdr, declare_cardano_reader_with_rollback,
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::governance::{
-        DRepDelegatorAddresses, DRepInfo, DRepInfoWithDelegators, DRepUpdates, DRepVotes,
-        DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
-    },
-    state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
-};
-use anyhow::Result;
+    DRepDelegatorAddresses, DRepInfo, DRepInfoWithDelegators, DRepUpdates, DRepVotes,
+    DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
+}, state_history::{StateHistory, StateHistoryStore}, BlockInfo, BlockStatus};
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+use acropolis_common::validation::{ValidationError, ValidationOutcomes};
 
 mod state;
 use state::State;
@@ -29,18 +32,38 @@ use drep_state_publisher::DRepStatePublisher;
 use crate::state::DRepStorageConfig;
 
 // Subscription topics
-const DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("certificates-subscribe-topic", "cardano.certificates");
-const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("governance-subscribe-topic", "cardano.governance");
-const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("parameters-subscribe-topic", "cardano.protocol.parameters");
-/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+declare_cardano_rdr!(
+    CertReader,
+    "certificates-subscribe-topic",
+    "cardano.certificates",
+    TxCertificates,
+    TxCertificatesMessage
+);
+
+declare_cardano_rdr!(
+    ParamReader,
+    "parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+
+declare_cardano_rdr!(
+    GovReader,
+    "governance-subscribe-topic",
+    "cardano.governance",
+    GovernanceProcedures,
+    GovernanceProceduresMessage
+);
+
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
 // Publisher topic
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
+
+const DEFAULT_VALIDATION_OUTPUT_TOPIC: (&str, &str) = 
+    ("validation-output-topic", "cardano.validation.drep");
 
 // Query topic
 const DEFAULT_DREPS_QUERY_TOPIC: (&str, &str) = ("dreps-state-query-topic", "cardano.query.dreps");
@@ -60,6 +83,124 @@ const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 )]
 pub struct DRepState;
 
+struct BlockSyncContext {
+    context: Arc<Context<Message>>,
+    current_block: Option<BlockInfo>,
+    validation: ValidationOutcomes,
+    validation_topic: String,
+}
+
+impl BlockSyncContext {
+    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
+        Self {
+            validation: ValidationOutcomes::new(),
+            current_block: None,
+            context: context.clone(),
+            validation_topic: validation_topic.to_owned(),
+        }
+    }
+
+    pub fn set_current_block(&mut self, block: &BlockInfo) {
+        self.current_block = Some(block.clone());
+    }
+
+    pub fn get_epoch(&self) -> Result<u64> {
+        self.current_block.as_ref().map(|x| x.epoch)
+            .ok_or_else(|| anyhow!("Out of sync, missing current block"))
+    }
+
+    pub fn get_block_info(&self) -> Result<&BlockInfo> {
+        self.current_block.as_ref().ok_or_else(|| anyhow!("Out of sync, missing current block"))
+    }
+
+    pub fn unexpected_message_type(&mut self, topic: &str, msg: &Message) {
+        self.validation.push_anyhow(anyhow!(
+            "Unexpected message type for {topic} topic: {msg:?}"
+        ));
+    }
+
+    pub fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
+        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
+    }
+
+    pub fn merge(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
+        match outcome {
+            Err(e) => self.handling_error(handler, &e),
+            Ok(mut outcome) => self.validation.merge(&mut outcome),
+        }
+    }
+
+    pub fn handle<T: Default>(&mut self, handler: &str, result: Result<T>) -> T {
+        match result {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                self.handling_error(handler, &e);
+                T::default()
+            }
+        }
+    }
+
+    pub fn consume_sync<T>(
+        &mut self,
+        inp: Result<(BlockInfo, RollbackWrapper<T>)>
+    ) -> Result<RollbackWrapper<T>> {
+        match inp {
+            Ok(msg) => {
+                self.current_block = Some(msg.0.clone());
+                Ok(msg.1)
+            },
+            Err(e) => {
+                bail!("Error handling sync block: {e}")
+            }
+        }
+    }
+
+    pub fn consume<T>(
+        &mut self,
+        inp: Result<Option<(BlockInfo, T)>>
+    ) -> Option<(BlockInfo, T)> {
+        match inp {
+            Ok(msg) => msg,
+            Err(e) => {
+                self.validation.push_anyhow(e);
+                None
+            }
+        }
+    }
+
+    pub async fn publish(&mut self) {
+        if let Some(blk) = &self.current_block {
+            if let Err(e) =
+                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            {
+                error!("Publish failed: {:?}", e);
+            }
+        } else {
+            self.validation.print_errors(None);
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(&mut self, actual: &BlockInfo) {
+        if let Some(ref block) = self.current_block {
+            if block.number != actual.number {
+                self.validation.push_anyhow(anyhow!(
+                    "Messages out of sync: expected {}, actual {}",
+                    block.number,
+                    actual.number
+                ));
+            }
+        }
+    }
+}
+
+struct DRepSubscriptions {
+    snapshot: Option<Box<dyn Subscription<Message>>>,
+    certs: CertReader,
+    gov: GovReader,
+    params: ParamReader,
+}
+
 impl DRepState {
     /// Wait for and process snapshot bootstrap message if available
     async fn wait_for_bootstrap(
@@ -68,7 +209,7 @@ impl DRepState {
         storage_config: DRepStorageConfig,
     ) -> Result<()> {
         let mut subscription = match snapshot_subscription {
-            Some(sub) => sub,
+            Some(mut sub) => sub,
             None => {
                 info!("No snapshot subscription, skipping bootstrap");
                 return Ok(());
@@ -95,7 +236,7 @@ impl DRepState {
                         drep_msg.epoch
                     );
                     let mut state = State::new(storage_config);
-                    state.bootstrap(drep_msg);
+                    state.bootstrap(&drep_msg);
                     let drep_count = state.dreps.len();
                     history.lock().await.commit_forced(state);
                     info!(
@@ -116,20 +257,19 @@ impl DRepState {
     #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut certs_subscription: Box<dyn Subscription<Message>>,
-        mut gov_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut params_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut subs: Box<DRepSubscriptions>,
         mut drep_state_publisher: DRepStatePublisher,
+        validation_topic: String,
         context: Arc<Context<Message>>,
         storage_config: DRepStorageConfig,
     ) -> Result<()> {
         // Wait for snapshot bootstrap first (if available)
-        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, storage_config).await?;
+        Self::wait_for_bootstrap(
+            history.clone(), subs.snapshot, storage_config
+        ).await?;
 
         if storage_config.store_info {
-            if let Some(sub) = params_subscription.as_mut() {
-                let _ = sub.read().await?;
+            if let Some(sub) = subs.params.read_opt().await? {
                 info!("Consumed initial genesis params from params_subscription");
             }
         }
@@ -141,122 +281,68 @@ impl DRepState {
                 let mut h = history.lock().await;
                 h.get_or_init_with(|| State::new(storage_config))
             };
-            let mut current_block: Option<BlockInfo> = None;
 
-            // Certificates are the synchroniser
-            let (_, certs_message) = certs_subscription.read().await?;
-            let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((ref block_info, CardanoMessage::TxCertificates(_))) => {
-                    // rollback only on certs
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
+            let mut ctx = BlockSyncContext::new(&context, &validation_topic);
+
+            let (certs_message, new_epoch) = match ctx.consume_sync(subs.certs.read_rb().await)? {
+                RollbackWrapper::Normal(block) => {
+                    let blk_inf = ctx.get_block_info()?;
+                    if blk_inf.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(blk_inf.number);
                     }
-                    current_block = Some(block_info.clone());
-                    block_info.new_epoch && block_info.epoch > 0
+                    (Some(block), (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch))
                 }
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    drep_state_publisher.publish_rollback(certs_message.clone()).await?;
-                    false
+                RollbackWrapper::Rollback(msg) => {
+                    ctx.handle("rollback", drep_state_publisher.publish_rollback(msg).await);
+                    (None, None)
                 }
-                _ => false,
             };
 
             // Read from epoch-boundary messages only when it's a new epoch
-            if new_epoch {
-                // Read params subscription if store-info is enabled to obtain DRep expiration param. Update expirations on epoch transition
-                if let Some(sub) = params_subscription.as_mut() {
-                    let (_, message) = sub.read_ignoring_rollbacks().await?;
-                    match message.as_ref() {
-                        Message::Cardano((
-                            ref block_info,
-                            CardanoMessage::ProtocolParams(params),
-                        )) => {
-                            Self::check_sync(&current_block, block_info, "params");
-                            if let Some(conway) = &params.params.conway {
-                                state
-                                    .update_drep_expirations(
-                                        block_info.epoch,
-                                        conway.d_rep_activity,
-                                    )
-                                    .inspect_err(|e| error!("Param update error: {e:#}"))
-                                    .ok();
-                            }
-                        }
-                        _ => error!("Unexpected params message: {message:?}"),
+            if let Some(new_epoch) = new_epoch {
+                // Read params subscription if store-info is enabled to obtain DRep expiration param.
+                // Update expirations on epoch transition
+                if let Some((_, message)) = ctx.consume(subs.params.read_opt().await) {
+                    if let Some(cw) = message.params.conway {
+                        ctx.handle(
+                            "params",
+                            state.update_drep_expirations(new_epoch, cw.d_rep_activity)
+                        );
                     }
                 }
 
                 // Publish DRep state at the end of the epoch
-                if let Some(ref block) = current_block {
-                    let dreps = state.active_drep_list();
-                    drep_state_publisher.publish_drep_state(block, dreps).await?;
-                }
+                let dreps = state.active_drep_list();
+                drep_state_publisher.publish_drep_state(ctx.get_block_info()?, dreps).await?;
             }
 
-            // Handle cert message
-            match certs_message.as_ref() {
-                Message::Cardano((
-                    ref block_info,
-                    CardanoMessage::TxCertificates(tx_certs_msg),
-                )) => {
-                    let span = info_span!("drep_state.handle_certs", block = block_info.number);
-                    async {
-                        Self::check_sync(&current_block, block_info, "certs");
-                        state
-                            .process_certificates(
-                                context.clone(),
-                                &tx_certs_msg.certificates,
-                                block_info.epoch,
-                            )
-                            .await
-                            .inspect_err(|e| error!("Certificates handling error: {e:#}"))
-                            .ok();
-                    }
-                    .instrument(span)
-                    .await;
-                }
-
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // Do nothing, we handled the rollback earlier
-                }
-
-                _ => error!("Unexpected message type: {certs_message:?}"),
+            if let Some(tx_certs_msg) = certs_message {
+                let block_info = ctx.get_block_info()?.clone(); // Must be available if we have certs
+                let span = info_span!("drep_state.handle_certs", block = block_info.number);
+                async {
+                    ctx.merge("certs",
+                              state.process_certificates(
+                                  context.clone(),
+                                  &tx_certs_msg.certificates,
+                                  block_info.epoch
+                              ).await,
+                    )
+                }.instrument(span).await;
             }
 
-            // Handle governance message
-            if let Some(sub) = gov_subscription.as_mut() {
-                let (_, message) = sub.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((
-                        block_info,
-                        CardanoMessage::GovernanceProcedures(gov_msg),
-                    )) => {
-                        let span = info_span!("drep_state.handle_votes", block = block_info.number);
-                        async {
-                            Self::check_sync(&current_block, block_info, "gov");
-                            state
-                                .process_votes(&gov_msg.voting_procedures)
-                                .inspect_err(|e| error!("Votes handling error: {e:#}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
+            if let Some((blk_inf, gov)) = ctx.consume(subs.gov.read_opt().await) {
+                let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
+                async {
+                    ctx.merge("gov", state.process_votes(&gov.voting_procedures));
+                }.instrument(span).await;
             }
 
             // Commit the new state
-            if let Some(block_info) = current_block {
+            if let Some(block_info) = &ctx.current_block {
                 history.lock().await.commit(block_info.number, state);
             }
+
+            ctx.publish().await;
         }
     }
 
@@ -299,23 +385,35 @@ impl DRepState {
             store_votes: get_bool_flag(&config, DEFAULT_STORE_VOTES),
         };
 
-        let certificates_subscribe_topic =
-            get_string_flag(&config, DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC);
-        info!("Creating subscriber on '{certificates_subscribe_topic}'");
+        // Subscribe for snapshot messages if bootstrapping from snapshot
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
-        let mut governance_subscribe_topic = String::new();
-        if storage_config.store_votes {
-            governance_subscribe_topic =
-                get_string_flag(&config, DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{governance_subscribe_topic}'");
-        }
+        let subscriptions = DRepSubscriptions {
+            snapshot: if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+                info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
+                Some(context.subscribe(&snapshot_subscribe_topic).await?)
+            } else {
+                None
+            },
 
-        let mut parameters_subscribe_topic = String::new();
-        if storage_config.store_info {
-            parameters_subscribe_topic =
-                get_string_flag(&config, DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{parameters_subscribe_topic}'");
-        }
+            certs: CertReader::new(&context, &config).await?,
+
+            gov: if storage_config.store_votes {
+                GovReader::new(&context, &config).await?
+            }
+            else {
+                GovReader::new_none()
+            },
+
+            params: if storage_config.store_info {
+                ParamReader::new(&context, &config).await?
+            }
+            else {
+                ParamReader::new_none()
+            }
+        };
 
         let drep_state_topic = config
             .get_string("publish-drep-state-topic")
@@ -325,6 +423,9 @@ impl DRepState {
         let drep_query_topic = get_string_flag(&config, DEFAULT_DREPS_QUERY_TOPIC);
         info!("Creating DRep query handler on '{drep_query_topic}'");
 
+        let validation_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTPUT_TOPIC);
+        info!("Creating DRep state publisher on '{validation_topic}'");
+        
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",
@@ -334,18 +435,6 @@ impl DRepState {
         let query_history = history.clone();
         let ticker_history = history.clone();
         let ctx_run = context.clone();
-
-        // Subscribe for snapshot messages if bootstrapping from snapshot
-        let snapshot_subscribe_topic = config
-            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
-
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
-            info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
-            Some(context.subscribe(&snapshot_subscribe_topic).await?)
-        } else {
-            None
-        };
 
         // Query handler
         context.handle(&drep_query_topic, move |message| {
@@ -550,30 +639,13 @@ impl DRepState {
         // Publisher for DRep State
         let drep_state_publisher = DRepStatePublisher::new(context.clone(), drep_state_topic);
 
-        // Subscribe to enabled topics
-        let certs_sub = context.subscribe(&certificates_subscribe_topic).await?;
-
-        let gov_sub = if storage_config.store_votes {
-            Some(context.subscribe(&governance_subscribe_topic).await?)
-        } else {
-            None
-        };
-
-        let params_sub = if storage_config.store_info {
-            Some(context.subscribe(&parameters_subscribe_topic).await?)
-        } else {
-            None
-        };
-
         // Start run task
         context.run(async move {
             Self::run(
                 history_run,
-                snapshot_subscription,
-                certs_sub,
-                gov_sub,
-                params_sub,
+                Box::new(subscriptions),
                 drep_state_publisher,
+                validation_topic,
                 ctx_run,
                 storage_config,
             )

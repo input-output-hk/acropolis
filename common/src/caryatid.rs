@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
-
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
 
 #[async_trait]
@@ -83,6 +82,106 @@ macro_rules! declare_cardano_reader {
                     "Unexpected message {msg:?} for {} topic",
                     stringify!($msg_constructor)
                 )),
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! declare_cardano_reader_with_rollback {
+    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
+        async fn $name<'a>(s: &'a mut Box<&'a mut dyn Subscription<Message>>) -> Result<(BlockInfo, RollbackWrapper<$msg_type>)> {
+            let (_,msg) = s.read().await?;
+            match msg.as_ref() { //s.read_ignoring_rollbacks().await?.1.as_ref() {
+                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
+                    Ok((blk.clone(), RollbackWrapper::Normal(body.clone())))
+                }
+                Message::Cardano((blk, CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)))) => {
+                    Ok((blk.clone(), RollbackWrapper::Rollback(msg.clone())))
+                }
+                msg => Err(anyhow!(
+                    "Unexpected message {msg:?} for {} topic",
+                    stringify!($msg_constructor)
+                )),
+            }
+        }
+    };
+}
+
+pub enum RollbackWrapper<T> {
+    Rollback(Arc<Message>),
+    Normal(T)
+}
+
+#[macro_export]
+macro_rules! declare_cardano_rdr {
+    ($reader_name:ident, $param:expr, $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
+        pub struct $reader_name {
+            sub: Option<Box<dyn Subscription<Message>>>,
+        }
+
+        impl $reader_name {
+            pub async fn new(
+                ctx: &Context<Message>,
+                cfg: &Arc<Config>,
+            ) -> Result<Self> {
+                let topic_name = cfg.get($param).unwrap_or($def_topic);
+
+                info!("Creating subscriber on '{topic_name}' for '{}'", $param);
+                let subscription = ctx.subscribe(&topic_name).await?;
+
+                Ok (Self {
+                    sub: Some(subscription),
+                })
+            }
+
+            pub fn new_none() -> Self {
+                Self {
+                    sub: None,
+                }
+            }
+
+            pub async fn read_rb(&mut self) -> Result<(BlockInfo, RollbackWrapper<$msg_type>)> {
+                let Some(sub) = self.sub.as_mut() else {
+                    bail!("Subscription '{}' is disabled, cannot read", $param);
+                };
+
+                let res = sub.read().await?.1;
+                match res.as_ref() {
+                    Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
+                        Ok((blk.clone(), RollbackWrapper::Normal(body.clone())))
+                    },
+                    Message::Cardano((
+                        blk,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_))
+                    )) => {
+                        Ok((blk.clone(), RollbackWrapper::Rollback(res.clone())))
+                    }
+                    msg => bail!("Unexpected message {msg:?} for {}", $param),
+                }
+            }
+
+            pub async fn read(&mut self) -> Result<(BlockInfo, $msg_type)> {
+                let Some(sub) = self.sub.as_mut() else {
+                    bail!("Subscription '{}' is disabled, cannot read", $param);
+                };
+
+                match sub.read_ignoring_rollbacks().await?.1.as_ref() {
+                    Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
+                        Ok((blk.clone(), body.clone()))
+                    },
+                    msg => bail!(
+                        "Unexpected message {msg:?} for '{}' topic",
+                        stringify!($msg_constructor)
+                    ),
+                }
+            }
+
+            pub async fn read_opt(&mut self) -> Result<Option<(BlockInfo, $msg_type)>> {
+                match self.sub {
+                    None => Ok(None),
+                    Some(_) => Ok(Some(self.read().await?))
+                }
             }
         }
     };
