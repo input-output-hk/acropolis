@@ -5,7 +5,7 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "snapshot"  # Options: "mithril" | "snapshot"
+method = "mithril"  # Options: "mithril" | "snapshot"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -216,7 +216,3 @@ class = "in-memory"
 [[message-router.route]]  # Everything is internal only
 pattern = "#"
 bus = "internal"
-
-[monitor]
-output = "monitor.json" # Write to a file named monitor.json
-frequency_secs = 5.0 
