@@ -174,38 +174,9 @@ impl State {
         );
 
         // Apply deltas with overflow checks
-        let new_treasury = self.pots.treasury as i128 + deltas.delta_treasury as i128;
-        let new_reserves = self.pots.reserves as i128 + deltas.delta_reserves as i128;
-        let new_deposits = self.pots.deposits as i128 + deltas.delta_deposits as i128;
-
-        if new_treasury < 0 || new_treasury > u64::MAX as i128 {
-            anyhow::bail!(
-                "treasury pot overflow: {} + {} = {}",
-                self.pots.treasury,
-                deltas.delta_treasury,
-                new_treasury
-            );
-        }
-        if new_reserves < 0 || new_reserves > u64::MAX as i128 {
-            anyhow::bail!(
-                "reserves pot overflow: {} + {} = {}",
-                self.pots.reserves,
-                deltas.delta_reserves,
-                new_reserves
-            );
-        }
-        if new_deposits < 0 || new_deposits > u64::MAX as i128 {
-            anyhow::bail!(
-                "deposits pot overflow: {} + {} = {}",
-                self.pots.deposits,
-                deltas.delta_deposits,
-                new_deposits
-            );
-        }
-
-        self.pots.treasury = new_treasury as u64;
-        self.pots.reserves = new_reserves as u64;
-        self.pots.deposits = new_deposits as u64;
+        update_value_with_delta(&mut self.pots.treasury, deltas.delta_treasury)?;
+        update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
+        update_value_with_delta(&mut self.pots.deposits, deltas.delta_deposits)?;
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
