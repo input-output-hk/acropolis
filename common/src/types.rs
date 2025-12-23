@@ -1202,16 +1202,6 @@ impl fmt::Display for Pot {
     }
 }
 
-/// Pot Delta - internal change of pot values at genesis / era boundaries
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PotDelta {
-    /// Stake address to withdraw to
-    pub pot: Pot,
-
-    /// Delta to apply
-    pub delta: LovelaceDelta,
-}
-
 #[serde_as]
 #[derive(
     Debug, Clone, Ord, Eq, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,

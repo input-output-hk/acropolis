@@ -8,7 +8,7 @@ use acropolis_common::{
         GovernanceBootstrapMessage, GovernanceProposalRoots,
         GovernanceProtocolParametersBootstrapMessage,
         GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
-        Message, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
+        Message, SPOBootstrapMessage, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
@@ -96,6 +96,7 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
+    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -118,6 +119,7 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
+            snapshot_fee: 0,
         }
     }
 
@@ -167,7 +169,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: 0,
+            total_fees: self.snapshot_fee,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -243,10 +245,14 @@ impl PoolCallback for SnapshotPublisher {
             pools.updates.len(),
             pools.retiring.len()
         );
+
         self.pools.extend(&pools);
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::SPOState(pools),
+            SnapshotStateMessage::SPOState(SPOBootstrapMessage {
+                block_number: self.epoch_context.last_block_height,
+                spo_state: pools,
+            }),
         )));
 
         let context = self.context.clone();
@@ -284,12 +290,14 @@ impl AccountsCallback for SnapshotPublisher {
         // Convert the parsed data to the message type
         let message = AccountsBootstrapMessage {
             epoch: data.epoch,
+            block_number: self.epoch_context.last_block_height,
             accounts: data.accounts,
             pools: data.pools,
             retiring_pools: data.retiring_pools,
             dreps: data.dreps,
             pots: data.pots,
             bootstrap_snapshots: data.snapshots,
+            pot_deltas: data.pot_deltas,
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -342,7 +350,11 @@ impl DRepCallback for SnapshotPublisher {
         self.dreps_len += dreps.len();
         // Send a message to the DRepState
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::DRepState(DRepBootstrapMessage { dreps, epoch }),
+            SnapshotStateMessage::DRepState(DRepBootstrapMessage {
+                dreps,
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+            }),
         )));
 
         // Clone what we need for the async task
