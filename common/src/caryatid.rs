@@ -195,8 +195,8 @@ impl ValidationContext {
     /// Main intention for `T` is unit (`()`), but the implementation made more general.
     /// * Checks errors (and adds them to the validation outcomes, if result is Err)
     /// * Passes argument to the outcome (or replaces it with default)
-    /// `handler` annotation string for errors
-    /// `result` result of validation to be checked and passed
+    ///   `handler` annotation string for errors
+    ///   `result` result of validation to be checked and passed
     pub fn handle<T: Default>(&mut self, handler: &str, result: Result<T>) -> T {
         match result {
             Ok(outcome) => outcome,
