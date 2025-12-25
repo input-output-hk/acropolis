@@ -7,14 +7,14 @@ use acropolis_common::{
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
+    validation::ValidationOutcomes,
     Anchor, DRepChoice, DRepCredential, DRepRecord, Lovelace, StakeAddress, TxCertificate,
     TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use std::{collections::HashMap, sync::Arc};
-use tracing::{error, info};
-use acropolis_common::validation::ValidationOutcomes;
+use tracing::info;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct HistoricalDRepState {
@@ -229,7 +229,7 @@ impl State {
 
         // Batched delegations to reduce redundant queries to accounts_state
         if store_delegators && !batched_delegators.is_empty() {
-            if let Err(e) = self.update_delegators(&context, &batched_delegators).await {
+            if let Err(e) = self.update_delegators(&context, &batched_delegators, &mut vld).await {
                 vld.push_anyhow(anyhow!("Error processing batched delegators: {e}"));
             }
         }
@@ -331,7 +331,7 @@ impl State {
                 };
 
                 if self.historical_dreps.is_some() {
-                    if let Err(err) = self.update_historical(&reg.credential, true, |entry| {
+                    if let Err(err) = self.update_historical(&reg.credential, true, vld, |entry| {
                         if let Some(info) = entry.info.as_mut() {
                             info.deposit = reg.deposit;
                             info.expired = false;
@@ -370,7 +370,7 @@ impl State {
 
                 // Update history if enabled
                 if self.historical_dreps.is_some() {
-                    if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
+                    if let Err(err) = self.update_historical(&reg.credential, false, vld, |entry| {
                         if let Some(info) = entry.info.as_mut() {
                             info.deposit = 0;
                             info.expired = false;
@@ -401,7 +401,7 @@ impl State {
                 drep.anchor = reg.anchor.clone();
 
                 // Update history if enabled
-                if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
+                if let Err(err) = self.update_historical(&reg.credential, false, vld, |entry| {
                     if let Some(info) = entry.info.as_mut() {
                         info.expired = false;
                         info.retired = false;
@@ -434,6 +434,7 @@ impl State {
         &mut self,
         credential: &DRepCredential,
         create_if_missing: bool,
+        vld: &mut ValidationOutcomes,
         f: F,
     ) -> Result<()>
     where
@@ -452,7 +453,7 @@ impl State {
         } else if let Some(entry) = hist.get_mut(credential) {
             f(entry);
         } else {
-            error!("Tried to update unknown DRep credential: {:?}", credential);
+            vld.push_anyhow(anyhow!("Tried to update unknown DRep credential: {:?}", credential));
         }
 
         Ok(())
@@ -462,6 +463,7 @@ impl State {
         &mut self,
         context: &Arc<Context<Message>>,
         delegators: &[(&StakeAddress, &DRepChoice)],
+        vld: &mut ValidationOutcomes,
     ) -> Result<()> {
         let mut stake_address_to_drep = HashMap::with_capacity(delegators.len());
         let mut stake_addresses = Vec::with_capacity(delegators.len());
@@ -503,7 +505,7 @@ impl State {
             if let Some(old_drep) = old_drep_opt {
                 if let Some(old_drep_cred) = drep_choice_to_credential(&old_drep) {
                     if old_drep_cred != new_drep_cred {
-                        self.update_historical(&old_drep_cred, false, |entry| {
+                        self.update_historical(&old_drep_cred, false, vld, |entry| {
                             if let Some(delegators) = entry.delegators.as_mut() {
                                 delegators.retain(|s| s.get_hash() != stake_address.get_hash());
                             }
@@ -513,7 +515,7 @@ impl State {
             }
 
             // Add delegator to new DRep
-            match self.update_historical(&new_drep_cred, true, |entry| {
+            match self.update_historical(&new_drep_cred, true, vld, |entry| {
                 if let Some(delegators) = entry.delegators.as_mut() {
                     if !delegators.contains(&stake_address) {
                         delegators.push(stake_address.clone());

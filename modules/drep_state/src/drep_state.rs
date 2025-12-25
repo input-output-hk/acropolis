@@ -1,28 +1,31 @@
 //! Acropolis DRep State module for Caryatid
 //! Accepts certificate events and derives the DRep State in memory
 
-use std::{marker::PhantomData, future::Future};
-use acropolis_common::caryatid::{RollbackWrapper, SubscriptionExt};
-use acropolis_common::configuration::StartupMethod;
-use acropolis_common::messages::{
-    GovernanceProceduresMessage, ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage, 
-    StateTransitionMessage, TxCertificatesMessage
-};
-use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
-    declare_cardano_reader, declare_cardano_rdr, declare_cardano_reader_with_rollback,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
-    queries::governance::{
-    DRepDelegatorAddresses, DRepInfo, DRepInfoWithDelegators, DRepUpdates, DRepVotes,
-    DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
-}, state_history::{StateHistory, StateHistoryStore}, BlockInfo, BlockStatus};
-use anyhow::{anyhow, bail, Result};
+    caryatid::{RollbackWrapper, ValidationContext},
+    configuration::StartupMethod,
+    declare_cardano_rdr,
+    messages::{
+        CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage, SnapshotMessage,
+        SnapshotStateMessage, StateQuery, StateQueryResponse, StateTransitionMessage,
+        TxCertificatesMessage
+    },
+    queries::{
+        governance::{
+            DRepDelegatorAddresses, DRepInfo, DRepInfoWithDelegators, DRepUpdates, DRepVotes,
+            DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
+        },
+        errors::QueryError,
+    },
+    state_history::{StateHistory, StateHistoryStore},
+    BlockInfo, BlockStatus,
+};
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
-use acropolis_common::validation::{ValidationError, ValidationOutcomes};
 
 mod state;
 use state::State;
@@ -83,122 +86,11 @@ const DEFAULT_STORE_VOTES: (&str, bool) = ("store-votes", false);
 )]
 pub struct DRepState;
 
-struct BlockSyncContext {
-    context: Arc<Context<Message>>,
-    current_block: Option<BlockInfo>,
-    validation: ValidationOutcomes,
-    validation_topic: String,
-}
-
-impl BlockSyncContext {
-    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
-        Self {
-            validation: ValidationOutcomes::new(),
-            current_block: None,
-            context: context.clone(),
-            validation_topic: validation_topic.to_owned(),
-        }
-    }
-
-    pub fn set_current_block(&mut self, block: &BlockInfo) {
-        self.current_block = Some(block.clone());
-    }
-
-    pub fn get_epoch(&self) -> Result<u64> {
-        self.current_block.as_ref().map(|x| x.epoch)
-            .ok_or_else(|| anyhow!("Out of sync, missing current block"))
-    }
-
-    pub fn get_block_info(&self) -> Result<&BlockInfo> {
-        self.current_block.as_ref().ok_or_else(|| anyhow!("Out of sync, missing current block"))
-    }
-
-    pub fn unexpected_message_type(&mut self, topic: &str, msg: &Message) {
-        self.validation.push_anyhow(anyhow!(
-            "Unexpected message type for {topic} topic: {msg:?}"
-        ));
-    }
-
-    pub fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
-        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
-    }
-
-    pub fn merge(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
-        match outcome {
-            Err(e) => self.handling_error(handler, &e),
-            Ok(mut outcome) => self.validation.merge(&mut outcome),
-        }
-    }
-
-    pub fn handle<T: Default>(&mut self, handler: &str, result: Result<T>) -> T {
-        match result {
-            Ok(outcome) => outcome,
-            Err(e) => {
-                self.handling_error(handler, &e);
-                T::default()
-            }
-        }
-    }
-
-    pub fn consume_sync<T>(
-        &mut self,
-        inp: Result<(BlockInfo, RollbackWrapper<T>)>
-    ) -> Result<RollbackWrapper<T>> {
-        match inp {
-            Ok(msg) => {
-                self.current_block = Some(msg.0.clone());
-                Ok(msg.1)
-            },
-            Err(e) => {
-                bail!("Error handling sync block: {e}")
-            }
-        }
-    }
-
-    pub fn consume<T>(
-        &mut self,
-        inp: Result<Option<(BlockInfo, T)>>
-    ) -> Option<(BlockInfo, T)> {
-        match inp {
-            Ok(msg) => msg,
-            Err(e) => {
-                self.validation.push_anyhow(e);
-                None
-            }
-        }
-    }
-
-    pub async fn publish(&mut self) {
-        if let Some(blk) = &self.current_block {
-            if let Err(e) =
-                self.validation.publish(&self.context, &self.validation_topic, blk).await
-            {
-                error!("Publish failed: {:?}", e);
-            }
-        } else {
-            self.validation.print_errors(None);
-        }
-    }
-
-    /// Check for synchronisation
-    fn check_sync(&mut self, actual: &BlockInfo) {
-        if let Some(ref block) = self.current_block {
-            if block.number != actual.number {
-                self.validation.push_anyhow(anyhow!(
-                    "Messages out of sync: expected {}, actual {}",
-                    block.number,
-                    actual.number
-                ));
-            }
-        }
-    }
-}
-
 struct DRepSubscriptions {
     snapshot: Option<Box<dyn Subscription<Message>>>,
     certs: CertReader,
-    gov: GovReader,
-    params: ParamReader,
+    gov: Option<GovReader>,
+    params: Option<ParamReader>,
 }
 
 impl DRepState {
@@ -269,7 +161,8 @@ impl DRepState {
             history.clone(), subs.snapshot, storage_config
         ).await?;
 
-        if subs.params.read_opt().await?.is_some() {
+        if let Some(params) = &mut subs.params {
+            params.read().await?;
             info!("Consumed initial genesis params from params_subscription");
         }
 
@@ -281,18 +174,18 @@ impl DRepState {
                 h.get_or_init_with(|| State::new(storage_config))
             };
 
-            let mut ctx = BlockSyncContext::new(&context, &validation_topic);
+            let mut ctx = ValidationContext::new(&context, &validation_topic);
 
-            let (certs_message, new_epoch) = match ctx.consume_sync(subs.certs.read_rb().await)? {
-                RollbackWrapper::Normal(block) => {
-                    let blk_inf = ctx.get_block_info()?;
+            let (certs_message, new_epoch) = match &ctx.consume_sync(subs.certs.read_rb().await)? {
+                RollbackWrapper::Normal(msg @ (blk_inf,_)) => {
                     if blk_inf.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_inf.number);
                     }
-                    (Some(block), (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch))
+                    let new_epoch = (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
+                    (Some(msg.clone()), new_epoch)
                 }
                 RollbackWrapper::Rollback(msg) => {
-                    ctx.handle("rollback", drep_state_publisher.publish_rollback(msg).await);
+                    ctx.handle("rollback", drep_state_publisher.publish_rollback(msg.clone()).await);
                     (None, None)
                 }
             };
@@ -301,68 +194,51 @@ impl DRepState {
             if let Some(new_epoch) = new_epoch {
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
-                if let Some((_, message)) = ctx.consume(subs.params.read_opt().await) {
-                    if let Some(cw) = message.params.conway {
-                        ctx.handle(
-                            "params",
-                            state.update_drep_expirations(new_epoch, cw.d_rep_activity)
-                        );
+                if let Some(params) = &mut subs.params {
+                    if let Some((_, msg)) = ctx.consume("params", params.read().await) {
+                        if let Some(cw) = &msg.params.conway {
+                            ctx.handle(
+                                "params",
+                                state.update_drep_expirations(new_epoch, cw.d_rep_activity)
+                            );
+                        }
                     }
                 }
 
                 // Publish DRep state at the end of the epoch
                 let dreps = state.active_drep_list();
-                drep_state_publisher.publish_drep_state(ctx.get_block_info()?, dreps).await?;
+                let block_info = ctx.get_block_info()?;
+                drep_state_publisher.publish_drep_state(&block_info, dreps).await?;
             }
 
-            if let Some(tx_certs_msg) = certs_message {
-                let block_info = ctx.get_block_info()?.clone(); // Must be available if we have certs
+            if let Some((block_info, tx_certs)) = certs_message {
                 let span = info_span!("drep_state.handle_certs", block = block_info.number);
                 async {
                     ctx.merge("certs",
                               state.process_certificates(
                                   context.clone(),
-                                  &tx_certs_msg.certificates,
+                                  &tx_certs.certificates,
                                   block_info.epoch
                               ).await,
                     )
                 }.instrument(span).await;
             }
 
-            if let Some((blk_inf, gov)) = ctx.consume(subs.gov.read_opt().await) {
-                let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
-                async {
-                    ctx.merge("gov", state.process_votes(&gov.voting_procedures));
-                }.instrument(span).await;
+            if let Some(gov_sub) = subs.gov.as_mut() {
+                if let Some((blk_inf, gov)) = ctx.consume("gov", gov_sub.read().await) {
+                    let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
+                    async {
+                        ctx.merge("gov", state.process_votes(&gov.voting_procedures));
+                    }.instrument(span).await;
+                }
             }
 
             // Commit the new state
-            if let Some(block_info) = &ctx.current_block {
+            if let Some(block_info) = &ctx.get_current_block_opt() {
                 history.lock().await.commit(block_info.number, state);
             }
 
             ctx.publish().await;
-        }
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo, source: &str) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    source = source,
-                    "Messages out of sync (expected certs block {}, got {} from {})",
-                    block.number,
-                    actual.number,
-                    source,
-                );
-                panic!(
-                    "Message streams diverged: certs at {} vs {} from {}",
-                    block.number, actual.number, source
-                );
-            }
         }
     }
 
@@ -396,22 +272,9 @@ impl DRepState {
             } else {
                 None
             },
-
             certs: CertReader::new(&context, &config).await?,
-
-            gov: if storage_config.store_votes {
-                GovReader::new(&context, &config).await?
-            }
-            else {
-                GovReader::new_none()
-            },
-
-            params: if storage_config.store_info {
-                ParamReader::new(&context, &config).await?
-            }
-            else {
-                ParamReader::new_none()
-            }
+            gov: GovReader::new_opt(storage_config.store_votes, &context, &config).await?,
+            params: ParamReader::new_opt(storage_config.store_info, &context, &config).await?
         };
 
         let drep_state_topic = config

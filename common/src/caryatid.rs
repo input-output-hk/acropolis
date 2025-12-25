@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
+use tracing::error;
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
+use crate::types::BlockInfo;
+use crate::validation::ValidationOutcomes;
 
 #[async_trait]
 pub trait SubscriptionExt<M: MessageBounds> {
@@ -87,37 +90,17 @@ macro_rules! declare_cardano_reader {
     };
 }
 
-#[macro_export]
-macro_rules! declare_cardano_reader_with_rollback {
-    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
-        async fn $name<'a>(s: &'a mut Box<&'a mut dyn Subscription<Message>>) -> Result<(BlockInfo, RollbackWrapper<$msg_type>)> {
-            let (_,msg) = s.read().await?;
-            match msg.as_ref() { //s.read_ignoring_rollbacks().await?.1.as_ref() {
-                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                    Ok((blk.clone(), RollbackWrapper::Normal(body.clone())))
-                }
-                Message::Cardano((blk, CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)))) => {
-                    Ok((blk.clone(), RollbackWrapper::Rollback(msg.clone())))
-                }
-                msg => Err(anyhow!(
-                    "Unexpected message {msg:?} for {} topic",
-                    stringify!($msg_constructor)
-                )),
-            }
-        }
-    };
-}
-
+#[derive(Debug)]
 pub enum RollbackWrapper<T> {
     Rollback(Arc<Message>),
-    Normal(T)
+    Normal((Arc<BlockInfo>, Arc<T>))
 }
 
 #[macro_export]
 macro_rules! declare_cardano_rdr {
     ($reader_name:ident, $param:expr, $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
         pub struct $reader_name {
-            sub: Option<Box<dyn Subscription<Message>>>,
+            sub: Box<dyn Subscription<Message>>,
         }
 
         impl $reader_name {
@@ -128,61 +111,173 @@ macro_rules! declare_cardano_rdr {
                 let topic_name = cfg.get($param).unwrap_or($def_topic);
 
                 info!("Creating subscriber on '{topic_name}' for '{}'", $param);
-                let subscription = ctx.subscribe(&topic_name).await?;
-
                 Ok (Self {
-                    sub: Some(subscription),
+                    sub: ctx.subscribe(&topic_name).await?,
                 })
             }
 
-            pub fn new_none() -> Self {
-                Self {
-                    sub: None,
+            pub async fn new_opt(
+                do_create: bool,
+                ctx: &Context<Message>,
+                cfg: &Arc<Config>,
+            ) -> Result<Option<Self>> {
+                if do_create {
+                    Ok(Some(Self::new(ctx, cfg).await?))
+                }
+                else {
+                    Ok(None)
                 }
             }
 
-            pub async fn read_rb(&mut self) -> Result<(BlockInfo, RollbackWrapper<$msg_type>)> {
-                let Some(sub) = self.sub.as_mut() else {
-                    bail!("Subscription '{}' is disabled, cannot read", $param);
-                };
-
-                let res = sub.read().await?.1;
+            pub async fn read_rb(&mut self) -> Result<RollbackWrapper<$msg_type>> {
+                let res = self.sub.read().await?.1;
                 match res.as_ref() {
                     Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                        Ok((blk.clone(), RollbackWrapper::Normal(body.clone())))
+                        Ok(RollbackWrapper::Normal((Arc::new(blk.clone()), Arc::new(body.clone()))))
                     },
                     Message::Cardano((
-                        blk,
+                        _blk,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_))
                     )) => {
-                        Ok((blk.clone(), RollbackWrapper::Rollback(res.clone())))
+                        Ok(RollbackWrapper::Rollback(res.clone()))
                     }
                     msg => bail!("Unexpected message {msg:?} for {}", $param),
                 }
             }
 
-            pub async fn read(&mut self) -> Result<(BlockInfo, $msg_type)> {
-                let Some(sub) = self.sub.as_mut() else {
-                    bail!("Subscription '{}' is disabled, cannot read", $param);
-                };
-
-                match sub.read_ignoring_rollbacks().await?.1.as_ref() {
-                    Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                        Ok((blk.clone(), body.clone()))
-                    },
-                    msg => bail!(
-                        "Unexpected message {msg:?} for '{}' topic",
-                        stringify!($msg_constructor)
-                    ),
-                }
-            }
-
-            pub async fn read_opt(&mut self) -> Result<Option<(BlockInfo, $msg_type)>> {
-                match self.sub {
-                    None => Ok(None),
-                    Some(_) => Ok(Some(self.read().await?))
+            pub async fn read(&mut self) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
+                loop {
+                    match self.read_rb().await? {
+                        RollbackWrapper::Normal(blk) => return Ok(blk),
+                        RollbackWrapper::Rollback(_) => continue,
+                    }
                 }
             }
         }
     };
 }
+
+pub struct ValidationContext {
+    context: Arc<Context<Message>>,
+    current_block: Option<Arc<BlockInfo>>,
+    validation: ValidationOutcomes,
+    validation_topic: String,
+}
+
+impl ValidationContext {
+    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
+        Self {
+            validation: ValidationOutcomes::new(),
+            current_block: None,
+            context: context.clone(),
+            validation_topic: validation_topic.to_owned(),
+        }
+    }
+
+    pub fn get_block_info(&self) -> Result<Arc<BlockInfo>> {
+        self.current_block.as_ref().ok_or_else(|| anyhow!("Current block missing")).cloned()
+    }
+
+    pub fn get_current_block_opt(&self) -> Option<Arc<BlockInfo>> {
+        self.current_block.clone()
+    }
+
+    fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
+        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
+    }
+
+    /// Adds given `outcome` to the validation outcomes list.
+    /// If the `outcome` is 'Err', then the error is added to the outcomes list instead,
+    /// annotated with `handler` string.
+    pub fn merge(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
+        match outcome {
+            Err(e) => self.handling_error(handler, &e),
+            Ok(mut outcome) => self.validation.merge(&mut outcome),
+        }
+    }
+
+    /// Adds outcome to the validation outcomes list. Similar to `merge`, but passes
+    /// value of arbitrary type `T` instead of merging validation outcomes.
+    /// Main intention for `T` is unit (`()`), but the implementation made more general.
+    /// * Checks errors (and adds them to the validation outcomes, if result is Err)
+    /// * Passes argument to the outcome (or replaces it with default)
+    /// `handler` annotation string for errors
+    /// `result` result of validation to be checked and passed
+    pub fn handle<T: Default>(&mut self, handler: &str, result: Result<T>) -> T {
+        match result {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                self.handling_error(handler, &e);
+                T::default()
+            }
+        }
+    }
+
+    /// Analyzes message retrieved from a subscriber used for synchronization:
+    /// * checks errors (adds them to validation outcome);
+    /// * sets current_block (in case the message is not empty).
+    pub fn consume_sync<T>(
+        &mut self, inp: Result<RollbackWrapper<T>>
+    ) -> Result<RollbackWrapper<T>> {
+        match &inp {
+            Ok(RollbackWrapper::Normal((blk, _msg))) => {
+                self.current_block = Some(blk.clone());
+            },
+            Ok(RollbackWrapper::Rollback(_)) => {
+                self.current_block = None;
+            },
+            Err(e) => {
+                self.current_block = None;
+                bail!("Error handling sync block: {e}");
+            }
+        }
+        inp
+    }
+
+    /// Analyzes message retrieved from a subscriber:
+    /// * checks errors (adds them to validation outcome);
+    /// * checks block info (error is generated if current_block field set and different from
+    ///   block info of the message from the topic. That is, all blocks received by the module
+    ///   must have the same block info
+    pub fn consume<T>(
+        &mut self, handler: &str, inp: Result<(Arc<BlockInfo>, Arc<T>)>
+    ) -> Option<(Arc<BlockInfo>, Arc<T>)> {
+        match inp {
+            Ok(ref msg @ (ref blk_info,_)) => {
+                self.check_sync(handler, blk_info);
+                Some(msg.clone())
+            },
+            Err(e) => {
+                self.validation.push_anyhow(e);
+                None
+            }
+        }
+    }
+
+    pub async fn publish(&mut self) {
+        if let Some(blk) = &self.current_block {
+            if let Err(e) =
+                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            {
+                error!("Publish failed: {:?}", e);
+            }
+        } else {
+            self.validation.print_errors(None);
+        }
+    }
+
+    /// Check for synchronisation
+    fn check_sync(&mut self, handler: &str, actual: &BlockInfo) {
+        if let Some(ref block) = self.current_block {
+            if block.number != actual.number {
+                self.validation.push_anyhow(anyhow!(
+                    "Messages out of sync: expected {:?}, actual ({handler}) {:?}",
+                    block,
+                    actual
+                ));
+            }
+        }
+    }
+}
+
+
