@@ -588,9 +588,8 @@ fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
 mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
-        validation::ValidationOutcomes,
-        Anchor, Credential, DRepDeregistration, DRepRegistration, DRepUpdate, TxCertificate,
-        TxCertificateWithPos, TxIdentifier,
+        validation::ValidationOutcomes, Anchor, Credential, DRepDeregistration, DRepRegistration,
+        DRepUpdate, TxCertificate, TxCertificateWithPos, TxIdentifier,
     };
 
     const CRED_1: [u8; 28] = [
