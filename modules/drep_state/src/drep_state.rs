@@ -129,7 +129,7 @@ impl DRepState {
                     );
                     let block_number = drep_msg.block_number;
                     let mut state = State::new(storage_config);
-                    state.bootstrap(&drep_msg);
+                    state.bootstrap(drep_msg);
                     let drep_count = state.dreps.len();
                     history.lock().await.bootstrap_init_with(state, block_number);
                     info!(
