@@ -306,7 +306,12 @@ impl State {
         distribution
     }
 
-    fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64, vld: &mut ValidationOutcomes) -> Result<bool> {
+    fn process_one_cert(
+        &mut self,
+        tx_cert: &TxCertificateWithPos,
+        epoch: u64,
+        vld: &mut ValidationOutcomes,
+    ) -> Result<bool> {
         match &tx_cert.cert {
             TxCertificate::DRepRegistration(reg) => {
                 let new = match self.dreps.get_mut(&reg.credential) {
@@ -453,7 +458,10 @@ impl State {
         } else if let Some(entry) = hist.get_mut(credential) {
             f(entry);
         } else {
-            vld.push_anyhow(anyhow!("Tried to update unknown DRep credential: {:?}", credential));
+            vld.push_anyhow(anyhow!(
+                "Tried to update unknown DRep credential: {:?}",
+                credential
+            ));
         }
 
         Ok(())
@@ -580,10 +588,10 @@ fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
 mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
+        validation::ValidationOutcomes,
         Anchor, Credential, DRepDeregistration, DRepRegistration, DRepUpdate, TxCertificate,
         TxCertificateWithPos, TxIdentifier,
     };
-    use acropolis_common::validation::ValidationOutcomes;
 
     const CRED_1: [u8; 28] = [
         123, 222, 247, 170, 243, 201, 37, 233, 124, 164, 45, 54, 241, 25, 176, 70, 154, 18, 204,

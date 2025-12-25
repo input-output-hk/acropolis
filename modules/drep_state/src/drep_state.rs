@@ -6,16 +6,16 @@ use acropolis_common::{
     configuration::StartupMethod,
     declare_cardano_rdr,
     messages::{
-        CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage, SnapshotMessage,
-        SnapshotStateMessage, StateQuery, StateQueryResponse, StateTransitionMessage,
-        TxCertificatesMessage
+        CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
+        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
+        StateTransitionMessage, TxCertificatesMessage,
     },
     queries::{
+        errors::QueryError,
         governance::{
             DRepDelegatorAddresses, DRepInfo, DRepInfoWithDelegators, DRepUpdates, DRepVotes,
             DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
         },
-        errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -65,7 +65,7 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 // Publisher topic
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
 
-const DEFAULT_VALIDATION_OUTPUT_TOPIC: (&str, &str) = 
+const DEFAULT_VALIDATION_OUTPUT_TOPIC: (&str, &str) =
     ("validation-output-topic", "cardano.validation.drep");
 
 // Query topic
@@ -157,9 +157,7 @@ impl DRepState {
         storage_config: DRepStorageConfig,
     ) -> Result<()> {
         // Wait for snapshot bootstrap first (if available)
-        Self::wait_for_bootstrap(
-            history.clone(), subs.snapshot, storage_config
-        ).await?;
+        Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
         if let Some(params) = &mut subs.params {
             params.read().await?;
@@ -177,15 +175,19 @@ impl DRepState {
             let mut ctx = ValidationContext::new(&context, &validation_topic);
 
             let (certs_message, new_epoch) = match &ctx.consume_sync(subs.certs.read_rb().await)? {
-                RollbackWrapper::Normal(msg @ (blk_inf,_)) => {
+                RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
                     if blk_inf.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_inf.number);
                     }
-                    let new_epoch = (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
+                    let new_epoch =
+                        (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
                     (Some(msg.clone()), new_epoch)
                 }
                 RollbackWrapper::Rollback(msg) => {
-                    ctx.handle("rollback", drep_state_publisher.publish_rollback(msg.clone()).await);
+                    ctx.handle(
+                        "rollback",
+                        drep_state_publisher.publish_rollback(msg.clone()).await,
+                    );
                     (None, None)
                 }
             };
@@ -199,7 +201,7 @@ impl DRepState {
                         if let Some(cw) = &msg.params.conway {
                             ctx.handle(
                                 "params",
-                                state.update_drep_expirations(new_epoch, cw.d_rep_activity)
+                                state.update_drep_expirations(new_epoch, cw.d_rep_activity),
                             );
                         }
                     }
@@ -214,14 +216,19 @@ impl DRepState {
             if let Some((block_info, tx_certs)) = certs_message {
                 let span = info_span!("drep_state.handle_certs", block = block_info.number);
                 async {
-                    ctx.merge("certs",
-                              state.process_certificates(
-                                  context.clone(),
-                                  &tx_certs.certificates,
-                                  block_info.epoch
-                              ).await,
+                    ctx.merge(
+                        "certs",
+                        state
+                            .process_certificates(
+                                context.clone(),
+                                &tx_certs.certificates,
+                                block_info.epoch,
+                            )
+                            .await,
                     )
-                }.instrument(span).await;
+                }
+                .instrument(span)
+                .await;
             }
 
             if let Some(gov_sub) = subs.gov.as_mut() {
@@ -229,7 +236,9 @@ impl DRepState {
                     let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
                     async {
                         ctx.merge("gov", state.process_votes(&gov.voting_procedures));
-                    }.instrument(span).await;
+                    }
+                    .instrument(span)
+                    .await;
                 }
             }
 
@@ -274,7 +283,7 @@ impl DRepState {
             },
             certs: CertReader::new(&context, &config).await?,
             gov: GovReader::new_opt(storage_config.store_votes, &context, &config).await?,
-            params: ParamReader::new_opt(storage_config.store_info, &context, &config).await?
+            params: ParamReader::new_opt(storage_config.store_info, &context, &config).await?,
         };
 
         let drep_state_topic = config
@@ -287,7 +296,7 @@ impl DRepState {
 
         let validation_topic = get_string_flag(&config, DEFAULT_VALIDATION_OUTPUT_TOPIC);
         info!("Creating DRep state publisher on '{validation_topic}'");
-        
+
         // Initalize state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "DRepState",

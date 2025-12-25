@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
-use tracing::error;
 use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
 use crate::types::BlockInfo;
 use crate::validation::ValidationOutcomes;
+use anyhow::{anyhow, bail, Result};
+use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
+use tracing::error;
 
 #[async_trait]
 pub trait SubscriptionExt<M: MessageBounds> {
@@ -93,7 +93,7 @@ macro_rules! declare_cardano_reader {
 #[derive(Debug)]
 pub enum RollbackWrapper<T> {
     Rollback(Arc<Message>),
-    Normal((Arc<BlockInfo>, Arc<T>))
+    Normal((Arc<BlockInfo>, Arc<T>)),
 }
 
 #[macro_export]
@@ -104,14 +104,11 @@ macro_rules! declare_cardano_rdr {
         }
 
         impl $reader_name {
-            pub async fn new(
-                ctx: &Context<Message>,
-                cfg: &Arc<Config>,
-            ) -> Result<Self> {
+            pub async fn new(ctx: &Context<Message>, cfg: &Arc<Config>) -> Result<Self> {
                 let topic_name = cfg.get($param).unwrap_or($def_topic);
 
                 info!("Creating subscriber on '{topic_name}' for '{}'", $param);
-                Ok (Self {
+                Ok(Self {
                     sub: ctx.subscribe(&topic_name).await?,
                 })
             }
@@ -123,8 +120,7 @@ macro_rules! declare_cardano_rdr {
             ) -> Result<Option<Self>> {
                 if do_create {
                     Ok(Some(Self::new(ctx, cfg).await?))
-                }
-                else {
+                } else {
                     Ok(None)
                 }
             }
@@ -132,15 +128,13 @@ macro_rules! declare_cardano_rdr {
             pub async fn read_rb(&mut self) -> Result<RollbackWrapper<$msg_type>> {
                 let res = self.sub.read().await?.1;
                 match res.as_ref() {
-                    Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                        Ok(RollbackWrapper::Normal((Arc::new(blk.clone()), Arc::new(body.clone()))))
-                    },
+                    Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => Ok(
+                        RollbackWrapper::Normal((Arc::new(blk.clone()), Arc::new(body.clone()))),
+                    ),
                     Message::Cardano((
                         _blk,
-                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_))
-                    )) => {
-                        Ok(RollbackWrapper::Rollback(res.clone()))
-                    }
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                    )) => Ok(RollbackWrapper::Rollback(res.clone())),
                     msg => bail!("Unexpected message {msg:?} for {}", $param),
                 }
             }
@@ -217,15 +211,16 @@ impl ValidationContext {
     /// * checks errors (adds them to validation outcome);
     /// * sets current_block (in case the message is not empty).
     pub fn consume_sync<T>(
-        &mut self, inp: Result<RollbackWrapper<T>>
+        &mut self,
+        inp: Result<RollbackWrapper<T>>,
     ) -> Result<RollbackWrapper<T>> {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
                 self.current_block = Some(blk.clone());
-            },
+            }
             Ok(RollbackWrapper::Rollback(_)) => {
                 self.current_block = None;
-            },
+            }
             Err(e) => {
                 self.current_block = None;
                 bail!("Error handling sync block: {e}");
@@ -240,13 +235,15 @@ impl ValidationContext {
     ///   block info of the message from the topic. That is, all blocks received by the module
     ///   must have the same block info
     pub fn consume<T>(
-        &mut self, handler: &str, inp: Result<(Arc<BlockInfo>, Arc<T>)>
+        &mut self,
+        handler: &str,
+        inp: Result<(Arc<BlockInfo>, Arc<T>)>,
     ) -> Option<(Arc<BlockInfo>, Arc<T>)> {
         match inp {
-            Ok(ref msg @ (ref blk_info,_)) => {
+            Ok(ref msg @ (ref blk_info, _)) => {
                 self.check_sync(handler, blk_info);
                 Some(msg.clone())
-            },
+            }
             Err(e) => {
                 self.validation.push_anyhow(e);
                 None
@@ -279,5 +276,3 @@ impl ValidationContext {
         }
     }
 }
-
-
