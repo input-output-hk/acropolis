@@ -1,7 +1,6 @@
 {
   "version": "0.2.0",
   "configurations": [
-  
     {
         "type": "lldb",
         "request": "launch",
@@ -49,6 +48,32 @@
       },
       "args": [],
       "cwd": "${workspaceFolder}/processes/omnibus"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'acropolis_process_omnibus bootstrap'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=acropolis_process_omnibus",
+          "--package=acropolis_process_omnibus"
+        ],
+        "filter": {
+          "name": "acropolis_process_omnibus",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "--config",
+        "omnibus.toml",
+        "--config",
+        "omnibus.bootstrap.toml"
+      ],
+      "cwd": "${workspaceFolder}/processes/omnibus",
+      "env": {
+        "RUST_LOG": "info"
+      }
     },
     {
         "type": "lldb",

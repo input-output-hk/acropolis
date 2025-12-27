@@ -509,6 +509,13 @@ pub struct SPOBootstrapMessage {
     pub spo_state: SPOState,
 }
 
+/// KES state bootstrap message containing opcert counters
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct KESStateBootstrapMessage {
+    pub block_number: u64,
+    pub opcert_counters: HashMap<PoolId, u64>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
@@ -519,6 +526,7 @@ pub enum SnapshotStateMessage {
     DRepState(DRepBootstrapMessage),
     ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
+    KESState(KESStateBootstrapMessage),
 }
 
 // === Global message enum ===

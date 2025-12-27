@@ -45,6 +45,17 @@ impl State {
         self.active_spos = msg.spos.iter().map(|spo| spo.operator).collect();
     }
 
+    /// Initialize opcert counters from snapshot bootstrap data
+    pub fn bootstrap_from_snapshot(
+        &mut self,
+        opcert_counters: &std::collections::HashMap<PoolId, u64>,
+    ) {
+        // Convert std::collections::HashMap to imbl::HashMap
+        self.ocert_counters = opcert_counters.iter().map(|(k, v)| (*k, *v)).collect();
+
+        eprintln!("Bootstrapped KES opcert counters for {} pools: {:?}", self.ocert_counters.len(), self.ocert_counters);
+    }
+
     pub fn update_ocert_counter(&mut self, pool_id: PoolId, declared_sequence_number: u64) {
         self.ocert_counters.insert(pool_id, declared_sequence_number);
     }

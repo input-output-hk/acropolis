@@ -34,6 +34,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Block KES Validator module
 #[module(
@@ -55,6 +57,7 @@ impl BlockKesValidator {
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         kes_validation_publisher_topic: String,
         is_snapshot_mode: bool,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -63,6 +66,13 @@ impl BlockKesValidator {
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
+
+        // Wait for and process KES snapshot bootstrap if in snapshot mode
+        if is_snapshot_mode {
+            if let Some(mut subscription) = snapshot_subscription {
+                Self::wait_for_kes_bootstrap(history.clone(), &mut subscription).await?;
+            }
+        }
 
         // Consume initial protocol parameters
         if !is_snapshot_mode {
@@ -190,6 +200,17 @@ impl BlockKesValidator {
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
 
+        // Subscribe to snapshot topic if in snapshot mode
+        let snapshot_subscription = if is_snapshot_mode {
+            let snapshot_subscribe_topic = config
+                .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+                .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "block_kes_validator",
@@ -208,12 +229,50 @@ impl BlockKesValidator {
                 spo_state_subscription,
                 validation_kes_publisher_topic,
                 is_snapshot_mode,
+                snapshot_subscription,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
+    }
+
+    /// Wait for and process KES state bootstrap message from snapshot
+    async fn wait_for_kes_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        snapshot_subscription: &mut Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for KES state bootstrap from snapshot...");
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+
+            match message {
+                Message::Snapshot(acropolis_common::messages::SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal");
+                }
+                Message::Snapshot(acropolis_common::messages::SnapshotMessage::Bootstrap(
+                    acropolis_common::messages::SnapshotStateMessage::KESState(kes_data),
+                )) => {
+                    info!(
+                        "Received KES state bootstrap with {} opcert counters",
+                        kes_data.opcert_counters.len()
+                    );
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.bootstrap_from_snapshot(&kes_data.opcert_counters);
+                    history.lock().await.commit(kes_data.block_number, state);
+                    info!("KES state bootstrap complete");
+                }
+                Message::Snapshot(acropolis_common::messages::SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting KES bootstrap loop");
+                    return Ok(());
+                }
+                _ => {
+                    // Ignore other snapshot messages
+                }
+            }
+        }
     }
 
     /// Check for synchronisation

@@ -1,6 +1,7 @@
 use acropolis_codec::map_to_block_era;
-use acropolis_common::{Era, Point};
-use pallas_traverse::MultiEraBlock;
+use acropolis_common::{crypto::keyhash_224, Era, Point, PoolId};
+use pallas_traverse::{MultiEraBlock, MultiEraHeader};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -22,6 +23,9 @@ pub struct BlockContext {
     pub point: Point,
     pub block_number: u64,
     pub era: Era,
+    /// Operational certificate counters extracted from the block header
+    /// Will be None if the block doesn't have opcert data (e.g., Byron era)
+    pub opcert_counters: Option<HashMap<PoolId, u64>>,
 }
 
 impl BlockContext {
@@ -40,12 +44,48 @@ impl BlockContext {
         let block = MultiEraBlock::decode(&cbor)
             .map_err(|e| BlockContextError::Decode(point.slot(), e.to_string()))?;
 
+        let era = map_to_block_era(&block)
+            .map_err(|e| BlockContextError::Decode(point.slot(), e.to_string()))?;
+
+        // Extract opcert counter from the block header if it's a post-Shelley block
+        let opcert_counters = Self::extract_opcert_counter(&block);
+
         Ok(Self {
             point: point.clone(),
             block_number: block.number(),
-            era: map_to_block_era(&block)
-                .map_err(|e| BlockContextError::Decode(point.slot(), e.to_string()))?,
+            era,
+            opcert_counters,
         })
+    }
+
+    /// Extract the operational certificate counter from a block header
+    /// Returns None if the block doesn't contain opcert data
+    fn extract_opcert_counter(block: &MultiEraBlock) -> Option<HashMap<PoolId, u64>> {
+        let header = block.header();
+
+        // Extract opcert data based on header type
+        let (issuer_vkey, opcert_sequence_number) = match &header {
+            MultiEraHeader::ShelleyCompatible(h) => {
+                let vkey = &h.header_body.issuer_vkey;
+                let seq_num = h.header_body.operational_cert_sequence_number;
+                (vkey.as_ref(), seq_num)
+            }
+            MultiEraHeader::BabbageCompatible(h) => {
+                let vkey = &h.header_body.issuer_vkey;
+                let seq_num = h.header_body.operational_cert.operational_cert_sequence_number;
+                (vkey.as_ref(), seq_num)
+            }
+            _ => return None, // Byron or other unsupported era
+        };
+
+        // Calculate pool ID from issuer verification key
+        let pool_id = PoolId::from(keyhash_224(issuer_vkey));
+
+        // Create a map with this single pool's opcert counter
+        let mut counters = HashMap::new();
+        counters.insert(pool_id, opcert_sequence_number);
+
+        Some(counters)
     }
 }
 

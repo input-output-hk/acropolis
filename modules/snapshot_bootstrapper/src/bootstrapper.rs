@@ -128,6 +128,14 @@ impl SnapshotBootstrapper {
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
+        // Publish KES state bootstrap if opcert counters are available
+        publisher
+            .publish_kes_state(
+                bootstrap_ctx.opcert_counters.clone(),
+                bootstrap_ctx.block_info.number,
+            )
+            .await?;
+
         publisher.publish_snapshot_complete().await?;
         publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 

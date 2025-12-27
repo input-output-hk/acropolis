@@ -9,7 +9,7 @@ use acropolis_common::{
     ledger_state::SPOState,
     messages::{
         AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        GovernanceBootstrapMessage, GovernanceProposalRoots, KESStateBootstrapMessage, Message,
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
@@ -139,6 +139,33 @@ impl SnapshotPublisher {
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish bootstrap startup message: {}", e);
         });
+        Ok(())
+    }
+
+    /// Publish KES state bootstrap message if opcert counters are available
+    pub async fn publish_kes_state(
+        &self,
+        opcert_counters: Option<HashMap<acropolis_common::PoolId, u64>>,
+        block_number: u64,
+    ) -> Result<()> {
+        if let Some(counters) = opcert_counters {
+            info!(
+                "Publishing KES state bootstrap with {} opcert counters on '{}'",
+                counters.len(),
+                self.snapshot_topic
+            );
+            let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+                SnapshotStateMessage::KESState(KESStateBootstrapMessage {
+                    block_number,
+                    opcert_counters: counters,
+                }),
+            )));
+            self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+                tracing::error!("Failed to publish KES state bootstrap message: {}", e);
+            });
+        } else {
+            info!("No opcert counters available for KES state bootstrap");
+        }
         Ok(())
     }
 

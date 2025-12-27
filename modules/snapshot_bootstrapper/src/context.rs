@@ -4,8 +4,9 @@ use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
 use acropolis_common::{
     genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
-    Point,
+    Point, PoolId,
 };
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -37,6 +38,7 @@ pub struct BootstrapContext {
     pub snapshot: Snapshot,
     pub nonces: Nonces,
     pub block_info: BlockInfo,
+    pub opcert_counters: Option<HashMap<PoolId, u64>>,
     network_dir: PathBuf,
 }
 
@@ -66,6 +68,9 @@ impl BootstrapContext {
             .unwrap_or_else(|| panic!("Origin point has no hash: {:?}", block_ctx.point));
         let slot = block_ctx.point.slot();
 
+        // Capture opcert counters from block if available
+        let opcert_counters = block_ctx.opcert_counters;
+
         // Build nonce
         let nonces = nonces_file.into_nonces(target_epoch, *hash);
 
@@ -90,6 +95,7 @@ impl BootstrapContext {
             snapshot,
             nonces,
             block_info,
+            opcert_counters,
             network_dir,
         })
     }
