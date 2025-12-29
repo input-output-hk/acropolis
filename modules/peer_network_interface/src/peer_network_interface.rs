@@ -233,17 +233,19 @@ impl PeerNetworkInterface {
     async fn wait_initial_command(
         subscription: &mut Box<dyn Subscription<Message>>,
     ) -> Result<Point> {
-        let (_, message) = subscription.read().await?;
-        match message.as_ref() {
-            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point))) => {
-                match point {
-                    acropolis_common::Point::Origin => Ok(Point::Origin),
+        loop {
+            let (_, message) = subscription.read().await?;
+
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point))) =
+                message.as_ref()
+            {
+                return Ok(match point {
+                    acropolis_common::Point::Origin => Point::Origin,
                     acropolis_common::Point::Specific { hash, slot } => {
-                        Ok(Point::Specific(*slot, hash.to_vec()))
+                        Point::Specific(*slot, hash.to_vec())
                     }
-                }
+                });
             }
-            msg => bail!("Unexpected message in sync command topic: {msg:?}"),
         }
     }
 }

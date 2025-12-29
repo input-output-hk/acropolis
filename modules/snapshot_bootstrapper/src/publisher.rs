@@ -157,7 +157,7 @@ impl SnapshotPublisher {
             self.sync_command_topic,
             point.slot()
         );
-        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        let message = Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)));
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await
