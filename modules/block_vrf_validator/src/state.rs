@@ -66,10 +66,11 @@ impl State {
 
     pub fn handle_epoch_nonce(&mut self, active_nonce: &Option<Nonce>) {
         self.epoch_nonce = active_nonce.clone();
+        tracing::info!("Reported nonce: {}", active_nonce.clone().unwrap());
         self.epoch_nonce = Some(Nonce {
             tag: NonceVariant::Nonce,
             hash: Some(
-                *Hash::from_str("0b9e320e63bf995b81287ce7a624b6735d98b083cc1a0e2ae8b08b680c79c983")
+                *Hash::from_str("c7937fc47fecbe687891b3decd71e904d1e129598aa3852481d295eea3ea3ada")
                     .expect("Nonce isnt correct"),
             ),
         });
@@ -127,15 +128,6 @@ impl State {
         let is_tpraos = matches!(
             block_info.era,
             Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo
-        );
-
-        tracing::info!(
-            "active_spos: {}",
-            self.epoch_snapshots.set.active_spos.len()
-        );
-        tracing::info!(
-            "active_stakes: {}",
-            self.epoch_snapshots.set.active_stakes.len()
         );
 
         let result = if is_tpraos {
