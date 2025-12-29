@@ -10,8 +10,6 @@ we need to add one more:
 
 * [DRep State](../../modules/drep_state) which tracks "Delegated Representatives" (DReps)
 
-TODO
-
 ## Module graph
 
 ```mermaid
@@ -25,10 +23,10 @@ flowchart LR
   SPO(SPO State)
   DREP(DRep State)
   ES(Epochs State)
-  AC(Accounts State)
   SDF(Stake Delta Filter)
   PARAM(Parameters State)
   GOV(Governance State)
+  AC(Accounts State)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
   MSF -- cardano.block.available --> BU
@@ -48,14 +46,14 @@ flowchart LR
   SPO  SPO_AC@-- cardano.spo.state --> AC
   GEN  -- cardano.pot.deltas --> AC
   TXU  -- cardano.block.txs --> ES
-  ES   ES_AC@-- cardano.epoch.activity --> AC
-  DREP DREP_AC@-- cardano.drep.state --> AC
   AC AC_GOV_DREP@-- cardano.drep.distribution --> GOV
   AC AC_GOV_SPO@-- cardano.spo.distribution --> GOV
   PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
   PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
   PARAM PARAM_DREP@-- cardano.protocol.paramters --> DREP
   GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
+  ES   ES_AC@-- cardano.epoch.activity --> AC
+  DREP DREP_AC@-- cardano.drep.state --> AC
 
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
@@ -89,7 +87,7 @@ flowchart LR
 ## Data flow
 
 The process bootstraps from Mithril, then syncs from the live chain and tracks ledger state
-exactly as [before](system-simple-mithril-and-sync-basic-ledger.md).  We are just adding support
+exactly as [before](system-bootstrap-and-sync-basic-ledger.md).  We are just adding support
 for the Conway era governance here.
 
 ### DReps
@@ -100,7 +98,7 @@ Cardano stakeholders delegating to them, and wield voting power in proportion to
 delegations.
 
 DReps are tracked with a new [DRep State](../../modules/drep_state) module.  It subscribes to
-`cardano.tx.certificates` produced by the [TX Unpacker](../../modules/tx_unpacker), to watch
+`cardano.tx.certificates` produced by the [Tx Unpacker](../../modules/tx_unpacker), to watch
 DRep registrations, updates and retirements and deregistrations (retirements).
 It keeps an internal store of these and issues a complete
 list of all active DReps and their details at the start of each epoch, on `cardano.drep.state`.
