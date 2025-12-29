@@ -10,6 +10,8 @@ For this we need to add some more modules:
 * [Epochs State](../../modules/epochs_state) which counts blocks and fees for each epoch
 * [Accounts State](../../modules/accounts_state) which tracks stake address balances, SPO delegation, monetary and reward accounts
 * [Stake Delta Filter](../../modules/stake_delta_filter) which handles stake pointer addresses
+* [Parameters State](../../modules/parameters_state) which tracks protocol parameters
+* [Governance State](../../modules/governance_state) which watches governance changes
 
 ## Module graph
 
@@ -99,7 +101,7 @@ each *block*.  We colour these in blue in the diagram above.
 
 ### Accounts State
 This message is picked up by the new [Accounts State](../../modules/accounts_state) module.
-Accounts State has a lot a functions - we'll discuss why they are all combined later - but
+Accounts State has a lot of functions - we'll discuss why they are all combined later - but
 its primary output is the Stake Pool Delegation Distribution (SPDD) which gives the total
 stake (both UTXOs and rewards) delegated to each SPO.  This is a core part of the Ouroboros
 protocol, since it defines which SPOs are allowed to produce blocks.
@@ -200,6 +202,16 @@ new MIRs are no longer allowed.
 Accounts State receives MIRs through the `cardano.certificates` topic, stores
 them up and processes them at the start of each epoch.
 
+### The SPDD
+
+Given all the above, the Accounts State module has enough to track both the UTXO and
+rewards balance of every stake address, and which SPO (if any) that stake address is
+delegated to.  This allows it, once per epoch, to generate the Stake Pool Delegation Distribution
+(SPDD) which it publishes on `cardano.spo.distribution`.  We don't show this going anywhere
+at the moment - it's something an external application could pick up, though.  In the
+[next build](system-bootstrap-and-sync-with-conway.md) we'll see how it is fed back into
+goverance for Conway.
+
 ### Parameters and Governance
 
 Although at this stage we aren't handling the full governance of the Conway era (CIP-1694)
@@ -208,12 +220,17 @@ by the founding entities.  We need to track this in order to maintain the correc
 various calculation parameters as we move through the chain.
 
 To do this, we introduce two new modules: [Governance State](../../modules/governance_state)
-and [Parameter State](../../modules/parameter_state).  The Governance State gets governance
+and [Parameters State](../../modules/parameters_state).  The Governance State gets governance
 events from the Tx Unpacker on `cardano.governance`.  If anything changes during an epoch,
-it sends a `cardano.enact.state` message to the Parameter State, which then sends a
+it sends a `cardano.enact.state` message to the Parameters State, which then sends a
 `cardano.protocol.parameters` with the updated parameter set.  This is picked up by Accounts
 State to get its calculation parameters, and also by Governance State since the parameters
 affect the voting system as well.
+
+## Why is AccountsState so big?
+
+TODO: Would otherwise require the exchange or query of data structures (Stake address map) which
+is too big to do efficiently.
 
 ## Configuration
 
