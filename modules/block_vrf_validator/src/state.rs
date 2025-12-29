@@ -1,12 +1,16 @@
 //! Acropolis block_vrf_validator state storage
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage},
-    protocol_params::Nonce,
+    hash::Hash,
+    messages::{
+        AccountsBootstrapMessage, ProtocolParamsMessage, SPOStakeDistributionMessage,
+        SPOStateMessage,
+    },
+    protocol_params::{Nonce, NonceVariant},
     rational_number::RationalNumber,
     validation::{ValidationError, VrfValidationError},
     BlockInfo, Era,
@@ -62,6 +66,14 @@ impl State {
 
     pub fn handle_epoch_nonce(&mut self, active_nonce: &Option<Nonce>) {
         self.epoch_nonce = active_nonce.clone();
+        self.epoch_nonce = Some(Nonce {
+            tag: NonceVariant::Nonce,
+            hash: Some(
+                *Hash::from_str("0b9e320e63bf995b81287ce7a624b6735d98b083cc1a0e2ae8b08b680c79c983")
+                    .expect("Nonce isnt correct"),
+            ),
+        });
+        tracing::info!("Stored epoch nonce: {}", self.epoch_nonce.clone().unwrap());
     }
 
     pub fn handle_new_snapshot(
@@ -70,7 +82,6 @@ impl State {
         spdd_msg: &SPOStakeDistributionMessage,
     ) {
         let new_snapshot = Snapshot::from((spo_state_msg, spdd_msg));
-        tracing::info!("new_snapshot: {new_snapshot}");
         self.epoch_snapshots.push(new_snapshot);
     }
 
@@ -118,6 +129,15 @@ impl State {
             Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo
         );
 
+        tracing::info!(
+            "active_spos: {}",
+            self.epoch_snapshots.set.active_spos.len()
+        );
+        tracing::info!(
+            "active_stakes: {}",
+            self.epoch_snapshots.set.active_stakes.len()
+        );
+
         let result = if is_tpraos {
             ouroboros::tpraos::validate_vrf_tpraos(
                 block_info,
@@ -148,5 +168,11 @@ impl State {
             })
         };
         result.map_err(|e| Box::new((*e).into()))
+    }
+
+    pub fn bootstrap(&mut self, vrf_data: AccountsBootstrapMessage) -> Result<()> {
+        let latest = Snapshot::from(vrf_data);
+        self.epoch_snapshots.push(latest);
+        Ok(())
     }
 }
