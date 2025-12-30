@@ -4,7 +4,7 @@
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
     configuration::StartupMethod,
-    declare_cardano_rdr,
+    declare_cardano_inner, declare_cardano_rdr,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
         SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
@@ -38,7 +38,7 @@ use crate::state::DRepStorageConfig;
 declare_cardano_rdr!(
     CertReader,
     "certificates-subscribe-topic",
-    "cardano.certificates",
+    default "cardano.certificates",
     TxCertificates,
     TxCertificatesMessage
 );
@@ -46,7 +46,7 @@ declare_cardano_rdr!(
 declare_cardano_rdr!(
     ParamReader,
     "parameters-subscribe-topic",
-    "cardano.protocol.parameters",
+    default "cardano.protocol.parameters",
     ProtocolParams,
     ProtocolParamsMessage
 );
@@ -54,7 +54,7 @@ declare_cardano_rdr!(
 declare_cardano_rdr!(
     GovReader,
     "governance-subscribe-topic",
-    "cardano.governance",
+    default "cardano.governance",
     GovernanceProcedures,
     GovernanceProceduresMessage
 );

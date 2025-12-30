@@ -36,7 +36,7 @@ use state::State;
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const CONFIG_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
-    ("publish-validation-outcome", "cardano.validation.parameters");
+    ("validation-output-topic", "cardano.validation.parameters");
 const CONFIG_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
 const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot

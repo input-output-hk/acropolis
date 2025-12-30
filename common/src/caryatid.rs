@@ -97,34 +97,13 @@ pub enum RollbackWrapper<T> {
 }
 
 #[macro_export]
-macro_rules! declare_cardano_rdr {
-    ($reader_name:ident, $param:expr, $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
+macro_rules! declare_cardano_inner {
+    ($reader_name:ident, $param:expr, $msg_constructor:ident, $msg_type:ty) => {
         pub struct $reader_name {
             sub: Box<dyn Subscription<Message>>,
         }
 
         impl $reader_name {
-            pub async fn new(ctx: &Context<Message>, cfg: &Arc<Config>) -> Result<Self> {
-                let topic_name = cfg.get($param).unwrap_or($def_topic);
-
-                info!("Creating subscriber on '{topic_name}' for '{}'", $param);
-                Ok(Self {
-                    sub: ctx.subscribe(&topic_name).await?,
-                })
-            }
-
-            pub async fn new_opt(
-                do_create: bool,
-                ctx: &Context<Message>,
-                cfg: &Arc<Config>,
-            ) -> Result<Option<Self>> {
-                if do_create {
-                    Ok(Some(Self::new(ctx, cfg).await?))
-                } else {
-                    Ok(None)
-                }
-            }
-
             pub async fn read_rb(&mut self) -> Result<RollbackWrapper<$msg_type>> {
                 let res = self.sub.read().await?.1;
                 match res.as_ref() {
@@ -146,6 +125,56 @@ macro_rules! declare_cardano_rdr {
                         RollbackWrapper::Rollback(_) => continue,
                     }
                 }
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! declare_cardano_rdr {
+    ($reader_name:ident, $param:expr, default $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
+        declare_cardano_inner!($reader_name, $param, $msg_constructor, $msg_type);
+
+        impl $reader_name {
+            pub async fn new(ctx: &Context<Message>, cfg: &Arc<Config>) -> Result<Self> {
+                let topic_name = cfg.get($param).unwrap_or($def_topic);
+
+                tracing::info!("Creating subscriber on '{topic_name}' for '{}'", $param);
+                Ok(Self {
+                    sub: ctx.subscribe(&topic_name).await?,
+                })
+            }
+
+            pub async fn new_opt(
+                do_create: bool,
+                ctx: &Context<Message>,
+                cfg: &Arc<Config>,
+            ) -> Result<Option<Self>> {
+                if do_create {
+                    Ok(Some(Self::new(ctx, cfg).await?))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    };
+    ($reader_name:ident, $param:expr, $msg_constructor:ident, $msg_type:ty) => {
+        declare_cardano_inner!($reader_name, $param, $msg_constructor, $msg_type);
+
+        impl $reader_name {
+            pub async fn new_no_default(
+                ctx: &Context<Message>,
+                cfg: &Arc<Config>,
+            ) -> Result<Option<Self>> {
+                let Ok(topic_name) = cfg.get_string($param) else {
+                    tracing::info!("No topic specified for '{}'", $param);
+                    return Ok(None);
+                };
+
+                tracing::info!("Creating subscriber on '{topic_name}' for '{}'", $param);
+                Ok(Some(Self {
+                    sub: ctx.subscribe(&topic_name).await?,
+                }))
             }
         }
     };
