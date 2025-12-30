@@ -4,7 +4,7 @@
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
-    configuration::StartupMethod,
+    configuration::{StartupMethod, StartupMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Point,
@@ -273,7 +273,13 @@ impl MithrilSnapshotFetcher {
 
         let mut last_block_info: Option<BlockInfo> = None;
 
-        let blocks = hardano::immutable::read_blocks_from_point(&path, point)?;
+        let mut blocks = hardano::immutable::read_blocks_from_point(&path, point)?;
+
+        // Skip first block if booting from snapshot as `read_blocks_from_point` is inclusive of the point
+        if StartupMode::from_config(&config).is_snapshot() {
+            let _ = blocks.next();
+        }
+
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         for raw_block in blocks {
@@ -403,6 +409,10 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        if !StartupMethod::from_config(&config).is_mithril() {
+            return Ok(());
+        }
+
         let bootstrapped_subscribe_topic = config
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
@@ -414,7 +424,7 @@ impl MithrilSnapshotFetcher {
 
         let mut bootstrapped_subscription =
             context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let mut sync_command_subscription = if StartupMethod::from_config(&config).is_snapshot() {
+        let mut sync_command_subscription = if StartupMode::from_config(&config).is_snapshot() {
             Some(context.subscribe(&sync_command_topic).await?)
         } else {
             None

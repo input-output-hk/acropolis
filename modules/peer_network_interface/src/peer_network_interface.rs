@@ -6,6 +6,7 @@ mod network;
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus,
     commands::chain_sync::ChainSyncCommand,
+    configuration::{StartupMethod, StartupMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -34,13 +35,20 @@ pub struct PeerNetworkInterface;
 
 impl PeerNetworkInterface {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let cfg = InterfaceConfig::try_load(&config)?;
+        let mut cfg = InterfaceConfig::try_load(&config)?;
         let genesis_complete = if cfg.genesis_values.is_none() {
             Some(context.subscribe(&cfg.genesis_completion_topic).await?)
         } else {
             None
         };
         let mut command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
+
+        // Override sync_point to Origin if mode is genesis using upstream method
+        if StartupMode::from_config(&config).is_genesis()
+            && StartupMethod::from_config(&config).is_upstream()
+        {
+            cfg.sync_point = SyncPoint::Origin
+        }
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {

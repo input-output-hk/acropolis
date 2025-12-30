@@ -5,7 +5,8 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "mithril"  # Options: "mithril" | "snapshot"
+sync-mode = "genesis"   # Options: "genesis" | "snapshot"
+sync-method = "mithril" # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
 
 # ============================================================================
