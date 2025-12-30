@@ -82,7 +82,6 @@ flowchart LR
 ```
 
 ## Data flow
-
 The process bootstraps from Mithril, then syncs from the live chain and tracks UTXOs exactly
 as [before](system-simple-mithril-and-sync-utxo.md).  We will add much more comprehensive
 tracking of the ledger state for the Shelley era only for now - Conway governance will
@@ -132,7 +131,6 @@ addresses don't).  The cleaned-up deltas are then published on `cardano.stake.de
 is what the Accounts State actually subscribes to.
 
 ### Epoch activity
-
 Another new module, [Epoch State](../../modules/epoch_state) counts up all the fees paid on
 transactions in each epoch, and also how many blocks each SPO produced.  It gets this information
 from block data sent on `cardano.block.txs` .It sends the totals to
@@ -229,11 +227,15 @@ affect the voting system as well.
 
 ## Why is AccountsState so big?
 
-TODO: Would otherwise require the exchange or query of data structures (Stake address map) which
-is too big to do efficiently.
+The Accounts State module has a lot of functions and seems rather, well, monolithic.  This seems
+to go against our general philosophy of each module having a single bounded context.
+
+The reason for this is pragmatic - the stake address data is big (in the order of 0.5GB) so
+is too big to send between modules, even on an epoch boundary.  It would also be very inefficient
+for a separate module (e.g. an imaginary "Rewards Calculator") to query and then update it one
+address at a time.
 
 ## Configuration
-
 Here is the
 [configuration](../../processes/omnibus/configs/bootstrap-and-sync-with-basic-ledger.toml)
 for this setup. You can run it in the `processes/omnibus` directory with:
@@ -241,3 +243,6 @@ for this setup. You can run it in the `processes/omnibus` directory with:
 ```shell
 $ cargo run --release -- --config configs/bootstrap-and-sync-with-basic-ledger.toml
 ```
+
+## Next steps
+Next up, we will add [Conway era governance](system-bootstrap-and-sync-with-conway.md).

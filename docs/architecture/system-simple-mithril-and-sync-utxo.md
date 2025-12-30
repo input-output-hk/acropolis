@@ -39,7 +39,6 @@ flowchart LR
 ```
 
 ## Data flow
-
 The process follows exactly the same sequence as [before](system-simple-mithril-utxo.md) initially:
 
 * [Genesis Bootstrapper](../../modules/genesis_bootstrapper) reads and sends the Genesis UTXOs
@@ -67,10 +66,13 @@ sequence, which the hand-off process ensures.  This is the benefit of the pub-su
 architecture!
 
 ## Configuration
-
 Here is the [configuration](../../processes/omnibus/configs/simple-mithril-and-sync-utxo.toml)
 for this setup. You can run it in the `processes/omnibus` directory with:
 
 ```shell
 $ cargo run --release -- --config configs/simple-mithril-and-sync-utxo.toml
 ```
+
+## Next steps
+To continue, we will add more complete
+[ledger state tracking](system-bootstrap-and-sync-with-basic-ledger.md).
