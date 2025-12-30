@@ -2,9 +2,9 @@ use crate::block::{BlockContext, BlockContextError};
 use crate::configuration::{BootstrapConfig, ConfigError, Snapshot};
 use crate::nonces::{NonceContext, NonceContextError};
 use crate::publisher::EpochContext;
+use acropolis_common::Slot;
 use acropolis_common::{
     genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
-    Point,
 };
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -16,8 +16,8 @@ pub enum BootstrapContextError {
 
     #[error("Nonces point mismatch: nonces at {nonces_point}, snapshot at {snapshot_point}")]
     NoncesPointMismatch {
-        nonces_point: Point,
-        snapshot_point: Point,
+        nonces_point: Slot,
+        snapshot_point: Slot,
     },
 
     #[error(transparent)]
@@ -51,10 +51,10 @@ impl BootstrapContext {
         let nonces_file = NonceContext::load(&network_dir)?;
 
         // Validate nonces match snapshot point
-        if nonces_file.at != snapshot.point {
+        if nonces_file.slot != snapshot.point.slot() {
             return Err(BootstrapContextError::NoncesPointMismatch {
-                nonces_point: nonces_file.at.clone(),
-                snapshot_point: snapshot.point.clone(),
+                nonces_point: nonces_file.slot,
+                snapshot_point: snapshot.point.slot(),
             });
         }
 
@@ -67,7 +67,7 @@ impl BootstrapContext {
         let slot = block_ctx.point.slot();
 
         // Build nonce
-        let nonces = nonces_file.into_nonces(target_epoch, *hash);
+        let nonces = nonces_file.into_nonces(target_epoch);
 
         // Build block info
         let (_, epoch_slot) = genesis.slot_to_epoch(slot);

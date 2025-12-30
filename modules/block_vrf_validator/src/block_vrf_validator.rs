@@ -60,7 +60,7 @@ impl BlockVrfValidator {
         let epoch = vrf_data.epoch;
         let pools_len = vrf_data.pools.len();
 
-        // Initialize vrf state from snapshot data
+        // Initialize VRF validator state from snapshot data
         state.bootstrap(vrf_data)?;
 
         info!(

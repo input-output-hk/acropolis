@@ -1,16 +1,15 @@
 //! Acropolis block_vrf_validator state storage
 
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 
 use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
-    hash::Hash,
     messages::{
         AccountsBootstrapMessage, ProtocolParamsMessage, SPOStakeDistributionMessage,
         SPOStateMessage,
     },
-    protocol_params::{Nonce, NonceVariant},
+    protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::{ValidationError, VrfValidationError},
     BlockInfo, Era,
@@ -66,15 +65,6 @@ impl State {
 
     pub fn handle_epoch_nonce(&mut self, active_nonce: &Option<Nonce>) {
         self.epoch_nonce = active_nonce.clone();
-        tracing::info!("Reported nonce: {}", active_nonce.clone().unwrap());
-        self.epoch_nonce = Some(Nonce {
-            tag: NonceVariant::Nonce,
-            hash: Some(
-                *Hash::from_str("c7937fc47fecbe687891b3decd71e904d1e129598aa3852481d295eea3ea3ada")
-                    .expect("Nonce isnt correct"),
-            ),
-        });
-        tracing::info!("Stored epoch nonce: {}", self.epoch_nonce.clone().unwrap());
     }
 
     pub fn handle_new_snapshot(
