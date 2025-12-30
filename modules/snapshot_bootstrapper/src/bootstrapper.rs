@@ -3,7 +3,7 @@ mod configuration;
 mod context;
 mod downloader;
 mod nonces;
-pub(crate) mod opcerts;
+mod opcerts;
 mod progress_reader;
 mod publisher;
 
@@ -94,17 +94,12 @@ impl SnapshotBootstrapper {
 
         let bootstrap_ctx = BootstrapContext::load(&cfg)?;
         info!(
-            "Loaded bootstrap data for epoch {}",
-            bootstrap_ctx.block_info.epoch
-        );
-        info!("  Snapshot: {}", bootstrap_ctx.snapshot.url);
-        info!(
-            "  Block: slot={}, number={}",
-            bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
-        );
-        info!(
-            "  OpCert counters: {} pools",
-            bootstrap_ctx.ocert_counters.len()
+            epoch = bootstrap_ctx.block_info.epoch,
+            slot = bootstrap_ctx.block_info.slot,
+            block = bootstrap_ctx.block_info.number,
+            opcert_pools = bootstrap_ctx.ocert_counters.len(),
+            snapshot = %bootstrap_ctx.snapshot.url,
+            "Loaded bootstrap data"
         );
 
         // Publish
@@ -133,14 +128,12 @@ impl SnapshotBootstrapper {
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
-        // Publish KES validator bootstrap data (opcert counters from CSV)
         publisher
             .publish_kes_validator_bootstrap(
                 bootstrap_ctx.block_info.epoch,
                 bootstrap_ctx.ocert_counters,
             )
             .await?;
-
         publisher.publish_snapshot_complete().await?;
         publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
