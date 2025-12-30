@@ -3,9 +3,6 @@
 //! Reads OpCerts.csv containing pool operational certificate counter values
 //! needed for KES signature validation during bootstrap.
 
-// TODO: Remove this once the module is integrated into the bootstrap flow
-#![allow(dead_code)]
-
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::PoolId;
 use std::collections::HashMap;
