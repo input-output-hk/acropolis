@@ -352,6 +352,21 @@ pub struct DRepBootstrapMessage {
     pub dreps: HashMap<DRepCredential, DRepRecord>,
 }
 
+/// Block KES validator bootstrap message containing operational certificate counters
+/// needed for KES signature validation during snapshot bootstrap
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockKesValidatorBootstrapMessage {
+    /// Epoch number this snapshot is for
+    pub epoch: u64,
+
+    /// Block number this snapshot is for
+    pub block_number: u64,
+
+    /// Operational certificate counters per pool
+    /// Maps pool ID to the latest operational certificate counter value
+    pub ocert_counters: HashMap<PoolId, u64>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParametersBootstrapMessage {
     pub network_name: String,
@@ -519,6 +534,7 @@ pub enum SnapshotStateMessage {
     DRepState(DRepBootstrapMessage),
     ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
+    BlockKesValidatorState(BlockKesValidatorBootstrapMessage),
 }
 
 // === Global message enum ===
