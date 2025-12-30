@@ -3,6 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
+    configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
@@ -61,6 +62,7 @@ impl BlockVrfValidator {
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
         publish_vrf_validation_topic: String,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -71,7 +73,9 @@ impl BlockVrfValidator {
         };
 
         // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
+        if !is_snapshot_mode {
+            let _ = protocol_parameters_subscription.read().await?;
+        }
 
         loop {
             // Get a mutable state
@@ -213,6 +217,8 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
 
+        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
@@ -241,6 +247,7 @@ impl BlockVrfValidator {
                 spo_state_subscription,
                 spdd_subscription,
                 validation_vrf_publisher_topic,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
