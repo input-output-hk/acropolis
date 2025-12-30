@@ -3,6 +3,7 @@ mod configuration;
 mod context;
 mod downloader;
 mod nonces;
+pub(crate) mod opcerts;
 mod progress_reader;
 mod publisher;
 
