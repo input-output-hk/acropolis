@@ -5,7 +5,10 @@ use std::sync::Arc;
 use crate::{ouroboros, snapshot::Snapshot};
 use acropolis_common::{
     genesis_values::GenesisValues,
-    messages::{ProtocolParamsMessage, SPOStakeDistributionMessage, SPOStateMessage},
+    messages::{
+        AccountsBootstrapMessage, ProtocolParamsMessage, SPOStakeDistributionMessage,
+        SPOStateMessage,
+    },
     protocol_params::Nonce,
     rational_number::RationalNumber,
     validation::{ValidationError, VrfValidationError},
@@ -70,7 +73,6 @@ impl State {
         spdd_msg: &SPOStakeDistributionMessage,
     ) {
         let new_snapshot = Snapshot::from((spo_state_msg, spdd_msg));
-        tracing::info!("new_snapshot: {new_snapshot}");
         self.epoch_snapshots.push(new_snapshot);
     }
 
@@ -148,5 +150,11 @@ impl State {
             })
         };
         result.map_err(|e| Box::new((*e).into()))
+    }
+
+    pub fn bootstrap(&mut self, vrf_data: AccountsBootstrapMessage) -> Result<()> {
+        let latest = Snapshot::from(vrf_data);
+        self.epoch_snapshots.push(latest);
+        Ok(())
     }
 }
