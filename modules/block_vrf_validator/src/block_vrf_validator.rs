@@ -74,16 +74,8 @@ impl BlockVrfValidator {
     /// Wait for and process snapshot bootstrap messages
     async fn wait_for_bootstrap(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let snapshot_subscription = match snapshot_subscription.as_mut() {
-            Some(sub) => sub,
-            None => {
-                info!("No snapshot subscription available, using default state");
-                return Ok(());
-            }
-        };
-
         info!("Waiting for snapshot bootstrap messages...");
         loop {
             let (_, message) = snapshot_subscription.read().await?;
@@ -128,7 +120,6 @@ impl BlockVrfValidator {
         mut spdd_subscription: Box<dyn Subscription<Message>>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_vrf_validation_topic: String,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -139,7 +130,7 @@ impl BlockVrfValidator {
         };
 
         // Consume initial protocol parameters or bootstap message
-        if is_snapshot_mode {
+        if let Some(snapshot_subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
         } else {
             let _ = protocol_parameters_subscription.read().await?;
@@ -289,10 +280,8 @@ impl BlockVrfValidator {
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
-
         // Subscribers
-        let snapshot_subscription = if is_snapshot_mode {
+        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
@@ -327,7 +316,6 @@ impl BlockVrfValidator {
                 spdd_subscription,
                 snapshot_subscription,
                 validation_vrf_publisher_topic,
-                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
