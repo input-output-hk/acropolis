@@ -34,6 +34,12 @@ impl State {
         }
     }
 
+    /// Initialize state from snapshot bootstrap data
+    pub fn bootstrap(&mut self, ocert_counters: std::collections::HashMap<PoolId, u64>) {
+        // Convert std::collections::HashMap to imbl::HashMap
+        self.ocert_counters = ocert_counters.into_iter().collect();
+    }
+
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
         if let Some(shelley_params) = msg.params.shelley.as_ref() {
             self.slots_per_kes_period = Some(shelley_params.slots_per_kes_period as u64);
