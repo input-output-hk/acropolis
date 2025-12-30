@@ -94,9 +94,7 @@ impl BlockKesValidator {
                     info!("Snapshot complete, exiting KES validator bootstrap loop");
                     return Ok(());
                 }
-                _ => {
-                    // Ignore other messages (e.g., AccountsState, EpochState, etc.)
-                }
+                _ => {}
             }
         }
     }

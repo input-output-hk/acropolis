@@ -43,7 +43,6 @@ pub struct BootstrapContext {
     pub snapshot: Snapshot,
     pub nonces: Nonces,
     pub block_info: BlockInfo,
-    /// Operational certificate counters for KES validation
     pub ocert_counters: HashMap<PoolId, u64>,
     network_dir: PathBuf,
 }

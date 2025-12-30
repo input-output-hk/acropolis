@@ -34,9 +34,7 @@ impl State {
         }
     }
 
-    /// Initialize state from snapshot bootstrap data
     pub fn bootstrap(&mut self, ocert_counters: std::collections::HashMap<PoolId, u64>) {
-        // Convert std::collections::HashMap to imbl::HashMap
         self.ocert_counters = ocert_counters.into_iter().collect();
     }
 

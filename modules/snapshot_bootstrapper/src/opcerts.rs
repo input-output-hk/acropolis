@@ -1,7 +1,4 @@
-//! Operational certificate counters reader for snapshot bootstrap.
-//!
-//! Reads OpCerts.csv containing pool operational certificate counter values
-//! needed for KES signature validation during bootstrap.
+//! Reads OpCerts.csv for KES signature validation during bootstrap.
 
 use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::PoolId;
@@ -37,22 +34,19 @@ pub enum OpCertsError {
     },
 }
 
-/// Operational certificate counters loaded from CSV.
 #[derive(Debug, Clone, Default)]
 pub struct OpCertsContext {
-    /// Map of pool ID to latest operational certificate counter
     pub counters: HashMap<PoolId, u64>,
 }
 
 impl OpCertsContext {
-    /// Path to the OpCerts.csv file in the network directory.
     pub fn path(network_dir: &Path) -> PathBuf {
-        network_dir.join("OpCerts.csv")
+        network_dir.join("op_cert_counters.csv")
     }
 
     /// Load operational certificate counters from CSV file.
     ///
-    /// The CSV format is:
+    /// Expected format:
     /// ```csv
     /// "pool_id","latest_op_cert_counter"
     /// "pool1abc...","3"
@@ -63,7 +57,7 @@ impl OpCertsContext {
         // If file doesn't exist, return empty counters (graceful degradation)
         if !path.exists() {
             tracing::warn!(
-                "OpCerts.csv not found at {}, starting with empty counters",
+                "op_cert_counters.csv not found at {}, starting with empty counters",
                 path.display()
             );
             return Ok(Self::default());
@@ -75,23 +69,19 @@ impl OpCertsContext {
         Self::parse(&path, &content)
     }
 
-    /// Parse CSV content into OpCertsContext.
     fn parse(path: &Path, content: &str) -> Result<Self, OpCertsError> {
         let mut counters = HashMap::new();
 
         for (line_num, line) in content.lines().enumerate() {
-            // Skip header line
             if line_num == 0 {
                 continue;
             }
 
-            // Skip empty lines
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
 
-            // Parse CSV line: "pool_id","counter"
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() != 2 {
                 return Err(OpCertsError::Parse {
@@ -101,10 +91,7 @@ impl OpCertsContext {
                 });
             }
 
-            // Remove quotes from pool_id
             let pool_id_str = parts[0].trim().trim_matches('"');
-
-            // Parse pool ID (bech32 format: pool1...)
             let pool_id =
                 PoolId::from_bech32(pool_id_str).map_err(|_| OpCertsError::InvalidPoolId {
                     path: path.to_path_buf(),
@@ -112,7 +99,6 @@ impl OpCertsContext {
                     pool_id: pool_id_str.to_string(),
                 })?;
 
-            // Remove quotes from counter and parse
             let counter_str = parts[1].trim().trim_matches('"');
             let counter = counter_str.parse::<u64>().map_err(|_| OpCertsError::InvalidCounter {
                 path: path.to_path_buf(),
