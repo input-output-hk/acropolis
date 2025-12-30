@@ -1,5 +1,5 @@
 use acropolis_common::{
-    messages::{SPOStakeDistributionMessage, SPOStateMessage},
+    messages::{AccountsBootstrapMessage, SPOStakeDistributionMessage, SPOStateMessage},
     PoolId, VrfKeyHash,
 };
 use std::collections::HashMap;
@@ -37,6 +37,48 @@ impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {
         let active_stakes: HashMap<PoolId, u64> =
             spdd_msg.spos.iter().map(|(pool_id, stake)| (*pool_id, stake.live)).collect();
         let total_active_stakes = active_stakes.values().sum();
+        Self {
+            active_spos,
+            active_stakes,
+            total_active_stakes,
+        }
+    }
+}
+
+impl From<AccountsBootstrapMessage> for Snapshot {
+    fn from(bootstrap_msg: AccountsBootstrapMessage) -> Self {
+        let vrf_by_pool: HashMap<PoolId, VrfKeyHash> = bootstrap_msg
+            .pools
+            .iter()
+            .map(|reg| {
+                let pool_id = reg.operator;
+                let vrf = reg.vrf_key_hash;
+                (pool_id, vrf)
+            })
+            .collect();
+
+        let active_stakes: HashMap<PoolId, u64> = bootstrap_msg
+            .bootstrap_snapshots
+            .mark
+            .spos
+            .iter()
+            .filter_map(|(pool_id, snapshot)| {
+                let stake = snapshot.total_stake;
+                if stake > 0 {
+                    Some((*pool_id, stake))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let active_spos: HashMap<PoolId, VrfKeyHash> = active_stakes
+            .keys()
+            .filter_map(|pool_id| vrf_by_pool.get(pool_id).map(|vrf| (*pool_id, *vrf)))
+            .collect();
+
+        let total_active_stakes = active_stakes.values().copied().sum();
+
         Self {
             active_spos,
             active_stakes,
