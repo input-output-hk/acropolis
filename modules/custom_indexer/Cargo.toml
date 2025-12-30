@@ -18,6 +18,7 @@ bincode = "1"
 config = { workspace = true }
 fjall = "2.7.0"
 futures = "0.3"
+minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas = { workspace = true}
 serde = { workspace = true, features = ["rc"] }
 thiserror = "2.0.17"

@@ -1,151 +1,229 @@
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 use acropolis_common::{BlockInfo, Point};
+use anyhow::{Context, Result};
 use tokio::sync::{mpsc, oneshot};
+use tracing::warn;
 
-use crate::{cursor_store::CursorEntry, IndexWrapper};
+use crate::{chain_index::ChainIndex, cursor_store::CursorEntry};
 
-pub enum IndexCommand {
-    ApplyTxs {
-        block: BlockInfo,
-        txs: Vec<Arc<[u8]>>,
-        response_tx: oneshot::Sender<IndexResult>,
+enum IndexCommand {
+    ApplyTx {
+        block: Arc<BlockInfo>,
+        tx: Arc<[u8]>,
+        response_tx: oneshot::Sender<Result<()>>,
     },
     Rollback {
         point: Point,
-        response_tx: oneshot::Sender<IndexResult>,
+        response_tx: oneshot::Sender<Result<()>>,
     },
 }
 
-#[derive(Debug)]
-pub enum IndexResult {
-    Success { entry: CursorEntry },
-    HandleError { entry: CursorEntry, reason: String },
-    Reset { entry: CursorEntry },
-    Halted,
-    FatalResetError { entry: CursorEntry, reason: String },
+pub struct IndexActor {
+    pub name: String,
+    tx: mpsc::Sender<IndexCommand>,
+    points: VecDeque<Point>,
+    next_tx: Option<u64>,
+    halted: bool,
+    security_param: u64,
 }
 
-pub async fn index_actor(mut wrapper: IndexWrapper, mut rx: mpsc::Receiver<IndexCommand>) {
+impl IndexActor {
+    pub fn new(
+        name: String,
+        index: Box<dyn ChainIndex>,
+        cursor: &CursorEntry,
+        security_param: u64,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel(128);
+        tokio::spawn(index_actor(index, rx));
+        Self {
+            name,
+            tx,
+            points: cursor.points.clone(),
+            next_tx: cursor.next_tx,
+            halted: false,
+            security_param,
+        }
+    }
+
+    pub fn update_cursor(&self, cursor: &mut CursorEntry) {
+        cursor.next_tx = self.next_tx;
+        let (Some(first), Some(last)) = (self.points.front(), self.points.back()) else {
+            cursor.points.clear();
+            return;
+        };
+        while cursor.points.front().is_some_and(|p| p.slot() < first.slot()) {
+            // we pruned our history, do that to the cursor as well
+            cursor.points.pop_front();
+        }
+        while cursor.points.len() > self.points.len() {
+            // we rolled back, roll back the cursor as well
+            cursor.points.pop_back();
+        }
+        if cursor.points.len() == self.points.len()
+            && cursor.points.back().is_some_and(|l| l != last)
+        {
+            // after rolling back, we must have rolled forward
+            cursor.points.pop_back();
+        }
+        if cursor.points.len() < self.points.len() {
+            // we only roll forward one block at a time,
+            // so the cursor can only be missing the most recent block.
+            cursor.points.push_back(last.clone());
+        }
+    }
+
+    pub async fn apply_txs(&mut self, block: Arc<BlockInfo>, txs: &[Arc<[u8]>]) {
+        if self.points.front().is_none_or(|p| p.slot() > block.slot) {
+            // this block is from before our recent history
+            return;
+        }
+        let tip = self.points.back().unwrap();
+        let tip_slot = tip.slot();
+        if tip_slot >= block.slot {
+            // This block is new enough to be in our history, but isn't new enough to be a new tip.
+            // Check if we need to roll back.
+            let rollback_before_idx =
+                match self.points.binary_search_by_key(&block.slot, |p| p.slot()) {
+                    Ok(pos) => {
+                        let point = self.points.get(pos).unwrap();
+                        if point.hash() == Some(&block.hash) {
+                            // This point was in our history, no need to roll back
+                            None
+                        } else {
+                            // We saw a different block in this slot.
+                            // Roll back to before that block.
+                            Some(pos)
+                        }
+                    }
+                    Err(pos) => {
+                        // We never saw a block in this slot.
+                        // Roll back to before whichever block came after this slot.
+                        Some(pos)
+                    }
+                };
+            if let Some(idx) = rollback_before_idx {
+                // We need to roll back
+                let Some(rollback_to_idx) = idx.checked_sub(1) else {
+                    self.halted = true;
+                    warn!(index = self.name, "rolled back farther than known history");
+                    return;
+                };
+                let point = self.points.get(rollback_to_idx).unwrap().clone();
+                self.rollback(point).await;
+            }
+            if tip_slot < block.slot || self.next_tx.is_none() {
+                // Either this block is from before our tip,
+                // or this block is at our tip but we have already applied all of its TXs.
+                // Either way, we're done here.
+                return;
+            }
+        }
+
+        if self.halted {
+            return;
+        }
+
+        if tip_slot < block.slot {
+            self.points.push_back(Point::Specific {
+                hash: block.hash,
+                slot: block.slot,
+            });
+            while self.points.len() > self.security_param as usize {
+                self.points.pop_front();
+            }
+        }
+
+        for (idx, tx) in txs.iter().enumerate() {
+            if self.next_tx.is_some_and(|i| i as usize > idx) {
+                continue;
+            }
+
+            if let Err(error) = self.call_apply_tx(block.clone(), tx.clone()).await {
+                self.next_tx = Some(idx as u64);
+                self.halted = true;
+                warn!(index = self.name, "error applying tx: {error:#}");
+                return;
+            }
+        }
+        self.next_tx = None;
+    }
+
+    pub async fn rollback(&mut self, point: Point) {
+        let mut new_points = self.points.clone();
+        let mut new_tx_index = self.next_tx;
+        while new_points.back().is_some_and(|p| p.slot() > point.slot()) {
+            new_points.pop_back();
+            new_tx_index = None;
+            self.halted = false;
+        }
+        if new_points.back().is_none_or(|p| p != &point) {
+            self.halted = true;
+            warn!(index = self.name, "rolled back farther than known history");
+            return;
+        }
+        match self.call_rollback(point).await {
+            Ok(()) => {
+                self.points = new_points;
+                self.next_tx = new_tx_index;
+            }
+            Err(e) => {
+                self.halted = true;
+                warn!(index = self.name, "error when rolling back: {e:#}");
+            }
+        }
+    }
+
+    async fn call_apply_tx(&self, block: Arc<BlockInfo>, tx: Arc<[u8]>) -> Result<()> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let cmd = IndexCommand::ApplyTx {
+            block,
+            tx,
+            response_tx,
+        };
+        self.tx.send(cmd).await.context("channel closed")?;
+        response_rx.await.context("sender closed")?
+    }
+
+    async fn call_rollback(&self, point: Point) -> Result<()> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let cmd = IndexCommand::Rollback { point, response_tx };
+        self.tx.send(cmd).await.context("channel closed")?;
+        response_rx.await.context("sender closed")?
+    }
+}
+
+async fn index_actor(mut index: Box<dyn ChainIndex>, mut rx: mpsc::Receiver<IndexCommand>) {
     while let Some(cmd) = rx.recv().await {
         match cmd {
-            IndexCommand::ApplyTxs {
+            IndexCommand::ApplyTx {
                 block,
-                txs,
+                tx,
                 response_tx,
             } => {
-                let result = handle_apply_txs(&mut wrapper, block, txs).await;
-                let _ = response_tx.send(result);
+                let res = index.handle_onchain_tx_bytes(&block, &tx).await;
+                let _ = response_tx.send(res);
             }
-
             IndexCommand::Rollback { point, response_tx } => {
-                let result = handle_rollback(&mut wrapper, point).await;
-                let _ = response_tx.send(result);
+                let res = index.handle_rollback(&point).await;
+                let _ = response_tx.send(res);
             }
         }
-    }
-}
-
-async fn handle_apply_txs(
-    wrapper: &mut IndexWrapper,
-    block: acropolis_common::BlockInfo,
-    txs: Vec<Arc<[u8]>>,
-) -> IndexResult {
-    // If the index is halted early return and continue waiting for a rollback event
-    if wrapper.halted {
-        return IndexResult::Halted;
-    }
-
-    // If the index has a tip greater than the current set of transactions early return and continue waiting for chainsync to catch up
-    if block.slot <= wrapper.tip.slot() {
-        return IndexResult::Success {
-            entry: CursorEntry {
-                tip: wrapper.tip.clone(),
-                halted: false,
-            },
-        };
-    }
-
-    // Decode the transactions and call handle_onchain_tx for each, halting if decode or the handler return an error
-    for raw in txs {
-        if let Err(e) = wrapper.index.handle_onchain_tx_bytes(&block, &raw).await {
-            wrapper.halted = true;
-            return IndexResult::HandleError {
-                entry: CursorEntry {
-                    tip: wrapper.tip.clone(),
-                    halted: true,
-                },
-                reason: e.to_string(),
-            };
-        }
-    }
-
-    // Update index tip and return success
-    wrapper.tip = Point::Specific {
-        hash: block.hash,
-        slot: block.slot,
-    };
-    IndexResult::Success {
-        entry: CursorEntry {
-            tip: wrapper.tip.clone(),
-            halted: false,
-        },
-    }
-}
-
-async fn handle_rollback(wrapper: &mut IndexWrapper, point: Point) -> IndexResult {
-    match wrapper.index.handle_rollback(&point).await {
-        Ok(_) => {
-            // If the rollback is successful, remove the halt (if any), update the tip, and return success
-            wrapper.halted = false;
-            wrapper.tip = point.clone();
-            IndexResult::Success {
-                entry: CursorEntry {
-                    tip: wrapper.tip.clone(),
-                    halted: false,
-                },
-            }
-        }
-        // If the rollback failed, attempt to reset the index
-        Err(_) => match wrapper.index.reset(&wrapper.default_start).await {
-            // If reset successful, remove the halt (if any), update the tip and return reset so the manager can send a FindIntersect command
-            Ok(point) => {
-                wrapper.tip = point;
-                wrapper.halted = false;
-                IndexResult::Reset {
-                    entry: CursorEntry {
-                        tip: wrapper.tip.clone(),
-                        halted: false,
-                    },
-                }
-            }
-            // If the reset fails, return a fatal error to remove the index from the manager (On next run the index will attempt to reset again)
-            Err(e) => IndexResult::FatalResetError {
-                entry: CursorEntry {
-                    tip: wrapper.tip.clone(),
-                    halted: true,
-                },
-                reason: e.to_string(),
-            },
-        },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{collections::VecDeque, sync::Arc};
 
-    use acropolis_common::{BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point};
+    use acropolis_common::{
+        params::SECURITY_PARAMETER_K, BlockInfo, BlockIntent, BlockStatus, Era, Point,
+    };
     use caryatid_sdk::async_trait;
     use pallas::ledger::traverse::MultiEraTx;
-    use tokio::sync::{mpsc, oneshot};
 
-    use crate::{
-        chain_index::ChainIndex,
-        cursor_store::InMemoryCursorStore,
-        index_actor::{IndexCommand, IndexResult},
-        CustomIndexer,
-    };
+    use crate::{chain_index::ChainIndex, cursor_store::CursorEntry, index_actor::IndexActor};
 
     #[derive(Default)]
     pub struct MockIndex {
@@ -194,7 +272,7 @@ mod tests {
             intent: BlockIntent::none(),
             slot,
             number: 1,
-            hash: BlockHash::default(),
+            hash: [slot as u8; 32].into(),
             epoch: 0,
             epoch_slot: 0,
             new_epoch: false,
@@ -211,52 +289,14 @@ mod tests {
         Arc::from(raw_tx.as_slice())
     }
 
-    async fn setup_indexer(
-        mock: MockIndex,
-    ) -> (
-        Arc<CustomIndexer<InMemoryCursorStore>>,
-        mpsc::Sender<IndexCommand>,
-    ) {
-        let cursor_store = InMemoryCursorStore::new();
-        let indexer = Arc::new(CustomIndexer::new(cursor_store));
-
-        indexer.add_index(mock, Point::Origin, false).await.expect("add_index failed");
-
-        let sender = {
-            let senders = indexer.senders.lock().await;
-            senders.get("mock-index").expect("index not registered").clone()
-        };
-
-        (indexer, sender)
-    }
-
-    async fn send_apply(
-        sender: &mpsc::Sender<IndexCommand>,
-        block: BlockInfo,
-        txs: Vec<Arc<[u8]>>,
-    ) -> IndexResult {
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send(IndexCommand::ApplyTxs {
-                block,
-                txs,
-                response_tx: tx,
-            })
-            .await
-            .expect("actor dropped");
-        rx.await.expect("oneshot dropped")
-    }
-
-    async fn send_rollback(sender: &mpsc::Sender<IndexCommand>, point: Point) -> IndexResult {
-        let (tx, rx) = oneshot::channel();
-        sender
-            .send(IndexCommand::Rollback {
-                point,
-                response_tx: tx,
-            })
-            .await
-            .expect("actor dropped");
-        rx.await.expect("oneshot dropped")
+    fn new_cursor(slot: u64) -> CursorEntry {
+        let mut points = VecDeque::new();
+        let hash = [slot as u8; 32].into();
+        points.push_back(Point::Specific { hash, slot });
+        CursorEntry {
+            points,
+            next_tx: None,
+        }
     }
 
     #[tokio::test]
@@ -266,27 +306,23 @@ mod tests {
             ..Default::default()
         };
 
-        let (_indexer, sender) = setup_indexer(mock).await;
-        let (resp_tx, resp_rx) = oneshot::channel();
+        let block = Arc::new(test_block(1));
+        let txs = vec![valid_tx()];
+        let mut cursor = new_cursor(0);
 
-        sender
-            .send(IndexCommand::ApplyTxs {
-                block: test_block(1),
-                txs: vec![valid_tx()],
-                response_tx: resp_tx,
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(block.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: block.hash,
+                slot: block.slot
             })
-            .await
-            .expect("actor dropped unexpectedly");
-
-        let result = resp_rx.await.expect("oneshot dropped");
-
-        match result {
-            IndexResult::HandleError { entry, reason } => {
-                assert!(entry.halted);
-                assert!(reason.contains("handle error response"));
-            }
-            other => panic!("Expected HandleError, got {:?}", other),
-        }
+        );
+        assert_eq!(cursor.next_tx, Some(0));
     }
 
     #[tokio::test]
@@ -296,19 +332,37 @@ mod tests {
             ..Default::default()
         };
 
-        let (_indexer, sender) = setup_indexer(mock).await;
+        let b1 = Arc::new(test_block(1));
+        let txs = vec![valid_tx()];
+        let mut cursor = new_cursor(0);
 
-        match send_apply(&sender, test_block(1), vec![valid_tx()]).await {
-            IndexResult::HandleError { entry, .. } => {
-                assert!(entry.halted);
-            }
-            other => panic!("Expected HandleError on first call, got {:?}", other),
-        }
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(b1.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
 
-        match send_apply(&sender, test_block(2), vec![valid_tx()]).await {
-            IndexResult::Halted => {}
-            other => panic!("Expected Halted, got {:?}", other),
-        }
+        assert!(actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b1.hash,
+                slot: b1.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, Some(0));
+
+        let b2 = Arc::new(test_block(2));
+        actor.apply_txs(b2.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b1.hash,
+                slot: b1.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, Some(0));
     }
 
     #[tokio::test]
@@ -318,15 +372,23 @@ mod tests {
             ..Default::default()
         };
 
-        let (_indexer, sender) = setup_indexer(mock).await;
+        let b1 = Arc::new(test_block(1));
+        let txs = vec![valid_tx()];
+        let mut cursor = new_cursor(0);
 
-        match send_apply(&sender, test_block(50), vec![valid_tx()]).await {
-            IndexResult::Success { entry } => {
-                assert_eq!(entry.tip.slot(), 50);
-                assert!(!entry.halted, "index should not be halted on success");
-            }
-            other => panic!("Expected Success, got {:?}", other),
-        }
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(b1.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(!actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b1.hash,
+                slot: b1.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, None);
     }
 
     #[tokio::test]
@@ -337,96 +399,39 @@ mod tests {
             ..Default::default()
         };
 
-        let (_indexer, sender) = setup_indexer(mock).await;
+        let b0 = test_block(123);
+        let b1 = Arc::new(test_block(200));
+        let txs = vec![valid_tx()];
+        let mut cursor = new_cursor(123);
 
-        match send_apply(&sender, test_block(1), vec![valid_tx()]).await {
-            IndexResult::HandleError { entry, .. } => assert!(entry.halted),
-            other => panic!("Expected HandleError, got {:?}", other),
-        }
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(b1.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b1.hash,
+                slot: b1.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, Some(0));
 
         let rollback_point = Point::Specific {
-            hash: [9u8; 32].into(),
-            slot: 12345,
+            hash: [123u8; 32].into(),
+            slot: 123,
         };
-
-        match send_rollback(&sender, rollback_point.clone()).await {
-            IndexResult::Success { entry } => {
-                assert_eq!(entry.tip, rollback_point);
-                assert!(!entry.halted);
-            }
-            other => panic!("Expected Success, got {:?}", other),
-        }
-    }
-
-    #[tokio::test]
-    async fn rollback_fails_then_reset_succeeds_clears_halt_and_updates_tip() {
-        let mock = MockIndex {
-            on_tx: Some(Box::new(|| Err(anyhow::anyhow!("fail tx")))),
-            on_rollback: Some(Box::new(|| Err(anyhow::anyhow!("rollback failed")))),
-            on_reset: Some(Box::new(|| {
-                Ok(Point::Specific {
-                    hash: [3u8; 32].into(),
-                    slot: 123,
-                })
-            })),
-        };
-
-        let (_indexer, sender) = setup_indexer(mock).await;
-
-        match send_apply(&sender, test_block(1), vec![valid_tx()]).await {
-            IndexResult::HandleError { entry, .. } => assert!(entry.halted),
-            other => panic!("Expected HandleError, got {:?}", other),
-        }
-
-        match send_rollback(
-            &sender,
-            Point::Specific {
-                hash: [7u8; 32].into(),
-                slot: 123,
-            },
-        )
-        .await
-        {
-            IndexResult::Reset { entry } => {
-                assert_eq!(entry.tip.slot(), 123);
-                assert!(!entry.halted);
-            }
-            other => panic!("Expected Reset, got {:?}", other),
-        }
-    }
-
-    #[tokio::test]
-    async fn rollback_fails_then_reset_fails_halts() {
-        let mock = MockIndex {
-            on_tx: Some(Box::new(|| Err(anyhow::anyhow!("tx boom")))),
-            on_rollback: Some(Box::new(|| Err(anyhow::anyhow!("rollback boom")))),
-            on_reset: Some(Box::new(|| Err(anyhow::anyhow!("reset boom")))),
-        };
-
-        let (_indexer, sender) = setup_indexer(mock).await;
-
-        match send_apply(&sender, test_block(1), vec![valid_tx()]).await {
-            IndexResult::HandleError { entry, .. } => assert!(entry.halted),
-            other => panic!("Expected HandleError, got {:?}", other),
-        }
-
-        match send_rollback(
-            &sender,
-            Point::Specific {
-                hash: [9u8; 32].into(),
-                slot: 123,
-            },
-        )
-        .await
-        {
-            IndexResult::FatalResetError { entry, reason } => {
-                assert!(entry.halted, "halt must remain true after failed reset");
-                assert!(
-                    reason.contains("reset boom"),
-                    "expected reset failure reason in: {reason}"
-                );
-            }
-            other => panic!("Expected FatalResetError, got {:?}", other),
-        }
+        actor.rollback(rollback_point).await;
+        actor.update_cursor(&mut cursor);
+        assert!(!actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b0.hash,
+                slot: b0.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, None);
     }
 }
