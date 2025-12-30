@@ -1,5 +1,5 @@
 use acropolis_common::protocol_params::{Nonce, Nonces};
-use acropolis_common::{BlockHash, Point};
+use acropolis_common::BlockHash;
 use serde::{Deserialize, Deserializer};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,25 +22,9 @@ where
     Ok(Nonce::from(hash))
 }
 
-fn deserialize_point<'de, D>(deserializer: D) -> Result<Point, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    s.split_once('.')
-        .and_then(|(slot_str, hash_str)| {
-            Some(Point::Specific {
-                slot: slot_str.parse().ok()?,
-                hash: hash_str.parse().ok()?,
-            })
-        })
-        .ok_or_else(|| serde::de::Error::custom("invalid point format"))
-}
-
 #[derive(Debug, Deserialize)]
 pub struct NonceContext {
-    #[serde(deserialize_with = "deserialize_point")]
-    pub at: Point,
+    pub slot: u64,
     #[serde(deserialize_with = "deserialize_nonce")]
     pub active: Nonce,
     #[serde(deserialize_with = "deserialize_nonce")]
@@ -48,7 +32,9 @@ pub struct NonceContext {
     #[serde(deserialize_with = "deserialize_nonce")]
     pub evolving: Nonce,
     #[serde(deserialize_with = "deserialize_nonce")]
-    pub tail: Nonce,
+    pub lab: Nonce,
+    #[serde(deserialize_with = "deserialize_nonce")]
+    pub prev_lab: Nonce,
 }
 
 impl NonceContext {
@@ -63,14 +49,14 @@ impl NonceContext {
         serde_json::from_str(&content).map_err(|e| NonceContextError::Parse(path, e))
     }
 
-    pub fn into_nonces(self, epoch: u64, lab_hash: BlockHash) -> Nonces {
+    pub fn into_nonces(self, epoch: u64) -> Nonces {
         Nonces {
             epoch,
             active: self.active,
             evolving: self.evolving,
             candidate: self.candidate,
-            lab: Nonce::from(lab_hash),
-            prev_lab: self.tail,
+            lab: self.lab,
+            prev_lab: self.prev_lab,
         }
     }
 }
@@ -86,11 +72,12 @@ mod nonces_tests {
     fn valid_json_with_point(point: &str) -> String {
         format!(
             r#"{{
-                "at": "{point}",
+                "slot": "{point}",
                 "active": "{ZERO_HASH}",
                 "candidate": "{ZERO_HASH}",
                 "evolving": "{ZERO_HASH}",
-                "tail": "{ZERO_HASH}"
+                "lab": "{ZERO_HASH}"
+                "prev_lab": "{ZERO_HASH}"
             }}"#
         )
     }
