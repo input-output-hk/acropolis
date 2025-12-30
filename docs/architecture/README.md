@@ -11,3 +11,4 @@ to become a full Cardano node.
   - [Mithril and Sync UTXOs](system-simple-mithril-and-sync-utxo.md) - Adding a live network sync
   - [Basic ledger](system-bootstrap-and-sync-with-basic-ledger.md) - Adding basic (Shelley-era) ledger state
   - [Conway ledger](system-bootstrap-and-sync-with-conway.md) - Adding Conway / CIP-1694 governance
+  - [BlockFrost API](system-ledger-with-api-and-history.md) - Adding a BlockFrost REST API and history storage

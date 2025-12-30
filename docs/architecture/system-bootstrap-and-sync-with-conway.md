@@ -1,6 +1,6 @@
 # System description - bootstrap and sync with Conway ledger
 
-In the [previous setup](system-bootstrap-and-sync-with-conway.md) we tracked the ledger
+In the [previous setup](system-bootstrap-and-sync-with-basic-ledger.md) we tracked the ledger
 state for the Shelley and subsequent eras, up to (but not including) Conway.
 
 To move into Conway, we need to handle a much more complex governance system (CIP-1694).  The
@@ -85,7 +85,6 @@ flowchart LR
 ```
 
 ## Data flow
-
 The process bootstraps from Mithril, then syncs from the live chain and tracks ledger state
 exactly as [before](system-bootstrap-and-sync-basic-ledger.md).  We are just adding support
 for the Conway era governance here.
@@ -111,7 +110,6 @@ stake address delegates to.  This enables it to derive the "DRep Delegation Dist
 which it publishes once per epoch on `cardano.drep.distribution`.
 
 ### Governance State
-
 The [Governance State](../../modules/governance_state) module has much more heavy lifting to do
 in the Conway era than it did before.  This is a [separate topic](TODO) but for now let's just
 look at the message flow.
@@ -129,7 +127,6 @@ which is used to update the Parameter State, as well as being available for any 
 observer who is interested in the governance process.
 
 ## Configuration
-
 Here is the
 [configuration](../../processes/omnibus/configs/bootstrap-and-sync-with-conway.toml)
 for this setup. You can run it in the `processes/omnibus` directory with:
@@ -137,3 +134,8 @@ for this setup. You can run it in the `processes/omnibus` directory with:
 ```shell
 $ cargo run --release -- --config configs/bootstrap-and-sync-with-conway.toml
 ```
+
+## Next steps
+Now we have a complete picture of the ledger, we need a way to access the data!  Next
+we'll add a [REST API and history storage](system-ledger-with-api-and-history.md).
+
