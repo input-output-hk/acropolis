@@ -406,8 +406,14 @@ mod tests {
 
         // Build a cursor that saw block 1, then failed to apply the first TX in block 2
         let mut cursor = CursorEntry::default();
-        cursor.points.push_back(Point::Specific { hash: b1.hash, slot: b1.slot });
-        cursor.points.push_back(Point::Specific { hash: b2.hash, slot: b2.slot });
+        cursor.points.push_back(Point::Specific {
+            hash: b1.hash,
+            slot: b1.slot,
+        });
+        cursor.points.push_back(Point::Specific {
+            hash: b2.hash,
+            slot: b2.slot,
+        });
         cursor.next_tx = Some(0);
 
         let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
@@ -438,8 +444,14 @@ mod tests {
 
         // Build a cursor that saw block 1, then failed to apply the first TX in block 2
         let mut cursor = CursorEntry::default();
-        cursor.points.push_back(Point::Specific { hash: b1.hash, slot: b1.slot });
-        cursor.points.push_back(Point::Specific { hash: b2.hash, slot: b2.slot });
+        cursor.points.push_back(Point::Specific {
+            hash: b1.hash,
+            slot: b1.slot,
+        });
+        cursor.points.push_back(Point::Specific {
+            hash: b2.hash,
+            slot: b2.slot,
+        });
         cursor.next_tx = Some(0);
 
         let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
