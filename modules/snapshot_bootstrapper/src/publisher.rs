@@ -1,3 +1,4 @@
+use acropolis_common::configuration::SyncMode;
 use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
@@ -98,6 +99,7 @@ pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     snapshot_topic: String,
     sync_command_topic: String,
+    sync_mode: SyncMode,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -115,12 +117,14 @@ impl SnapshotPublisher {
         context: Arc<Context<Message>>,
         snapshot_topic: String,
         sync_command_topic: String,
+        sync_mode: SyncMode,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
             snapshot_topic,
             sync_command_topic,
+            sync_mode,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -157,7 +161,11 @@ impl SnapshotPublisher {
             self.sync_command_topic,
             point.slot()
         );
-        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        let message = if self.sync_mode.is_mithril() {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
+        } else {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
+        };
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await

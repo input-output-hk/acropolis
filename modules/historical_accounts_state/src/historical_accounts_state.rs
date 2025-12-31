@@ -2,7 +2,7 @@
 //! Manages optional state data needed for Blockfrost alignment
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::queries::accounts::{
     AccountsStateQuery, AccountsStateQueryResponse, DEFAULT_HISTORICAL_ACCOUNTS_QUERY_TOPIC,
 };
@@ -234,7 +234,7 @@ impl HistoricalAccountsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Subscription topics
         let tx_certificates_topic = config

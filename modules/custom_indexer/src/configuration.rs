@@ -1,4 +1,4 @@
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::SyncMode;
 use anyhow::Result;
 use config::Config;
 
@@ -13,8 +13,8 @@ pub struct CustomIndexerConfig {
 }
 
 impl CustomIndexerConfig {
-    pub fn startup_method(&self) -> StartupMethod {
-        self.global.startup.method.clone()
+    pub fn sync_mode(&self) -> SyncMode {
+        self.global.startup.sync_mode.clone()
     }
 }
 
@@ -25,7 +25,7 @@ pub struct GlobalConfig {
 
 #[derive(serde::Deserialize)]
 pub struct StartupConfig {
-    pub method: StartupMethod,
+    pub sync_mode: SyncMode,
 }
 
 impl CustomIndexerConfig {

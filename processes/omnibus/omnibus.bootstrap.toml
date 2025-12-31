@@ -7,7 +7,8 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "snapshot"  # Options: "mithril" | "snapshot"
+sync-mode = "snapshot"   # Options: "genesis" | "snapshot"
+sync-method = "mithril" # Options: "mithril" | "upstream"
 
 # ============================================================================
 # Bootstrap Module Configurations

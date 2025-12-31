@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    configuration::StartupMethod,
+    configuration::StartupMode,
     messages::{CardanoMessage, Message},
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
@@ -181,7 +181,7 @@ impl BlockKesValidator {
             .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Subscribers
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;

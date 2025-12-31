@@ -1,7 +1,7 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -203,7 +203,7 @@ impl ParametersState {
             .get_string(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {

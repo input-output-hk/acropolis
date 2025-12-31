@@ -4,13 +4,13 @@
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
-    configuration::StartupMethod,
+    configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Point,
 };
 use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
@@ -37,7 +37,7 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
-const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
+const DEFAULT_SYNC_COMMAND_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -242,16 +242,17 @@ impl MithrilSnapshotFetcher {
         context: Arc<Context<Message>>,
         config: Arc<Config>,
         genesis: GenesisValues,
+        point: hardano::immutable::Point,
     ) -> Result<()> {
         let block_publish_topic = config
             .get_string(DEFAULT_BLOCK_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCK_PUBLISH_TOPIC.1.to_string());
         info!("Publishing blocks on '{block_publish_topic}'");
 
-        let completion_topic = config
-            .get_string(DEFAULT_COMPLETION_TOPIC.0)
-            .unwrap_or(DEFAULT_COMPLETION_TOPIC.1.to_string());
-        info!("Publishing completion on '{completion_topic}'");
+        let sync_command_topic = config
+            .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
+            .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+        info!("Publishing completion on '{sync_command_topic}'");
 
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
         let mut pause_constraint =
@@ -272,7 +273,13 @@ impl MithrilSnapshotFetcher {
 
         let mut last_block_info: Option<BlockInfo> = None;
 
-        let blocks = hardano::immutable::read_blocks(&path)?;
+        let mut blocks = hardano::immutable::read_blocks_from_point(&path, point)?;
+
+        // Skip first block if booting from snapshot as `read_blocks_from_point` is inclusive of the point
+        if StartupMode::from_config(&config).is_snapshot() {
+            let _ = blocks.next();
+        }
+
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         for raw_block in blocks {
@@ -393,7 +400,7 @@ impl MithrilSnapshotFetcher {
             ));
             context
                 .message_bus
-                .publish(&completion_topic, Arc::new(message_enum))
+                .publish(&sync_command_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         }
@@ -402,13 +409,7 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // Check if this module is the selected startup method
-        let startup_method = StartupMethod::from_config(&config);
-        if !startup_method.is_mithril() {
-            info!(
-                "Mithril Snapshot Fetcher not enabled (startup.method = '{}')",
-                startup_method
-            );
+        if !SyncMode::from_config(&config).is_mithril() {
             return Ok(());
         }
 
@@ -416,9 +417,19 @@ impl MithrilSnapshotFetcher {
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
+        let sync_command_topic = config
+            .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
+            .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+        info!("Publishing completion on '{sync_command_topic}'");
 
         let mut bootstrapped_subscription =
             context.subscribe(&bootstrapped_subscribe_topic).await?;
+        let mut sync_command_subscription = if StartupMode::from_config(&config).is_snapshot() {
+            Some(context.subscribe(&sync_command_topic).await?)
+        } else {
+            None
+        };
+
         context.clone().run(async move {
             let Ok((_, bootstrapped_message)) = bootstrapped_subscription.read().await else {
                 return;
@@ -429,6 +440,14 @@ impl MithrilSnapshotFetcher {
                     complete.values.clone()
                 }
                 x => panic!("unexpected bootstrapped message: {x:?}"),
+            };
+
+            let point = match get_start_point(&mut sync_command_subscription).await {
+                Ok(point) => point,
+                Err(e) => {
+                    error!("Failed to get start point: {e}");
+                    return;
+                }
             };
 
             let mut delay = 1;
@@ -445,7 +464,7 @@ impl MithrilSnapshotFetcher {
                 delay = (delay * 2).min(60);
             }
 
-            if let Err(e) = Self::process_snapshot(context, config, genesis).await {
+            if let Err(e) = Self::process_snapshot(context, config, genesis, point).await {
                 error!("Failed to process Mithril snapshot: {e}");
             }
         });
@@ -469,6 +488,29 @@ async fn prompt_pause(description: String) -> bool {
     })
     .await
     .unwrap()
+}
+
+async fn get_start_point(
+    sync_command_subscription: &mut Option<Box<dyn Subscription<Message>>>,
+) -> Result<hardano::immutable::Point> {
+    if let Some(sync_sub) = sync_command_subscription.as_mut() {
+        loop {
+            let (_, sync_msg) = sync_sub.read().await?;
+
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point))) =
+                sync_msg.as_ref()
+            {
+                return Ok(match point {
+                    Point::Origin => hardano::immutable::Point::Origin,
+                    Point::Specific { hash, slot } => {
+                        hardano::immutable::Point::Specific(*slot, hash.to_vec())
+                    }
+                });
+            }
+        }
+    } else {
+        Ok(hardano::immutable::Point::Origin)
+    }
 }
 
 #[cfg(test)]
