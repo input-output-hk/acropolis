@@ -11,7 +11,15 @@ use tokio::sync::Mutex;
 use tracing::warn;
 
 #[derive(
-    Debug, Clone, Default, serde::Serialize, serde::Deserialize, minicbor::Decode, minicbor::Encode,
+    Debug,
+    Clone,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    minicbor::Decode,
+    minicbor::Encode,
 )]
 pub struct CursorEntry {
     #[n(0)]
