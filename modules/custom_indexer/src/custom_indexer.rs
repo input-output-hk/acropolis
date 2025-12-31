@@ -145,6 +145,13 @@ impl<CS: CursorStore> CustomIndexer<CS> {
                 &cfg.sync_command_publisher_topic,
             )
             .await?;
+        } else {
+            utils::start_mithril(
+                sync_points.back().unwrap().clone(),
+                context,
+                &cfg.sync_command_publisher_topic,
+            )
+            .await?;
         }
 
         loop {

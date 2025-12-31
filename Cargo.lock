@@ -556,6 +556,7 @@ dependencies = [
  "acropolis_module_block_unpacker",
  "acropolis_module_custom_indexer",
  "acropolis_module_genesis_bootstrapper",
+ "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_peer_network_interface",
  "anyhow",
  "bincode 1.3.3",

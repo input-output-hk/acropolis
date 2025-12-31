@@ -1,4 +1,5 @@
 use acropolis_common::{hash::Hash, messages::Message, Point};
+use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use anyhow::Result;
 use caryatid_process::Process;
 use caryatid_sdk::module_registry::ModuleRegistry;
@@ -31,7 +32,7 @@ struct Args {
 async fn main() -> Result<()> {
     // Get arguments and config
     let args = Args::parse();
-    tracing_subscriber::fmt().with_env_filter("info").init();
+    tracing_subscriber::fmt().with_env_filter("info,fjall=warn").init();
     let mut builder = Config::builder();
     for file in &args.config {
         builder = builder.add_source(File::with_name(file));
@@ -43,6 +44,7 @@ async fn main() -> Result<()> {
 
     // Core modules to fetch blocks and publish decoded transactions
     GenesisBootstrapper::register(&mut process);
+    MithrilSnapshotFetcher::register(&mut process);
     BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
 
@@ -59,15 +61,24 @@ async fn main() -> Result<()> {
             let mut r1 = receiver_1.clone();
             let mut r2 = receiver_2.clone();
 
+            let mut last_1 = None;
+            let mut last_2 = None;
+
             loop {
                 tokio::select! {
                     _ = r1.changed() => {
                         let state = r1.borrow_and_update().clone();
-                        tracing::info!("Index 1 updated: {:?}", state.pools);
+                        if last_1.as_ref() != Some(&state.pools) {
+                            tracing::info!("Index 1 updated: {:?}", state.pools);
+                            last_1 = Some(state.pools);
+                        }
                     }
                     _ = r2.changed() => {
                         let state = r2.borrow_and_update().clone();
-                        tracing::info!("Index 2 updated: {:?}", state.pools);
+                        if last_2.as_ref() != Some(&state.pools) {
+                            tracing::info!("Index 2 updated: {:?}", state.pools);
+                            last_2 = Some(state.pools);
+                        }
                     }
                 }
             }
@@ -80,9 +91,7 @@ async fn main() -> Result<()> {
         slot: 16588737,
     };
 
-    let indexer = Arc::new(CustomIndexer::new(FjallCursorStore::new(
-        "fjall-cursor-store",
-    )?));
+    let indexer = Arc::new(CustomIndexer::new(InMemoryCursorStore::new()));
     process.register(indexer.clone());
     indexer
         .add_index(

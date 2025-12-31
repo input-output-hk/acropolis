@@ -24,3 +24,21 @@ pub async fn change_sync_point(
 
     Ok(())
 }
+
+pub async fn start_mithril(
+    point: Point,
+    context: Arc<Context<Message>>,
+    topic: &String,
+) -> Result<()> {
+    let msg = Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(
+        point.clone(),
+    )));
+    context.publish(topic, Arc::new(msg)).await?;
+    info!(
+        "Publishing sync command on {} for slot {}",
+        topic,
+        point.slot()
+    );
+
+    Ok(())
+}

@@ -417,14 +417,14 @@ impl MithrilSnapshotFetcher {
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
-        let sync_command_topic = config
-            .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
-            .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
-        info!("Publishing completion on '{sync_command_topic}'");
 
         let mut bootstrapped_subscription =
             context.subscribe(&bootstrapped_subscribe_topic).await?;
         let mut sync_command_subscription = if StartupMode::from_config(&config).is_snapshot() {
+            let sync_command_topic = config
+                .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
+                .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+
             Some(context.subscribe(&sync_command_topic).await?)
         } else {
             None
