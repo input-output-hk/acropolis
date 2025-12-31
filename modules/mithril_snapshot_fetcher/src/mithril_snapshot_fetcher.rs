@@ -4,7 +4,7 @@
 use acropolis_codec::map_to_block_era;
 use acropolis_common::{
     commands::chain_sync::ChainSyncCommand,
-    configuration::{StartupMethod, StartupMode},
+    configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
     BlockHash, BlockInfo, BlockIntent, BlockStatus, Point,
@@ -409,7 +409,7 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        if !StartupMethod::from_config(&config).is_mithril() {
+        if !SyncMode::from_config(&config).is_mithril() {
             return Ok(());
         }
 

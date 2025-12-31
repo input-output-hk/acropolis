@@ -6,7 +6,7 @@ mod network;
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus,
     commands::chain_sync::ChainSyncCommand,
-    configuration::{StartupMethod, StartupMode},
+    configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -45,7 +45,7 @@ impl PeerNetworkInterface {
 
         // Override sync_point to Origin if mode is genesis using upstream method
         if StartupMode::from_config(&config).is_genesis()
-            && StartupMethod::from_config(&config).is_upstream()
+            && SyncMode::from_config(&config).is_upstream()
         {
             cfg.sync_point = SyncPoint::Origin
         }
