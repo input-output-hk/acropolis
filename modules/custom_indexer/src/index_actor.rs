@@ -113,7 +113,7 @@ impl IndexActor {
                 let point = self.points.get(rollback_to_idx).unwrap().clone();
                 self.rollback(point).await;
             }
-            if tip_slot < block.slot || self.next_tx.is_none() {
+            if tip_slot > block.slot || self.next_tx.is_none() {
                 // Either this block is from before our tip,
                 // or this block is at our tip but we have already applied all of its TXs.
                 // Either way, we're done here.
@@ -388,6 +388,70 @@ mod tests {
             Some(&Point::Specific {
                 hash: b1.hash,
                 slot: b1.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, None);
+    }
+
+    #[tokio::test]
+    async fn apply_txs_skips_txs_from_older_block() {
+        let mock = MockIndex {
+            on_tx: Some(Box::new(|| Err(anyhow::anyhow!("handle error response")))),
+            ..Default::default()
+        };
+
+        let b1 = Arc::new(test_block(1));
+        let b2 = Arc::new(test_block(2));
+        let txs = vec![valid_tx()];
+
+        // Build a cursor that saw block 1, then failed to apply the first TX in block 2
+        let mut cursor = CursorEntry::default();
+        cursor.points.push_back(Point::Specific { hash: b1.hash, slot: b1.slot });
+        cursor.points.push_back(Point::Specific { hash: b2.hash, slot: b2.slot });
+        cursor.next_tx = Some(0);
+
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(b1.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(!actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b2.hash,
+                slot: b2.slot
+            })
+        );
+        assert_eq!(cursor.next_tx, Some(0));
+    }
+
+    #[tokio::test]
+    async fn apply_txs_applies_skipped_txs_from_current_block() {
+        let mock = MockIndex {
+            on_tx: Some(Box::new(|| Ok(()))),
+            ..Default::default()
+        };
+
+        let b1 = Arc::new(test_block(1));
+        let b2 = Arc::new(test_block(2));
+        let txs = vec![valid_tx()];
+
+        // Build a cursor that saw block 1, then failed to apply the first TX in block 2
+        let mut cursor = CursorEntry::default();
+        cursor.points.push_back(Point::Specific { hash: b1.hash, slot: b1.slot });
+        cursor.points.push_back(Point::Specific { hash: b2.hash, slot: b2.slot });
+        cursor.next_tx = Some(0);
+
+        let mut actor = IndexActor::new(mock.name(), Box::new(mock), &cursor, SECURITY_PARAMETER_K);
+        actor.apply_txs(b2.clone(), &txs).await;
+        actor.update_cursor(&mut cursor);
+
+        assert!(!actor.halted);
+        assert_eq!(
+            cursor.points.back(),
+            Some(&Point::Specific {
+                hash: b2.hash,
+                slot: b2.slot
             })
         );
         assert_eq!(cursor.next_tx, None);
