@@ -137,7 +137,7 @@ impl<CS: CursorStore> CustomIndexer<CS> {
             return Ok(());
         }
 
-        if !cfg.startup_method().is_mithril() {
+        if !cfg.sync_mode().is_mithril() {
             // TODO: pass multiple points
             utils::change_sync_point(
                 sync_points.back().unwrap().clone(),

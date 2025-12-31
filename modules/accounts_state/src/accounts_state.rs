@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    configuration::StartupMethod,
+    configuration::StartupMode,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse, StateTransitionMessage,
@@ -861,7 +861,7 @@ impl AccountsState {
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
         let snapshot_subscription = if is_snapshot_mode {
             info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
