@@ -2,7 +2,7 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    configuration::StartupMethod,
+    configuration::StartupMode,
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
@@ -68,7 +68,7 @@ impl GenesisBootstrapper {
             config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        let snapshot_bootstrap = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let snapshot_bootstrap = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {

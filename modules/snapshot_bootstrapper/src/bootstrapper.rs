@@ -11,8 +11,8 @@ use crate::configuration::BootstrapConfig;
 use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
+use acropolis_common::configuration::{StartupMode, SyncMode};
 use acropolis_common::{
-    configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
 };
@@ -49,14 +49,15 @@ pub struct SnapshotBootstrapper;
 impl SnapshotBootstrapper {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Check if this module is the selected startup method
-        let startup_method = StartupMethod::from_config(&config);
-        if !startup_method.is_snapshot() {
+        let startup_mode = StartupMode::from_config(&config);
+        if !startup_mode.is_snapshot() {
             info!(
                 "Snapshot bootstrapper not enabled (startup.method = '{}')",
-                startup_method
+                startup_mode
             );
             return Ok(());
         }
+        let sync_mode = SyncMode::from_config(&config);
 
         let cfg = BootstrapConfig::try_load(&config)?;
 
@@ -74,7 +75,7 @@ impl SnapshotBootstrapper {
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper");
             async {
-                if let Err(e) = Self::run(bootstrapped_sub, cfg, context).await {
+                if let Err(e) = Self::run(bootstrapped_sub, cfg, sync_mode, context).await {
                     error!("Snapshot bootstrap failed: {e:#}");
                 }
             }
@@ -88,6 +89,7 @@ impl SnapshotBootstrapper {
     async fn run(
         bootstrapped_sub: Box<dyn Subscription<Message>>,
         cfg: BootstrapConfig,
+        sync_mode: SyncMode,
         context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
         Self::wait_for_genesis(bootstrapped_sub).await?;
@@ -107,6 +109,7 @@ impl SnapshotBootstrapper {
             context.clone(),
             cfg.snapshot_topic.clone(),
             cfg.sync_command_topic.clone(),
+            sync_mode,
             bootstrap_ctx.context(),
         );
         // Download
