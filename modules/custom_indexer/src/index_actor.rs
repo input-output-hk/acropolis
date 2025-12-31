@@ -153,10 +153,11 @@ impl IndexActor {
     pub async fn rollback(&mut self, point: Point) {
         let mut new_points = self.points.clone();
         let mut new_tx_index = self.next_tx;
+        let mut new_halted = self.halted;
         while new_points.back().is_some_and(|p| p.slot() > point.slot()) {
             new_points.pop_back();
             new_tx_index = None;
-            self.halted = false;
+            new_halted = false;
         }
         if new_points.back().is_none_or(|p| p != &point) {
             self.halted = true;
@@ -167,6 +168,7 @@ impl IndexActor {
             Ok(()) => {
                 self.points = new_points;
                 self.next_tx = new_tx_index;
+                self.halted = new_halted;
             }
             Err(e) => {
                 self.halted = true;
