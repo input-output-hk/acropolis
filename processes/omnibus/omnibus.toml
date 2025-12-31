@@ -46,6 +46,8 @@ validators = [
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
+#           "cardano.validation.governance"
+#           "cardano.validation.parameters"
 ]
 
 [module.block-unpacker]

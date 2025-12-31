@@ -3,10 +3,13 @@
 //! Use imbl collections in the state to avoid memory explosion!
 
 use std::collections::VecDeque;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::params::SECURITY_PARAMETER_K;
 
+#[derive(Clone)]
 pub enum StateHistoryStore {
     Bounded(u64), // Used for rollbacks, bounded at k
     Unbounded,    // Used for historical lookups, unbounded
@@ -47,6 +50,10 @@ impl<S: Clone + Default> StateHistory<S> {
         }
     }
 
+    pub fn new_mutex(module: &str, store: StateHistoryStore) -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self::new(module, store)))
+    }
+    
     /// Get the current state (if any), direct ref
     pub fn current(&self) -> Option<&S> {
         self.history.back().map(|entry| &entry.state)

@@ -270,7 +270,7 @@ pub struct SPORewardsMessage {
     pub spos: Vec<(PoolId, SPORewards)>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParamsMessage {
     pub params: ProtocolParams,
 }
