@@ -1,7 +1,7 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
@@ -349,7 +349,7 @@ impl GovernanceState {
         let cfg = GovernanceStateConfig::new(&config);
 
         // Subscribe for snapshot bootstrap if starting from snapshot
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             Some(context.subscribe(&cfg.snapshot_subscribe_topic).await?)
         } else {
             None

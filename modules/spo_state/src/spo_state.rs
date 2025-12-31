@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::validation::ValidationOutcomes;
@@ -870,7 +870,7 @@ impl SPOState {
         });
 
         // Subscribe for snapshot bootstrap if using snapshot startup
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber for snapshot on '{snapshot_topic}'");
             Some(context.subscribe(&snapshot_topic).await?)
         } else {
