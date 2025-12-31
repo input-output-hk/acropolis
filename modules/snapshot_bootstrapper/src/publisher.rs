@@ -9,8 +9,8 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        AccountsBootstrapMessage, BlockKesValidatorBootstrapMessage, DRepBootstrapMessage,
+        EpochBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
@@ -23,7 +23,7 @@ use acropolis_common::{
         UtxoCallback,
     },
     stake_addresses::AccountState,
-    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, UTXOValue, UTxOIdentifier,
+    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, PoolId, UTXOValue, UTxOIdentifier,
 };
 
 use anyhow::Result;
@@ -152,6 +152,33 @@ impl SnapshotPublisher {
         self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
             tracing::error!("Failed to publish snapshot complete message: {}", e);
         });
+        Ok(())
+    }
+
+    /// Publish operational certificate counters for block KES validator bootstrap
+    pub async fn publish_kes_validator_bootstrap(
+        &self,
+        epoch: u64,
+        ocert_counters: HashMap<PoolId, u64>,
+    ) -> Result<()> {
+        info!(
+            "Publishing KES validator bootstrap with {} opcert counters on '{}'",
+            ocert_counters.len(),
+            self.snapshot_topic
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::BlockKesValidatorState(BlockKesValidatorBootstrapMessage {
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+                ocert_counters,
+            }),
+        )));
+
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish KES validator bootstrap message: {}", e);
+        });
+
         Ok(())
     }
 

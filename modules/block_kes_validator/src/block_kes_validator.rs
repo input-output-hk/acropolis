@@ -4,7 +4,10 @@
 use acropolis_common::{
     caryatid::SubscriptionExt,
     configuration::StartupMode,
-    messages::{CardanoMessage, Message},
+    messages::{
+        BlockKesValidatorBootstrapMessage, CardanoMessage, Message, SnapshotMessage,
+        SnapshotStateMessage,
+    },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
@@ -34,6 +37,8 @@ const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Block KES Validator module
 #[module(
@@ -45,6 +50,55 @@ const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
 pub struct BlockKesValidator;
 
 impl BlockKesValidator {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, kes_data: BlockKesValidatorBootstrapMessage) {
+        let epoch = kes_data.epoch;
+        let counters_len = kes_data.ocert_counters.len();
+
+        // Initialize KES validator state from snapshot data
+        state.bootstrap(kes_data.ocert_counters);
+
+        info!(
+            "KES state bootstrapped successfully for epoch {} with {} opcert counters",
+            epoch, counters_len
+        );
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for KES validator snapshot bootstrap messages...");
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+
+            match message {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting KES bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::BlockKesValidatorState(kes_data),
+                )) => {
+                    info!("Received BlockKesValidatorState bootstrap message");
+
+                    let block_number = kes_data.block_number;
+                    let mut state = State::new();
+
+                    Self::handle_bootstrap(&mut state, kes_data);
+                    history.lock().await.bootstrap_init_with(state, block_number);
+                    info!("KES validator bootstrap complete");
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting KES validator bootstrap loop");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run(
         context: Arc<Context<Message>>,
@@ -53,8 +107,8 @@ impl BlockKesValidator {
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         kes_validation_publisher_topic: String,
-        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -64,8 +118,10 @@ impl BlockKesValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters
-        if !is_snapshot_mode {
+        // Consume initial protocol parameters or bootstrap message
+        if let Some(subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(history.clone(), subscription).await?;
+        } else {
             let _ = protocol_parameters_subscription.read().await?;
         }
 
@@ -181,9 +237,18 @@ impl BlockKesValidator {
             .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
 
-        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         // Subscribers
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
+            None
+        };
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let block_subscription = context.subscribe(&block_subscribe_topic).await?;
         let protocol_parameters_subscription =
@@ -206,8 +271,8 @@ impl BlockKesValidator {
                 block_subscription,
                 protocol_parameters_subscription,
                 spo_state_subscription,
+                snapshot_subscription,
                 validation_kes_publisher_topic,
-                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
