@@ -1259,7 +1259,12 @@ impl StreamingSnapshotParser {
 
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
-        let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
+        let retiring_pools: Vec<PoolId> = pools
+            .retiring
+            .iter()
+            .filter(|(_, retiring_epoch)| **retiring_epoch == epoch)
+            .map(|(pool_id, _)| *pool_id)
+            .collect();
 
         info!(
             "Pools: {} registered, {} retiring, {} DReps",
