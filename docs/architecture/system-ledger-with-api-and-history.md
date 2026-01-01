@@ -23,7 +23,7 @@ both whole blocks and individual transactions
 * [DRDD State](../../modules/drdd_state) which captures and stores the DRep Delegation Distribution
 (DRDD) likewise
 * [Historical Accounts State](../../historical_accounts_state) which stores the history of events for stake addresses
-* [Historical Epochs State](../../historical_epochs_state) which stores statistics for each epoch we pass thorugh
+* [Historical Epochs State](../../historical_epochs_state) which stores statistics for each epoch we pass through
 
 ## Module graph
 
@@ -53,19 +53,24 @@ flowchart LR
   GEN -- cardano.sequence.bootstrapped --> MSF
   MSF -- cardano.block.available --> BU
   MSF -- cardano.block.available --> CS
+  MSF -- cardano.block.available --> HES
   MSF -- cardano.snapshot.complete --> PNI
   PNI -- cardano.block.available --> BU
   PNI -- cardano.block.available --> CS
+  PNI -- cardano.block.available --> HES
   BU  -- cardano.txs --> TXU
   TXU -- cardano.utxo.deltas --> UTXO
   GEN -- cardano.utxo.deltas --> UTXO
   UTXO -- cardano.address.delta --> SDF
   SDF  -- cardano.stake.deltas --> AC
+  SDF  -- cardano.stake.deltas --> HAC
   TXU  -- cardano.certificates --> SDF
   TXU  -- cardano.certificates --> SPO
   TXU  -- cardano.certificates --> DREP
   TXU  -- cardano.certificates --> AC
+  TXU  -- cardano.certificates --> HAC
   TXU  -- cardano.withdrawals --> AC
+  TXU  -- cardano.withdrawals --> HAC
   TXU  -- cardano.governance --> GOV
   TXU  -- cardano.governance --> DREP
   SPO  SPO_AC@-- cardano.spo.state --> AC
@@ -73,14 +78,21 @@ flowchart LR
   TXU  -- cardano.block.txs --> ES
   AC AC_GOV_DREP@-- cardano.drep.distribution --> GOV
   AC AC_GOV_SPO@-- cardano.spo.distribution --> GOV
+  AC AC_SPDD@-- cardano.spo.distribution --> SPDD
+  AC AC_DRDD@-- cardano.drep.distribution --> DRDD
+  AC AC_HAC@-- cardano.stake.reward.deltas --> HAC
   PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
   PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
   PARAM PARAM_DREP@-- cardano.protocol.parameters --> DREP
   PARAM PARAM_CS@-- cardano.protocol.parameters --> CS
+  PARAM PARAM_HAC@-- cardano.protocol.parameters --> HAC
+  PARAM PARAM_HES@-- cardano.protocol.parameters --> HES
   GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
   ES   ES_AC@-- cardano.epoch.activity --> AC
+  ES   ES_HES@-- cardano.epoch.activity --> HES
   DREP DREP_AC@-- cardano.drep.state --> AC
   REST REST_BF@-- rest.get.{multiple} --> BF
+  REST REST_SPDD-- rest.get.spdd --> SPDD
   REST REST_DRDD@-- rest.get.drdd --> DRDD
   BF BF_UTXO@-- cardano.query.utxos --> UTXO
   BF BF_SPO@ -- cardano.query.pools --> SPO
@@ -129,17 +141,24 @@ flowchart LR
   classDef EPOCH stroke:#008
   class SPO_AC EPOCH
   class ES_AC EPOCH
+  class ES_HES EPOCH
   class PARAM_GOV EPOCH
   class PARAM_AC EPOCH
   class GOV_PARAM EPOCH
   class DREP_AC EPOCH
   class AC_GOV_DREP EPOCH
   class AC_GOV_SPO EPOCH
+  class AC_SPDD EPOCH
+  class AC_DRDD EPOCH
+  class AC_HAC EPOCH
   class PARAM_DREP EPOCH
   class PARAM_CS EPOCH
+  class PARAM_HAC EPOCH
+  class PARAM_HES EPOCH
 
   classDef REQ stroke:#800
   class REST_BF REQ
+  class REST_SPDD REQ
   class REST_DRDD REQ
   class BF_UTXO REQ
   class BF_SPO REQ
