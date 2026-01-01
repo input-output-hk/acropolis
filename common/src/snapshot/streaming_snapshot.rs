@@ -1822,18 +1822,28 @@ impl StreamingSnapshotParser {
 
         // Extract rewards and pot deltas based on variant
         let result = match pulsing_update {
-            PulsingRewardUpdate::Pulsing { snapshot } => {
-                let rewards = snapshot
-                    .leaders
-                    .0
-                    .iter()
-                    .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
-                    .collect();
+            PulsingRewardUpdate::Pulsing { snapshot, pulser } => {
+                // Combine leader rewards from snapshot.leaders with member rewards from pulser
+                let mut rewards: HashMap<StakeCredential, Lovelace> = HashMap::new();
+
+                // Add leader rewards from snapshot
+                for (cred, reward_set) in &snapshot.leaders.0 {
+                    let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
+                    *rewards.entry(cred.clone()).or_insert(0) += amount;
+                }
+
+                // Add member rewards from pulser's accumulated rewards
+                for (cred, reward_set) in &pulser.reward_ans.accum_rewards.0 {
+                    let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
+                    *rewards.entry(cred.clone()).or_insert(0) += amount;
+                }
+
                 // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
                 // Both are positive values in RewardSnapshot
                 info!(
-                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}",
-                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r
+                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}, leader_accounts={}, member_accounts={}",
+                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r,
+                    snapshot.leaders.0.len(), pulser.reward_ans.accum_rewards.0.len()
                 );
                 PulsingRewardResult {
                     rewards,
