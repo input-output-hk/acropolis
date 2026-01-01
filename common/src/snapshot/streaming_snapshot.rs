@@ -43,6 +43,7 @@ pub use crate::{
 };
 use crate::{PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
+use super::delegation_state::parse_dstate;
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
 
@@ -313,29 +314,6 @@ impl<C> minicbor::Encode<C> for DRep {
                 Ok(())
             }
         }
-    }
-}
-
-/// Account state from ledger (internal CBOR type for decoding)
-///
-/// This is converted to AccountState for the external API.
-#[derive(Debug)]
-pub struct Account {
-    pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
-    pub pointers: SnapshotSet<(u64, u64, u64)>,
-    pub pool: StrictMaybe<PoolId>,
-    pub drep: StrictMaybe<DRep>,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for Account {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        Ok(Account {
-            rewards_and_deposit: d.decode_with(ctx)?,
-            pointers: d.decode_with(ctx)?,
-            pool: d.decode_with(ctx)?,
-            drep: d.decode_with(ctx)?,
-        })
     }
 }
 
@@ -940,89 +918,23 @@ impl StreamingSnapshotParser {
                 .context("Failed to parse PState for pools")?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
-            // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
-            decoder.array().context("Failed to parse DState array")?;
-
-            // Parse unified rewards - it's actually an array containing the map
-            // UMap structure: [rewards_map, ...]
-            let umap_len = decoder.array().context("Failed to parse UMap array")?;
-
-            // Parse the rewards map [0]: StakeCredential -> Account
-            let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
-
-            // Skip remaining UMap elements if any
-            if let Some(len) = umap_len {
-                for _ in 1..len {
-                    decoder.skip()?;
-                }
-            }
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-            decoder.skip()?;
-
-            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
-            // Parse instant rewards (MIRs) and combine with regular rewards
-            // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
-            let instant_rewards_result = Self::parse_instant_rewards(&mut decoder)
-                .context("Failed to parse instant rewards")?;
+            let dstate = parse_dstate(&mut decoder).context("Failed to parse DState")?;
 
             // Log instant rewards deltas
             info!(
                 "Instant rewards deltas: delta_treasury={}, delta_reserves={}",
-                instant_rewards_result.delta_treasury, instant_rewards_result.delta_reserves
+                dstate.instant_rewards.delta_treasury, dstate.instant_rewards.delta_reserves
             );
 
-            // Convert to AccountState for API, combining regular rewards with instant rewards
-            let accounts: Vec<AccountState> = accounts_map
-                .into_iter()
-                .map(|(credential, account)| {
-                    // Convert StakeCredential to stake address representation
-                    let stake_address = StakeAddress::new(credential.clone(), network.clone());
+            // Convert DState to AccountState list for API
+            let accounts = dstate.to_accounts(&network);
 
-                    // Extract rewards from rewards_and_deposit (first element of tuple)
-                    let regular_rewards = match &account.rewards_and_deposit {
-                        StrictMaybe::Just((reward, _deposit)) => *reward,
-                        StrictMaybe::Nothing => 0,
-                    };
-
-                    // Add instant rewards (MIRs) if any
-                    let mir_rewards =
-                        instant_rewards_result.rewards.get(&credential).copied().unwrap_or(0);
-                    let rewards = regular_rewards + mir_rewards;
-
-                    // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
-                    // PoolId is Hash<28>, we need to convert to Vec<u8>
-                    let delegated_spo = match &account.pool {
-                        StrictMaybe::Just(pool_id) => Some(*pool_id),
-                        StrictMaybe::Nothing => None,
-                    };
-
-                    // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
-                    let delegated_drep = match &account.drep {
-                        StrictMaybe::Just(drep) => Some(match drep {
-                            DRep::Key(hash) => DRepChoice::Key(*hash),
-                            DRep::Script(hash) => DRepChoice::Script(*hash),
-                            DRep::Abstain => DRepChoice::Abstain,
-                            DRep::NoConfidence => DRepChoice::NoConfidence,
-                        }),
-                        StrictMaybe::Nothing => None,
-                    };
-
-                    AccountState {
-                        stake_address,
-                        address_state: StakeAddressState {
-                            registered: true, // Accounts in DState are registered by definition
-                            utxo_value: 0,    // Will be populated from UTXO parsing
-                            rewards,
-                            delegated_spo,
-                            delegated_drep,
-                        },
-                    }
-                })
-                .collect();
+            // Convert instant rewards for later use
+            let instant_rewards_result = InstantRewardsResult {
+                rewards: dstate.instant_rewards.combined_rewards(),
+                delta_treasury: dstate.instant_rewards.delta_treasury,
+                delta_reserves: dstate.instant_rewards.delta_reserves,
+            };
 
             // Navigate to UTxOState [3][1][1]
             let utxo_state_len = decoder
@@ -1880,49 +1792,6 @@ impl StreamingSnapshotParser {
                 Ok(Vec::new())
             }
         }
-    }
-
-    /// Parse instant rewards (MIRs) from DState
-    ///
-    /// instantaneous_rewards = [
-    ///   ir_reserves : { * credential_staking => coin },
-    ///   ir_treasury : { * credential_staking => coin },
-    ///   ir_delta_reserves : delta_coin,
-    ///   ir_delta_treasury : delta_coin,
-    /// ]
-    ///
-    /// Returns combined rewards map and pot deltas from MIR transfers
-    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<InstantRewardsResult> {
-        let ir_len = decoder
-            .array()
-            .context("Failed to parse instant_rewards array")?
-            .ok_or_else(|| anyhow!("instant_rewards must be a definite-length array"))?;
-
-        if ir_len < 4 {
-            return Err(anyhow!(
-                "instant_rewards array too short: expected 4 elements, got {ir_len}"
-            ));
-        }
-
-        // Parse ir_reserves and ir_treasury: { * credential_staking => coin }
-        let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
-        let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
-
-        // Parse ir_delta_reserves and ir_delta_treasury
-        let delta_reserves: i64 = decoder.decode()?;
-        let delta_treasury: i64 = decoder.decode()?;
-
-        // Combine rewards from both sources
-        let mut combined = ir_reserves;
-        for (credential, amount) in ir_treasury {
-            *combined.entry(credential).or_insert(0) += amount;
-        }
-
-        Ok(InstantRewardsResult {
-            rewards: combined,
-            delta_treasury,
-            delta_reserves,
-        })
     }
 
     /// Parse pulsing_rew_update to extract reward information and pot deltas.

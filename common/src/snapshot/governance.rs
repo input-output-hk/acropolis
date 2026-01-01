@@ -1017,9 +1017,7 @@ fn parse_enact_state_withdrawals(decoder: &mut Decoder) -> Result<HashMap<Creden
     match map_len {
         Some(len) => {
             for _ in 0..len {
-                // Parse credential
                 if let Ok(credential) = parse_credential(decoder) {
-                    // Parse amount
                     let amount: Lovelace =
                         decoder.decode().context("Failed to parse withdrawal amount")?;
                     withdrawals.insert(credential, amount);

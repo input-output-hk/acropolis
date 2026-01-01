@@ -11,6 +11,7 @@
 
 // Submodules
 mod decode;
+pub mod delegation_state;
 mod error;
 pub mod governance;
 pub mod mark_set_go;
@@ -35,3 +36,7 @@ pub use reward_snapshot::{
 };
 
 pub use governance::{parse_gov_state, GovActionState, GovRelation, GovernanceState};
+
+pub use delegation_state::{
+    parse_dstate, DState, InstantaneousRewards, Pointer, RDPair, UMap, UMapElem,
+};
