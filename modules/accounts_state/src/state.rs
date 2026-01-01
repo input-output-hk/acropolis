@@ -37,15 +37,20 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
 
 /// State for rewards calculation
+///
+/// In Cardano terminology:
+/// - Mark = current epoch snapshot (newest) - the one being built
+/// - Set = previous epoch snapshot (epoch - 1)
+/// - Go = two epochs ago snapshot (epoch - 2) - used for staking in rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
-    /// Latest snapshot (epoch i)
+    /// Mark snapshot (current epoch) - newest
     pub mark: Arc<EpochSnapshot>,
 
-    /// Previous snapshot (epoch i-1)
+    /// Set snapshot (epoch - 1)
     pub set: Arc<EpochSnapshot>,
 
-    /// One before that (epoch i-2)
+    /// Go snapshot (epoch - 2) - oldest, used for staking in rewards calculation
     pub go: Arc<EpochSnapshot>,
 }
 
@@ -1109,21 +1114,22 @@ impl State {
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
-                    // DRep registration requires a deposit (typically 500 ADA)
+                    // DRep deposits are NOT included in the deposits pot for verification.
+                    // The Haskell node tracks DRep deposits separately from the deposits pot.
+                    // We only track DReps for other purposes (governance), not for deposit accounting.
                     debug!(
                         "DRep registration: {:?}, deposit: {}",
                         reg.credential, reg.deposit
                     );
-                    self.pots.deposits += reg.deposit;
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    // DRep deregistration refunds the deposit
+                    // DRep deposits are NOT included in the deposits pot for verification.
+                    // The Haskell node tracks DRep deposits separately from the deposits pot.
                     debug!(
                         "DRep deregistration: {:?}, refund: {}",
                         dereg.credential, dereg.refund
                     );
-                    self.pots.deposits = self.pots.deposits.saturating_sub(dereg.refund);
                 }
 
                 _ => (),

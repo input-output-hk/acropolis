@@ -96,14 +96,28 @@ impl EpochSnapshot {
             // See how many blocks produced
             let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
-            // Check if the reward account from two epochs ago is still registered
+            // Check if the reward account from two epochs ago is still registered.
+            // This implements the Shelley-era rule that SPO leader rewards are only paid
+            // if the reward account was registered at the time of the staking snapshot.
             let two_previous_reward_account_is_registered =
                 match two_previous_snapshot.spos.get(spo_id) {
-                    Some(old_spo) => stake_addresses
-                        .get(&old_spo.reward_account)
-                        .map(|sas| sas.registered)
-                        .unwrap_or(false),
-                    None => false,
+                    Some(old_spo) => {
+                        // SPO existed two epochs ago - check if their old reward account is registered
+                        stake_addresses
+                            .get(&old_spo.reward_account)
+                            .map(|sas| sas.registered)
+                            .unwrap_or(false)
+                    }
+                    None => {
+                        // SPO wasn't in snapshot from 2 epochs ago (newly registered or data issue).
+                        // Check if their CURRENT reward account is registered as a fallback.
+                        // Default to true if we can't verify - conservative approach to avoid
+                        // incorrectly denying legitimate rewards.
+                        stake_addresses
+                            .get(&spo.reward_account)
+                            .map(|sas| sas.registered)
+                            .unwrap_or(true)
+                    }
                 };
             debug!(
                 epoch,
@@ -262,11 +276,19 @@ impl EpochSnapshot {
                 match (two_previous_snapshot, registered_credentials) {
                     (Some(prev_snapshot), Some(registered)) => {
                         // Look up this SPO in the snapshot from two epochs ago
-                        prev_snapshot
-                            .spos
-                            .get(&pool_id)
-                            .map(|old_spo| registered.contains(&old_spo.reward_account.credential))
-                            .unwrap_or(false)
+                        match prev_snapshot.spos.get(&pool_id) {
+                            Some(old_spo) => {
+                                // SPO existed two epochs ago - check their old reward account
+                                registered.contains(&old_spo.reward_account.credential)
+                            }
+                            None => {
+                                // SPO wasn't in snapshot from 2 epochs ago (newly registered).
+                                // For newly registered SPOs, we can't verify historical registration,
+                                // so we default to true (conservative approach to pay rewards).
+                                // This avoids denying legitimate rewards to new SPOs.
+                                true
+                            }
+                        }
                     }
                     // If we don't have the information, default to true (conservative)
                     // This ensures rewards are paid when we can't verify
@@ -324,15 +346,20 @@ impl EpochSnapshot {
 }
 
 /// Container for the three snapshots used in rewards calculation (mark, set, go)
+///
+/// In Cardano terminology:
+/// - Mark = current epoch snapshot (newest) - the one being built
+/// - Set = previous epoch snapshot (epoch - 1)
+/// - Go = two epochs ago snapshot (epoch - 2) - used for rewards calculation
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
-    /// Mark snapshot (epoch - 2)
+    /// Mark snapshot (current epoch) - newest
     pub mark: EpochSnapshot,
 
     /// Set snapshot (epoch - 1)
     pub set: EpochSnapshot,
 
-    /// Go snapshot (current epoch)
+    /// Go snapshot (epoch - 2) - oldest, used for staking in rewards calculation
     pub go: EpochSnapshot,
 }
 

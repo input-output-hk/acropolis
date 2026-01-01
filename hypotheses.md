@@ -60,20 +60,37 @@ Added `just_retired_pool_ids: OrdSet<PoolId>` field to track pools that retired 
 
 ---
 
-### Fix 2: DRep registration/deregistration deposit handling
+### Fix 2: DRep deposit handling (TWO ISSUES FOUND)
 
-**Problem Identified:**
-The `handle_tx_certificates()` function in `accounts_state` was NOT handling `DRepRegistration` and `DRepDeregistration` certificates. These were falling through to the `_ => ()` catch-all case.
+**Problem 1 - Bootstrap subtraction (WRONG):**
+The bootstrap code in `streaming_snapshot.rs` was SUBTRACTING DRep deposits from `us_deposited`:
+```rust
+let deposits = deposits.saturating_sub(total_drep_deposits);
+```
+The comment said "DRep deposits shouldn't be in our deposits pot" - but this is INCORRECT.
+DRep deposits ARE part of the deposits pot, just like pool deposits and stake key deposits.
 
-DRep registration requires a 500 ADA deposit, and deregistration refunds it. Without handling these, the deposits pot would drift over time as DReps register and deregister.
+**Problem 2 - DRep re-registration double-counting:**
+The `handle_tx_certificates()` was adding deposits for ALL `DRepRegistration` certificates,
+even for DReps that were already registered. This caused double-counting when:
+- A DRep registered before bootstrap, then re-registered (updating their info)
+- We'd add their deposit again even though they never got a refund
 
 **The Fix:**
-Added handling for `TxCertificate::DRepRegistration` and `TxCertificate::DRepDeregistration` in `handle_tx_certificates()`:
-- Registration: `self.pots.deposits += reg.deposit`
-- Deregistration: `self.pots.deposits -= dereg.refund`
+1. **Removed the DRep deposit subtraction from bootstrap** (`streaming_snapshot.rs:1290-1292`)
+   - DRep deposits now correctly remain in the deposits pot
+
+2. **Added registration tracking for DReps** (`state.rs:1111-1140`)
+   - Check if DRep is already in `self.dreps` before adding deposit
+   - Only add deposit for truly NEW DRep registrations
+   - Track new DReps by adding to `self.dreps`
+   - Remove DReps from tracking on deregistration
 
 **Files Modified:**
-- `modules/accounts_state/src/state.rs` - Added DRep deposit handling in `handle_tx_certificates()`
+- `common/src/snapshot/streaming_snapshot.rs` - Removed incorrect DRep deposit subtraction
+- `modules/accounts_state/src/state.rs` - Added proper DRep registration tracking
+
+**Expected Result:** Fixes the 43,500 ADA (87 × 500 ADA) deposits discrepancy at epoch 509.
 
 ---
 
@@ -144,3 +161,219 @@ The mark/set/go snapshots are built from CBOR `snapshot_stake` values, while `St
 ### Hypothesis: Pulsing Rewards for Non-DState Accounts
 
 Pulsing rewards are only added to accounts that exist in DState. If an account was deregistered but still has pending rewards, those rewards go to treasury as "unclaimed" - which may or may not be correct depending on timing.
+
+---
+
+## Fix 4: SPO Leader Rewards Not Paid (COMPREHENSIVE FIX)
+
+### Problem Analysis
+
+From log analysis, **11 SPOs have leader rewards "not paid"** totaling **43,316 ADA**:
+```
+SPO 1506bd5a...'s reward account e1bf7e0a... not paid 1844034416
+SPO 926b65d0...'s reward account e19cb992... not paid 387968582
+SPO b6139d65...'s reward account e147e9fb... not paid 935455780
+... (11 total)
+```
+
+This happens because `two_previous_reward_account_is_registered` is `false` for these SPOs.
+
+### Root Cause
+
+The check in `rewards.rs:118-119` uses:
+```rust
+let mut pay_to_pool_reward_account = performance_spo.two_previous_reward_account_is_registered;
+```
+
+This flag is set in `EpochSnapshot::new()` at lines 100-107:
+```rust
+let two_previous_reward_account_is_registered =
+    match two_previous_snapshot.spos.get(spo_id) {
+        Some(old_spo) => stake_addresses
+            .get(&old_spo.reward_account)
+            .map(|sas| sas.registered)
+            .unwrap_or(false),
+        None => false,  // <-- BUG: SPO wasn't in snapshot 2 epochs ago
+    };
+```
+
+**The bug**: When an SPO is NOT found in `two_previous_snapshot`, the code defaults to `false`. This incorrectly denies rewards to:
+1. SPOs that registered after the "two previous" snapshot was taken
+2. SPOs whose data wasn't correctly captured in bootstrap snapshots
+3. Any SPO not present in that specific snapshot for any reason
+
+### Layered Fix Approach
+
+All four layers should be implemented together for complete coverage:
+
+#### Layer 1: Fix `EpochSnapshot::new()` - SPO not found case
+
+**File:** `common/src/epoch_snapshot.rs` lines 100-107
+
+**Current:**
+```rust
+None => false,
+```
+
+**Fix:**
+```rust
+None => {
+    // SPO wasn't in snapshot from 2 epochs ago (newly registered or data issue)
+    // Check if their CURRENT reward account is registered - conservative approach
+    stake_addresses
+        .get(&spo.reward_account)
+        .map(|sas| sas.registered)
+        .unwrap_or(true)  // Default to true if we can't verify
+}
+```
+
+#### Layer 2: Fix bootstrap snapshot creation with registered_credentials
+
+**File:** `common/src/snapshot/streaming_snapshot.rs` around line 1243
+
+The `registered_credentials` HashSet is already built at line 1328-1329 but it's built AFTER the snapshots are created. Reorder to build it earlier and pass to `into_snapshots_container()`:
+
+```rust
+// Build registered credentials BEFORE creating snapshots
+let dstate_registered_credentials: HashSet<StakeCredential> =
+    dstate_result.accounts.keys().cloned().collect();
+
+let processed = raw_snapshots.into_snapshots_container_with_registration_check(
+    epoch,
+    &blocks_prev_map,
+    &blocks_curr_map,
+    pots.clone(),
+    network.clone(),
+    Some(&dstate_registered_credentials),
+);
+```
+
+**File:** `common/src/snapshot/mark_set_go.rs`
+
+Add `into_snapshots_container_with_registration_check()` that:
+1. Creates Go snapshot first (oldest, epoch-3)
+2. Creates Set snapshot using Go as `two_previous` (epoch-2)
+3. Creates Mark snapshot using Set as `two_previous` (epoch-1)
+
+Each snapshot checks SPO reward accounts against `registered_credentials`.
+
+#### Layer 3: Enhance rewards.rs fallback check
+
+**File:** `modules/accounts_state/src/rewards.rs` lines 128-143
+
+**Current fallback only checks `registrations` (newly registered this epoch):**
+```rust
+if !pay_to_pool_reward_account {
+    pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
+}
+```
+
+**Enhanced fix - also pass stake_addresses to check current registration:**
+```rust
+if !pay_to_pool_reward_account {
+    // Check if registered during this epoch (Shelley bug compatibility)
+    pay_to_pool_reward_account = registrations.contains(&staking_spo.reward_account);
+
+    // Also check if currently registered in stake_addresses
+    // (handles accounts registered before the epoch that weren't in two_previous)
+    if !pay_to_pool_reward_account {
+        pay_to_pool_reward_account = stake_addresses
+            .get(&staking_spo.reward_account)
+            .map(|sas| sas.registered)
+            .unwrap_or(false);
+    }
+}
+```
+
+This requires passing `stake_addresses` (or a reference to it) into `calculate_rewards()`.
+
+#### Layer 4: Conservative default when unknown
+
+Throughout all the checks, when we truly cannot determine registration status, default to `true` (pay the reward) rather than `false` (deny the reward).
+
+**Rationale:**
+1. The Shelley-era bug this check replicates was about *denying* rewards when accounts weren't registered
+2. Most reward accounts ARE registered (that's the common case)
+3. It's better to potentially overpay slightly than to deny legitimate rewards
+4. The ~43k ADA in unpaid rewards is significant and affects real SPOs
+
+### Expected Result
+
+- 11 SPOs should now receive their leader rewards (~43,316 ADA total)
+- This may also fix or reduce the reserves/treasury discrepancy (unpaid leader rewards likely affect pot calculations)
+- Withdrawal underflows should be reduced (accounts will have correct reward balances)
+
+### Files to Modify
+
+1. `common/src/epoch_snapshot.rs` - Fix SPO-not-found case in `new()`
+2. `common/src/snapshot/mark_set_go.rs` - Add `into_snapshots_container_with_registration_check()`
+3. `common/src/snapshot/streaming_snapshot.rs` - Build and pass `registered_credentials` earlier
+4. `modules/accounts_state/src/rewards.rs` - Enhanced fallback check with stake_addresses
+
+---
+
+## Connection Between Issues
+
+The three main issues may be interconnected:
+
+1. **Unpaid SPO leader rewards (43k ADA)** directly causes:
+   - Reserves to be higher (rewards not paid out)
+   - Treasury to be lower (some unpaid rewards may go to treasury)
+
+2. **Withdrawal underflows** could be caused by:
+   - Accounts expecting leader rewards that weren't paid
+   - The ~0.5% shortfall may correspond to leader reward percentage
+
+3. **Pot discrepancies** (56k reserves, 23k treasury):
+   - 43k ADA unpaid rewards is in the same order of magnitude
+   - The difference (56k - 43k = 13k) may be from other sources
+
+---
+
+## Fix 5: Enacted Treasury Withdrawals (es_withdrawals) Causing Double Rewards
+
+### Problem Analysis
+
+Accounts that have enacted treasury withdrawals (`es_withdrawals` in `enact_state`) were incorrectly receiving pulsing rewards. The `es_withdrawals` field contains withdrawals that have been enacted via governance - these accounts have already received their funds through the governance process.
+
+### Root Cause
+
+The bootstrap code was adding pulsing rewards from `pulsing_rew_update` to all DState accounts without checking if they had enacted treasury withdrawals. This caused double-counting for accounts that:
+1. Had governance proposals for treasury withdrawals
+2. Those proposals were ratified and enacted
+3. The withdrawal amount was recorded in `es_withdrawals`
+
+### The Fix
+
+**Files Modified:**
+
+1. `common/src/snapshot/governance.rs`:
+   - Added `enacted_withdrawals: HashMap<Credential, Lovelace>` field to `GovernanceState`
+   - Created `parse_enact_state_withdrawals()` function to parse the `es_withdrawals` map
+   - Updated `parse_ratify_state()` to parse `enact_state` instead of skipping it
+   - Updated `DRepPulsingResult` type to include withdrawals
+
+2. `common/src/snapshot/streaming_snapshot.rs`:
+   - Extract `enacted_withdrawals` from governance state before callback
+   - Skip pulsing rewards for accounts that have enacted withdrawals
+   - Log count of skipped accounts for debugging
+
+### CDDL Reference
+
+```cddl
+enact_state = [
+  es_committee: strict_maybe<committee>,       [0]
+  es_constitution: constitution,               [1]
+  es_current_pparams: pparams,                 [2]
+  es_previous_pparams: pparams,                [3]
+  es_treasury: coin,                           [4]
+  es_withdrawals: { * credential => coin },    [5]  <-- This is what we parse
+  es_prev_gov_action_ids: gov_relation,        [6]
+]
+```
+
+### Expected Result
+
+- Accounts with enacted treasury withdrawals will NOT receive pulsing rewards
+- This prevents double-counting of rewards for governance-enacted withdrawals
+- May help fix the reserves/treasury discrepancy

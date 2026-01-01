@@ -1191,6 +1191,10 @@ impl StreamingSnapshotParser {
             }
         };
 
+        // Extract enacted withdrawals before moving governance_state to callback
+        // These are treasury withdrawals enacted via governance that affect reward accounting
+        let enacted_withdrawals = governance_state.enacted_withdrawals.clone();
+
         // Emit governance state callback
         callbacks.on_governance_state(governance_state)?;
 
@@ -1234,18 +1238,29 @@ impl StreamingSnapshotParser {
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
         );
 
+        // Build the set of registered credentials from DState accounts.
+        // This is used to properly determine `two_previous_reward_account_is_registered`
+        // for SPOs in the bootstrap snapshots.
+        let dstate_registered_credentials: std::collections::HashSet<StakeCredential> =
+            accounts.iter().map(|a| a.stake_address.credential.clone()).collect();
+        info!(
+            "Built registered credentials set with {} entries from DState",
+            dstate_registered_credentials.len()
+        );
+
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("Successfully parsed mark/set/go snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer.
-                // For bootstrap, two_previous_reward_account_is_registered defaults to true
-                // since we don't have historical registration data from the CBOR snapshots.
-                let processed = raw_snapshots.into_snapshots_container(
+                // Convert raw snapshots to processed SnapshotsContainer with registration checking.
+                // We pass the registered credentials from DState to properly determine
+                // two_previous_reward_account_is_registered for each SPO.
+                let processed = raw_snapshots.into_snapshots_container_with_registration_check(
                     epoch,
                     &blocks_prev_map,
                     &blocks_curr_map,
                     pots.clone(),
                     network.clone(),
+                    Some(&dstate_registered_credentials),
                 );
                 info!(
                     "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
@@ -1287,23 +1302,28 @@ impl StreamingSnapshotParser {
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
         let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
-        // Subtract DRep deposits from us_deposited
-        // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
-        let deposits = deposits.saturating_sub(total_drep_deposits);
-
         info!(
-            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
+            "Deposit breakdown: total_deposits={} ADA, pool_deposits={} ADA ({} pools), drep_deposits={} ADA ({} dreps)",
             deposits / 1_000_000,
-            total_drep_deposits / 1_000_000,
             total_pool_deposits / 1_000_000,
             pool_registrations.len(),
+            total_drep_deposits / 1_000_000,
             drep_deposits.len()
         );
+
+        // Subtract DRep deposits from us_deposited.
+        // The Haskell node's deposits pot verification does NOT include DRep deposits,
+        // so we must exclude them to match. DRep deposits are tracked separately.
+        let deposits = deposits.saturating_sub(total_drep_deposits);
 
         // Merge UTXO values and pulsing reward update rewards into accounts
         // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
         // added to DState rewards (accumulated rewards from previous epochs).
+        //
+        // IMPORTANT: Accounts with enacted treasury withdrawals (es_withdrawals) should NOT receive
+        // pulsing rewards, as their rewards have already been processed through governance.
         let mut pulsing_rewards_total: u64 = 0;
+        let mut skipped_withdrawal_accounts: u64 = 0;
 
         let mut accounts_with_utxo_values: Vec<AccountState> = accounts
             .into_iter()
@@ -1312,7 +1332,10 @@ impl StreamingSnapshotParser {
                 {
                     account.address_state.utxo_value = utxo_value;
                 }
-                if let Some(&pulsing_reward) =
+                // Check if this account has an enacted withdrawal - if so, skip pulsing rewards
+                if enacted_withdrawals.contains_key(&account.stake_address.credential) {
+                    skipped_withdrawal_accounts += 1;
+                } else if let Some(&pulsing_reward) =
                     pulsing_result.rewards.get(&account.stake_address.credential)
                 {
                     account.address_state.rewards += pulsing_reward;
@@ -1321,6 +1344,13 @@ impl StreamingSnapshotParser {
                 account
             })
             .collect();
+
+        if skipped_withdrawal_accounts > 0 {
+            info!(
+                "Skipped pulsing rewards for {} accounts with enacted treasury withdrawals",
+                skipped_withdrawal_accounts
+            );
+        }
 
         // Add accounts for stake addresses that have UTXOs but aren't registered in DState
         // These are addresses that received funds but were never registered for staking
