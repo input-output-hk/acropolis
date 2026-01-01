@@ -628,6 +628,10 @@ pub struct AccountsBootstrapData {
     pub pools: Vec<PoolRegistration>,
     /// Pool IDs that are retiring
     pub retiring_pools: Vec<PoolId>,
+    /// Pool IDs with pending updates (will become active at next epoch boundary).
+    /// These pools already have their deposits counted in the deposits pot,
+    /// so they should not be counted as "new" when they become active.
+    pub pending_pool_ids: Vec<PoolId>,
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
     /// Treasury, reserves, and deposits for the snapshot epoch
@@ -1233,7 +1237,9 @@ impl StreamingSnapshotParser {
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("Successfully parsed mark/set/go snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer
+                // Convert raw snapshots to processed SnapshotsContainer.
+                // For bootstrap, two_previous_reward_account_is_registered defaults to true
+                // since we don't have historical registration data from the CBOR snapshots.
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
                     &blocks_prev_map,
@@ -1260,10 +1266,15 @@ impl StreamingSnapshotParser {
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
+        // Pending pool IDs - these pools have pending updates and their deposits are already
+        // counted in the deposits pot. When they become active at the next epoch boundary,
+        // they should NOT be counted as "new" pools for deposit purposes.
+        let pending_pool_ids: Vec<PoolId> = pools.updates.keys().cloned().collect();
 
         info!(
-            "Pools: {} registered, {} retiring, {} DReps",
+            "Pools: {} registered, {} pending updates, {} retiring, {} DReps",
             pool_registrations.len(),
+            pending_pool_ids.len(),
             retiring_pools.len(),
             dreps.len()
         );
@@ -1416,7 +1427,6 @@ impl StreamingSnapshotParser {
         // Plus adjustments for deregistered accounts with pending rewards
         // Plus governance proposal deposit refunds
         // Plus treasury donations
-        //
         // Use checked arithmetic to detect overflow
         let unclaimed_rewards_i64 =
             i64::try_from(unclaimed_rewards).expect("unclaimed_rewards exceeds i64::MAX");
@@ -1457,6 +1467,7 @@ impl StreamingSnapshotParser {
             accounts: accounts_with_utxo_values,
             pools: pool_registrations,
             retiring_pools,
+            pending_pool_ids,
             dreps: drep_deposits,
             pots: Pots {
                 reserves,

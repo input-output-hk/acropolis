@@ -67,6 +67,15 @@ pub struct State {
     /// List of SPOs (by pool ID) retiring in the current epoch
     retiring_spos: Vec<PoolId>,
 
+    /// Pool IDs that just retired this epoch. If they re-register in the same epoch,
+    /// we should NOT count their deposits again (they never got refunded).
+    just_retired_pool_ids: OrdSet<PoolId>,
+
+    /// Pool IDs with pending updates from bootstrap. These pools already have their
+    /// deposits counted in the deposits pot, so they should not be counted as "new"
+    /// when they become active at the first epoch boundary after bootstrap.
+    pending_pool_ids: OrdSet<PoolId>,
+
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
     stake_addresses: Arc<Mutex<StakeAddressMap>>,
@@ -105,11 +114,12 @@ impl State {
         let num_accounts = bootstrap_msg.accounts.len();
         let num_pools = bootstrap_msg.pools.len();
         let num_retiring = bootstrap_msg.retiring_pools.len();
+        let num_pending = bootstrap_msg.pending_pool_ids.len();
         let num_dreps = bootstrap_msg.dreps.len();
 
         info!(
-            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
-            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_dreps
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring, {} pending), {} dreps",
+            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_pending, num_dreps
         );
 
         // Load stake addresses
@@ -131,6 +141,24 @@ impl State {
         // Load retiring pools
         self.retiring_spos = bootstrap_msg.retiring_pools;
         info!("Loaded {} retiring pools", self.retiring_spos.len());
+
+        // Load pending pool IDs - these pools already have their deposits counted,
+        // so we should not count them as "new" when they become active
+        self.pending_pool_ids = bootstrap_msg.pending_pool_ids.into_iter().collect();
+        info!("Loaded {} pending pool IDs", self.pending_pool_ids.len());
+
+        // Debug: Check how many pending pools are NOT already in self.spos (truly new vs updates)
+        let pending_not_in_spos: Vec<_> =
+            self.pending_pool_ids.iter().filter(|id| !self.spos.contains_key(*id)).collect();
+        let pending_already_in_spos = self.pending_pool_ids.len() - pending_not_in_spos.len();
+        info!(
+            "  Pending pool breakdown: {} already active (param updates), {} not yet active (new registrations)",
+            pending_already_in_spos,
+            pending_not_in_spos.len()
+        );
+        for pool_id in &pending_not_in_spos {
+            info!("    New registration pending activation: {}", pool_id);
+        }
 
         // Load DReps
         self.dreps = bootstrap_msg.dreps;
@@ -473,6 +501,11 @@ impl State {
             }
         }
 
+        // Track pools that just retired - if they re-register in the same epoch,
+        // we should NOT count their deposits again (they never got refunded).
+        // Clear previous epoch's retired pools and add this epoch's.
+        self.just_retired_pool_ids = retiring.clone();
+
         self.spos = self
             .spos
             .iter()
@@ -712,7 +745,7 @@ impl State {
                                 pool: reward.pool,
                             });
                         } else {
-                            warn!(
+                            debug!(
                                 "Reward account {} deregistered - paying reward {} to treasury",
                                 reward.account, reward.amount
                             );
@@ -796,8 +829,68 @@ impl State {
             .map(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
-        // Check for how many new SPOs
-        let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
+        // Check for how many truly new SPOs:
+        // - NOT in self.spos (not currently active)
+        // - NOT in pending_pool_ids (not pending from bootstrap)
+        // - NOT in just_retired_pool_ids (not a pool that just retired and re-registered)
+        // Pools in pending_pool_ids already had their deposits counted during bootstrap.
+        // Pools in just_retired_pool_ids never got their deposits refunded, so we shouldn't add again.
+        let truly_new_pools: Vec<_> = new_spos
+            .keys()
+            .filter(|id| {
+                !self.spos.contains_key(*id)
+                    && !self.pending_pool_ids.contains(*id)
+                    && !self.just_retired_pool_ids.contains(*id)
+            })
+            .cloned()
+            .collect();
+        let new_count = truly_new_pools.len();
+
+        // Count how many pending pools are now becoming active (for logging)
+        let pending_becoming_active_pools: Vec<_> = new_spos
+            .keys()
+            .filter(|id| !self.spos.contains_key(*id) && self.pending_pool_ids.contains(*id))
+            .cloned()
+            .collect();
+        let pending_becoming_active = pending_becoming_active_pools.len();
+
+        // Count how many just-retired pools are re-registering (for logging)
+        let reregistered_pools: Vec<_> = new_spos
+            .keys()
+            .filter(|id| !self.spos.contains_key(*id) && self.just_retired_pool_ids.contains(*id))
+            .cloned()
+            .collect();
+        let reregistered_count = reregistered_pools.len();
+
+        // Debug: Log pools that are not in self.spos
+        let not_in_spos: Vec<_> =
+            new_spos.keys().filter(|id| !self.spos.contains_key(*id)).cloned().collect();
+
+        if !not_in_spos.is_empty() {
+            info!(
+                "SPO state epoch {}: {} pools not in self.spos, {} pending, {} re-registered, {} truly new",
+                spo_msg.epoch,
+                not_in_spos.len(),
+                pending_becoming_active,
+                reregistered_count,
+                new_count,
+            );
+            for pool_id in &truly_new_pools {
+                info!("  Truly new pool (adding deposit): {}", pool_id);
+            }
+            for pool_id in &pending_becoming_active_pools {
+                info!(
+                    "  Pending pool now active (deposit already counted): {}",
+                    pool_id
+                );
+            }
+            for pool_id in &reregistered_pools {
+                info!(
+                    "  Re-registered pool (deposit already counted, was retired): {}",
+                    pool_id
+                );
+            }
+        }
 
         // Log new ones and pledge/cost/margin changes
         for (id, spo) in new_spos.iter() {
@@ -821,12 +914,14 @@ impl State {
                 }
 
                 _ => {
+                    let is_pending = self.pending_pool_ids.contains(id);
                     debug!(
                         epoch = spo_msg.epoch,
                         pledge = spo.pledge,
                         cost = spo.cost,
                         margin = ?spo.margin,
                         reward = %spo.reward_account,
+                        was_pending = is_pending,
                         "Registered new SPO {}",
                         id
                     );
@@ -835,12 +930,25 @@ impl State {
         }
 
         // They've each paid their deposit, so increment that (the UTXO spend is taken
-        // care of in UTXOState)
+        // care of in UTXOState). Note: pending pools from bootstrap already have their
+        // deposits counted, so we only count truly new ones.
         let total_deposits = (new_count as u64) * deposit;
         self.pots.deposits += total_deposits;
 
         if new_count > 0 {
             info!("{new_count} new SPOs, total new deposits {total_deposits}");
+        }
+
+        if pending_becoming_active > 0 {
+            info!(
+                "{pending_becoming_active} pending SPOs from bootstrap now active (deposits already counted)"
+            );
+        }
+
+        // Clear pending_pool_ids for any pools that are now active - they've transitioned
+        // and we no longer need to track them
+        for id in new_spos.keys() {
+            self.pending_pool_ids.remove(id);
         }
 
         // Check for any SPOs that have retired this epoch and need deposit refunds
@@ -998,6 +1106,24 @@ impl State {
                     );
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                }
+
+                TxCertificate::DRepRegistration(reg) => {
+                    // DRep registration requires a deposit (typically 500 ADA)
+                    debug!(
+                        "DRep registration: {:?}, deposit: {}",
+                        reg.credential, reg.deposit
+                    );
+                    self.pots.deposits += reg.deposit;
+                }
+
+                TxCertificate::DRepDeregistration(dereg) => {
+                    // DRep deregistration refunds the deposit
+                    debug!(
+                        "DRep deregistration: {:?}, refund: {}",
+                        dereg.credential, dereg.refund
+                    );
+                    self.pots.deposits = self.pots.deposits.saturating_sub(dereg.refund);
                 }
 
                 _ => (),

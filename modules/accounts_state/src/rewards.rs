@@ -157,7 +157,7 @@ pub fn calculate_rewards(
                     // any blocks is enough here - if not we'll have to do this as a post-process
                     if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
                         pay_to_pool_reward_account = false;
-                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                        debug!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               operator_id,
                               other_id,
                               staking_spo.reward_account);
@@ -374,7 +374,7 @@ fn calculate_spo_rewards(
 
                 // Check if it was deregistered between staking and now
                 if deregistrations.contains(delegator_stake_address) {
-                    info!(
+                    debug!(
                         "Recently deregistered member account {}, losing {to_pay}",
                         delegator_stake_address
                     );

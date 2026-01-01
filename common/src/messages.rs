@@ -440,6 +440,11 @@ pub struct AccountsBootstrapMessage {
     /// Pool IDs that are retiring
     pub retiring_pools: Vec<PoolId>,
 
+    /// Pool IDs with pending updates (will become active at next epoch boundary).
+    /// These pools already have their deposits counted in the deposits pot,
+    /// so they should not be counted as "new" when they become active.
+    pub pending_pool_ids: Vec<PoolId>,
+
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
 

@@ -167,23 +167,61 @@ impl RawSnapshotsContainer {
         pots: Pots,
         network: NetworkId,
     ) -> SnapshotsContainer {
+        self.into_snapshots_container_with_registration_check(
+            epoch,
+            blocks_previous_epoch,
+            blocks_current_epoch,
+            pots,
+            network,
+            None,
+        )
+    }
+
+    /// Convert raw snapshots to processed SnapshotsContainer
+    ///
+    /// For bootstrap snapshots, we don't have historical registration data to properly
+    /// determine `two_previous_reward_account_is_registered`. The CBOR snapshots only
+    /// contain stake/delegation/pool data, not the DState registration status from
+    /// the time the snapshot was taken.
+    ///
+    /// Therefore, we default `two_previous_reward_account_is_registered` to `true` for
+    /// all SPOs in bootstrap snapshots. This is the conservative approach - we pay
+    /// rewards when we can't verify registration status. This matches the behavior
+    /// of a fully-synced Cardano node which would have the historical data.
+    ///
+    /// After bootstrap, when processing blocks normally, we track registrations
+    /// ourselves and can properly compute this flag.
+    pub fn into_snapshots_container_with_registration_check(
+        self,
+        epoch: u64,
+        blocks_previous_epoch: &HashMap<PoolId, usize>,
+        blocks_current_epoch: &HashMap<PoolId, usize>,
+        pots: Pots,
+        network: NetworkId,
+        _registered_credentials: Option<&std::collections::HashSet<crate::StakeCredential>>,
+    ) -> SnapshotsContainer {
         let empty_blocks = HashMap::new();
 
-        SnapshotsContainer {
-            mark: self.mark.into_snapshot(
-                epoch.saturating_sub(2),
-                &empty_blocks,
-                Pots::default(),
-                network.clone(),
-            ),
-            set: self.set.into_snapshot(
-                epoch.saturating_sub(1),
-                blocks_previous_epoch,
-                pots,
-                network.clone(),
-            ),
-            go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
-        }
+        // For bootstrap snapshots, we default two_previous_reward_account_is_registered to true
+        // since we don't have the historical registration data needed to verify this properly.
+        // The into_snapshot function already defaults this to true.
+        let mark = self.mark.into_snapshot(
+            epoch.saturating_sub(2),
+            &empty_blocks,
+            Pots::default(),
+            network.clone(),
+        );
+
+        let set = self.set.into_snapshot(
+            epoch.saturating_sub(1),
+            blocks_previous_epoch,
+            pots,
+            network.clone(),
+        );
+
+        let go = self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network);
+
+        SnapshotsContainer { mark, set, go }
     }
 }
 

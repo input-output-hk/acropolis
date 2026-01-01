@@ -175,6 +175,20 @@ impl EpochSnapshot {
 
     /// Create a new snapshot from raw CBOR-parsed data (used during bootstrap parsing)
     /// Takes ownership of the maps to avoid cloning large data structures.
+    ///
+    /// # Arguments
+    /// * `epoch` - The epoch this snapshot is for
+    /// * `stake_map` - Map of stake credentials to their stake amounts
+    /// * `delegation_map` - Map of stake credentials to pool IDs they delegate to
+    /// * `pool_params_map` - Map of pool IDs to their registration parameters
+    /// * `block_counts` - Map of pool IDs to blocks produced
+    /// * `pots` - The pot balances at this epoch
+    /// * `network` - Network ID
+    /// * `two_previous_snapshot` - Optional snapshot from two epochs prior, used to check
+    ///   if reward accounts were registered. If None, `two_previous_reward_account_is_registered`
+    ///   will be set to true for all SPOs (conservative default for first epochs after bootstrap).
+    /// * `registered_credentials` - Optional set of registered credentials at the time of this
+    ///   snapshot. Used with `two_previous_snapshot` to determine if reward accounts are registered.
     pub fn from_raw(
         epoch: u64,
         stake_map: HashMap<StakeCredential, i64>,
@@ -183,6 +197,32 @@ impl EpochSnapshot {
         block_counts: &HashMap<PoolId, usize>,
         pots: Pots,
         network: NetworkId,
+    ) -> Self {
+        Self::from_raw_with_registration_check(
+            epoch,
+            stake_map,
+            delegation_map,
+            pool_params_map,
+            block_counts,
+            pots,
+            network,
+            None,
+            None,
+        )
+    }
+
+    /// Create a new snapshot from raw CBOR-parsed data with registration checking support
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_raw_with_registration_check(
+        epoch: u64,
+        stake_map: HashMap<StakeCredential, i64>,
+        delegation_map: HashMap<StakeCredential, PoolId>,
+        pool_params_map: HashMap<PoolId, PoolRegistration>,
+        block_counts: &HashMap<PoolId, usize>,
+        pots: Pots,
+        network: NetworkId,
+        two_previous_snapshot: Option<&EpochSnapshot>,
+        registered_credentials: Option<&std::collections::HashSet<StakeCredential>>,
     ) -> Self {
         // First pass: group delegations by pool (O(n) instead of O(n*m))
         let mut delegations_by_pool: HashMap<PoolId, Vec<(StakeAddress, Lovelace)>> =
@@ -215,6 +255,24 @@ impl EpochSnapshot {
             let blocks_produced = block_counts.get(&pool_id).copied().unwrap_or(0);
             total_blocks += blocks_produced;
 
+            // Check if the reward account from two epochs ago is registered.
+            // We look up the SPO in the two_previous_snapshot and check if their
+            // reward account credential is in the registered_credentials set.
+            let two_previous_reward_account_is_registered =
+                match (two_previous_snapshot, registered_credentials) {
+                    (Some(prev_snapshot), Some(registered)) => {
+                        // Look up this SPO in the snapshot from two epochs ago
+                        prev_snapshot
+                            .spos
+                            .get(&pool_id)
+                            .map(|old_spo| registered.contains(&old_spo.reward_account.credential))
+                            .unwrap_or(false)
+                    }
+                    // If we don't have the information, default to true (conservative)
+                    // This ensures rewards are paid when we can't verify
+                    _ => true,
+                };
+
             spos.insert(
                 pool_id,
                 SnapshotSPO {
@@ -225,8 +283,8 @@ impl EpochSnapshot {
                     margin: pool_reg.margin,
                     blocks_produced,
                     pool_owners: pool_reg.pool_owners,
-                    reward_account: pool_reg.reward_account,
-                    two_previous_reward_account_is_registered: true,
+                    reward_account: pool_reg.reward_account.clone(),
+                    two_previous_reward_account_is_registered,
                 },
             );
         }
