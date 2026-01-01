@@ -377,3 +377,184 @@ enact_state = [
 - Accounts with enacted treasury withdrawals will NOT receive pulsing rewards
 - This prevents double-counting of rewards for governance-enacted withdrawals
 - May help fix the reserves/treasury discrepancy
+
+---
+
+## Fix 6: Missing Member Rewards from Pulser in Pulsing State (CRITICAL FIX)
+
+### Problem Analysis
+
+Investigation of the withdrawal underflow errors revealed a critical insight about `rdpair_reward`:
+
+**What `rdpair` represents (from CDDL):**
+```cddl
+rdpair = [
+  rdpair_reward : compactform_coin,   // Accumulated rewards already in account
+  rdpair_deposit : compactform_coin,  // Stake key registration deposit
+]
+```
+
+The `rdpair_reward` field contains rewards that have **already been paid** to accounts in previous epochs. It does NOT include rewards currently being calculated.
+
+**The `pulsing_rew_update` structure has two variants:**
+
+1. **Complete (variant 1)**: Reward calculation is finished
+   - `update.rewards` contains ALL rewards (member + leader) ready to be distributed
+   - This was being handled correctly
+
+2. **Pulsing (variant 0)**: Reward calculation is still in progress
+   - `snapshot.leaders` contains **ONLY leader rewards**
+   - `pulser.reward_ans.accum_rewards` contains **member rewards calculated so far**
+   - **WE WERE SKIPPING THE PULSER ENTIRELY!**
+
+### Root Cause
+
+In `streaming_snapshot.rs`, the Pulsing variant was only extracting leader rewards:
+
+```rust
+PulsingRewardUpdate::Pulsing { snapshot } => {
+    let rewards = snapshot
+        .leaders  // <-- ONLY LEADER REWARDS!
+        .0
+        .iter()
+        .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+        .collect();
+    // ...
+}
+```
+
+And in `reward_snapshot.rs`, the Pulser was being skipped:
+
+```rust
+impl Pulser {
+    pub fn skip(d: &mut Decoder) -> Result<(), minicbor::decode::Error> {
+        d.skip()  // <-- SKIPPING ALL MEMBER REWARDS!
+    }
+}
+```
+
+When the NewEpochState snapshot is taken during reward pulsing (before completion), all delegator/member rewards were being lost, causing the withdrawal underflows.
+
+### CDDL Reference for Pulser Structure
+
+```cddl
+pulser = [
+    pulser_n : int,
+    pulser_free : freevars,
+    pulser_balance : {* credential_staking => compactform_coin },
+    pulser_ans : reward_ans
+]
+
+reward_ans = [
+    accum_reward_ans : { * credential_staking => reward },  <-- MEMBER REWARDS HERE!
+    recent_reward_ans : reward_event
+]
+```
+
+### The Fix
+
+**Files Modified:**
+
+1. `common/src/snapshot/reward_snapshot.rs`:
+   - Added `RewardAns` struct to parse the accumulated rewards
+   - Updated `Pulser` struct to actually parse and hold `reward_ans` instead of skipping
+   - Updated `PulsingRewardUpdate::Pulsing` variant to include the `pulser` field
+
+2. `common/src/snapshot/streaming_snapshot.rs`:
+   - Updated `parse_pulsing_reward_update()` to combine both leader AND member rewards
+   - Leader rewards from `snapshot.leaders`
+   - Member rewards from `pulser.reward_ans.accum_rewards`
+   - Added logging to show count of leader and member reward accounts
+
+### Code Changes
+
+**reward_snapshot.rs - New RewardAns struct:**
+```rust
+pub struct RewardAns {
+    pub accum_rewards: VMap<StakeCredential, SnapshotSet<Reward>>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for RewardAns {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        let accum_rewards: VMap<StakeCredential, SnapshotSet<Reward>> = VMap::decode(d, ctx)?;
+        d.skip()?; // Skip recent_reward_ans
+        Ok(RewardAns { accum_rewards })
+    }
+}
+```
+
+**reward_snapshot.rs - Updated Pulser:**
+```rust
+pub struct Pulser {
+    pub reward_ans: RewardAns,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Pulser {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        d.skip()?; // pulser_n
+        d.skip()?; // pulser_free
+        d.skip()?; // pulser_balance
+        let reward_ans = RewardAns::decode(d, ctx)?;
+        Ok(Pulser { reward_ans })
+    }
+}
+```
+
+**streaming_snapshot.rs - Combined rewards extraction:**
+```rust
+PulsingRewardUpdate::Pulsing { snapshot, pulser } => {
+    let mut rewards: HashMap<StakeCredential, Lovelace> = HashMap::new();
+
+    // Add leader rewards from snapshot
+    for (cred, reward_set) in &snapshot.leaders.0 {
+        let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
+        *rewards.entry(cred.clone()).or_insert(0) += amount;
+    }
+
+    // Add member rewards from pulser's accumulated rewards
+    for (cred, reward_set) in &pulser.reward_ans.accum_rewards.0 {
+        let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
+        *rewards.entry(cred.clone()).or_insert(0) += amount;
+    }
+    // ...
+}
+```
+
+### Expected Result
+
+- All delegator accounts should now receive their member rewards from the Pulser
+- Withdrawal underflow errors should be eliminated (accounts will have correct reward balances)
+- The ~0.5% shortfall pattern should be resolved
+- May significantly improve or fix the reserves/treasury discrepancy
+
+### Commit
+
+```
+fix: extract member rewards from Pulser in pulsing reward state
+```
+
+**Status:** IMPLEMENTED - Needs testing with snapshot bootstrap to verify fix.
+
+---
+
+## Remaining Open Issues
+
+### 1. SPDD Total Active Stake Mismatch
+```
+Total active stake mismatch for epoch 508:
+   DB: 22588758523424195
+   SPDD: 22450738602670046
+```
+Difference of ~138B lovelace (~138k ADA). This may be related to:
+- Different timing of when delegations are counted
+- Rewards being included/excluded from stake calculations
+- Missing pools (6 pools reported as missing)
+
+### 2. Reserves/Treasury Discrepancy
+After all fixes, need to verify if the pot discrepancies are resolved:
+- Reserves: -56,427 ADA too high
+- Treasury: +23,603 ADA too low
+
+The member rewards fix (Fix 6) is expected to have a significant impact on this.
