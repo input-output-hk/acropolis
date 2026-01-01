@@ -92,7 +92,7 @@ flowchart LR
   ES   ES_HES@-- cardano.epoch.activity --> HES
   DREP DREP_AC@-- cardano.drep.state --> AC
   REST REST_BF@-- "rest.get.{multiple}" --> BF
-  REST REST_SPDD-- rest.get.spdd --> SPDD
+  REST REST_SPDD@-- rest.get.spdd --> SPDD
   REST REST_DRDD@-- rest.get.drdd --> DRDD
   BF BF_UTXO@-- cardano.query.utxos --> UTXO
   BF BF_SPO@ -- cardano.query.pools --> SPO
