@@ -177,12 +177,54 @@ flowchart LR
 Note the edges in red indicate request-responses.
 
 ## Data flow
-The process bootstraps from Mithril, then syncs from the live chain and tracks ledger state
-exactly as [before](system-bootstrap-and-sync-with-conway.md).
+The process bootstraps from Mithril, then syncs from the live chain
+and tracks ledger state exactly as
+[before](system-bootstrap-and-sync-with-conway.md).  However in this
+system there are now new modules listening to the messages flowing
+past and recording them for historical queries - the benefit of the
+pub-sub architecture is we can drop these into the existing message
+flow without changing anything. We also enable some historical state
+storage in existing modules.
 
-TODO
+There is also a whole new set of `cardano.query.xxx` messages (shown in red in the
+diagram).  These are request-response messages - Caryatid provides a sugar layer to
+make it easy to register a 'handler' for these requests, which just returns a result like a
+standard function.  You can also `request()` something and just `await` an async response like
+any other async function.
 
-## TODO New modules
+## New modules
+
+We have added quite a few new modules in this system:
+
+### REST Server
+The
+[REST Server](https://github.com/input-output-hk/caryatid/tree/main/modules/rest_server),
+which is a standard Caryatid module, provides a generic REST endpoint, and turns HTTP
+requests into request-response messages on the Caryatid message bus.  So, for example
+`GET /foo/bar` turns into a `rest.get.foo.bar` request.
+
+### Blockfrost REST
+The actual BlockFrost REST endpoints are provided by the
+[Blockfrost REST](../../modules/rest_blockfrost) has handlers for a variety of `rest.get.xxx`
+requests, requests further queries from the ledger state modules (sometimes multiple, which
+it aggregates) and returns the corresponding REST response.
+
+### Chain Store
+
+The [Chain Store](../../modules/chain_store) receives blocks from the Mithril Snapshot Fetcher
+and the Peer Network Interface (depending on the phase of the synchronisation) and stores them
+on disk, using a [Fjall key-value store](https://docs.rs/fjall/latest/fjall/). It also stores
+indexes that allows it to retrieve blocks by hash, slot, number or epoch-slot combination, and
+transactions by hash.
+
+It then provides handlers to allow querying blocks and transactions through
+`cardano.query.blocks` and `cardano.query.transactions` requests.  We're just usnig the Chain
+Store to provide the BlockFrost API for now, but we'll see [later](TODO) it will be used to
+serve blocks to downstream peers, too.
+
+### SPDD State
+
+TODO...
 
 Note DRDD is a non-BF extension
 
