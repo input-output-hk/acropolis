@@ -107,6 +107,18 @@ flowchart LR
   BF BF_HAC@-- cardano.query.historical.accounts --> HAC
   BF BF_HES@-- cardano.query.historical.epochs --> HES
 
+  %% Additional flows to SPOState, hopefully to be removed
+  TXU -- cardano.withdrawals -- SPO
+  TXU -- cardano.governance -- SPO
+  MSF -- cardano.block.available --> SPO
+  PNI -- cardano.block.available --> SPO
+  ES -- cardano.epoch.activity --> SPO
+  AC -- cardano.spo.distribution --> SPO
+  SPD -- cardano.stake.deltas --> SPO
+  AC -- cardano.spo.rewards --> SPO
+  AC -- cardano.stake.reward.deltas --> SPO
+  %% ends
+
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
   click PNI "https://github.com/input-output-hk/acropolis/tree/main/modules/peer_network_interface/"
@@ -279,7 +291,16 @@ Like Historical Accounts State, although the data stored is much smaller, it use
 pattern of a hierarchical store with volatile data in memory, and immutable data on disk (Fjall)
 and in the same way subscribes to `cardano.protocol.parameters` to track 'k'.
 
-TODO: Extensions to existing modules
+### SPO State
+
+The [SPO State](../../modules/spo_state) module is extended to track a large number of existing
+topics in order to generate its own record of the stake distribution which it can then capture
+historically.
+
+** Note: this was probably an architectural mistake which will be rectified soon, so we won't
+go into too many details yet **
+
+TODO: Other existing module extensions
 
 ## Configuration
 Here is the
