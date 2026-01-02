@@ -108,8 +108,8 @@ flowchart LR
   BF BF_HES@-- cardano.query.historical.epochs --> HES
 
   %% Additional flows to SPOState, hopefully to be removed
-  TXU -- cardano.withdrawals -- SPO
-  TXU -- cardano.governance -- SPO
+  TXU -- cardano.withdrawals --> SPO
+  TXU -- cardano.governance --> SPO
   MSF -- cardano.block.available --> SPO
   PNI -- cardano.block.available --> SPO
   ES -- cardano.epoch.activity --> SPO
