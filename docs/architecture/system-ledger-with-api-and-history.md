@@ -224,9 +224,62 @@ serve blocks to downstream peers, too.
 
 ### SPDD State
 
-TODO...
+The new [SPDD State](../../modules/spdd_state) module takes the Stake
+Pool Delegation Distribution (SPDD) generated each epoch by the
+Accounts State and stores it for each epoch.  It then provides a
+`cardano.query.spdd` handler for the BlockFrost REST API to retrieve
+this, by epoch, and also a direct REST query `rest.get.spdd` which
+does the same thing.
 
-Note DRDD is a non-BF extension
+### DRDD State
+
+Similarly, the [DRDD State](../../modules/drdd_state) captures the DRep Delegation Distribution
+(DRDD) from Accounts State and stores it for each epoch.  It then provides `cardano.query.spdd`
+for the BlockFrost API, and a direct REST query `rest.get.drdd` as well.
+
+### Historical Accounts State
+
+The new [Historical Accounts State](../../modules/historical_accounts_state) module stores
+the complete history of every stake address, including payments made to and from its
+addresses, its rewards paid, and registration and deregistration.  It does this by receiving
+`cardano.stake.deltas` from the Stake Delta Filter, `cardano.certificates` and
+`cardano.withdrawals` from the Tx Unpacker, `cardano.stake.reward.deltas` from the
+Accounts State and `cardano.protocol.parameters` from Parameters State.
+
+Because this is a very large data set, the module stores updates as a hierarchical
+store in two sections:
+
+1. A 'volatile' section, in memory, which covers the last 'k' (currently 2160)
+blocks, to allow easy rewind of the history in the event of a rollback
+2. An immutable section, on disk (using Fjall again) with the long term history which
+cannot be rolled back.
+
+At the end of each epoch, it moves the volatile updates into the immutable store.  Although 'k'
+is unlikely ever to change, this is why it subscribes to `cardano.protocol.parameters`.
+
+To further tune the amount of disk space used, the Historical Accounts State has a number
+of configuration options enabling various parts of the history - see the
+[module page](../../modules/historical_accounts_state) for details.
+
+To allow the BlockFrost API to query its data, the module handles
+`cardano.query.historical.accounts` which has numerous flavours according to the data
+required.  The configuration options enable the relevant parts of this request surface as well.
+
+### Historical Epoch State
+
+The [Historical Epoch State](../../modules/historical_epoch_state) module stores the per-epoch
+data captured in an EpochActivityMessage on `cardano.epoch.activity`, which includes all the
+timing and block height information for the epoch, the total number of transactions, total outputs
+and fees, the number of blocks produced by each SPO and the VRF nonce.
+
+It also subscribes to `cardano.block.available` just to get informed of any rollbacks and to
+spot the new epoch.
+
+Like Historical Accounts State, although the data stored is much smaller, it uses the same
+pattern of a hierarchical store with volatile data in memory, and immutable data on disk (Fjall)
+and in the same way subscribes to `cardano.protocol.parameters` to track 'k'.
+
+TODO: Extensions to existing modules
 
 ## Configuration
 Here is the
