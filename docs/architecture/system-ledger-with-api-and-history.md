@@ -28,7 +28,7 @@ both whole blocks and individual transactions
 ## Module graph
 
 ```mermaid
-flowchart LR
+flowchart-elk LR
   GEN(Genesis Bootstrapper)
   MSF(Mithril Snapshot Fetcher)
   PNI(Peer Network Interface)
