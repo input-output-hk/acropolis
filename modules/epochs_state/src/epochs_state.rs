@@ -17,7 +17,7 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus
+    BlockInfo, BlockStatus,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -36,16 +36,32 @@ use crate::{
 use state::State;
 
 declare_cardano_rdr!(
-    BootstrapReader, "bootstrapped-subscribe-topic", "cardano.sequence.bootstrapped", GenesisComplete, GenesisCompleteMessage
+    BootstrapReader,
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
 );
 declare_cardano_rdr!(
-    BlockReader, "block-subscribe-topic", "cardano.block.proposed", BlockAvailable, RawBlockMessage
+    BlockReader,
+    "block-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
 );
 declare_cardano_rdr!(
-    TxsReader, "block-txs-subscribe-topic", "cardano.block.txs", BlockInfoMessage, BlockTxsMessage
+    TxsReader,
+    "block-txs-subscribe-topic",
+    "cardano.block.txs",
+    BlockInfoMessage,
+    BlockTxsMessage
 );
 declare_cardano_rdr!(
-    ParamsReader, "protocol-parameters-subscribe-topic", "cardano.protocol.parameters", ProtocolParams, ProtocolParamsMessage
+    ParamsReader,
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
 );
 
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -56,7 +72,7 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
 const DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-nonce-publish-topic", "cardano.epoch.nonce");
 const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
-    ("validation-publish-topic", "cardano.validation.epoch");
+    ("validation-publish-topic", "cardano.validation.epochs");
 
 /// Epochs State module
 #[module(
@@ -160,10 +176,9 @@ impl EpochsState {
                     let is_new_epoch = blk_info.new_epoch && blk_info.epoch > 0;
 
                     if is_new_epoch {
-                        if let Some((_,params)) = ctx.consume(
-                            "protocol params",
-                            params_reader.read().await
-                        ) {
+                        if let Some((_, params)) =
+                            ctx.consume("protocol params", params_reader.read().await)
+                        {
                             state.handle_protocol_parameters(&params);
                         }
 
@@ -171,7 +186,7 @@ impl EpochsState {
                         // publish epoch activity message
                         ctx.handle(
                             "publish epoch activity",
-                            epoch_activity_publisher.publish(&blk_info, ea).await
+                            epoch_activity_publisher.publish(&blk_info, ea).await,
                         );
                     }
 
@@ -179,8 +194,8 @@ impl EpochsState {
                         "epochs_state.decode_header",
                         match MultiEraHeader::decode(blk_info.era as u8, None, &blk_msg.header) {
                             Err(e) => Err(anyhow!("Can't decode header {}: {e}", blk_info.slot)),
-                            Ok(res) => Ok(Some(res))
-                        }
+                            Ok(res) => Ok(Some(res)),
+                        },
                     );
 
                     let span = info_span!("epochs_state.evolve_nonces", block = blk_info.number);
@@ -188,7 +203,7 @@ impl EpochsState {
                         if let Some(header) = header.as_ref() {
                             ctx.handle(
                                 "evolve_nonces",
-                                state.evolve_nonces(&genesis.values, &blk_info, header)
+                                state.evolve_nonces(&genesis.values, &blk_info, header),
                             )
                         }
                     });
@@ -199,7 +214,7 @@ impl EpochsState {
                         let active_nonce = state.get_active_nonce();
                         ctx.handle(
                             "publish epoch nonce",
-                            epoch_nonce_publisher.publish(&blk_info, active_nonce).await
+                            epoch_nonce_publisher.publish(&blk_info, active_nonce).await,
                         );
                     }
 
@@ -209,17 +224,17 @@ impl EpochsState {
                             state.handle_mint(&blk_info, header.issuer_vkey());
                         }
                     });
-                },
+                }
                 RollbackWrapper::Rollback(raw_message) => {
                     ctx.handle(
                         "publishing rollback message",
-                        epoch_activity_publisher.publish_rollback(raw_message).await
+                        epoch_activity_publisher.publish_rollback(raw_message).await,
                     );
                 }
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            if let Some((blk_info,msg)) = ctx.consume("block_txs", txs_reader.read().await) {
+            if let Some((blk_info, msg)) = ctx.consume("block_txs", txs_reader.read().await) {
                 let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                 span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
             }
