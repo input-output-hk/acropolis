@@ -741,24 +741,6 @@ impl State {
                 &mut deregistrations,
             );
 
-            // Per Shelley spec (Figure 48): isRRegistered = rewardAcnt ∈ dom (rewards pp dstate)
-            // We need to check if reward accounts are registered NOW (at calculation time),
-            // not based on historical snapshot data. Extract the currently registered addresses.
-            let registered_stake_addresses: HashSet<StakeAddress> = {
-                let stake_addresses = self.stake_addresses.lock().unwrap();
-                let registered: HashSet<StakeAddress> = stake_addresses
-                    .iter()
-                    .filter(|(_, sas)| sas.registered)
-                    .map(|(addr, _)| addr.clone())
-                    .collect();
-                info!(
-                    "Extracted {} registered stake addresses for rewards calculation (total in map: {})",
-                    registered.len(),
-                    stake_addresses.len()
-                );
-                registered
-            };
-
             let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
             let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
             self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
@@ -787,7 +769,6 @@ impl State {
                     monetary_change.stake_rewards,
                     &registrations,
                     &deregistrations,
-                    &registered_stake_addresses,
                 )
             }))));
 
@@ -1108,19 +1089,6 @@ impl State {
                 // - Rewards for unregistered accounts are filtered out via `addrsrew ✁ potentialRewards`
                 // - The leftover goes back to reserves via Δr2 = R - sum(rs)
                 //
-                // Only rewards that WERE calculated (for registered accounts) but then the account
-                // got deregistered BEFORE application go to treasury (handled at line 1065 above).
-                //
-                // Since unpaid leader rewards are never in total_paid, they stay in reserves
-                // automatically. We just log them for visibility.
-                if rewards_result.total_unpaid_leader_rewards > 0 {
-                    info!(
-                        "Leader rewards not calculated (SPO reward accounts not registered): {} lovelace ({} ADA) - stays in reserves per spec",
-                        rewards_result.total_unpaid_leader_rewards,
-                        rewards_result.total_unpaid_leader_rewards / 1_000_000
-                    );
-                }
-
                 // Summary logging for rewards application
                 info!(
                     "Rewards application summary: total_paid={} ({} ADA), to_registered={} ({} ADA), to_treasury_unreg={} ({} ADA, {} accounts)",
