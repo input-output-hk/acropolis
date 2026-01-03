@@ -1199,9 +1199,7 @@ impl StreamingSnapshotParser {
             .filter(|(_, retiring_epoch)| **retiring_epoch == epoch)
             .map(|(pool_id, _)| *pool_id)
             .collect();
-        // Pending pool IDs - these pools have pending updates and their deposits are already
-        // counted in the deposits pot. When they become active at the next epoch boundary,
-        // they should NOT be counted as "new" pools for deposit purposes.
+
         let pending_pool_ids: Vec<PoolId> = pools.updates.keys().cloned().collect();
 
         info!(

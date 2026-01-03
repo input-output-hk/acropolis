@@ -112,36 +112,6 @@ async function validateEpoch(db: Client, epoch: number) {
         if (missing.length) console.log(`   Missing pools: ${missing.join(", ")}`);
         if (extra.length) console.log(`   Extra pools (in SPDD only): ${extra.join(", ")}`);
         if (mismatched.length) {
-            // Calculate total difference from all mismatched pools
-            let totalMismatchedDiff = 0n;
-            let dbOverSpdd = 0n;
-            let spddOverDb = 0n;
-            for (const m of mismatched) {
-                if (m.db > m.spdd) {
-                    dbOverSpdd += m.db - m.spdd;
-                } else {
-                    spddOverDb += m.spdd - m.db;
-                }
-                totalMismatchedDiff += m.db > m.spdd ? m.db - m.spdd : m.spdd - m.db;
-            }
-            console.log(`   Total diff from ${mismatched.length} mismatched pools: ${totalMismatchedDiff} lovelace (${Number(totalMismatchedDiff) / 1_000_000} ADA)`);
-            console.log(`   DB > SPDD by: ${dbOverSpdd} lovelace (${Number(dbOverSpdd) / 1_000_000} ADA)`);
-            console.log(`   SPDD > DB by: ${spddOverDb} lovelace (${Number(spddOverDb) / 1_000_000} ADA)`);
-
-            // Sort by difference descending to find largest
-            const sorted = [...mismatched].sort((a, b) => {
-                const aDiff = a.db > a.spdd ? a.db - a.spdd : a.spdd - a.db;
-                const bDiff = b.db > b.spdd ? b.db - b.spdd : b.spdd - b.db;
-                return Number(bDiff - aDiff);
-            });
-
-            console.log(`   Top 5 pools with LARGEST differences:`);
-            for (const m of sorted.slice(0, 5)) {
-                const diff = m.db > m.spdd ? m.db - m.spdd : m.spdd - m.db;
-                const direction = m.db > m.spdd ? "DB > SPDD" : "SPDD > DB";
-                console.log(`   - ${m.id} (db: ${m.db}, spdd: ${m.spdd}, diff: ${diff} = ${Number(diff) / 1_000_000} ADA, ${direction})`);
-            }
-
             const smallest = mismatched.reduce((best, curr) => {
                 const bestDiff = best.db >= best.spdd ? best.db - best.spdd : best.spdd - best.db;
                 const currDiff = curr.db >= curr.spdd ? curr.db - curr.spdd : curr.spdd - curr.db;

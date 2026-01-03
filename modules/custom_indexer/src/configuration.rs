@@ -25,6 +25,7 @@ pub struct GlobalConfig {
 
 #[derive(serde::Deserialize)]
 pub struct StartupConfig {
+    #[serde(rename = "sync-mode")]
     pub sync_mode: SyncMode,
 }
 

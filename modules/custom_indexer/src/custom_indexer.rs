@@ -10,129 +10,180 @@ pub mod cursor_store;
 mod index_actor;
 mod utils;
 
-use futures::stream::FuturesUnordered;
-use futures::StreamExt;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{mpsc, Mutex};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use anyhow::{bail, Result};
-use config::Config;
-use tracing::{error, warn};
-
-use caryatid_sdk::{async_trait, Context, Module};
 
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateTransitionMessage},
+    params::SECURITY_PARAMETER_K,
     Point,
 };
+use caryatid_sdk::{async_trait, Context, Module, Subscription};
+use config::Config;
+use futures::future::join_all;
+use tokio::sync::Mutex;
+use tracing::{error, info, warn};
 
 use crate::{
-    chain_index::ChainIndex,
-    configuration::CustomIndexerConfig,
-    cursor_store::{CursorEntry, CursorStore},
-    index_actor::{index_actor, IndexCommand, IndexResult},
-    utils::{change_sync_point, send_rollback_to_indexers, send_txs_to_indexers},
+    chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::CursorStore,
+    index_actor::IndexActor,
 };
 
-type IndexSenders = HashMap<String, mpsc::Sender<IndexCommand>>;
-type SharedSenders = Arc<Mutex<IndexSenders>>;
-type IndexResponse = (
-    String,
-    Result<IndexResult, tokio::sync::oneshot::error::RecvError>,
-);
-
-struct IndexWrapper {
+struct IndexConfig {
     index: Box<dyn ChainIndex>,
-    tip: Point,
     default_start: Point,
-    halted: bool,
+    force_restart: bool,
 }
 
 pub struct CustomIndexer<CS: CursorStore> {
-    senders: SharedSenders,
+    indexes: Arc<Mutex<HashMap<String, IndexConfig>>>,
     cursor_store: Arc<CS>,
+}
+
+impl<CS: CursorStore> Clone for CustomIndexer<CS> {
+    fn clone(&self) -> Self {
+        Self {
+            indexes: self.indexes.clone(),
+            cursor_store: self.cursor_store.clone(),
+        }
+    }
 }
 
 impl<CS: CursorStore> CustomIndexer<CS> {
     pub fn new(cursor_store: CS) -> Self {
         Self {
-            senders: Arc::new(Mutex::new(HashMap::new())),
+            indexes: Arc::new(Mutex::new(HashMap::new())),
             cursor_store: Arc::new(cursor_store),
         }
     }
 
     pub async fn add_index<I: ChainIndex + 'static>(
         &self,
-        mut index: I,
+        index: I,
         default_start: Point,
         force_restart: bool,
     ) -> Result<()> {
         let name = index.name();
-
-        let mut indexes = self.senders.lock().await;
-        if indexes.contains_key(&name) {
-            warn!("CustomIndexer: index '{name}' already exists, skipping add_index");
-            return Ok(());
-        }
-
-        let mut cursors = self.cursor_store.load().await?;
-
-        let mut entry = cursors.get(&name).cloned().unwrap_or(CursorEntry {
-            tip: default_start.clone(),
-            halted: false,
-        });
-
-        if force_restart || entry.halted {
-            index.reset(&default_start).await?;
-            entry.tip = default_start.clone();
-            entry.halted = true;
-        }
-
-        cursors.insert(name.clone(), entry.clone());
-        self.cursor_store.save(&cursors).await?;
-
-        let wrapper = IndexWrapper {
+        let wrapper = IndexConfig {
             index: Box::new(index),
-            tip: entry.tip.clone(),
             default_start,
-            halted: false,
+            force_restart,
         };
-
-        let (tx, rx) = mpsc::channel(32);
-        tokio::spawn(index_actor(wrapper, rx));
-        indexes.insert(name.clone(), tx);
+        let mut indexes = self.indexes.lock().await;
+        if indexes.insert(name.clone(), wrapper).is_some() {
+            bail!("index \"{name}\" was added twice");
+        }
 
         Ok(())
     }
 
-    async fn compute_start_point(&self) -> Result<Point> {
-        let saved_tips = self.cursor_store.load().await?;
-        let index_names: Vec<String> = {
-            let senders = self.senders.lock().await;
-            senders.keys().cloned().collect()
+    async fn run(
+        &self,
+        context: Arc<Context<Message>>,
+        cfg: CustomIndexerConfig,
+        mut txs_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        let indexes: HashMap<String, IndexConfig> = {
+            let mut lock = self.indexes.lock().await;
+            std::mem::take(&mut lock)
         };
 
-        let mut min_point = None;
-        for index in index_names {
-            let index_entry = saved_tips
-                .get(&index)
-                .unwrap_or(&CursorEntry {
-                    tip: Point::Origin,
-                    halted: false,
-                })
-                .clone();
-            min_point = match min_point {
-                None => Some(index_entry.tip),
-                Some(current) => {
-                    if index_entry.tip.slot() < current.slot() {
-                        Some(index_entry.tip)
-                    } else {
-                        Some(current)
-                    }
-                }
+        let mut cursors = self.cursor_store.load().await?;
+
+        let mut sync_points: VecDeque<Point> = VecDeque::new();
+
+        let mut actors = vec![];
+
+        for (name, mut index) in indexes {
+            let cursor = cursors.entry(name.clone()).or_default();
+            if index.force_restart {
+                index.index.reset(&index.default_start).await?;
+                cursor.points.clear();
+                cursor.next_tx = None;
+            }
+            if cursor.points.is_empty() {
+                cursor.points.push_back(index.default_start);
+            }
+            let my_sync_points = if cursor.next_tx.is_some() {
+                // This index failed to apply a TX from its tip.
+                // We want to pass the point BEFORE that tip to chainsync,
+                // so that the first point we get back IS that tip.
+                let mut points = cursor.points.clone();
+                points.pop_back();
+                points
+            } else {
+                cursor.points.clone()
             };
+            let Some(tip) = my_sync_points.back() else {
+                bail!("cursor {name} has no history");
+            };
+            if sync_points.back().is_none_or(|p| p.slot() > tip.slot()) {
+                sync_points = my_sync_points;
+            }
+            actors.push(IndexActor::new(
+                name,
+                index.index,
+                cursor,
+                SECURITY_PARAMETER_K,
+            ));
         }
-        Ok(min_point.unwrap_or(Point::Origin))
+
+        if sync_points.is_empty() {
+            warn!("no indexes configured, nothing to do");
+            return Ok(());
+        }
+
+        if !cfg.sync_mode().is_mithril() {
+            // TODO: pass multiple points
+            utils::change_sync_point(
+                sync_points.back().unwrap().clone(),
+                context,
+                &cfg.sync_command_publisher_topic,
+            )
+            .await?;
+        } else {
+            utils::start_mithril(
+                sync_points.back().unwrap().clone(),
+                context,
+                &cfg.sync_command_publisher_topic,
+            )
+            .await?;
+        }
+
+        loop {
+            let (_, message) = txs_subscription.read().await?;
+            match message.as_ref() {
+                Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
+                    let block = Arc::new(block.clone());
+                    let txs: Vec<Arc<[u8]>> =
+                        txs_msg.txs.iter().map(|tx| Arc::<[u8]>::from(tx.as_slice())).collect();
+                    join_all(actors.iter_mut().map(|a| a.apply_txs(block.clone(), &txs))).await;
+                    // update cursors
+                    for actor in actors.iter_mut() {
+                        let cursor = cursors.get_mut(&actor.name).unwrap();
+                        actor.update_cursor(cursor);
+                    }
+                    self.cursor_store.save(&cursors).await?;
+                }
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
+                )) => {
+                    join_all(actors.iter_mut().map(|a| a.rollback(point.clone()))).await;
+                    // update cursors
+                    for actor in actors.iter_mut() {
+                        let cursor = cursors.get_mut(&actor.name).unwrap();
+                        actor.update_cursor(cursor);
+                    }
+                    self.cursor_store.save(&cursors).await?;
+                }
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+        }
     }
 }
 
@@ -151,163 +202,39 @@ where
 
     async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = CustomIndexerConfig::try_load(&config)?;
-        let mut txs_subscription = context.subscribe(&cfg.txs_subscribe_topic).await?;
+        let txs_subscription = context.subscribe(&cfg.txs_subscribe_topic).await?;
         let mut genesis_complete_subscription =
             context.subscribe(&cfg.genesis_complete_topic).await?;
 
         let run_context = context.clone();
 
-        let senders = Arc::clone(&self.senders);
-        let cursor_store = Arc::clone(&self.cursor_store);
-
-        // Get the lowest tip from added indexes to determine where chain sync should begin
-        let start_point = self.compute_start_point().await?;
-
+        let this = self.clone();
         context.run(async move {
-            // Wait for genesis bootstrapping then publish initial sync point if not using mithril
-            let (_, message) = genesis_complete_subscription.read().await?;
-            match message.as_ref() {
-                Message::Cardano((_, CardanoMessage::GenesisComplete(_))) => { }
-                msg => bail!("Unexpected message in genesis completion topic: {msg:?}"),
-            }
-
-            if !cfg.sync_mode().is_mithril() {
-                change_sync_point(start_point, run_context.clone(), &cfg.sync_command_publisher_topic).await?;
-            }
-
-            // Forward received txs and rollback notifications to index handlers
-            loop {
-                match txs_subscription.read().await {
-                    Ok((_, message)) => {
-                        match message.as_ref() {
-                            Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) => {
-                                let txs: Vec<Arc<[u8]>> = txs_msg
-                                    .txs
-                                    .iter()
-                                    .map(|tx| Arc::<[u8]>::from(tx.as_slice()))
-                                    .collect();
-
-                                // Send txs to all index tasks
-                                let responses = send_txs_to_indexers(&senders, block, &txs).await;
-
-                                // Get responses with new tips and any halts that occured
-                                let new_entries = process_tx_responses(responses, block.slot).await;
-
-                                // Save the new entries to the cursor store
-                                cursor_store.save(&new_entries).await?;
-
-                            }
-
-                            Message::Cardano((
-                                _,
-                                CardanoMessage::StateTransition(StateTransitionMessage::Rollback(
-                                    point,
-                                )),
-                            )) => {
-                                // Inform indexes of a rollback
-                                let responses = send_rollback_to_indexers(&senders, point).await;
-
-                                // Get responses with new tips and any indexes which failed to rollback and could not be reset
-                                let (new_tips, to_remove) = process_rollback_responses(
-                                    responses,
-                                    run_context.clone(),
-                                    &cfg.sync_command_publisher_topic,
-                                ).await?;
-
-                                // Save the new entries to the cursor store
-                                cursor_store.save(&new_tips).await?;
-
-                                // Remove any indexes which were unable to rollback or reset successfully
-                                if !to_remove.is_empty() {
-                                    let mut guard = senders.lock().await;
-
-                                    for name in &to_remove {
-                                        if guard.remove(name).is_some() {
-                                            warn!("Removed sender for '{name}' due to fatal reset error");
-                                        } else {
-                                            warn!("Tried to remove sender for '{name}' but it wasn't present");
-                                        }
-                                    }
-                                }
-                            }
-                            _ => error!("Unexpected message type: {message:?}"),
-                        }
-                    }
-                    Err(e) => {
-                        error!("Subscription closed: {e:#}");
-                        break;
+            match genesis_complete_subscription.read().await {
+                Ok((_, message)) => {
+                    if !matches!(
+                        message.as_ref(),
+                        Message::Cardano((_, CardanoMessage::GenesisComplete(_)))
+                    ) {
+                        error!("unexpected message from genesis complete topic: {message:?}");
+                        return;
                     }
                 }
+                Err(err) => {
+                    error!("could not read genesis complete message: {err:#}");
+                    return;
+                }
             }
-
-            Ok::<_, anyhow::Error>(())
+            match this.run(run_context, cfg, txs_subscription).await {
+                Ok(()) => {
+                    info!("custom-indexer has finished");
+                }
+                Err(e) => {
+                    error!("custom-indexer has failed: {e:#}");
+                }
+            }
         });
 
         Ok(())
     }
-}
-
-async fn process_tx_responses<F: futures::Future<Output = IndexResponse> + Send>(
-    mut results: FuturesUnordered<F>,
-    block_slot: u64,
-) -> HashMap<String, CursorEntry> {
-    let mut new_tips = HashMap::new();
-
-    while let Some((name, result)) = results.next().await {
-        match result {
-            Ok(IndexResult::Success { entry }) => {
-                new_tips.insert(name, entry);
-            }
-            Ok(IndexResult::HandleError { entry, reason }) => {
-                error!(
-                    "Failed to handle tx at slot {} for index '{}': {}",
-                    block_slot, name, reason
-                );
-                new_tips.insert(name, entry);
-            }
-            Ok(IndexResult::Halted) => {
-                warn!("Index '{}' is halted", name);
-            }
-            Err(_) => {
-                error!("Actor for index '{}' dropped unexpectedly", name);
-            }
-            _ => error!("Unexpected index result type: {result:?}"),
-        }
-    }
-
-    new_tips
-}
-
-async fn process_rollback_responses<F: futures::Future<Output = IndexResponse> + Send>(
-    mut results: FuturesUnordered<F>,
-    run_context: Arc<Context<Message>>,
-    sync_topic: &str,
-) -> Result<(HashMap<String, CursorEntry>, Vec<String>)> {
-    let mut new_tips = HashMap::new();
-    let mut to_remove = Vec::new();
-
-    while let Some((name, result)) = results.next().await {
-        match result {
-            Ok(IndexResult::Success { entry }) => {
-                new_tips.insert(name, entry);
-            }
-            Ok(IndexResult::Reset { entry }) => {
-                // Update tip and publish sync command to start fetching blocks from this point
-                new_tips.insert(name.clone(), entry.clone());
-                change_sync_point(entry.tip, run_context.clone(), &sync_topic.to_string()).await?;
-            }
-            Ok(IndexResult::FatalResetError { entry, reason }) => {
-                // Update tip and add index for removal from senders list
-                new_tips.insert(name.clone(), entry);
-                to_remove.push(name.clone());
-                error!("{name} failed to reset, halting and retrying next run: {reason}");
-            }
-            Err(_) => {
-                error!("Actor for {name} index dropped");
-            }
-            _ => error!("Unexpected index result type: {result:?}"),
-        }
-    }
-
-    Ok((new_tips, to_remove))
 }
