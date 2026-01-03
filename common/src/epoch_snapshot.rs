@@ -6,6 +6,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use tracing::info;
 
 /// SPO data captured in a stake snapshot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -103,10 +104,29 @@ impl EpochSnapshot {
                 match two_previous_snapshot.spos.get(spo_id) {
                     Some(old_spo) => {
                         // SPO existed two epochs ago - check if their old reward account is registered
-                        stake_addresses
-                            .get(&old_spo.reward_account)
-                            .map(|sas| sas.registered)
-                            .unwrap_or(false)
+                        let lookup_result = stake_addresses.get(&old_spo.reward_account);
+                        let is_registered =
+                            lookup_result.as_ref().map(|sas| sas.registered).unwrap_or(false);
+
+                        // Debug logging for failed checks
+                        if !is_registered {
+                            match lookup_result {
+                                Some(sas) => {
+                                    info!(
+                                        "SPO {} reward account {} from epoch {} NOT registered: found in stake_addresses but registered=false, rewards={}, utxo={}",
+                                        spo_id, old_spo.reward_account, two_previous_snapshot.epoch,
+                                        sas.rewards, sas.utxo_value
+                                    );
+                                }
+                                None => {
+                                    info!(
+                                        "SPO {} reward account {} from epoch {} NOT registered: not found in stake_addresses at all",
+                                        spo_id, old_spo.reward_account, two_previous_snapshot.epoch
+                                    );
+                                }
+                            }
+                        }
+                        is_registered
                     }
                     None => {
                         // SPO wasn't in snapshot from 2 epochs ago (newly registered or data issue).
@@ -170,6 +190,20 @@ impl EpochSnapshot {
 
         // Calculate the total rewards just for logging and comparison
         let total_rewards: u64 = stake_addresses.values().map(|sas| sas.rewards).sum();
+
+        // Log summary of two_previous registration check
+        let registered_count = snapshot
+            .spos
+            .values()
+            .filter(|s| s.two_previous_reward_account_is_registered)
+            .count();
+        let not_registered_count = snapshot.spos.len() - registered_count;
+        if not_registered_count > 0 {
+            info!(
+                "Live epoch {} snapshot: {} SPOs with two_previous NOT registered (out of {})",
+                epoch, not_registered_count, snapshot.spos.len()
+            );
+        }
 
         // Log to be comparable with the DBSync ada_pots table
         info!(
@@ -279,7 +313,15 @@ impl EpochSnapshot {
                         match prev_snapshot.spos.get(&pool_id) {
                             Some(old_spo) => {
                                 // SPO existed two epochs ago - check their old reward account
-                                registered.contains(&old_spo.reward_account.credential)
+                                let is_registered =
+                                    registered.contains(&old_spo.reward_account.credential);
+                                if !is_registered {
+                                    info!(
+                                        "Bootstrap: SPO {} reward account {} (cred {:?}) from epoch {} NOT in registered_credentials set",
+                                        pool_id, old_spo.reward_account, old_spo.reward_account.credential, prev_snapshot.epoch
+                                    );
+                                }
+                                is_registered
                             }
                             None => {
                                 // SPO wasn't in snapshot from 2 epochs ago (newly registered).
@@ -310,6 +352,20 @@ impl EpochSnapshot {
                 },
             );
         }
+
+        // Log summary of registration check results
+        let registered_count = spos
+            .values()
+            .filter(|s| s.two_previous_reward_account_is_registered)
+            .count();
+        let not_registered_count = spos.len() - registered_count;
+        info!(
+            "Bootstrap epoch {} snapshot: {} SPOs, {} with two_previous registered, {} without",
+            epoch,
+            spos.len(),
+            registered_count,
+            not_registered_count
+        );
 
         EpochSnapshot {
             epoch,
@@ -353,19 +409,16 @@ impl EpochSnapshot {
 /// - Go = two epochs ago snapshot (epoch - 2) - used for rewards calculation
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
-    /// Mark snapshot (current epoch) - newest
+    /// Mark snapshot (current epoch) - newest, has current epoch blocks
     pub mark: EpochSnapshot,
 
-    /// Set snapshot (epoch - 1)
+    /// Set snapshot (epoch - 1) - has previous epoch blocks, used for staking in rewards calculation
     pub set: EpochSnapshot,
-
-    /// Go snapshot (epoch - 2) - oldest, used for staking in rewards calculation
-    pub go: EpochSnapshot,
 }
 
 impl Display for SnapshotsContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Mark: {}, Set: {}, Go: {}", self.mark, self.set, self.go)
+        writeln!(f, "Mark: {}, Set: {}", self.mark, self.set)
     }
 }
 

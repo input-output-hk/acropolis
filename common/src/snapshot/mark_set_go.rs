@@ -166,39 +166,21 @@ pub struct RawSnapshotsContainer {
     pub mark: RawSnapshot,
     /// Set snapshot (raw CBOR data)
     pub set: RawSnapshot,
-    /// Go snapshot (raw CBOR data)
-    pub go: RawSnapshot,
+    /// Fee snapshot (feeSS) - fees at epoch boundary, used for reward calculation
+    /// Per Shelley spec: rewardPot = feeSS + deltaR1
+    pub fee_ss: u64,
 }
 
 impl RawSnapshotsContainer {
     /// Convert raw snapshots to processed SnapshotsContainer
     ///
-    /// The CBOR file stores snapshots in order: [Mark, Set, Go, Fee]
+    /// The CBOR file stores snapshots in order: [Mark, Set, Fee]
     ///
-    /// IMPORTANT: The snapshots in the CBOR are taken at epoch BOUNDARIES, not at the
-    /// current epoch. For a Mithril snapshot captured during epoch N:
-    /// - Mark contains stake distribution from end of epoch N-1 (snapshot taken at N-1→N boundary)
-    /// - Set contains stake distribution from end of epoch N-2 (snapshot taken at N-2→N-1 boundary)
-    /// - Go contains stake distribution from end of epoch N-3 (snapshot taken at N-3→N-2 boundary)
+    /// For a Mithril snapshot captured during epoch N:
+    /// - Mark = current epoch (N), receives blocks_current_epoch, no pots
+    /// - Set = previous epoch (N-1), receives blocks_previous_epoch, pots
     ///
-    /// In Cardano terminology for rewards calculation:
-    /// - Mark = newest snapshot (epoch N-1) - used as "performance" snapshot (blocks_produced)
-    /// - Set = middle snapshot (epoch N-2)
-    /// - Go = oldest snapshot (epoch N-3) - used as "staking" snapshot for rewards
-    ///
-    /// Block count assignments:
-    /// - Mark (epoch N-1): Uses blocks_previous_epoch (blocks produced in epoch N-1)
-    /// - Set (epoch N-2): Uses blocks_current_epoch (actually from epoch before that)
-    /// - Go (epoch N-3): No block data available during bootstrap
-    ///
-    /// Pots assignment:
-    /// - Mark: receives the pots from the bootstrap file (most recent)
-    /// - Set and Go: receive zeroed pots (we don't have historical pots)
-    ///
-    /// Note on `two_previous_reward_account_is_registered`:
-    /// For bootstrap snapshots, we don't have historical registration data to properly
-    /// determine this flag. Therefore, we default to `true` for all SPOs - the conservative
-    /// approach that pays rewards when we can't verify registration status.
+    /// The Set snapshot is used for staking in rewards calculation.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
@@ -207,34 +189,20 @@ impl RawSnapshotsContainer {
         pots: Pots,
         network: NetworkId,
     ) -> SnapshotsContainer {
-        let empty_blocks = HashMap::new();
-
-        // Epoch assignments - snapshots are from epoch boundaries BEFORE the current epoch:
-        // - Mark = epoch - 1 (newest, has blocks from previous epoch)
-        // - Set = epoch - 2
-        // - Go = epoch - 3 (oldest, used for staking in rewards calculation)
-        let mark = self.mark.into_snapshot(
-            epoch.saturating_sub(1),
-            blocks_previous_epoch,
-            pots,
-            network.clone(),
-        );
-
-        let set = self.set.into_snapshot(
-            epoch.saturating_sub(2),
-            blocks_current_epoch,
-            Pots::default(),
-            network.clone(),
-        );
-
-        let go = self.go.into_snapshot(
-            epoch.saturating_sub(3),
-            &empty_blocks,
-            Pots::default(),
-            network,
-        );
-
-        SnapshotsContainer { mark, set, go }
+        SnapshotsContainer {
+            mark: self.mark.into_snapshot(
+                epoch,
+                blocks_current_epoch,
+                Pots::default(),
+                network.clone(),
+            ),
+            set: self.set.into_snapshot(
+                epoch.saturating_sub(1),
+                blocks_previous_epoch,
+                pots,
+                network,
+            ),
+        }
     }
 
     /// Convert raw snapshots to processed SnapshotsContainer with registration checking.
@@ -242,11 +210,9 @@ impl RawSnapshotsContainer {
     /// This version takes a set of registered credentials from DState to properly
     /// determine `two_previous_reward_account_is_registered` for each SPO.
     ///
-    /// The snapshots are created in order from oldest to newest so that each can
-    /// reference the previous one for registration checking:
-    /// 1. Go (epoch-3) - oldest, no previous snapshot available
-    /// 2. Set (epoch-2) - uses Go as two_previous
-    /// 3. Mark (epoch-1) - uses Set as two_previous
+    /// For a Mithril snapshot captured during epoch N:
+    /// - Mark = current epoch (N), receives blocks_current_epoch, no pots
+    /// - Set = previous epoch (N-1), receives blocks_previous_epoch, pots
     #[allow(clippy::too_many_arguments)]
     pub fn into_snapshots_container_with_registration_check(
         self,
@@ -257,42 +223,27 @@ impl RawSnapshotsContainer {
         network: NetworkId,
         registered_credentials: Option<&std::collections::HashSet<StakeCredential>>,
     ) -> SnapshotsContainer {
-        let empty_blocks = HashMap::new();
-
-        // Create snapshots from oldest to newest so each can reference the previous
-        // for two_previous_reward_account_is_registered checking.
-
-        // Go (epoch-3) - oldest, no previous snapshot to reference
-        let go = self.go.into_snapshot_with_registration_check(
-            epoch.saturating_sub(3),
-            &empty_blocks,
-            Pots::default(),
-            network.clone(),
-            None, // No previous snapshot for Go
-            registered_credentials,
-        );
-
-        // Set (epoch-2) - uses Go as reference for two_previous check
+        // Set (epoch-1) - used for staking in rewards calculation
         let set = self.set.into_snapshot_with_registration_check(
-            epoch.saturating_sub(2),
-            blocks_current_epoch,
-            Pots::default(),
-            network.clone(),
-            Some(&go),
-            registered_credentials,
-        );
-
-        // Mark (epoch-1) - uses Set as reference for two_previous check
-        let mark = self.mark.into_snapshot_with_registration_check(
             epoch.saturating_sub(1),
             blocks_previous_epoch,
             pots,
-            network,
-            Some(&set),
+            network.clone(),
+            None, // No previous snapshot available for bootstrap
             registered_credentials,
         );
 
-        SnapshotsContainer { mark, set, go }
+        // Mark (epoch) - current epoch
+        let mark = self.mark.into_snapshot_with_registration_check(
+            epoch,
+            blocks_current_epoch,
+            Pots::default(),
+            network,
+            None, // No previous snapshot available for bootstrap
+            registered_credentials,
+        );
+
+        SnapshotsContainer { mark, set }
     }
 }
 

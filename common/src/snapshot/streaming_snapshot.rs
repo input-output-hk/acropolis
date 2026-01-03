@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
@@ -1160,25 +1160,26 @@ impl StreamingSnapshotParser {
             dstate_registered_credentials.len()
         );
 
+        // Extract fee_ss from snapshots for reward calculation
+        let fee_ss = match &snapshots_result {
+            Ok(raw_snapshots) => raw_snapshots.fee_ss,
+            Err(_) => 0,
+        };
+
         let bootstrap_snapshots = match snapshots_result {
             Ok(raw_snapshots) => {
-                info!("Successfully parsed mark/set/go snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer with registration checking.
-                // We pass the registered credentials from DState to properly determine
-                // two_previous_reward_account_is_registered for each SPO.
-                let processed = raw_snapshots.into_snapshots_container_with_registration_check(
+                info!("Successfully parsed mark/set snapshots with fee_ss: {} ADA", fee_ss / 1_000_000);
+                let processed = raw_snapshots.into_snapshots_container(
                     epoch,
                     &blocks_prev_map,
                     &blocks_curr_map,
                     pots.clone(),
                     network.clone(),
-                    Some(&dstate_registered_credentials),
                 );
                 info!(
-                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs",
                     processed.mark.spos.len(),
                     processed.set.spos.len(),
-                    processed.go.spos.len()
                 );
                 callbacks.on_snapshots(processed.clone())?;
                 processed
@@ -1192,7 +1193,12 @@ impl StreamingSnapshotParser {
 
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
-        let retiring_pools: Vec<PoolId> = pools.retiring.keys().cloned().collect();
+        let retiring_pools: Vec<PoolId> = pools
+            .retiring
+            .iter()
+            .filter(|(_, retiring_epoch)| **retiring_epoch == epoch)
+            .map(|(pool_id, _)| *pool_id)
+            .collect();
         // Pending pool IDs - these pools have pending updates and their deposits are already
         // counted in the deposits pot. When they become active at the next epoch boundary,
         // they should NOT be counted as "new" pools for deposit purposes.
@@ -1269,28 +1275,45 @@ impl StreamingSnapshotParser {
         let registered_credentials: std::collections::HashSet<_> =
             accounts_with_utxo_values.iter().map(|a| a.stake_address.credential.clone()).collect();
 
+        let mut unregistered_pulsing_rewards_total: u64 = 0;
         let unregistered_accounts: Vec<_> = stake_utxo_values
             .iter()
             .filter(|(credential, _)| !registered_credentials.contains(credential))
-            .map(|(credential, &utxo_value)| AccountState {
-                stake_address: StakeAddress::new(credential.clone(), network.clone()),
-                address_state: StakeAddressState {
-                    registered: false,
-                    utxo_value,
-                    rewards: 0,
-                    delegated_spo: None,
-                    delegated_drep: None,
-                },
+            .map(|(credential, &utxo_value)| {
+                // Check if this unregistered account has pulsing rewards
+                // Skip pulsing rewards if they have enacted treasury withdrawals (same as registered accounts)
+                let rewards = if enacted_withdrawals.contains_key(credential) {
+                    0
+                } else {
+                    pulsing_result.rewards.get(credential).copied().unwrap_or(0)
+                };
+                if rewards > 0 {
+                    unregistered_pulsing_rewards_total += rewards;
+                }
+                AccountState {
+                    stake_address: StakeAddress::new(credential.clone(), network.clone()),
+                    address_state: StakeAddressState {
+                        registered: false,
+                        utxo_value,
+                        rewards,
+                        delegated_spo: None,
+                        delegated_drep: None,
+                    },
+                }
             })
             .collect();
 
         if !unregistered_accounts.is_empty() {
             info!(
-                "Added {} unregistered stake addresses with UTXOs to bootstrap",
-                unregistered_accounts.len()
+                "Added {} unregistered stake addresses with UTXOs to bootstrap ({} ADA in pulsing rewards)",
+                unregistered_accounts.len(),
+                unregistered_pulsing_rewards_total / 1_000_000
             );
         }
         accounts_with_utxo_values.extend(unregistered_accounts);
+
+        // Add unregistered pulsing rewards to total
+        pulsing_rewards_total += unregistered_pulsing_rewards_total;
 
         // Calculate summary statistics
         let total_utxo_value: u64 = stake_utxo_values.values().sum();
@@ -1427,7 +1450,7 @@ impl StreamingSnapshotParser {
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
         let epoch_bootstrap =
-            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
+            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch, fee_ss);
         callbacks.on_epoch(epoch_bootstrap)?;
 
         let snapshot_metadata = SnapshotMetadata {
@@ -1663,7 +1686,8 @@ impl StreamingSnapshotParser {
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
         // Parse the block count (value) - how many blocks this pool produced
-        let block_count = decoder.u8().context("Failed to parse block count")?;
+        // Using u32 since CDDL specifies `uint` and large pools can produce >255 blocks
+        let block_count = decoder.u32().context("Failed to parse block count")?;
 
         // Convert pool ID bytes to hex string
         let pool_id =
@@ -1724,6 +1748,7 @@ impl StreamingSnapshotParser {
                 let mut block_productions = Vec::new();
 
                 // Parse map content
+                let mut skipped_entries = 0;
                 if let Some(entry_count) = len {
                     for _i in 0..entry_count {
                         // Parse pool ID -> block count
@@ -1731,8 +1756,10 @@ impl StreamingSnapshotParser {
                             Ok(production) => {
                                 block_productions.push(production);
                             }
-                            Err(_) => {
-                                // Skip failed entries
+                            Err(e) => {
+                                // Skip failed entries but count them
+                                tracing::warn!("Failed to parse block entry for epoch {}: {}", epoch, e);
+                                skipped_entries += 1;
                                 decoder.skip().context("Failed to skip map key")?;
                                 decoder.skip().context("Failed to skip map value")?;
                             }
@@ -1751,8 +1778,10 @@ impl StreamingSnapshotParser {
                                     Ok(production) => {
                                         block_productions.push(production);
                                     }
-                                    Err(_) => {
-                                        // Skip failed entries
+                                    Err(e) => {
+                                        // Skip failed entries but count them
+                                        tracing::warn!("Failed to parse block entry for epoch {}: {}", epoch, e);
+                                        skipped_entries += 1;
                                         decoder.skip().context("Failed to skip map key")?;
                                         decoder.skip().context("Failed to skip map value")?;
                                     }
@@ -1760,6 +1789,25 @@ impl StreamingSnapshotParser {
                             }
                         }
                     }
+                }
+
+                // Log parsed blocks summary
+                let total_blocks: u32 = block_productions.iter().map(|p| p.block_count).sum();
+                if skipped_entries > 0 {
+                    tracing::warn!(
+                        "Parsed {} pools with {} total blocks for epoch {} (SKIPPED {} entries due to parse errors)",
+                        block_productions.len(),
+                        total_blocks,
+                        epoch,
+                        skipped_entries
+                    );
+                } else {
+                    info!(
+                        "Parsed {} pools with {} total blocks for epoch {}",
+                        block_productions.len(),
+                        total_blocks,
+                        epoch
+                    );
                 }
 
                 Ok(block_productions)
@@ -1823,33 +1871,108 @@ impl StreamingSnapshotParser {
         // Extract rewards and pot deltas based on variant
         let result = match pulsing_update {
             PulsingRewardUpdate::Pulsing { snapshot, pulser } => {
-                // Combine leader rewards from snapshot.leaders with member rewards from pulser
+                // In Pulsing state, rewards are calculated incrementally during the epoch.
+                // - Leader rewards are in snapshot.leaders
+                // - Member rewards are in pulser.reward_ans.accum_rewards
+                //
+                // Per Shelley spec, the total rewards distributed should equal:
+                // R = rewardPot - delta_t1 (treasury's share)
+                // where rewardPot = feeSS + delta_r1 (from reserves)
+                //
+                // We validate completeness by comparing extracted rewards to expected.
+
                 let mut rewards: HashMap<StakeCredential, Lovelace> = HashMap::new();
 
+                // Count unique accounts for leader and member rewards
+                let leader_count = snapshot.leaders.0.len();
+                let member_count = pulser.reward_ans.accum_rewards.0.len();
+
                 // Add leader rewards from snapshot
+                let mut total_leader_rewards: u64 = 0;
                 for (cred, reward_set) in &snapshot.leaders.0 {
                     let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
                     *rewards.entry(cred.clone()).or_insert(0) += amount;
+                    total_leader_rewards += amount;
                 }
 
                 // Add member rewards from pulser's accumulated rewards
+                let mut total_member_rewards: u64 = 0;
                 for (cred, reward_set) in &pulser.reward_ans.accum_rewards.0 {
                     let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
                     *rewards.entry(cred.clone()).or_insert(0) += amount;
+                    total_member_rewards += amount;
                 }
 
-                // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
-                // Both are positive values in RewardSnapshot
+                let total_rewards_extracted: u64 = rewards.values().sum();
+
+                // =====================================================================
+                // VALIDATION: Check pulsing rewards completeness
+                // =====================================================================
+                // The snapshot.r field contains the total reward pot available for distribution.
+                // delta_t1 is the treasury's share (goes to treasury, not distributed to accounts).
+                // Expected distributed rewards = r - delta_t1
+                //
+                // Note: In the Pulsing state, rewards may be incomplete if the snapshot was
+                // taken before all pulses completed. A significant shortfall (>1%) indicates
+                // incomplete pulsing, which could cause rewards to be missing.
+
+                let expected_rewards = snapshot.r.saturating_sub(snapshot.delta_t1);
+                let rewards_diff = expected_rewards as i64 - total_rewards_extracted as i64;
+                let shortfall_pct = if expected_rewards > 0 {
+                    (rewards_diff.abs() as f64 / expected_rewards as f64) * 100.0
+                } else {
+                    0.0
+                };
+
                 info!(
-                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}, leader_accounts={}, member_accounts={}",
-                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r,
-                    snapshot.leaders.0.len(), pulser.reward_ans.accum_rewards.0.len()
+                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}, \
+                     leader_accounts={} ({} ADA), member_accounts={} ({} ADA), \
+                     total_extracted={} ({} ADA)",
+                    snapshot.delta_r1,
+                    snapshot.delta_t1,
+                    snapshot.r,
+                    leader_count,
+                    total_leader_rewards / 1_000_000,
+                    member_count,
+                    total_member_rewards / 1_000_000,
+                    total_rewards_extracted,
+                    total_rewards_extracted / 1_000_000
                 );
+
+                // Log validation result
+                if rewards_diff.abs() > 0 {
+                    let log_level = if shortfall_pct > 1.0 { "WARN" } else { "INFO" };
+                    if shortfall_pct > 1.0 {
+                        warn!(
+                            "[PULSING VALIDATION {}] Rewards may be INCOMPLETE: \
+                             extracted={} ({} ADA), expected={} ({} ADA), diff={} ({:.2}%)",
+                            log_level,
+                            total_rewards_extracted,
+                            total_rewards_extracted / 1_000_000,
+                            expected_rewards,
+                            expected_rewards / 1_000_000,
+                            rewards_diff,
+                            shortfall_pct
+                        );
+                    } else {
+                        info!(
+                            "[PULSING VALIDATION] Rewards difference within tolerance: \
+                             extracted={}, expected={}, diff={} ({:.2}%)",
+                            total_rewards_extracted, expected_rewards, rewards_diff, shortfall_pct
+                        );
+                    }
+                } else {
+                    info!(
+                        "[PULSING VALIDATION] Rewards complete: extracted={} matches expected={}",
+                        total_rewards_extracted, expected_rewards
+                    );
+                }
+
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: snapshot.delta_t1 as i64,
-                    delta_reserves: -(snapshot.delta_r1 as i64), // Reserves decrease
-                    delta_fees: 0, // Pulsing variant doesn't have delta_fees
+                    delta_reserves: -(snapshot.delta_r1 as i64),
+                    delta_fees: 0,
                 }
             }
             PulsingRewardUpdate::Complete { update } => {
@@ -2041,14 +2164,17 @@ impl StreamingSnapshotParser {
             RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
         let set_snapshot =
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
-        let go_snapshot =
+        // Parse Go snapshot to advance decoder, but we don't use it
+        let _go_snapshot =
             RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
-        let _ = decoder.decode::<u64>().unwrap_or(0);
+        // Parse fee snapshot (feeSS) - fees at epoch boundary for reward calculation
+        let fee_ss = decoder.decode::<u64>().unwrap_or(0);
+        info!("Parsed fee snapshot (feeSS): {} lovelace ({} ADA)", fee_ss, fee_ss / 1_000_000);
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
-            go: go_snapshot,
+            fee_ss,
         })
     }
 }
@@ -2158,10 +2284,9 @@ impl SnapshotsCallback for CollectingCallbacks {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
-            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
+            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs",
             snapshots.mark.spos.len(),
             snapshots.set.spos.len(),
-            snapshots.go.spos.len()
         );
         Ok(())
     }

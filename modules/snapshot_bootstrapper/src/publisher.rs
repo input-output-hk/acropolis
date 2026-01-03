@@ -109,7 +109,6 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
-    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -134,7 +133,6 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
-            snapshot_fee: 0,
         }
     }
 
@@ -215,7 +213,9 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: self.snapshot_fee,
+            // Use fee_ss from snapshot - this is the fee pot at epoch boundary
+            // needed for reward calculation: rewardPot = feeSS + deltaR1
+            total_fees: data.fee_ss,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -432,8 +432,8 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
         epoch: u64,
-        _: RewardParams,
-        _: RewardParams,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
         params: ProtocolParamUpdate,
     ) -> Result<()> {
         publish_gov_state(
@@ -443,6 +443,8 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
             self.epoch_context.era,
             self.epoch_context.magic_number.clone(),
             params,
+            previous_reward_params,
+            current_reward_params,
         );
 
         Ok(())
@@ -456,8 +458,18 @@ fn publish_gov_state(
     era: Era,
     magic_number: MagicNumber,
     params: ProtocolParamUpdate,
+    previous_reward_params: RewardParams,
+    current_reward_params: RewardParams,
 ) {
-    info!("Received governance protocol parameters for epoch {epoch}",);
+    info!(
+        "Received governance protocol parameters for epoch {epoch} \
+         (previous_reward_params: k={}, a0={}, rho={}, tau={}, min_pool_cost={})",
+        previous_reward_params.desired_number_of_stake_pools,
+        previous_reward_params.pool_pledge_influence,
+        previous_reward_params.expansion_rate,
+        previous_reward_params.treasury_growth_rate,
+        previous_reward_params.min_pool_cost,
+    );
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
@@ -465,6 +477,8 @@ fn publish_gov_state(
             params,
             era,
             network_name: magic_number.to_network_name().to_string(),
+            previous_reward_params: Some(previous_reward_params),
+            current_reward_params: Some(current_reward_params),
         }),
     )));
 
@@ -529,9 +543,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.values().map(|spo| spo.delegators.len()).sum();
         let set_stake: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
 
-        let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
-        let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-
         info!("Snapshots Data:");
         info!(
             "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
@@ -546,13 +557,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.len(),
             set_delegators,
             set_stake / 1_000_000
-        );
-        info!(
-            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.go.epoch,
-            snapshots.go.spos.len(),
-            go_delegators,
-            go_stake / 1_000_000
         );
 
         Ok(())

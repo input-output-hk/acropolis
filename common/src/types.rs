@@ -146,7 +146,8 @@ pub struct PoolBlockProduction {
     pub pool_id: PoolId,
 
     /// Number of blocks produced by this pool in the epoch
-    pub block_count: u8,
+    /// Using u32 to handle pools that may produce more than 255 blocks per epoch
+    pub block_count: u32,
 
     /// Epoch number
     pub epoch: u64,
@@ -164,6 +165,9 @@ pub struct EpochBootstrapData {
     pub total_blocks_current: u64,
     /// Sum of previous epoch blocks
     pub total_blocks_previous: u64,
+    /// Fee snapshot (feeSS) - fees at epoch boundary for reward calculation
+    /// Per Shelley spec: rewardPot = feeSS + deltaR1
+    pub fee_ss: u64,
 }
 
 impl EpochBootstrapData {
@@ -171,6 +175,7 @@ impl EpochBootstrapData {
         epoch: u64,
         blocks_previous_epoch: &[crate::types::PoolBlockProduction],
         blocks_current_epoch: &[crate::types::PoolBlockProduction],
+        fee_ss: u64,
     ) -> Self {
         let blocks_previous: HashMap<PoolId, u64> =
             blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
@@ -187,6 +192,7 @@ impl EpochBootstrapData {
             spo_blocks_current: blocks_current,
             total_blocks_current: total_current,
             total_blocks_previous: total_previous,
+            fee_ss,
         }
     }
 }
@@ -1964,7 +1970,7 @@ pub enum ProtocolParamType {
     SecurityProperty,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RewardParams {
     pub expansion_rate: RationalNumber,
     pub treasury_growth_rate: RationalNumber,

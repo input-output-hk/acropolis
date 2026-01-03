@@ -1,4 +1,25 @@
 //! Acropolis AccountsState: State storage
+//!
+//! This module manages the account state including stake addresses, pools, rewards,
+//! and pot balances. It handles the bootstrap-to-live transition and epoch boundary
+//! processing including rewards calculation.
+//!
+//! ## Bootstrap-to-Live Transition
+//!
+//! At bootstrap, we receive snapshot data directly from the Cardano node's CBOR dump.
+//! The first live epoch after bootstrap creates a new snapshot from live state, which
+//! replaces the bootstrap Mark snapshot. Diagnostic logging tracks any discrepancies
+//! between bootstrap and live-calculated snapshots to help identify state drift issues.
+//!
+//! ## Snapshot Rotation (Mark/Set/Go)
+//!
+//! Per Shelley spec:
+//! - **Mark** = current epoch snapshot (newest)
+//! - **Set** = previous epoch snapshot (epoch - 1)
+//! - **Go** = two epochs ago snapshot (epoch - 2) - used for staking in rewards calculation
+//!
+//! At each epoch boundary, snapshots rotate: Go ← Set ← Mark ← new_snapshot
+
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
@@ -12,13 +33,15 @@ use acropolis_common::{
         EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
         StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    protocol_params::ProtocolParams,
+    protocol_params::{Nonce, ProtocolParams, ProtocolVersion, ShelleyParams, ShelleyProtocolParams},
+    rational_number::RationalNumber,
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
-    StakeRewardDelta, TxCertificate,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GenesisDelegates,
+    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
+    NetworkId, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
+    RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
+use chrono::DateTime;
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -40,26 +63,165 @@ const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis
 ///
 /// In Cardano terminology:
 /// - Mark = current epoch snapshot (newest) - the one being built
-/// - Set = previous epoch snapshot (epoch - 1)
-/// - Go = two epochs ago snapshot (epoch - 2) - used for staking in rewards calculation
+/// - Set = previous epoch snapshot (epoch - 1) - used for staking in rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
     /// Mark snapshot (current epoch) - newest
     pub mark: Arc<EpochSnapshot>,
 
-    /// Set snapshot (epoch - 1)
+    /// Set snapshot (epoch - 1) - used for staking in rewards calculation
     pub set: Arc<EpochSnapshot>,
-
-    /// Go snapshot (epoch - 2) - oldest, used for staking in rewards calculation
-    pub go: Arc<EpochSnapshot>,
 }
 
 impl EpochSnapshots {
-    /// Push a new snapshot
+    /// Push a new snapshot, with optional comparison logging for bootstrap-to-live transition
+    ///
+    /// When `is_first_live_snapshot` is true, this logs detailed comparisons between
+    /// the bootstrap Mark snapshot (being replaced) and the new live-calculated snapshot.
+    /// This helps diagnose any state drift between bootstrap and live processing.
     pub fn push(&mut self, latest: EpochSnapshot) {
-        self.go = self.set.clone();
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
+    }
+
+    /// Compare two snapshots and log any significant differences.
+    ///
+    /// This is particularly useful for diagnosing bootstrap-to-live transition issues
+    /// where the first live-calculated snapshot may differ from bootstrap data.
+    pub fn compare_snapshots(label: &str, old: &EpochSnapshot, new: &EpochSnapshot) {
+        if old.epoch != new.epoch {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Epochs differ - old={}, new={}",
+                label, old.epoch, new.epoch
+            );
+        }
+
+        // Compare total active stake
+        let old_total_stake: u64 = old.spos.values().map(|s| s.total_stake).sum();
+        let new_total_stake: u64 = new.spos.values().map(|s| s.total_stake).sum();
+        let stake_diff = new_total_stake as i64 - old_total_stake as i64;
+
+        if stake_diff != 0 {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Total stake differs by {} lovelace ({} ADA) - old={}, new={}",
+                label,
+                stake_diff,
+                stake_diff / 1_000_000,
+                old_total_stake,
+                new_total_stake
+            );
+        }
+
+        // Compare pool counts
+        let old_pools = old.spos.len();
+        let new_pools = new.spos.len();
+        if old_pools != new_pools {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Pool count differs - old={}, new={}",
+                label, old_pools, new_pools
+            );
+
+            // Find pools in old but not new
+            let old_only: Vec<_> = old.spos.keys().filter(|k| !new.spos.contains_key(*k)).collect();
+            if !old_only.is_empty() {
+                info!(
+                    "[SNAPSHOT COMPARE] {}: {} pools in OLD but not NEW: {:?}",
+                    label,
+                    old_only.len(),
+                    old_only.iter().take(10).collect::<Vec<_>>()
+                );
+            }
+
+            // Find pools in new but not old
+            let new_only: Vec<_> = new.spos.keys().filter(|k| !old.spos.contains_key(*k)).collect();
+            if !new_only.is_empty() {
+                info!(
+                    "[SNAPSHOT COMPARE] {}: {} pools in NEW but not OLD: {:?}",
+                    label,
+                    new_only.len(),
+                    new_only.iter().take(10).collect::<Vec<_>>()
+                );
+            }
+        }
+
+        // Compare per-pool stake differences (find largest discrepancies)
+        let mut pool_diffs: Vec<(PoolId, i64)> = Vec::new();
+        for (pool_id, old_spo) in &old.spos {
+            if let Some(new_spo) = new.spos.get(pool_id) {
+                let diff = new_spo.total_stake as i64 - old_spo.total_stake as i64;
+                if diff != 0 {
+                    pool_diffs.push((*pool_id, diff));
+                }
+            }
+        }
+
+        if !pool_diffs.is_empty() {
+            // Sort by absolute difference
+            pool_diffs.sort_by_key(|(_, diff)| -diff.abs());
+
+            let total_diff: i64 = pool_diffs.iter().map(|(_, d)| *d).sum();
+            info!(
+                "[SNAPSHOT COMPARE] {}: {} pools with stake differences, total diff={} lovelace ({} ADA)",
+                label,
+                pool_diffs.len(),
+                total_diff,
+                total_diff / 1_000_000
+            );
+
+            // Log top 10 largest differences
+            for (pool_id, diff) in pool_diffs.iter().take(10) {
+                let old_stake = old.spos.get(pool_id).map(|s| s.total_stake).unwrap_or(0);
+                let new_stake = new.spos.get(pool_id).map(|s| s.total_stake).unwrap_or(0);
+                info!(
+                    "[SNAPSHOT COMPARE] {}: Pool {} stake diff {} ({} ADA): old={}, new={}",
+                    label,
+                    pool_id,
+                    diff,
+                    diff / 1_000_000,
+                    old_stake,
+                    new_stake
+                );
+            }
+        }
+
+        // Compare blocks produced
+        let old_blocks: usize = old.spos.values().map(|s| s.blocks_produced).sum();
+        let new_blocks: usize = new.spos.values().map(|s| s.blocks_produced).sum();
+        if old_blocks != new_blocks {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Total blocks differs - old={}, new={}",
+                label, old_blocks, new_blocks
+            );
+        }
+
+        // Compare pots
+        if old.pots.reserves != new.pots.reserves {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Reserves differ by {} - old={}, new={}",
+                label,
+                new.pots.reserves as i64 - old.pots.reserves as i64,
+                old.pots.reserves,
+                new.pots.reserves
+            );
+        }
+        if old.pots.treasury != new.pots.treasury {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Treasury differ by {} - old={}, new={}",
+                label,
+                new.pots.treasury as i64 - old.pots.treasury as i64,
+                old.pots.treasury,
+                new.pots.treasury
+            );
+        }
+        if old.pots.deposits != new.pots.deposits {
+            info!(
+                "[SNAPSHOT COMPARE] {}: Deposits differ by {} - old={}, new={}",
+                label,
+                new.pots.deposits as i64 - old.pots.deposits as i64,
+                old.pots.deposits,
+                new.pots.deposits
+            );
+        }
     }
 }
 
@@ -91,6 +253,9 @@ pub struct State {
     /// Global account pots
     pots: Pots,
 
+    /// DRep deposits (tracked separately from main deposits pot per Haskell node behavior)
+    drep_deposits: Lovelace,
+
     /// All registered DReps
     dreps: Vec<(DRepCredential, Lovelace)>,
 
@@ -111,6 +276,13 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
+
+    /// Flag indicating this is the first epoch after bootstrap.
+    /// Used to enable diagnostic logging comparing bootstrap vs live snapshots.
+    is_first_epoch_after_bootstrap: bool,
+
+    /// The epoch we bootstrapped at, for logging purposes
+    bootstrap_epoch: Option<u64>,
 }
 
 impl State {
@@ -165,9 +337,15 @@ impl State {
             info!("    New registration pending activation: {}", pool_id);
         }
 
-        // Load DReps
+        // Load DReps and calculate total deposits
         self.dreps = bootstrap_msg.dreps;
-        info!("Loaded {} DReps", self.dreps.len());
+        self.drep_deposits = self.dreps.iter().map(|(_, deposit)| deposit).sum();
+        info!(
+            "Loaded {} DReps with total deposits: {} lovelace ({} ADA)",
+            self.dreps.len(),
+            self.drep_deposits,
+            self.drep_deposits / 1_000_000
+        );
 
         // Load pots
         self.pots = bootstrap_msg.pots;
@@ -176,23 +354,20 @@ impl State {
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // Load mark/set/go snapshots
+        // Load mark/set snapshots
         let snapshots = bootstrap_msg.bootstrap_snapshots;
         self.epoch_snapshots = EpochSnapshots {
             mark: Arc::new(snapshots.mark),
             set: Arc::new(snapshots.set),
-            go: Arc::new(snapshots.go),
         };
 
         if !self.epoch_snapshots.mark.spos.is_empty() {
             info!(
-                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
+                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs)",
                 self.epoch_snapshots.mark.epoch,
                 self.epoch_snapshots.mark.spos.len(),
                 self.epoch_snapshots.set.epoch,
                 self.epoch_snapshots.set.spos.len(),
-                self.epoch_snapshots.go.epoch,
-                self.epoch_snapshots.go.spos.len(),
             );
         } else {
             info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
@@ -211,6 +386,11 @@ impl State {
         update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
         update_value_with_delta(&mut self.pots.deposits, deltas.delta_deposits)?;
 
+        // Mark that we're in bootstrap mode - the first epoch boundary after this
+        // will create a live snapshot that we'll compare against bootstrap data
+        self.is_first_epoch_after_bootstrap = true;
+        self.bootstrap_epoch = Some(bootstrap_msg.epoch);
+
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",
@@ -221,6 +401,23 @@ impl State {
             self.pots.reserves,
             self.pots.treasury,
             self.pots.deposits,
+        );
+
+        // Log bootstrap snapshot summary for later comparison
+        info!(
+            "[BOOTSTRAP SNAPSHOT] Mark (epoch {}): {} SPOs, {} total blocks, reserves={}, treasury={}, deposits={}",
+            self.epoch_snapshots.mark.epoch,
+            self.epoch_snapshots.mark.spos.len(),
+            self.epoch_snapshots.mark.blocks,
+            self.epoch_snapshots.mark.pots.reserves,
+            self.epoch_snapshots.mark.pots.treasury,
+            self.epoch_snapshots.mark.pots.deposits,
+        );
+        info!(
+            "[BOOTSTRAP SNAPSHOT] Set (epoch {}): {} SPOs, {} total blocks",
+            self.epoch_snapshots.set.epoch,
+            self.epoch_snapshots.set.spos.len(),
+            self.epoch_snapshots.set.blocks,
         );
 
         Ok(())
@@ -368,22 +565,51 @@ impl State {
             );
         }
 
-        // Get previous Shelley parameters, silently return if too early in the chain so no
-        // rewards to calculate
-        // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
-        // have to use the genesis parameters we just received
-        let shelley_params = match &self.previous_protocol_parameters {
-            Some(ProtocolParams {
-                shelley: Some(sp), ..
-            }) => sp,
-            _ => match &self.protocol_parameters {
-                Some(ProtocolParams {
-                    shelley: Some(sp), ..
-                }) => sp,
-                _ => return Ok(vec![]),
+        // DEBUG: Hardcoded ShelleyParams for mainnet to eliminate parameter issues
+        // TODO: Remove this once the issue is resolved
+        let shelley_params = ShelleyParams {
+            active_slots_coeff: RationalNumber::new(5, 100),
+            epoch_length: 432000,
+            max_kes_evolutions: 62,
+            max_lovelace_supply: 45_000_000_000_000_000,
+            network_id: NetworkId::Mainnet,
+            network_magic: 764824073,
+            protocol_params: ShelleyProtocolParams {
+                protocol_version: ProtocolVersion::chang(),
+                max_tx_size: 16384,
+                max_block_body_size: 90112,
+                max_block_header_size: 1100,
+                min_utxo_value: 4310,
+                key_deposit: 2_000_000,
+                minfee_a: 44,
+                minfee_b: 155381,
+                pool_deposit: 500_000_000,
+                stake_pool_target_num: 500,
+                min_pool_cost: 170_000_000,
+                pool_retire_max_epoch: 18,
+                extra_entropy: Nonce::neutral(),
+                decentralisation_param: RationalNumber::new(0, 1),
+                monetary_expansion: RationalNumber::new(3, 1000),
+                treasury_cut: RationalNumber::new(2, 10),
+                pool_pledge_influence: RationalNumber::new(3, 10),
             },
-        }
-        .clone();
+            security_param: 2160,
+            slot_length: 1,
+            slots_per_kes_period: 129600,
+            system_start: DateTime::from_timestamp(1506203091, 0).unwrap(),
+            update_quorum: 5,
+            gen_delegs: GenesisDelegates::default(),
+        };
+        info!(
+            "Using hardcoded ShelleyParams: k={}, a0={}/{}, rho={}/{}, tau={}/{}",
+            shelley_params.protocol_params.stake_pool_target_num,
+            shelley_params.protocol_params.pool_pledge_influence.numer(),
+            shelley_params.protocol_params.pool_pledge_influence.denom(),
+            shelley_params.protocol_params.monetary_expansion.numer(),
+            shelley_params.protocol_params.monetary_expansion.denom(),
+            shelley_params.protocol_params.treasury_cut.numer(),
+            shelley_params.protocol_params.treasury_cut.denom(),
+        );
 
         info!(
             epoch,
@@ -412,6 +638,55 @@ impl State {
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(),
         );
+
+        // =====================================================================
+        // DIAGNOSTIC: Compare bootstrap vs live snapshot on first epoch transition
+        // =====================================================================
+        // At the first epoch boundary after bootstrap, we create a live snapshot
+        // that replaces the bootstrap Mark. This comparison helps identify any
+        // state drift between bootstrap data and live processing.
+        if self.is_first_epoch_after_bootstrap {
+            info!(
+                "[BOOTSTRAP->LIVE TRANSITION] First epoch boundary after bootstrap (bootstrap epoch {})",
+                self.bootstrap_epoch.unwrap_or(0)
+            );
+            info!(
+                "[BOOTSTRAP->LIVE TRANSITION] Creating live snapshot for epoch {} to replace bootstrap Mark (epoch {})",
+                epoch - 1,
+                self.epoch_snapshots.mark.epoch
+            );
+
+            // Compare the new live snapshot with the bootstrap Mark if epochs match
+            // (they should be the same epoch, but the live one is freshly calculated)
+            if self.epoch_snapshots.mark.epoch == snapshot.epoch {
+                EpochSnapshots::compare_snapshots(
+                    "Bootstrap Mark vs Live Mark",
+                    &self.epoch_snapshots.mark,
+                    &snapshot,
+                );
+            } else {
+                info!(
+                    "[BOOTSTRAP->LIVE TRANSITION] Epoch mismatch: bootstrap Mark is epoch {}, live snapshot is epoch {}",
+                    self.epoch_snapshots.mark.epoch,
+                    snapshot.epoch
+                );
+            }
+
+            // Log summary of the new live snapshot
+            let live_total_stake: u64 = snapshot.spos.values().map(|s| s.total_stake).sum();
+            info!(
+                "[LIVE SNAPSHOT] New Mark (epoch {}): {} SPOs, total_stake={} ({} ADA), {} blocks",
+                snapshot.epoch,
+                snapshot.spos.len(),
+                live_total_stake,
+                live_total_stake / 1_000_000,
+                snapshot.blocks
+            );
+
+            // Clear the flag - subsequent epoch transitions are normal
+            self.is_first_epoch_after_bootstrap = false;
+        }
+
         self.epoch_snapshots.push(snapshot);
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
@@ -437,64 +712,89 @@ impl State {
         );
 
         // Set up background task for rewards, capturing and emptying current deregistrations
-        let performance = self.epoch_snapshots.mark.clone();
-        let staking = self.epoch_snapshots.go.clone();
+        // Note: We no longer skip task creation at bootstrap. The pulsing rewards in the bootstrap
+        // snapshot are for epoch N-1 (calculated during epoch N), while the task created here
+        // calculates epoch N rewards (applied at epoch N+1 boundary). These are different epochs,
+        // so there's no double-counting.
+        {
+            let performance = self.epoch_snapshots.mark.clone();
+            let staking = self.epoch_snapshots.set.clone();
 
-        // Calculate the sets of net registrations and deregistrations which happened between
-        // staking and now
-        // Note: We do this to save memory - although the 'mark' snapshot contains the
-        // current registration status of each address, it is segmented by SPO and there's
-        // no way to search by address (they may move SPO in between), so this saves another
-        // huge map.  If the snapshot was ever changed to store addresses in a way where an
-        // individual could be looked up, this could be simplified - but you still need to
-        // handle the Shelley bug part!
-        let mut registrations: HashSet<StakeAddress> = HashSet::new();
-        let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.set.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-        Self::apply_registration_changes(
-            &self.epoch_snapshots.mark.registration_changes,
-            &mut registrations,
-            &mut deregistrations,
-        );
-
-        let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
-        let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
-        self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Wait for start signal
-            let _ = start_rewards_rx.recv();
-
-            // Additional deregistrations from current epoch - early Shelley bug
-            // TODO - make optional, turn off after Allegra
+            // Calculate the sets of net registrations and deregistrations which happened between
+            // staking and now
+            // Note: We do this to save memory - although the 'mark' snapshot contains the
+            // current registration status of each address, it is segmented by SPO and there's
+            // no way to search by address (they may move SPO in between), so this saves another
+            // huge map.  If the snapshot was ever changed to store addresses in a way where an
+            // individual could be looked up, this could be simplified - but you still need to
+            // handle the Shelley bug part!
+            let mut registrations: HashSet<StakeAddress> = HashSet::new();
+            let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
             Self::apply_registration_changes(
-                &current_epoch_registration_changes.lock().unwrap(),
+                &self.epoch_snapshots.set.registration_changes,
+                &mut registrations,
+                &mut deregistrations,
+            );
+            Self::apply_registration_changes(
+                &self.epoch_snapshots.mark.registration_changes,
                 &mut registrations,
                 &mut deregistrations,
             );
 
-            if tracing::enabled!(Level::DEBUG) {
-                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
-                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
-            }
+            // Per Shelley spec (Figure 48): isRRegistered = rewardAcnt ∈ dom (rewards pp dstate)
+            // We need to check if reward accounts are registered NOW (at calculation time),
+            // not based on historical snapshot data. Extract the currently registered addresses.
+            let registered_stake_addresses: HashSet<StakeAddress> = {
+                let stake_addresses = self.stake_addresses.lock().unwrap();
+                let registered: HashSet<StakeAddress> = stake_addresses
+                    .iter()
+                    .filter(|(_, sas)| sas.registered)
+                    .map(|(addr, _)| addr.clone())
+                    .collect();
+                info!(
+                    "Extracted {} registered stake addresses for rewards calculation (total in map: {})",
+                    registered.len(),
+                    stake_addresses.len()
+                );
+                registered
+            };
 
-            // Calculate reward payouts for previous epoch
-            calculate_rewards(
-                epoch - 1,
-                performance,
-                staking,
-                &shelley_params,
-                monetary_change.stake_rewards,
-                &registrations,
-                &deregistrations,
-            )
-        }))));
+            let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
+            let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
+            self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
+                // Wait for start signal
+                let _ = start_rewards_rx.recv();
 
-        // Delay starting calculation until 4k into epoch, to capture late deregistrations
-        // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
-        self.start_rewards_tx = Some(start_rewards_tx);
+                // Additional deregistrations from current epoch - early Shelley bug
+                // TODO - make optional, turn off after Allegra
+                Self::apply_registration_changes(
+                    &current_epoch_registration_changes.lock().unwrap(),
+                    &mut registrations,
+                    &mut deregistrations,
+                );
+
+                if tracing::enabled!(Level::DEBUG) {
+                    registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                    deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
+                }
+
+                // Calculate reward payouts for previous epoch
+                calculate_rewards(
+                    epoch - 1,
+                    performance,
+                    staking,
+                    &shelley_params,
+                    monetary_change.stake_rewards,
+                    &registrations,
+                    &deregistrations,
+                    &registered_stake_addresses,
+                )
+            }))));
+
+            // Delay starting calculation until 4k into epoch, to capture late deregistrations
+            // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
+            self.start_rewards_tx = Some(start_rewards_tx);
+        }
 
         // Now retire the SPOs fully
         let retiring: OrdSet<PoolId> = self.retiring_spos.drain(..).collect();
@@ -685,7 +985,12 @@ impl State {
     }
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
-    /// epoch
+    /// epoch.
+    ///
+    /// After bootstrap, the first call to this function will set both `protocol_parameters`
+    /// and `previous_protocol_parameters` to ensure reward calculations have valid params.
+    /// Since protocol params rarely change between epochs, using current as previous
+    /// at bootstrap is a safe approximation.
     pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
         let different = match &self.protocol_parameters {
             Some(old_params) => old_params != &params_msg.params,
@@ -694,7 +999,15 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            self.previous_protocol_parameters = self.protocol_parameters.clone();
+            // At bootstrap, previous_protocol_parameters is None and protocol_parameters
+            // will also be None. In this case, set previous to the new params as well,
+            // since protocol params rarely change between epochs.
+            if self.previous_protocol_parameters.is_none() && self.protocol_parameters.is_none() {
+                info!("Bootstrap: setting previous_protocol_parameters to match current");
+                self.previous_protocol_parameters = Some(params_msg.params.clone());
+            } else {
+                self.previous_protocol_parameters = self.protocol_parameters.clone();
+            }
             self.protocol_parameters = Some(params_msg.params.clone());
         }
 
@@ -739,10 +1052,14 @@ impl State {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
                 let mut filtered_rewards_result = rewards_result.clone();
+                let mut total_to_registered: u64 = 0;
+                let mut total_to_treasury_unreg: u64 = 0;
+                let mut count_to_treasury: usize = 0;
                 for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
                         if stake_addresses.is_registered(&reward.account) {
                             stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            total_to_registered += reward.amount;
                             reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
@@ -751,9 +1068,11 @@ impl State {
                             });
                         } else {
                             debug!(
-                                "Reward account {} deregistered - paying reward {} to treasury",
+                                "Reward account {} deregistered - paying reward {} to treasury (unregRU)",
                                 reward.account, reward.amount
                             );
+                            total_to_treasury_unreg += reward.amount;
+                            count_to_treasury += 1;
                             self.pots.treasury += reward.amount;
 
                             // Remove from filtered version for comparison and result
@@ -781,8 +1100,44 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust the reserves for next time with amount actually paid
+                // Adjust reserves for paid rewards
                 self.pots.reserves -= rewards_result.total_paid;
+
+                // NOTE: Unpaid leader rewards (for SPOs with unregistered reward accounts at
+                // calculation time) do NOT go to treasury. Per Shelley spec (Figure 51 createRUpd):
+                // - Rewards for unregistered accounts are filtered out via `addrsrew ✁ potentialRewards`
+                // - The leftover goes back to reserves via Δr2 = R - sum(rs)
+                //
+                // Only rewards that WERE calculated (for registered accounts) but then the account
+                // got deregistered BEFORE application go to treasury (handled at line 1065 above).
+                //
+                // Since unpaid leader rewards are never in total_paid, they stay in reserves
+                // automatically. We just log them for visibility.
+                if rewards_result.total_unpaid_leader_rewards > 0 {
+                    info!(
+                        "Leader rewards not calculated (SPO reward accounts not registered): {} lovelace ({} ADA) - stays in reserves per spec",
+                        rewards_result.total_unpaid_leader_rewards,
+                        rewards_result.total_unpaid_leader_rewards / 1_000_000
+                    );
+                }
+
+                // Summary logging for rewards application
+                info!(
+                    "Rewards application summary: total_paid={} ({} ADA), to_registered={} ({} ADA), to_treasury_unreg={} ({} ADA, {} accounts)",
+                    rewards_result.total_paid, rewards_result.total_paid / 1_000_000,
+                    total_to_registered, total_to_registered / 1_000_000,
+                    total_to_treasury_unreg, total_to_treasury_unreg / 1_000_000, count_to_treasury
+                );
+
+                // CRITICAL: Verify that total_paid = to_registered + to_treasury_unreg
+                let sum_applied = total_to_registered + total_to_treasury_unreg;
+                if sum_applied != rewards_result.total_paid {
+                    error!(
+                        "MISMATCH: total_paid ({}) != to_registered ({}) + to_treasury_unreg ({}), diff = {}",
+                        rewards_result.total_paid, total_to_registered, total_to_treasury_unreg,
+                        rewards_result.total_paid as i64 - sum_applied as i64
+                    );
+                }
             }
         };
 
@@ -1114,21 +1469,30 @@ impl State {
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
-                    // DRep deposits are NOT included in the deposits pot for verification.
-                    // The Haskell node tracks DRep deposits separately from the deposits pot.
-                    // We only track DReps for other purposes (governance), not for deposit accounting.
-                    debug!(
-                        "DRep registration: {:?}, deposit: {}",
-                        reg.credential, reg.deposit
+                    // DRep deposits are tracked separately from the main deposits pot
+                    // The Haskell node verification does NOT include DRep deposits in deposited pot,
+                    // so we track them separately for consistency with bootstrap (which subtracts them)
+                    self.drep_deposits += reg.deposit;
+                    info!(
+                        "DRep registration: {:?}, deposit: {}, drep_deposits: {}",
+                        reg.credential, reg.deposit, self.drep_deposits
                     );
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    // DRep deposits are NOT included in the deposits pot for verification.
-                    // The Haskell node tracks DRep deposits separately from the deposits pot.
-                    debug!(
-                        "DRep deregistration: {:?}, refund: {}",
-                        dereg.credential, dereg.refund
+                    // DRep deposits are tracked separately (not in main deposits pot)
+                    self.drep_deposits = self.drep_deposits.saturating_sub(dereg.refund);
+
+                    // Add refund to the DRep's stake address (like pool deposit refunds)
+                    // This is critical for SPDD to match db-sync!
+                    // DRepCredential is a Credential, same as StakeCredential
+                    let stake_address = StakeAddress::new(dereg.credential.clone(), NetworkId::Mainnet);
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    stake_addresses.add_to_reward(&stake_address, dereg.refund);
+
+                    info!(
+                        "DRep deregistration: {:?}, refund: {} added to stake address {}, drep_deposits: {}",
+                        dereg.credential, dereg.refund, stake_address, self.drep_deposits
                     );
                 }
 

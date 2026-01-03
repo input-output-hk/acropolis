@@ -248,7 +248,9 @@ impl AccountsState {
             // Read from epoch-boundary messages only when it's a new epoch
             // NEWEPOCH ticks
             if new_epoch {
-                // Applies rewards from previous epoch
+                // Applies rewards from previous epoch FIRST
+                // Per Shelley spec Section 11.1: rewards (G) are given out at start of new epoch,
+                // BEFORE the new snapshot is taken. The stake distribution includes these rewards.
                 let previous_epoch_rewards_result = state
                     .complete_previous_epoch_rewards_calculation(verifier, skip_first_epoch_rewards)
                     .await
@@ -277,7 +279,7 @@ impl AccountsState {
                 };
 
                 // EPOCH rule
-                // a. SNAP: Take the snapshot and pool distribution
+                // a. SNAP: Take the snapshot and pool distribution (AFTER rewards applied)
                 // rotate the snapshots (mark, set, go)
                 // b. POOLREAP: for any retiring pools, refund,
                 // remove from pool registry, clear delegations
