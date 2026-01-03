@@ -58,8 +58,8 @@ async function queryAcropolis(epoch: number) {
 
     const pools: { pool_id: string; stake: bigint }[] = [];
     for (const [pool_id, info] of Object.entries(data)) {
-        if (!info || typeof info !== "object" || !("active" in info)) continue;
-        pools.push({ pool_id, stake: BigInt((info as any).active) });
+        if (!info || typeof info !== "object" || !("live" in info)) continue;
+        pools.push({ pool_id, stake: BigInt((info as any).live) });
     }
     return pools;
 }
@@ -112,10 +112,37 @@ async function validateEpoch(db: Client, epoch: number) {
         if (missing.length) console.log(`   Missing pools: ${missing.join(", ")}`);
         if (extra.length) console.log(`   Extra pools (in SPDD only): ${extra.join(", ")}`);
         if (mismatched.length) {
-            console.log(`   Mismatched pools:`);
-            for (const { id, db, spdd } of mismatched) {
-                console.log(`   - ${id} (db: ${db}, spdd: ${spdd})`);
-            }
+            const smallest = mismatched.reduce((best, curr) => {
+                const bestDiff = best.db >= best.spdd ? best.db - best.spdd : best.spdd - best.db;
+                const currDiff = curr.db >= curr.spdd ? curr.db - curr.spdd : curr.spdd - curr.db;
+                return currDiff < bestDiff ? curr : best;
+            });
+
+            const diff =
+                smallest.db >= smallest.spdd
+                    ? smallest.db - smallest.spdd
+                    : smallest.spdd - smallest.db;
+
+            console.log(`   Mismatched pool with smallest difference:`);
+            console.log(
+                `   - ${smallest.id} (db: ${smallest.db}, spdd: ${smallest.spdd}, diff: ${diff})`
+            );
+
+            const smallestTotal = mismatched.reduce((best, curr) => {
+                const bestTotal = best.db + best.spdd;
+                const currTotal = curr.db + curr.spdd;
+                return currTotal < bestTotal ? curr : best;
+            });
+
+            const diff2 =
+                smallestTotal.db >= smallestTotal.spdd
+                    ? smallestTotal.db - smallestTotal.spdd
+                    : smallestTotal.spdd - smallestTotal.db;
+
+            console.log(`   Mismatched pool with smallest total stake:`);
+            console.log(
+                `   - ${smallestTotal.id} (db: ${smallestTotal.db}, spdd: ${smallestTotal.spdd}, diff: ${diff2})`
+            );
         }
         await pause();
     }

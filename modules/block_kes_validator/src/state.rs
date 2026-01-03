@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
     genesis_values::GenesisValues,
@@ -6,7 +6,7 @@ use acropolis_common::{
     validation::{KesValidationError, ValidationError},
     BlockInfo, PoolId,
 };
-use imbl::HashMap;
+use imbl::HashMap as ImblHashMap;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::error;
 
@@ -15,7 +15,7 @@ use crate::ouroboros;
 #[derive(Default, Debug, Clone)]
 pub struct State {
     /// Tracks the latest operational certificate counter for each pool
-    pub ocert_counters: HashMap<PoolId, u64>,
+    pub ocert_counters: ImblHashMap<PoolId, u64>,
 
     pub slots_per_kes_period: Option<u64>,
 
@@ -27,11 +27,15 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            ocert_counters: HashMap::new(),
+            ocert_counters: ImblHashMap::new(),
             slots_per_kes_period: None,
             max_kes_evolutions: None,
             active_spos: HashSet::new(),
         }
+    }
+
+    pub fn bootstrap(&mut self, ocert_counters: HashMap<PoolId, u64>) {
+        self.ocert_counters = ocert_counters.into_iter().collect();
     }
 
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {

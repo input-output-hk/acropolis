@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMethod,
+    configuration::StartupMode,
     declare_cardano_rdr,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
@@ -275,7 +275,7 @@ impl DRepState {
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         let subscriptions = DRepSubscriptions {
-            snapshot: if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+            snapshot: if StartupMode::from_config(config.as_ref()).is_snapshot() {
                 info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
                 Some(context.subscribe(&snapshot_subscribe_topic).await?)
             } else {

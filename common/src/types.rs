@@ -1059,12 +1059,26 @@ impl Display for VKeyWitness {
 pub type Slot = u64;
 
 /// Point on the chain
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    Eq,
+    PartialEq,
+    minicbor::Decode,
+    minicbor::Encode,
+)]
 pub enum Point {
     #[default]
+    #[n(0)]
     Origin,
+    #[n(1)]
     Specific {
+        #[n(0)]
         hash: BlockHash,
+        #[n(1)]
         slot: Slot,
     },
 }

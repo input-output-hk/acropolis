@@ -1,3 +1,4 @@
+use acropolis_common::configuration::SyncMode;
 use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
@@ -8,8 +9,8 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        AccountsBootstrapMessage, BlockKesValidatorBootstrapMessage, DRepBootstrapMessage,
+        EpochBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
@@ -22,7 +23,7 @@ use acropolis_common::{
         UtxoCallback,
     },
     stake_addresses::AccountState,
-    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, UTXOValue, UTxOIdentifier,
+    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, PoolId, UTXOValue, UTxOIdentifier,
 };
 
 use anyhow::Result;
@@ -98,6 +99,7 @@ pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     snapshot_topic: String,
     sync_command_topic: String,
+    sync_mode: SyncMode,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -115,12 +117,14 @@ impl SnapshotPublisher {
         context: Arc<Context<Message>>,
         snapshot_topic: String,
         sync_command_topic: String,
+        sync_mode: SyncMode,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
             snapshot_topic,
             sync_command_topic,
+            sync_mode,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -151,13 +155,44 @@ impl SnapshotPublisher {
         Ok(())
     }
 
+    /// Publish operational certificate counters for block KES validator bootstrap
+    pub async fn publish_kes_validator_bootstrap(
+        &self,
+        epoch: u64,
+        ocert_counters: HashMap<PoolId, u64>,
+    ) -> Result<()> {
+        info!(
+            "Publishing KES validator bootstrap with {} opcert counters on '{}'",
+            ocert_counters.len(),
+            self.snapshot_topic
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::BlockKesValidatorState(BlockKesValidatorBootstrapMessage {
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+                ocert_counters,
+            }),
+        )));
+
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish KES validator bootstrap message: {}", e);
+        });
+
+        Ok(())
+    }
+
     pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
         info!(
             "Publishing sync command on {} for slot {}",
             self.sync_command_topic,
             point.slot()
         );
-        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        let message = if self.sync_mode.is_mithril() {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
+        } else {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
+        };
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await

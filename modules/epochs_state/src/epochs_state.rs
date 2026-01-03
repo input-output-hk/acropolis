@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
-    configuration::StartupMethod,
+    configuration::StartupMode,
     declare_cardano_rdr,
     messages::{
         BlockTxsMessage, CardanoMessage, EpochBootstrapMessage, GenesisCompleteMessage, Message,
@@ -276,7 +276,7 @@ impl EpochsState {
         let history_query = history.clone();
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
         let snapshot_subscription = if is_snapshot_mode {
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {

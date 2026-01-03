@@ -353,6 +353,14 @@ pub struct DRepBootstrapMessage {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockKesValidatorBootstrapMessage {
+    pub epoch: u64,
+    pub block_number: u64,
+    /// Maps pool ID to the latest operational certificate counter
+    pub ocert_counters: HashMap<PoolId, u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolParametersBootstrapMessage {
     pub network_name: String,
     pub era: Era,
@@ -519,6 +527,7 @@ pub enum SnapshotStateMessage {
     DRepState(DRepBootstrapMessage),
     ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
+    BlockKesValidatorState(BlockKesValidatorBootstrapMessage),
 }
 
 // === Global message enum ===

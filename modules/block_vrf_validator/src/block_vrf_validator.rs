@@ -3,7 +3,7 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    configuration::StartupMethod,
+    configuration::StartupMode,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
     },
@@ -281,7 +281,7 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         // Subscribers
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
