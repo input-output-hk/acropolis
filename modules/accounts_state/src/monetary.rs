@@ -75,13 +75,11 @@ fn calculate_eta(params: &ShelleyParams, total_non_obft_blocks: usize) -> Result
     let eta = if decentralisation >= &RationalNumber::new(8, 10) {
         BigDecimal::one()
     } else {
-        // Per Shelley spec: η = blocksMade / floor((1 - d) * slotsPerEpoch * activeSlotCoeff)
-        let expected_blocks = (epoch_length
+        let expected_blocks = epoch_length
             * active_slots_coeff
             * (BigDecimal::one()
                 - BigDecimal::from(decentralisation.numer())
-                    / BigDecimal::from(decentralisation.denom())))
-        .with_scale(0); // floor() per spec
+                    / BigDecimal::from(decentralisation.denom()));
 
         (BigDecimal::from(total_non_obft_blocks as u64) / expected_blocks).min(BigDecimal::one())
     };
