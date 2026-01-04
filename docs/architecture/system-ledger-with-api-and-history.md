@@ -291,16 +291,87 @@ Like Historical Accounts State, although the data stored is much smaller, it use
 pattern of a hierarchical store with volatile data in memory, and immutable data on disk (Fjall)
 and in the same way subscribes to `cardano.protocol.parameters` to track 'k'.
 
+### Accounts State
+
+The existing [Accounts State](../../modules/accounts_state) module provides a query handler for
+`cardano.query.accounts` which enables a number of BlockFrost REST endpoints:
+
+* `GetAccountInfo`: Gets the current balances and delegations for a stake address, for the
+`/accounts` endpoint
+* `GetPoolLiveStake`: Gets the total stake of a pool, for the `/pools` endpoint
+* `GetPoolsLiveStakes`: Same, for multiple pools
+* `GetPoolDelegators`: Gets the list of delegators to a pool, for `/pools`
+* `GetDrepDelegators`: Gets the list of delegators to a DRep, for `/governance/dreps`
+* `GetAccountsDrepDelegationMap`: Maps a list of stake addresses to their delegated DRep, as a
+helper for DRep State (TODO: This isn't actually BF specific)
+* `GetOptimalPoolSizing`: Returns the 'stake pool target num' parameter also also (which only
+Accounts State knows) the total reserves supply, to enable the `/pools/extended` endpoint.
+* `GetAccountsUtxoValuesMap`: Maps a list of stake address to their total UTxO values, for the
+`/governance/dreps` endpoint
+* `GetAccountsUtxoValuesSum`: Get the sum of all UTxOs for a set of stake addresses, for the
+`/pools` endpoint
+* `GetAccountsBalancesMap`: Maps a list of stake addresses to their total balances (UTxO values
++ rewards).  Not currently used
+* `GetActiveStakes`: Gets the total active stake (UTxOs + rewards) for all delegators of all pools
+in the latest snapshot ('mark').  Used in the `/epochs` endpoint
+* `GetAccountBalancesSum`: Gets the total balances (UTxO values + rewards) for a list of stake
+addresses. Used in the `/governance/dreps/` endpoint.
+* `GetSPDDByEpoch`: Fetches the SPDD for a particular epoch (only if historical SPDD is enabled),
+for the `/epochs` endpoint
+* `GetSPDDByEpochAndPool`: Fetches the map of delegated stake addresses and amounts delegated for
+a particular epoch (also only if historical SPDD enabled), also for the `/epochs` endpoint.
+
+The historical SPDD storage is enabled through configuration - see the
+[module page](../../modules/accounts_state) for details.
+TODO - does this duplicate SPDD_Store?
+
+### UTXO State
+
+The [UTXO State](../../modules/utxo_state) module provides a `cardano.query.utxos` handler
+which allows the BlockFrost REST API to get address balances for the `/addresses` endpoint.
+
 ### SPO State
 
 The [SPO State](../../modules/spo_state) module is extended to track a large number of existing
 topics in order to generate its own record of the stake distribution which it can then capture
-historically.
+historically, in order to provide a `cardano.query.pools` handler for the BlockFrost `/pools`
+endpoint.
 
-** Note: this was probably an architectural mistake which will be rectified soon, so we won't
-go into too many details yet **
+*Note: this was probably an architectural mistake which will be rectified soon, so we won't
+go into too many details yet*
 
-TODO: Other existing module extensions
+### DRep State
+
+The [DRep State](../../modules/drep_state) provides a `cardano.query.dreps` handler to expose
+the data it holds about currently registered DReps for the `/governance/dreps` endpoint.
+
+Optionally, it can also store historical data about DRep registrations, delegators and votes -
+see the [module page](../../modules/drep_state) for details.
+
+### Epochs State
+
+The [Epochs State](../../modules/epochs_state) module also provides a query handler,
+`cardano.query.epochs` for the current epoch data and counts of blocks minted by particular
+pools.  Note it doesn't store any history - this is done by the new Historical Epochs State
+described above.
+
+### Parameters State
+
+[Parameters State](../../modules/parameters_state) handles `cardano.query.parameters` to provide
+the current protocol parameters set, which enables the `/epochs/latest/parameters` endpoint.
+
+If so configured (see the [module page](../../modules/parameters_state) for details), it can
+also store the history of parameters for every epoch in the past, to enable the
+`/epochs/{number}/parameters` endpoint.
+
+### Governance State
+
+The existing [Governance State](../../modules/governance_state) provides a query handler on
+`cardano.query.governance` to give access to the its store of proposals / governance actions.
+This enables the BlockFrost `/governance/proposals` and `/governance/proposal/<id>` endpoints.
+
+Governance State does not currently store the history of expired or ratified proposals.
+TODO: Should it?
 
 ## Configuration
 Here is the
