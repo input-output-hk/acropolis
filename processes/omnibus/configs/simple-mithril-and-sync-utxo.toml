@@ -25,7 +25,7 @@ pause = "none"
 # Core Module Configurations
 # ============================================================================
 [module.peer-network-interface]
-sync-point = "snapshot"
+sync-point = "dynamic"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
