@@ -141,8 +141,6 @@ pub struct RawSnapshotsContainer {
     pub set: RawSnapshot,
     /// Go snapshot (raw CBOR data)
     pub go: RawSnapshot,
-    /// Fee
-    pub fee: u64,
 }
 
 impl RawSnapshotsContainer {
@@ -154,14 +152,13 @@ impl RawSnapshotsContainer {
     /// - Go (epoch): Uses blocks_current_epoch
     ///
     /// Pots assignment (reserves, treasury, deposits - the global ADA accounting pots):
-    /// - Go (current epoch): receives the pots parsed from the bootstrap file
-    /// - Mark and Set: receive zeroed pots (we don't have historical pots for past epochs)
+    /// - Set (epoch-1): receives the pots parsed from the bootstrap file
+    /// - Mark and Go: receive zeroed pots (we don't have historical pots for past epochs)
     ///
-    /// Why this is safe: Only `mark.pots.reserves` is used in rewards calculation (see
-    /// rewards.rs:79). The first `enter_epoch` after bootstrap creates a fresh snapshot
-    /// with correct pots (from `self.pots`) that becomes the new mark *before* rewards
-    /// are calculated. The bootstrapped snapshots with zeroed pots shift through set→go
-    /// over subsequent epochs, but set/go pots are never read.
+    /// Why this is safe: On the first epoch after bootstrap, we skip monetary change
+    /// calculation (pots are already correct from bootstrap). The first `enter_epoch`
+    /// creates a fresh snapshot with correct pots that becomes the new mark. Subsequent
+    /// epochs will have correct pots propagated through the snapshot rotation.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
@@ -182,10 +179,10 @@ impl RawSnapshotsContainer {
             set: self.set.into_snapshot(
                 epoch.saturating_sub(1),
                 blocks_previous_epoch,
-                Pots::default(),
+                pots,
                 network.clone(),
             ),
-            go: self.go.into_snapshot(epoch, blocks_current_epoch, pots, network),
+            go: self.go.into_snapshot(epoch, blocks_current_epoch, Pots::default(), network),
         }
     }
 }

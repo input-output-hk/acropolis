@@ -3,13 +3,20 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    configuration::StartupMethod,
+    configuration::StartupMode,
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse, StateTransitionMessage,
     },
-    queries::accounts::{DrepDelegators, PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC},
+    queries::{
+        accounts::{
+            AccountInfo, AccountsStateQuery, AccountsStateQueryResponse, DrepDelegators,
+            PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC,
+        },
+        errors::QueryError,
+    },
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
 };
 use anyhow::{anyhow, Result};
@@ -32,11 +39,7 @@ use state::State;
 mod monetary;
 mod rewards;
 mod verifier;
-use acropolis_common::queries::accounts::{
-    AccountInfo, AccountsStateQuery, AccountsStateQueryResponse,
-};
-use acropolis_common::queries::errors::QueryError;
-use acropolis_common::validation::ValidationOutcomes;
+
 use verifier::Verifier;
 
 use crate::spo_distribution_store::{SPDDStore, SPDDStoreConfig};
@@ -76,17 +79,19 @@ pub struct AccountsState;
 
 impl AccountsState {
     /// Handle bootstrap message from snapshot
-    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) {
+    fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) -> Result<()> {
         let epoch = accounts_data.epoch;
         let accounts_len = accounts_data.accounts.len();
 
         // Initialize accounts state from snapshot data
-        state.bootstrap(accounts_data);
+        state.bootstrap(accounts_data)?;
 
         info!(
             "Accounts state bootstrapped successfully for epoch {} with {} accounts",
             epoch, accounts_len
         );
+
+        Ok(())
     }
 
     /// Wait for and process snapshot bootstrap messages
@@ -115,10 +120,12 @@ impl AccountsState {
                     SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
                     info!("Received AccountsState bootstrap message");
-                    let epoch = accounts_data.epoch;
-                    let mut state = history.lock().await.get_or_init_with(State::default);
-                    Self::handle_bootstrap(&mut state, accounts_data);
-                    history.lock().await.commit(epoch, state);
+
+                    let block_number = accounts_data.block_number;
+                    let mut state = State::default();
+
+                    Self::handle_bootstrap(&mut state, accounts_data)?;
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!("Accounts state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
@@ -153,42 +160,51 @@ impl AccountsState {
         mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
 
-        // Get the stake address deltas from the genesis bootstrap, which we know
-        // don't contain any stake, plus an extra parameter state (!unexplained)
-        // !TODO this seems overly specific to our startup process
-        let _ = stake_subscription.read().await?;
-        let _ = parameters_subscription.read().await?;
+        // Skip genesis-specific initialization when starting from snapshot
+        // (pots are already loaded from snapshot bootstrap data)
+        if !is_snapshot_mode {
+            // Get the stake address deltas from the genesis bootstrap, which we know
+            // don't contain any stake, plus an extra parameter state (!unexplained)
+            // !TODO this seems overly specific to our startup process
+            let _ = stake_subscription.read().await?;
+            let _ = parameters_subscription.read().await?;
 
-        // Initialisation messages
-        {
-            let mut state = history.lock().await.get_current_state();
-            let mut current_block: Option<BlockInfo> = None;
+            // Initialisation messages
+            {
+                let mut state = history.lock().await.get_current_state();
+                let mut current_block: Option<BlockInfo> = None;
 
-            let pots_message_f = pots_subscription.read();
+                let pots_message_f = pots_subscription.read();
 
-            // Handle pots
-            let (_, message) = pots_message_f.await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
-                    state
-                        .handle_pot_deltas(pot_deltas_msg)
-                        .inspect_err(|e| error!("Pots handling error: {e:#}"))
-                        .ok();
+                // Handle pots
+                let (_, message) = pots_message_f.await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::PotDeltas(pot_deltas_msg))) => {
+                        state
+                            .handle_pot_deltas(pot_deltas_msg)
+                            .inspect_err(|e| error!("Pots handling error: {e:#}"))
+                            .ok();
 
-                    current_block = Some(block_info.clone());
+                        current_block = Some(block_info.clone());
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
 
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            if let Some(block_info) = current_block {
-                history.lock().await.commit(block_info.number, state);
+                if let Some(block_info) = current_block {
+                    history.lock().await.commit(block_info.number, state);
+                }
             }
         }
+
+        // Track if this is the first epoch after snapshot bootstrap
+        // We skip rewards calculation on the first epoch since pot deltas were already applied
+        let mut skip_first_epoch_rewards = is_snapshot_mode;
 
         // Main loop of synchronised messages
         loop {
@@ -232,9 +248,9 @@ impl AccountsState {
             // Read from epoch-boundary messages only when it's a new epoch
             // NEWEPOCH ticks
             if new_epoch {
-                // Applies reewards from previous epoch
+                // Applies rewards from previous epoch
                 let previous_epoch_rewards_result = state
-                    .complete_previous_epoch_rewards_calculation(verifier)
+                    .complete_previous_epoch_rewards_calculation(verifier, skip_first_epoch_rewards)
                     .await
                     .inspect_err(|e| {
                         vld.push_anyhow(anyhow!("Previous epoch rewards calculation error: {e:#}"))
@@ -398,6 +414,9 @@ impl AccountsState {
 
                     _ => error!("Unexpected message type: {message:?}"),
                 }
+
+                // Clear the skip flag after first epoch transition
+                skip_first_epoch_rewards = false;
             }
 
             // Now handle the certs_message properly
@@ -842,7 +861,8 @@ impl AccountsState {
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+        let snapshot_subscription = if is_snapshot_mode {
             info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
@@ -872,6 +892,7 @@ impl AccountsState {
                 drep_state_subscription,
                 parameters_subscription,
                 &verifier,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

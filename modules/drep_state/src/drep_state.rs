@@ -2,7 +2,7 @@
 //! Accepts certificate events and derives the DRep State in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
@@ -94,10 +94,11 @@ impl DRepState {
                         drep_msg.dreps.len(),
                         drep_msg.epoch
                     );
+                    let block_number = drep_msg.block_number;
                     let mut state = State::new(storage_config);
                     state.bootstrap(drep_msg);
                     let drep_count = state.dreps.len();
-                    history.lock().await.commit_forced(state);
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!(
                         "Bootstrap complete - {} DReps committed to state",
                         drep_count
@@ -340,7 +341,7 @@ impl DRepState {
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {

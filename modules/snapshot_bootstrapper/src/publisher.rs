@@ -1,27 +1,31 @@
+use acropolis_common::configuration::SyncMode;
+use acropolis_common::messages::SPOBootstrapMessage;
+use acropolis_common::MagicNumber;
+use acropolis_common::ProtocolParamUpdate;
+use acropolis_common::RewardParams;
 use acropolis_common::{commands::chain_sync::ChainSyncCommand, messages::Command};
 use acropolis_common::{
     epoch_snapshot::SnapshotsContainer,
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots,
-        GovernanceProtocolParametersBootstrapMessage,
-        GovernanceProtocolParametersSlice::{self, Current, Future, Previous},
-        Message, SnapshotMessage, SnapshotStateMessage, UTxOPartialState,
+        AccountsBootstrapMessage, BlockKesValidatorBootstrapMessage, DRepBootstrapMessage,
+        EpochBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
+        UTxOPartialState,
     },
     params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
     snapshot::{
-        protocol_parameters::ProtocolParameters,
         streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
         AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback,
         PoolCallback, ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
         UtxoCallback,
     },
     stake_addresses::AccountState,
-    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, UTXOValue, UTxOIdentifier,
+    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, PoolId, UTXOValue, UTxOIdentifier,
 };
+
 use anyhow::Result;
 use caryatid_sdk::Context;
 use std::collections::HashMap;
@@ -47,6 +51,10 @@ pub struct EpochContext {
     pub last_block_time: u64,
     /// Last block height from header
     pub last_block_height: u64,
+    /// Bootstrap Era
+    pub era: Era,
+    /// Magic number from genesis params
+    pub magic_number: MagicNumber,
 }
 
 impl EpochContext {
@@ -56,12 +64,14 @@ impl EpochContext {
     /// * `header_slot` - Slot number from the target block header
     /// * `header_block_height` - Block height from the target block header
     /// * `epoch` - Target epoch number
+    /// * `era` - Era of the target block
     /// * `genesis` - Genesis values for timestamp calculations
     pub fn new(
         nonces: Nonces,
         header_slot: u64,
         header_block_height: u64,
         epoch: u64,
+        era: Era,
         genesis: &GenesisValues,
     ) -> Self {
         let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
@@ -75,6 +85,8 @@ impl EpochContext {
             epoch_end_time,
             last_block_time,
             last_block_height: header_block_height,
+            era,
+            magic_number: genesis.magic_number.clone(),
         }
     }
 }
@@ -87,6 +99,7 @@ pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     snapshot_topic: String,
     sync_command_topic: String,
+    sync_mode: SyncMode,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -96,6 +109,7 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
+    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -103,12 +117,14 @@ impl SnapshotPublisher {
         context: Arc<Context<Message>>,
         snapshot_topic: String,
         sync_command_topic: String,
+        sync_mode: SyncMode,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
             snapshot_topic,
             sync_command_topic,
+            sync_mode,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -118,6 +134,7 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
+            snapshot_fee: 0,
         }
     }
 
@@ -138,13 +155,44 @@ impl SnapshotPublisher {
         Ok(())
     }
 
+    /// Publish operational certificate counters for block KES validator bootstrap
+    pub async fn publish_kes_validator_bootstrap(
+        &self,
+        epoch: u64,
+        ocert_counters: HashMap<PoolId, u64>,
+    ) -> Result<()> {
+        info!(
+            "Publishing KES validator bootstrap with {} opcert counters on '{}'",
+            ocert_counters.len(),
+            self.snapshot_topic
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::BlockKesValidatorState(BlockKesValidatorBootstrapMessage {
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+                ocert_counters,
+            }),
+        )));
+
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish KES validator bootstrap message: {}", e);
+        });
+
+        Ok(())
+    }
+
     pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
         info!(
             "Publishing sync command on {} for slot {}",
             self.sync_command_topic,
             point.slot()
         );
-        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        let message = if self.sync_mode.is_mithril() {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
+        } else {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
+        };
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await
@@ -167,7 +215,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: 0,
+            total_fees: self.snapshot_fee,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -243,10 +291,14 @@ impl PoolCallback for SnapshotPublisher {
             pools.updates.len(),
             pools.retiring.len()
         );
+
         self.pools.extend(&pools);
 
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::SPOState(pools),
+            SnapshotStateMessage::SPOState(SPOBootstrapMessage {
+                block_number: self.epoch_context.last_block_height,
+                spo_state: pools,
+            }),
         )));
 
         let context = self.context.clone();
@@ -284,12 +336,14 @@ impl AccountsCallback for SnapshotPublisher {
         // Convert the parsed data to the message type
         let message = AccountsBootstrapMessage {
             epoch: data.epoch,
+            block_number: self.epoch_context.last_block_height,
             accounts: data.accounts,
             pools: data.pools,
             retiring_pools: data.retiring_pools,
             dreps: data.dreps,
             pots: data.pots,
             bootstrap_snapshots: data.snapshots,
+            pot_deltas: data.pot_deltas,
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -342,7 +396,11 @@ impl DRepCallback for SnapshotPublisher {
         self.dreps_len += dreps.len();
         // Send a message to the DRepState
         let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-            SnapshotStateMessage::DRepState(DRepBootstrapMessage { dreps, epoch }),
+            SnapshotStateMessage::DRepState(DRepBootstrapMessage {
+                dreps,
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+            }),
         )));
 
         // Clone what we need for the async task
@@ -373,20 +431,18 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
         epoch: u64,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        _: RewardParams,
+        _: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()> {
-        // Separate publish for each slice so that the messages enum is not too large
-        [
-            (Previous, gs_previous_params),
-            (Current, gs_current_params),
-            (Future, gs_future_params),
-        ]
-        .into_iter()
-        .for_each(|(slice, params)| {
-            publish_gov_state(&self.context, &self.snapshot_topic, slice, epoch, params)
-        });
+        publish_gov_state(
+            &self.context,
+            &self.snapshot_topic,
+            epoch,
+            self.epoch_context.era,
+            self.epoch_context.magic_number.clone(),
+            params,
+        );
 
         Ok(())
     }
@@ -395,25 +451,19 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
 fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
-    slice: GovernanceProtocolParametersSlice,
     epoch: u64,
-    params: ProtocolParameters,
+    era: Era,
+    magic_number: MagicNumber,
+    params: ProtocolParamUpdate,
 ) {
-    info!(
-        "Received governance protocol parameters for epoch {epoch} slice {:?}",
-        slice
-    );
+    info!("Received governance protocol parameters for epoch {epoch}",);
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
-        SnapshotStateMessage::ParametersState(GovernanceProtocolParametersBootstrapMessage {
+        SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
             epoch,
-            slice,
             params,
-            era: Some(Era::Conway),
-            network_name: "mainnet".to_string(),
-            // NOTE: The era is hardcoded to Conway. This code is currently
-            // Conway-focused and has not been tested on other eras. And the
-            // network name is hardcoded to mainnet for the same reason.
+            era,
+            network_name: magic_number.to_network_name().to_string(),
         }),
     )));
 
@@ -641,6 +691,7 @@ mod tests {
             134956789, // slot
             11000000,  // block height
             509,       // epoch
+            Era::Conway,
             &genesis,
         );
 
@@ -656,7 +707,14 @@ mod tests {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
 
-        let ctx = EpochContext::new(nonces.clone(), 134956789, 11000000, 509, &genesis);
+        let ctx = EpochContext::new(
+            nonces.clone(),
+            134956789,
+            11000000,
+            509,
+            Era::Conway,
+            &genesis,
+        );
 
         // Verify nonce conversion works
         assert_eq!(ctx.nonces, nonces);

@@ -5,7 +5,8 @@
 # ============================================================================
 [global.startup]
 network = "mainnet"
-method = "mithril"  # Options: "mithril" | "snapshot"
+startup-mode = "genesis"   # Options: "genesis" | "snapshot"
+sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -45,7 +46,7 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
-           "cardano.validation.spo"
+#           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]

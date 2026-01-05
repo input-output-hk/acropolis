@@ -1,7 +1,7 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::{EpochBootstrapMessage, SnapshotMessage, SnapshotStateMessage};
 use acropolis_common::{
     caryatid::SubscriptionExt,
@@ -98,9 +98,10 @@ impl EpochsState {
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::EpochState(epoch_data),
                 )) => {
+                    let block_number = epoch_data.last_block_height;
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
-                    history.lock().await.commit(epoch_data.epoch, state);
+                    history.lock().await.bootstrap_init_with(state, block_number);
                     info!("Epoch state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
@@ -123,6 +124,7 @@ impl EpochsState {
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
         mut epoch_nonce_publisher: EpochNoncePublisher,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -135,8 +137,10 @@ impl EpochsState {
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
 
-        // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
+        // Consume initial protocol parameters (only needed for genesis bootstrap)
+        if !is_snapshot_mode {
+            let _ = protocol_parameters_subscription.read().await?;
+        }
 
         loop {
             // Get a mutable state
@@ -311,7 +315,8 @@ impl EpochsState {
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let snapshot_subscription = if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+        let snapshot_subscription = if is_snapshot_mode {
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {
             None
@@ -371,6 +376,7 @@ impl EpochsState {
                 protocol_parameters_subscription,
                 epoch_activity_publisher,
                 epoch_nonce_publisher,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

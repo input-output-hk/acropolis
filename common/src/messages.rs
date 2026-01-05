@@ -24,7 +24,6 @@ use crate::queries::{
     scripts::{ScriptsStateQuery, ScriptsStateQueryResponse},
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
-use crate::snapshot::protocol_parameters::ProtocolParameters;
 use crate::snapshot::AccountState;
 use crate::Pots;
 use std::collections::HashMap;
@@ -116,7 +115,7 @@ pub struct WithdrawalsMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PotDeltasMessage {
     /// Set of pot deltas
-    pub deltas: Vec<PotDelta>,
+    pub deltas: BootstrapPotDeltas,
 }
 
 /// Stake address part of address deltas message
@@ -349,22 +348,23 @@ pub enum SnapshotMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepBootstrapMessage {
     pub epoch: u64,
+    pub block_number: u64,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub enum GovernanceProtocolParametersSlice {
-    Previous,
-    Current,
-    Future,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockKesValidatorBootstrapMessage {
+    pub epoch: u64,
+    pub block_number: u64,
+    /// Maps pool ID to the latest operational certificate counter
+    pub ocert_counters: HashMap<PoolId, u64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GovernanceProtocolParametersBootstrapMessage {
+pub struct ProtocolParametersBootstrapMessage {
     pub network_name: String,
-    pub era: Option<Era>,
-    pub slice: GovernanceProtocolParametersSlice,
-    pub params: ProtocolParameters,
+    pub era: Era,
+    pub params: ProtocolParamUpdate,
     pub epoch: u64,
 }
 
@@ -428,6 +428,9 @@ pub struct AccountsBootstrapMessage {
     /// Epoch number this snapshot is for
     pub epoch: u64,
 
+    /// Block number this snapshot is for
+    pub block_number: u64,
+
     /// All account states (stake addresses with delegations and balances)
     pub accounts: Vec<AccountState>,
 
@@ -440,13 +443,28 @@ pub struct AccountsBootstrapMessage {
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
 
-    /// Pot balances (treasury, reserves, deposits)
+    /// Pot balances (treasury, reserves, deposits) for the set epoch
     pub pots: Pots,
+
+    /// Pot deltas to apply at epoch boundary transition
+    /// These come from pulsing_rew_update and instantaneous_rewards in the snapshot
+    pub pot_deltas: BootstrapPotDeltas,
 
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
+}
+
+/// Deltas to apply to pots at epoch boundary during snapshot bootstrap
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct BootstrapPotDeltas {
+    /// Delta to treasury (positive = increase)
+    pub delta_treasury: i64,
+    /// Delta to reserves (positive = increase, typically negative due to monetary expansion)
+    pub delta_reserves: i64,
+    /// Delta to deposits (from stake/pool registrations/deregistrations)
+    pub delta_deposits: i64,
 }
 
 /// UTxO bootstrap message containing partial UTxO state
@@ -492,16 +510,24 @@ pub struct GovernanceProposalRoots {
     pub constitution: Option<GovActionId>,
 }
 
+/// SPO bootstrap message containing pool state and block number
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPOBootstrapMessage {
+    pub block_number: u64,
+    pub spo_state: SPOState,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
-    SPOState(SPOState),
+    SPOState(SPOBootstrapMessage),
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
-    ParametersState(GovernanceProtocolParametersBootstrapMessage),
+    ParametersState(ProtocolParametersBootstrapMessage),
     GovernanceState(GovernanceBootstrapMessage),
+    BlockKesValidatorState(BlockKesValidatorBootstrapMessage),
 }
 
 // === Global message enum ===
