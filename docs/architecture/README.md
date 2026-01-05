@@ -12,3 +12,4 @@ to become a full Cardano node.
   - [Basic ledger](system-bootstrap-and-sync-with-basic-ledger.md) - Adding basic (Shelley-era) ledger state
   - [Conway ledger](system-bootstrap-and-sync-with-conway.md) - Adding Conway / CIP-1694 governance
   - [BlockFrost API](system-ledger-with-api-and-history.md) - Adding a BlockFrost REST API and history storage
+  - [Validation](ledger-validation.md) - Validating incoming blocks, Phase 1
