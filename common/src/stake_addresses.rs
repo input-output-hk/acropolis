@@ -459,6 +459,26 @@ impl StakeAddressMap {
         }
     }
 
+    /// Deregister a DRep - clears all delegations to this DRep
+    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
+        for sas in self.inner.values_mut() {
+            if let Some(ref drep) = sas.delegated_drep {
+                let matches = match drep {
+                    DRepChoice::Key(hash) => {
+                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
+                    }
+                    DRepChoice::Script(hash) => {
+                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
+                    }
+                    _ => false,
+                };
+                if matches {
+                    sas.delegated_drep = None;
+                }
+            }
+        }
+    }
+
     /// Record a drep delegation
     pub fn record_drep_delegation(
         &mut self,

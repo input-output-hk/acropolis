@@ -33,15 +33,13 @@ use acropolis_common::{
         EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
         StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
-    protocol_params::{Nonce, ProtocolParams, ProtocolVersion, ShelleyParams, ShelleyProtocolParams},
-    rational_number::RationalNumber,
+    protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GenesisDelegates,
-    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
-    NetworkId, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
-    RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
+    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, NetworkId, PoolId,
+    PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards,
+    StakeAddress, StakeRewardDelta, TxCertificate,
 };
-use chrono::DateTime;
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -565,51 +563,22 @@ impl State {
             );
         }
 
-        // DEBUG: Hardcoded ShelleyParams for mainnet to eliminate parameter issues
-        // TODO: Remove this once the issue is resolved
-        let shelley_params = ShelleyParams {
-            active_slots_coeff: RationalNumber::new(5, 100),
-            epoch_length: 432000,
-            max_kes_evolutions: 62,
-            max_lovelace_supply: 45_000_000_000_000_000,
-            network_id: NetworkId::Mainnet,
-            network_magic: 764824073,
-            protocol_params: ShelleyProtocolParams {
-                protocol_version: ProtocolVersion::chang(),
-                max_tx_size: 16384,
-                max_block_body_size: 90112,
-                max_block_header_size: 1100,
-                min_utxo_value: 4310,
-                key_deposit: 2_000_000,
-                minfee_a: 44,
-                minfee_b: 155381,
-                pool_deposit: 500_000_000,
-                stake_pool_target_num: 500,
-                min_pool_cost: 170_000_000,
-                pool_retire_max_epoch: 18,
-                extra_entropy: Nonce::neutral(),
-                decentralisation_param: RationalNumber::new(0, 1),
-                monetary_expansion: RationalNumber::new(3, 1000),
-                treasury_cut: RationalNumber::new(2, 10),
-                pool_pledge_influence: RationalNumber::new(3, 10),
+        // Get previous Shelley parameters, silently return if too early in the chain so no
+        // rewards to calculate
+        // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
+        // have to use the genesis parameters we just received
+        let shelley_params = match &self.previous_protocol_parameters {
+            Some(ProtocolParams {
+                shelley: Some(sp), ..
+            }) => sp,
+            _ => match &self.protocol_parameters {
+                Some(ProtocolParams {
+                    shelley: Some(sp), ..
+                }) => sp,
+                _ => return Ok(vec![]),
             },
-            security_param: 2160,
-            slot_length: 1,
-            slots_per_kes_period: 129600,
-            system_start: DateTime::from_timestamp(1506203091, 0).unwrap(),
-            update_quorum: 5,
-            gen_delegs: GenesisDelegates::default(),
-        };
-        info!(
-            "Using hardcoded ShelleyParams: k={}, a0={}/{}, rho={}/{}, tau={}/{}",
-            shelley_params.protocol_params.stake_pool_target_num,
-            shelley_params.protocol_params.pool_pledge_influence.numer(),
-            shelley_params.protocol_params.pool_pledge_influence.denom(),
-            shelley_params.protocol_params.monetary_expansion.numer(),
-            shelley_params.protocol_params.monetary_expansion.denom(),
-            shelley_params.protocol_params.treasury_cut.numer(),
-            shelley_params.protocol_params.treasury_cut.denom(),
-        );
+        }
+        .clone();
 
         info!(
             epoch,
@@ -712,70 +681,64 @@ impl State {
         );
 
         // Set up background task for rewards, capturing and emptying current deregistrations
-        // Note: We no longer skip task creation at bootstrap. The pulsing rewards in the bootstrap
-        // snapshot are for epoch N-1 (calculated during epoch N), while the task created here
-        // calculates epoch N rewards (applied at epoch N+1 boundary). These are different epochs,
-        // so there's no double-counting.
-        {
-            let performance = self.epoch_snapshots.mark.clone();
-            let staking = self.epoch_snapshots.set.clone();
+        let performance = self.epoch_snapshots.mark.clone();
+        let staking = self.epoch_snapshots.set.clone();
 
-            // Calculate the sets of net registrations and deregistrations which happened between
-            // staking and now
-            // Note: We do this to save memory - although the 'mark' snapshot contains the
-            // current registration status of each address, it is segmented by SPO and there's
-            // no way to search by address (they may move SPO in between), so this saves another
-            // huge map.  If the snapshot was ever changed to store addresses in a way where an
-            // individual could be looked up, this could be simplified - but you still need to
-            // handle the Shelley bug part!
-            let mut registrations: HashSet<StakeAddress> = HashSet::new();
-            let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
+        // Calculate the sets of net registrations and deregistrations which happened between
+        // staking and now
+        // Note: We do this to save memory - although the 'mark' snapshot contains the
+        // current registration status of each address, it is segmented by SPO and there's
+        // no way to search by address (they may move SPO in between), so this saves another
+        // huge map.  If the snapshot was ever changed to store addresses in a way where an
+        // individual could be looked up, this could be simplified - but you still need to
+        // handle the Shelley bug part!
+        let mut registrations: HashSet<StakeAddress> = HashSet::new();
+        let mut deregistrations: HashSet<StakeAddress> = HashSet::new();
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.set.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
+        Self::apply_registration_changes(
+            &self.epoch_snapshots.mark.registration_changes,
+            &mut registrations,
+            &mut deregistrations,
+        );
+
+        let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
+        let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
+        self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
+            // Wait for start signal
+            let _ = start_rewards_rx.recv();
+
+            // Additional deregistrations from current epoch - early Shelley bug
+            // TODO - make optional, turn off after Allegra
             Self::apply_registration_changes(
-                &self.epoch_snapshots.set.registration_changes,
+                &current_epoch_registration_changes.lock().unwrap(),
                 &mut registrations,
                 &mut deregistrations,
             );
-            Self::apply_registration_changes(
-                &self.epoch_snapshots.mark.registration_changes,
-                &mut registrations,
-                &mut deregistrations,
-            );
 
-            let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
-            let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
-            self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-                // Wait for start signal
-                let _ = start_rewards_rx.recv();
+            if tracing::enabled!(Level::DEBUG) {
+                registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
+                deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
+            }
 
-                // Additional deregistrations from current epoch - early Shelley bug
-                // TODO - make optional, turn off after Allegra
-                Self::apply_registration_changes(
-                    &current_epoch_registration_changes.lock().unwrap(),
-                    &mut registrations,
-                    &mut deregistrations,
-                );
+            // Calculate reward payouts for previous epoch
+            calculate_rewards(
+                epoch - 1,
+                performance,
+                staking,
+                &shelley_params,
+                monetary_change.stake_rewards,
+                &registrations,
+                &deregistrations,
+            )
+        }))));
 
-                if tracing::enabled!(Level::DEBUG) {
-                    registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
-                    deregistrations.iter().for_each(|addr| debug!(epoch, "Deregistration {}", addr));
-                }
-
-                // Calculate reward payouts for previous epoch
-                calculate_rewards(
-                    epoch - 1,
-                    performance,
-                    staking,
-                    &shelley_params,
-                    monetary_change.stake_rewards,
-                    &registrations,
-                    &deregistrations,
-                )
-            }))));
-
-            // Delay starting calculation until 4k into epoch, to capture late deregistrations
-            // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
-            self.start_rewards_tx = Some(start_rewards_tx);
-        }
+        // Delay starting calculation until 4k into epoch, to capture late deregistrations
+        // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
+        self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
         let retiring: OrdSet<PoolId> = self.retiring_spos.drain(..).collect();
@@ -1056,7 +1019,7 @@ impl State {
                             count_to_treasury += 1;
                             self.pots.treasury += reward.amount;
 
-                            // Remove from filtered version for comparison and result
+                            // Remove from a filtered version for comparison and result
                             if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
                                 rewards.retain(|r| r.account != reward.account);
                             }
@@ -1357,7 +1320,31 @@ impl State {
     }
 
     pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
+        // Convert current and new DReps to maps for comparison
+        let old_dreps: HashMap<DRepCredential, Lovelace> = self.dreps.iter().cloned().collect();
+        let new_dreps: HashMap<DRepCredential, Lovelace> = drep_msg.dreps.iter().cloned().collect();
+
+        // Find truly new DReps (in new but not in old)
+        let new_registrations: Vec<_> =
+            new_dreps.keys().filter(|cred| !old_dreps.contains_key(*cred)).collect();
+
+        // Find deregistered DReps (in old but not in new)
+        let deregistrations: Vec<_> =
+            old_dreps.keys().filter(|cred| !new_dreps.contains_key(*cred)).collect();
+
+        if !new_registrations.is_empty() || !deregistrations.is_empty() {
+            info!(
+                "DRep state epoch {}: {} new registrations, {} deregistrations (deposits already handled via certificates)",
+                drep_msg.epoch,
+                new_registrations.len(),
+                deregistrations.len()
+            );
+        }
+
+        // Update to authoritative list from node
+        // Note: deposits are handled immediately via certificates, so we don't adjust pots here
         self.dreps = drep_msg.dreps.clone();
+        self.drep_deposits = self.dreps.iter().map(|(_, deposit)| deposit).sum();
     }
 
     /// Record a stake delegation
@@ -1437,31 +1424,51 @@ impl State {
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
-                    // DRep deposits are tracked separately from the main deposits pot
-                    // The Haskell node verification does NOT include DRep deposits in deposited pot,
-                    // so we track them separately for consistency with bootstrap (which subtracts them)
+                    // DRep deposits ARE part of the main deposits pot per Haskell ledger spec.
+                    // utxosDeposited = sumObligation(oblStake + oblPool + oblDRep + oblProposal)
+                    // The deposit comes from UTxO and goes into the deposits pot.
+                    self.pots.deposits += reg.deposit;
                     self.drep_deposits += reg.deposit;
+
+                    // Register the DRep
+                    self.dreps.push((reg.credential.clone(), reg.deposit));
+
                     info!(
-                        "DRep registration: {:?}, deposit: {}, drep_deposits: {}",
-                        reg.credential, reg.deposit, self.drep_deposits
+                        "DRep registration: {:?}, deposit: {}, pots.deposits: {}, drep_deposits: {}",
+                        reg.credential, reg.deposit, self.pots.deposits, self.drep_deposits
                     );
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    // DRep deposits are tracked separately (not in main deposits pot)
+                    // DRep deposits ARE part of the main deposits pot per Haskell ledger spec.
+                    self.pots.deposits = self.pots.deposits.saturating_sub(dereg.refund);
                     self.drep_deposits = self.drep_deposits.saturating_sub(dereg.refund);
 
-                    // Add refund to the DRep's stake address (like pool deposit refunds)
-                    // This is critical for SPDD to match db-sync!
-                    // DRepCredential is a Credential, same as StakeCredential
-                    let stake_address = StakeAddress::new(dereg.credential.clone(), NetworkId::Mainnet);
-                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                    stake_addresses.add_to_reward(&stake_address, dereg.refund);
+                    // Remove the DRep from registry
+                    self.dreps.retain(|(cred, _)| cred != &dereg.credential);
 
-                    info!(
-                        "DRep deregistration: {:?}, refund: {} added to stake address {}, drep_deposits: {}",
-                        dereg.credential, dereg.refund, stake_address, self.drep_deposits
-                    );
+                    // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)
+                    let reward_address =
+                        StakeAddress::new(dereg.credential.clone(), NetworkId::Mainnet);
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    stake_addresses.deregister_drep(&dereg.credential);
+
+                    // Pay refund to the DRep's reward account if registered,
+                    // otherwise to treasury (same as SPO pool refunds)
+                    if stake_addresses.is_registered(&reward_address) {
+                        stake_addresses.add_to_reward(&reward_address, dereg.refund);
+                        info!(
+                            "DRep deregistration: {:?}, refund: {} to {}, pots.deposits: {}",
+                            dereg.credential, dereg.refund, reward_address, self.pots.deposits
+                        );
+                    } else {
+                        drop(stake_addresses);
+                        self.pots.treasury += dereg.refund;
+                        warn!(
+                            "DRep deregistration: {:?}, reward address {} not registered - refund {} to treasury",
+                            dereg.credential, reward_address, dereg.refund
+                        );
+                    }
                 }
 
                 _ => (),
