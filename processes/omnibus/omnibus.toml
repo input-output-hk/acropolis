@@ -53,6 +53,10 @@ validators = [
 [module.rest-blockfrost]
 
 [module.tx-unpacker]
+# Subscriptions needed for validation
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
+protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
+
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
