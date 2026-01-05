@@ -24,7 +24,7 @@ fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
 
 /// Validate Native Scripts from Transaction witnesses
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L373
-pub fn validate_failed_native_scripts(
+pub fn validate_native_scripts(
     native_scripts: &[NativeScript],
     vkey_hashes_provided: &HashSet<KeyHash>,
     low_bnd: Option<u64>,
@@ -46,7 +46,7 @@ pub fn validate_failed_native_scripts(
 /// Validate that all vkey witnesses signatures
 /// are verified
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
-pub fn validate_verified_wits(
+pub fn validate_vkey_witnesses(
     vkey_witnesses: &[VKeyWitness],
     tx_hash: TxHash,
 ) -> Result<(), Box<UTxOWValidationError>> {
@@ -63,7 +63,7 @@ pub fn validate_verified_wits(
 
 /// Validate genesis keys signatures for MIR certificate
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L463
-pub fn validate_mir_insufficient_genesis_sigs(
+pub fn validate_mir_genesis_sigs(
     vkey_hashes_provided: &HashSet<KeyHash>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
@@ -103,7 +103,7 @@ pub fn validate(
     let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
 
     // validate native scripts
-    validate_failed_native_scripts(
+    validate_native_scripts(
         native_scripts,
         &vkey_hashes_provided,
         transaction_body.validity_interval_start,
@@ -111,18 +111,15 @@ pub fn validate(
     )?;
 
     // validate vkey witnesses signatures
-    validate_verified_wits(vkey_witnesses, tx_hash)?;
+    validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
-    // NOTE:
-    // need to validate metadata
+    // TODO:
+    // Validate metadata
+    // issue: https://github.com/input-output-hk/acropolis/issues/489
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
-        validate_mir_insufficient_genesis_sigs(
-            &vkey_hashes_provided,
-            genesis_delegs,
-            update_quorum,
-        )?;
+        validate_mir_genesis_sigs(&vkey_hashes_provided, genesis_delegs, update_quorum)?;
     }
 
     Ok(())

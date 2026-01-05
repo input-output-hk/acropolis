@@ -36,8 +36,9 @@ pub fn validate(
         update_quorum,
     )?;
 
-    // NOTE:
-    // need to add new validation rules here
+    // TODO:
+    // Add new validation rules here
+    // Issue: https://github.com/input-output-hk/acropolis/issues/546
 
     Ok(())
 }

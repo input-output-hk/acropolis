@@ -19,9 +19,9 @@ pub fn validate(
 ) -> Result<(), Box<UTxOWValidationError>> {
     shelley_wrapper(mtx, tx_hash, vkey_witnesses, native_scripts)?;
 
-    // NOTE:
-    // need to add Babbage UTxOW transition here
-    // need to add Alonzo UTxOW transition here
+    // TODO:
+    // Add Babbage UTxOW transition here
+    // Add Alonzo UTxOW transition here
 
     Ok(())
 }
@@ -38,7 +38,7 @@ fn shelley_wrapper(
     let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
 
     // validate native scripts
-    shelley::utxow::validate_failed_native_scripts(
+    shelley::utxow::validate_native_scripts(
         native_scripts,
         &vkey_hashes_provided,
         transaction_body.validity_interval_start,
@@ -46,10 +46,11 @@ fn shelley_wrapper(
     )?;
 
     // validate vkey witnesses signatures
-    shelley::utxow::validate_verified_wits(vkey_witnesses, tx_hash)?;
+    shelley::utxow::validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
-    // NOTE:
-    // need to validate metadata
+    // TODO:
+    // Validate metadata
+    // issue: https://github.com/input-output-hk/acropolis/issues/489
 
     Ok(())
 }

@@ -42,8 +42,8 @@ pub fn validate(mtx: &alonzo::MintedTx, shelley_params: &ShelleyParams) -> UTxOV
     let transaction_body = &mtx.transaction_body;
 
     validate_input_set_empty_utxo(transaction_body)?;
-    validate_wrong_network(transaction_body, network_id.clone())?;
-    validate_wrong_network_withdrawal(transaction_body, network_id.clone())?;
+    validate_output_network(transaction_body, network_id.clone())?;
+    validate_withdrawal_network(transaction_body, network_id.clone())?;
     validate_output_too_small_utxo(transaction_body, shelley_params)?;
     Ok(())
 }
@@ -62,7 +62,7 @@ pub fn validate_input_set_empty_utxo(
 
 /// Validate every output address match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L481
-pub fn validate_wrong_network(
+pub fn validate_output_network(
     transaction_body: &alonzo::TransactionBody,
     network_id: NetworkId,
 ) -> UTxOValidationResult {
@@ -107,7 +107,7 @@ pub fn validate_wrong_network(
 
 /// Validate every withdrawal account addresses match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L497
-pub fn validate_wrong_network_withdrawal(
+pub fn validate_withdrawal_network(
     transaction_body: &alonzo::TransactionBody,
     network_id: NetworkId,
 ) -> UTxOValidationResult {
