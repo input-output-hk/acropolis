@@ -139,21 +139,21 @@ mod tests {
         "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e"
     ) =>
         matches Ok(());
-        "valid transaction 1 - with byron input & output"
+        "shelley - valid transaction 1 - with byron input & output"
     )]
     #[test_case(validation_fixture!(
         "shelley",
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 2"
+        "shelley - valid transaction 2"
     )]
     #[test_case(validation_fixture!(
         "shelley",
         "0c993cb361c213e5b04d241321975e22870a0d658c03ea5b817c24fc48252ea0"
     ) =>
         matches Ok(());
-        "valid transaction 2 - with mir certificates"
+        "shelley - valid transaction 2 - with mir certificates"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -162,7 +162,7 @@ mod tests {
     ) =>
         matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
         if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
-        "invalid_witnesses_utxow"
+        "shelley - invalid_witnesses_utxow"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -171,7 +171,39 @@ mod tests {
     ) =>
         matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
         if genesis_keys.len() == 4;
-        "mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
+        "shelley - mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
+    )]
+    #[test_case(validation_fixture!(
+        "allegra",
+        "aee87cc55b9a4254497d2b2ea07981f32fd2cf0e1b4f94349a8c23f3d39eb576"
+    ) =>
+        matches Ok(());
+        "allegra - valid transaction 1"
+    )]
+    #[test_case(validation_fixture!(
+        "allegra",
+        "fabfad0aaa2b52b8304f45edc0350659ad0d73f9d1065d9cd3ef7d5a599ac57d"
+    ) =>
+        matches Ok(());
+        "allegra - valid transaction 2 - with mir certificates"
+    )]
+    #[test_case(validation_fixture!(
+        "allegra",
+        "aee87cc55b9a4254497d2b2ea07981f32fd2cf0e1b4f94349a8c23f3d39eb576",
+        "invalid_witnesses_utxow"
+    ) =>
+        matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
+        if key_hash == KeyHash::from_str("6a27b4eec5817b3f6c6af704c8936f2a6505c208e8c4933fdc154a08").unwrap();
+        "allegra - invalid_witnesses_utxow"
+    )]
+    #[test_case(validation_fixture!(
+        "allegra",
+        "fabfad0aaa2b52b8304f45edc0350659ad0d73f9d1065d9cd3ef7d5a599ac57d",
+        "mir_insufficient_genesis_sigs_utxow"
+    ) =>
+        matches Err(UTxOWValidationError::MIRInsufficientGenesisSigsUTXOW { genesis_keys, quorum: 5 })
+        if genesis_keys.len() == 4;
+        "allegra - mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {

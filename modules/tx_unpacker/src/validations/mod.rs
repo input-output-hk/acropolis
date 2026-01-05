@@ -5,11 +5,9 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
-mod allegra;
 mod alonzo;
 mod babbage;
 mod conway;
-mod mary;
 mod shelley;
 
 pub fn validate_tx(
@@ -105,10 +103,10 @@ fn validate_alonzo_compatible_tx(
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
         Era::Allegra => {
-            // NOTE:
-            // Need to add Tx and UTxO validation
+            // TODO:
+            // Add Tx and UTxO validation
 
-            allegra::utxow::validate(
+            shelley::utxow::validate(
                 mtx,
                 tx_hash,
                 &vkey_witnesses,
@@ -119,10 +117,10 @@ fn validate_alonzo_compatible_tx(
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
         Era::Mary => {
-            // NOTE:
-            // Need to add Tx and UTxO validation
+            // TODO:
+            // Add Tx and UTxO validation
 
-            mary::utxow::validate(
+            shelley::utxow::validate(
                 mtx,
                 tx_hash,
                 &vkey_witnesses,
