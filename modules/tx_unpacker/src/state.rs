@@ -33,7 +33,8 @@ impl State {
             raw_tx,
             genesis_delegs,
             &self.protocol_params.shelley,
-            block_info,
+            block_info.slot,
+            block_info.era,
         )
     }
 

@@ -1,7 +1,7 @@
 use acropolis_common::{
     protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    BlockInfo, Era, GenesisDelegates, TxHash,
+    Era, GenesisDelegates, TxHash,
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
@@ -16,9 +16,10 @@ pub fn validate_tx(
     raw_tx: &[u8],
     genesis_delegs: &GenesisDelegates,
     shelley_params: &Option<ShelleyParams>,
-    block_info: &BlockInfo,
+    current_slot: u64,
+    era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
-    let pallas_era = match block_info.era {
+    let pallas_era = match era {
         Era::Shelley => PallasEra::Shelley,
         Era::Allegra => PallasEra::Allegra,
         Era::Mary => PallasEra::Mary,
@@ -30,26 +31,20 @@ pub fn validate_tx(
 
     let tx = MultiEraTx::decode_for_era(pallas_era, raw_tx).map_err(|e| {
         TransactionValidationError::CborDecodeError {
-            era: block_info.era,
+            era,
             reason: e.to_string(),
         }
     })?;
 
-    match block_info.era {
+    match era {
         Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo => {
-            validate_alonzo_compatible_tx(
-                &tx,
-                genesis_delegs,
-                shelley_params,
-                block_info.slot,
-                block_info.era,
-            )?;
+            validate_alonzo_compatible_tx(&tx, genesis_delegs, shelley_params, current_slot, era)?;
         }
         Era::Babbage => {
-            validate_babbage_tx(&tx, genesis_delegs, shelley_params, block_info.era)?;
+            validate_babbage_tx(&tx, genesis_delegs, shelley_params, era)?;
         }
         Era::Conway => {
-            validate_conway_tx(&tx, block_info.era)?;
+            validate_conway_tx(&tx, era)?;
         }
         _ => (),
     }
