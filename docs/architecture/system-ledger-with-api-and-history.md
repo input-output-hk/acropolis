@@ -19,6 +19,8 @@ The new modules are:
 * [BlockFrost REST](../../modules/rest_blockfrost) which provides the actual REST endpoints
 * [Chain Store](../../modules/chain_store) which stores all blocks seen and provides access to
 both whole blocks and individual transactions
+* [Assets State](../../modules/assets_state) which captures information about Cardano Native Assets
+* [Address State](../../modules/address_state) which captures all UTxOs for stake addresses
 * [SPDD State](../../modules/spdd_state) which captures and stores the Stake Pool Delegation Distribution (SPDD) at every epoch
 * [DRDD State](../../modules/drdd_state) which captures and stores the DRep Delegation Distribution
 (DRDD) likewise
@@ -42,6 +44,8 @@ flowchart-elk LR
   PARAM(Parameters State)
   GOV(Governance State)
   AC(Accounts State)
+  ASSET(Assets State)
+  ADDR(Address State)
   REST(REST Server)
   BF(BlockFrost REST)
   CS(Chain Store)
@@ -73,6 +77,8 @@ flowchart-elk LR
   TXU  -- cardano.withdrawals --> HAC
   TXU  -- cardano.governance --> GOV
   TXU  -- cardano.governance --> DREP
+  TXU  -- cardano.asset.deltas --> ASSET
+  TXU  -- cardano.utxo.deltas --> ASSET
   SPO  SPO_AC@-- cardano.spo.state --> AC
   GEN  -- cardano.pot.deltas --> AC
   TXU  -- cardano.block.txs --> ES
@@ -81,8 +87,11 @@ flowchart-elk LR
   AC AC_SPDD@-- cardano.spo.distribution --> SPDD
   AC AC_DRDD@-- cardano.drep.distribution --> DRDD
   AC AC_HAC@-- cardano.stake.reward.deltas --> HAC
+  AC -- cardano.address.deltas --> ADDR
+  AC -- cardano.address.deltas --> ASSET
   PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
   PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
+  PARAM PARAM_ADDR@-- cardano.protocol.parameters --> ADDR
   PARAM PARAM_DREP@-- cardano.protocol.parameters --> DREP
   PARAM PARAM_CS@-- cardano.protocol.parameters --> CS
   PARAM PARAM_HAC@-- cardano.protocol.parameters --> HAC
@@ -156,6 +165,7 @@ flowchart-elk LR
   class ES_HES EPOCH
   class PARAM_GOV EPOCH
   class PARAM_AC EPOCH
+  class PARAM_ADDR EPOCH
   class GOV_PARAM EPOCH
   class DREP_AC EPOCH
   class AC_GOV_DREP EPOCH
@@ -233,6 +243,27 @@ It then provides handlers to allow querying blocks and transactions through
 `cardano.query.blocks` and `cardano.query.transactions` requests.  We're just usnig the Chain
 Store to provide the BlockFrost API for now, but we'll see [later](TODO) it will be used to
 serve blocks to downstream peers, too.
+
+### Address State
+
+The [Address State](../../modules/address_state) module takes
+`cardano.address.deltas` (deposits and spends) from the UTXO State and
+stores them along with their accompanying transaction IDs, in a Fjall disk store.
+
+It can then provide a `cardano.query.address` handler which provides the data for the
+BlockFrost `/addresses` endpoint.
+
+### Assets State
+
+Up to now we have not tracked Cardano Native Assets (CNAs), because they aren't used internally in
+a node's operations.  However, they are a major part of Cardano, and there is a BlockFrost API
+for them, so we need a new module, [Assets State](../../modules/assets_state) which tracks them.
+
+This receives `cardano.asset.deltas` from the Tx Unpacker, and tracks
+the minting and burning of CNA tokens.  If it is configured to store
+historical data as well (see the [module page](../../modules/assets_state)
+for details, it also takes `cardano.utxo.deltas` and `cardano.address.deltas`
+so that it can fully handle `cardano.query.assets` from the BlockFrost `/assets` endpoints.
 
 ### SPDD State
 
@@ -384,4 +415,5 @@ $ cargo run --release -- --config configs/ledger-with-api-and-history.toml
 
 ## Next steps
 
-
+In the next step, we'll simplify things again and remove the API and historical storage
+while we look at [validation](system-ledger-validation.md).
