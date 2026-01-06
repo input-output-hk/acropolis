@@ -49,6 +49,11 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 }
 
 /// DRep Record - represents the current state of a DRep in the ledger
+///
+/// TODO: The Haskell ledger's DRepState has additional fields we don't track:
+/// - `drepExpiry: EpochNo` - computed as (currentEpoch + ppDRepActivity - numDormantEpochs)
+/// - `drepDelegs: Set Credential` - reverse index of who delegated TO this DRep
+/// See: cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Governance/DRepPulser.hs
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepRecord {
     /// Deposit amount in lovelace

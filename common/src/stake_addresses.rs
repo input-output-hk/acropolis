@@ -460,6 +460,14 @@ impl StakeAddressMap {
     }
 
     /// Deregister a DRep - clears all delegations to this DRep
+    ///
+    /// TODO: This currently iterates ALL stake addresses to find delegations (O(n)).
+    /// The Haskell ledger maintains a reverse index (`drepDelegs`) on each DRepState
+    /// that tracks which credentials delegated TO that DRep, enabling O(k) clearing
+    /// where k = number of delegators. Consider adding similar reverse tracking for
+    /// better performance at scale.
+    /// See: cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
+    /// `clearDRepDelegations` function.
     pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
         for sas in self.inner.values_mut() {
             if let Some(ref drep) = sas.delegated_drep {

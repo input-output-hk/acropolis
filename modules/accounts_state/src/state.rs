@@ -38,7 +38,7 @@ use acropolis_common::{
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
-    NetworkId, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
+    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
     RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
@@ -1241,6 +1241,8 @@ impl State {
 
                 TxCertificate::DRepDeregistration(dereg) => {
                     // DRep deposits ARE part of the main deposits pot per Haskell ledger spec.
+                    // The actual refund is handled at the UTxO level (transaction outputs),
+                    // NOT paid to a reward account. We only need to update our deposit tracking.
                     self.pots.deposits = self.pots.deposits.saturating_sub(dereg.refund);
                     self.drep_deposits = self.drep_deposits.saturating_sub(dereg.refund);
 
@@ -1248,27 +1250,13 @@ impl State {
                     self.dreps.retain(|(cred, _)| cred != &dereg.credential);
 
                     // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)
-                    let reward_address =
-                        StakeAddress::new(dereg.credential.clone(), NetworkId::Mainnet);
                     let mut stake_addresses = self.stake_addresses.lock().unwrap();
                     stake_addresses.deregister_drep(&dereg.credential);
 
-                    // Pay refund to the DRep's reward account if registered,
-                    // otherwise to treasury (same as SPO pool refunds)
-                    if stake_addresses.is_registered(&reward_address) {
-                        stake_addresses.add_to_reward(&reward_address, dereg.refund);
-                        info!(
-                            "DRep deregistration: {:?}, refund: {} to {}, pots.deposits: {}",
-                            dereg.credential, dereg.refund, reward_address, self.pots.deposits
-                        );
-                    } else {
-                        drop(stake_addresses);
-                        self.pots.treasury += dereg.refund;
-                        warn!(
-                            "DRep deregistration: {:?}, reward address {} not registered - refund {} to treasury",
-                            dereg.credential, reward_address, dereg.refund
-                        );
-                    }
+                    info!(
+                        "DRep deregistration: {:?}, refund: {} (via UTxO), pots.deposits: {}, drep_deposits: {}",
+                        dereg.credential, dereg.refund, self.pots.deposits, self.drep_deposits
+                    );
                 }
 
                 _ => (),
