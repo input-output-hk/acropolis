@@ -207,10 +207,10 @@ message which is picked up by Consensus.
 Similarly, the [Block VRF Validator](../../modules/block_vrf_validator) takes proposed blocks
 and checks that the VRF calculation is correct - hence proving that the SPO did have the right
 to produce a block in that slot.  Along with the SPO state, protocol parameters and genesis
-values that the Block KES Validator takes, it also captures epoch nonces from `cardano.epoch.nonce`
-and the full SPDD from `cardano.spo.distribution`.  Then knowing the relative stake of the
-producing SPO compared to the total and the VRF output governed by the nonce, it can do the
-validation.
+values that the Block KES Validator takes, it also captures epoch nonces from `cardano.epoch.nonce`,
+which is sent by the Epochs State, and the full SPDD from `cardano.spo.distribution`.
+Then knowing the relative stake of the producing SPO compared to the total and the VRF output
+governed by the nonce, it can do the validation.
 
 The result of this is again a set of ValidationOutcomes, this time in
 a `cardano.validation.vrf` message.
