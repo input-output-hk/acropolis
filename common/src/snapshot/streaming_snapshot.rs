@@ -1123,8 +1123,10 @@ impl StreamingSnapshotParser {
         // Parse deposits (UTxOState[1])
         let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
-        let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
+        // Parse fees (UTxOState[2]) - cumulative fees in UTxO state
+        // Note: us_fees contains fees from both current AND previous epoch. We subtract
+        // fee_ss (previous epoch's fees from snapshots) later to get current epoch only.
+        let us_fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         // Parse governance state using the governance module
         // gov_state = [proposals, committee, constitution, current_pparams, previous_pparams, future_pparams, drep_pulsing_state]
@@ -1223,30 +1225,21 @@ impl StreamingSnapshotParser {
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
         );
 
-        let bootstrap_snapshots = match snapshots_result {
-            Ok(raw_snapshots) => {
-                info!("Successfully parsed mark and set snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer
-                let processed = raw_snapshots.into_snapshots_container(
-                    epoch,
-                    &blocks_prev_map,
-                    &blocks_curr_map,
-                    network.clone(),
-                );
-                info!(
-                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs",
-                    processed.mark.spos.len(),
-                    processed.set.spos.len(),
-                );
-                callbacks.on_snapshots(processed.clone())?;
-                processed
-            }
-            Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Using empty snapshots (pre-Shelley or parse error)...");
-                SnapshotsContainer::default()
-            }
-        };
+        let raw_snapshots = snapshots_result.context("Failed to parse mark/set snapshots")?;
+        info!("Successfully parsed mark/set snapshots!");
+        let fees_prev_epoch = raw_snapshots.fees;
+        let bootstrap_snapshots = raw_snapshots.into_snapshots_container(
+            epoch,
+            &blocks_prev_map,
+            &blocks_curr_map,
+            network.clone(),
+        );
+        info!(
+            "Parsed snapshots: Mark {} SPOs, Set {} SPOs",
+            bootstrap_snapshots.mark.spos.len(),
+            bootstrap_snapshots.set.spos.len(),
+        );
+        callbacks.on_snapshots(bootstrap_snapshots.clone())?;
 
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
@@ -1469,8 +1462,14 @@ impl StreamingSnapshotParser {
         callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
-        let epoch_bootstrap =
-            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
+        // Calculate current epoch fees: us_fees contains cumulative fees, subtract previous epoch's
+        let total_fees_current = us_fees.saturating_sub(fees_prev_epoch);
+        let epoch_bootstrap = EpochBootstrapData::new(
+            epoch,
+            &blocks_previous_epoch,
+            &blocks_current_epoch,
+            total_fees_current,
+        );
         callbacks.on_epoch(epoch_bootstrap)?;
 
         let snapshot_metadata = SnapshotMetadata {
@@ -2118,11 +2117,12 @@ impl StreamingSnapshotParser {
         let set_snapshot =
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
         decoder.skip()?;
-        let _ = decoder.decode::<u64>().unwrap_or(0);
+        let fees = decoder.decode::<u64>().context("Failed to parse fees from snapshots")?;
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
+            fees,
         })
     }
 }
