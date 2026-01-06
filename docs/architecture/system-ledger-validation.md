@@ -69,6 +69,7 @@ flowchart LR
   TXU -- cardano.utxo.deltas --> UTXO
   GEN -- cardano.utxo.deltas --> UTXO
   UTXO -- cardano.address.delta --> SDF
+  UTXO -- cardano.validation.utxo --> CON
   SDF  -- cardano.stake.deltas --> AC
   TXU  -- cardano.certificates --> SDF
   TXU  -- cardano.certificates --> SPO
@@ -79,17 +80,20 @@ flowchart LR
   SPO  SPO_AC@-- cardano.spo.state --> AC
   SPO  SPO_KES@-- cardano.spo.state --> KES
   SPO  SPO_VRF@-- cardano.spo.state --> VRF
+  SPO  -- cardano.validation.spo --> CON
   GEN  -- cardano.pot.deltas --> AC
   TXU  -- cardano.block.txs --> ES
   AC AC_GOV_DREP@-- cardano.drep.distribution --> GOV
   AC AC_GOV_SPO@-- cardano.spo.distribution --> GOV
   AC AC_VRF@-- cardano.spo.distribution --> VRF
+  AC -- cardano.validation.accounts --> CON
   PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
   PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
   PARAM PARAM_DREP@-- cardano.protocol.parameters --> DREP
   PARAM PARAM_KES@-- cardano.protocol.parameters --> KES
   PARAM PARAM_VRF@-- cardano.protocol.parameters --> VRF
   GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
+  GOV -- cardano.validation.governance --> CON
   ES   ES_AC@-- cardano.epoch.activity --> AC
   ES   ES_VRF@-- cardano.epoch.nonce --> VRF
   DREP DREP_AC@-- cardano.drep.state --> AC
@@ -199,8 +203,8 @@ The new [Block KES Validator](../../modules/block_kes_validator) takes proposed 
 the SPO state (`cardano.spo.state`) and the protocol parameters (`cardano.protocol.parameters`)
 and the genesis values (`cardano.sequence.bootstrapped`).
 
-Depending on the result, it sends one or more ValidationOutcomes in a `cardano.validation.kes`
-message which is picked up by Consensus.
+Depending on the result, it sends validation responses in a `cardano.validation.kes`
+message containing `KesValidationError`s (if any), which is picked up by Consensus.
 
 ### Block VRF Validator
 
@@ -212,16 +216,38 @@ which is sent by the Epochs State, and the full SPDD from `cardano.spo.distribut
 Then knowing the relative stake of the producing SPO compared to the total and the VRF output
 governed by the nonce, it can do the validation.
 
-The result of this is again a set of ValidationOutcomes, this time in
-a `cardano.validation.vrf` message.
+The result of this is again a validation response, this time in
+a `cardano.validation.vrf` message containing zero or more `VrfValidationError`s.
 
 ## Existing modules
 
-TODO all validation topics from existing modules - add to graph too.
+Many existing modules also send validation responses for blocks.  They have actually already
+been doing this, but they have been ignored until now.
+
+### Governance State
+
+The [Governance State](../../modules/governance_state) module sends validation responses on
+`cardano.validation.governance`, containing `GovernanceValidationError`s for any faults.
+
+### SPO State
+
+[SPO State](../../modules/spo_state) sends validation responses on
+`cardano.validation.spo`, containing unclassified textual errors for now.
+
+### Accounts State
+
+Similarly, the [Accounts State](../../modules/accounts_state) module sends validation responses on
+`cardano.validation.accounts`, also with unclassified textual errors.
+
+### UTXO State
+
+The [UTXO State](../../modules/utxo_state) sends its validation response on
+`cardano.validation.utxo`, containing `UTxOValidationError`s.
+
+TODO: More modules as they are converted to validation errors
 
 ## Configuration
-Here is the
-[configuration](../../processes/omnibus/configs/ledger-validation.toml)
+Here is the [configuration](../../processes/omnibus/configs/ledger-validation.toml)
 for this setup. You can run it in the `processes/omnibus` directory with:
 
 ```shell
@@ -229,6 +255,6 @@ $ cargo run --release -- --config configs/ledger-validation.toml
 ```
 
 ## Next steps
-TODO
+Next, we'll add [phase 2 validation of scripts](script-validation.md).
 
 

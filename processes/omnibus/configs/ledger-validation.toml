@@ -40,6 +40,10 @@ validators = [
            "cardano.validation.tx",
            "cardano.validation.vrf",
            "cardano.validation.kes",
+           "cardano.validation.governance",
+           "cardano.validation.spo",
+           "cardano.validation.accounts",
+           "cardano.validation.utxo",
            # TODO more
 ]
 
