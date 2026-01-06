@@ -1371,7 +1371,11 @@ impl State {
             info!(
                 "Processed {} governance proposals, total deposits added: {} lovelace",
                 procedures_msg.proposal_procedures.len(),
-                procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
+                procedures_msg
+                    .proposal_procedures
+                    .iter()
+                    .map(|p| p.deposit)
+                    .sum::<u64>()
             );
         }
 
@@ -1410,11 +1414,7 @@ impl State {
                 info!(
                     "Governance proposal {:?} {} - refund {} lovelace to {}",
                     proposal.gov_action_id,
-                    if outcome.voting.accepted {
-                        "enacted"
-                    } else {
-                        "expired"
-                    },
+                    if outcome.voting.accepted { "enacted" } else { "expired" },
                     deposit,
                     reward_account
                 );
@@ -1436,6 +1436,7 @@ impl State {
                 &outcome.action_to_perform
             {
                 for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    // Convert raw bytes to StakeAddress using from_binary (29-byte format)
                     match StakeAddress::from_binary(reward_account_bytes) {
                         Ok(reward_account) => {
                             // Deduct from treasury
