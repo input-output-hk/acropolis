@@ -1076,7 +1076,7 @@ impl StreamingSnapshotParser {
         // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
         // ========================================================================
         // After extensive analysis, the remaining snapshot data (deposits, fees,
-        // protocol parameters, and mark/set/go snapshots) can be efficiently
+        // protocol parameters, and mark/set snapshots) can be efficiently
         // parsed by reading the entire remainder of the file into memory (~500MB)
         // rather than streaming. This is much smaller than the full 2.5GB file.
         //
@@ -1092,7 +1092,7 @@ impl StreamingSnapshotParser {
         // This hybrid approach allows us to:
         // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
         // 2. Parse remaining sections using snapshot.rs functions
-        // 3. Access mark/set/go snapshots that were previously unreachable
+        // 3. Access mark/set snapshots that were previously unreachable
         // ========================================================================
 
         // Calculate remaining file size from current position
@@ -1202,7 +1202,7 @@ impl StreamingSnapshotParser {
             info!("Treasury donations: {} ADA", donations / 1_000_000);
         }
 
-        // Parse mark/set/go snapshots (EpochState[2])
+        // Parse mark/set snapshots (EpochState[2])
         let snapshots_result =
             Self::parse_snapshots_with_hybrid_approach(&mut remainder_decoder, &mut ctx, epoch);
 
@@ -1219,34 +1219,25 @@ impl StreamingSnapshotParser {
         let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
             blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
 
-        // Build pots for snapshot conversion (these are the epoch N pots from the snapshot)
-        let pots = Pots {
-            reserves,
-            treasury,
-            deposits,
-        };
-
         // Log the deltas from pulsing_rew_update (applied during bootstrap to adjust pots)
         info!(
             "Pulsing reward update deltas: delta_treasury={}, delta_reserves={}",
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
         );
 
-        let raw_snapshots = snapshots_result.context("Failed to parse mark/set/go snapshots")?;
-        info!("Successfully parsed mark/set/go snapshots!");
+        let raw_snapshots = snapshots_result.context("Failed to parse mark/set snapshots")?;
+        info!("Successfully parsed mark/set snapshots!");
         let fees_prev_epoch = raw_snapshots.fees;
         let bootstrap_snapshots = raw_snapshots.into_snapshots_container(
             epoch,
             &blocks_prev_map,
             &blocks_curr_map,
-            pots.clone(),
             network.clone(),
         );
         info!(
-            "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+            "Parsed snapshots: Mark {} SPOs, Set {} SPOs",
             bootstrap_snapshots.mark.spos.len(),
             bootstrap_snapshots.set.spos.len(),
-            bootstrap_snapshots.go.spos.len()
         );
         callbacks.on_snapshots(bootstrap_snapshots.clone())?;
 
@@ -2098,7 +2089,7 @@ impl StreamingSnapshotParser {
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
-    /// Uses snapshot.rs functions to parse mark/set/go snapshots from buffer
+    /// Uses snapshot.rs functions to parse mark and set snapshots from buffer
     /// We expect the following structure:
     /// Epoch State / Snapshots / Mark
     /// Epoch State / Snapshots / Set
@@ -2120,19 +2111,17 @@ impl StreamingSnapshotParser {
             ));
         }
 
-        // Parse Mark, Set, Go snapshots
+        // Parse Mark and Set snapshots
         let mark_snapshot =
             RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
         let set_snapshot =
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
-        let go_snapshot =
-            RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
+        decoder.skip()?;
         let fees = decoder.decode::<u64>().context("Failed to parse fees from snapshots")?;
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
-            go: go_snapshot,
             fees,
         })
     }
@@ -2243,10 +2232,9 @@ impl SnapshotsCallback for CollectingCallbacks {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
         // For testing, we could store snapshots here if needed
         info!(
-            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs, {} go SPOs",
+            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs",
             snapshots.mark.spos.len(),
             snapshots.set.spos.len(),
-            snapshots.go.spos.len()
         );
         Ok(())
     }
