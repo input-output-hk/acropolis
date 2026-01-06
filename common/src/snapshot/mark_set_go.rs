@@ -139,6 +139,8 @@ pub struct RawSnapshotsContainer {
     pub mark: RawSnapshot,
     /// Set snapshot (raw CBOR data)
     pub set: RawSnapshot,
+    /// Previous epoch's fees, used for reward calculation
+    pub fees: u64,
 }
 
 impl RawSnapshotsContainer {
