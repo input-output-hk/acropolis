@@ -1,25 +1,4 @@
 //! Acropolis AccountsState: State storage
-//!
-//! This module manages the account state including stake addresses, pools, rewards,
-//! and pot balances. It handles the bootstrap-to-live transition and epoch boundary
-//! processing including rewards calculation.
-//!
-//! ## Bootstrap-to-Live Transition
-//!
-//! At bootstrap, we receive snapshot data directly from the Cardano node's CBOR dump.
-//! The first live epoch after bootstrap creates a new snapshot from live state, which
-//! replaces the bootstrap Mark snapshot. Diagnostic logging tracks any discrepancies
-//! between bootstrap and live-calculated snapshots to help identify state drift issues.
-//!
-//! ## Snapshot Rotation (Mark/Set/Go)
-//!
-//! Per Shelley spec:
-//! - **Mark** = current epoch snapshot (newest)
-//! - **Set** = previous epoch snapshot (epoch - 1)
-//! - **Go** = two epochs ago snapshot (epoch - 2) - used for staking in rewards calculation
-//!
-//! At each epoch boundary, snapshots rotate: Go ← Set ← Mark ← new_snapshot
-
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
@@ -59,10 +38,6 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
 
 /// State for rewards calculation
-///
-/// In Cardano terminology:
-/// - Mark = current epoch snapshot (newest) - the one being built
-/// - Set = previous epoch snapshot (epoch - 1) - used for staking in rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
     /// Mark snapshot (current epoch) - newest
@@ -76,11 +51,7 @@ pub struct EpochSnapshots {
 }
 
 impl EpochSnapshots {
-    /// Push a new snapshot, with optional comparison logging for bootstrap-to-live transition
-    ///
-    /// When `is_first_live_snapshot` is true, this logs detailed comparisons between
-    /// the bootstrap Mark snapshot (being replaced) and the new live-calculated snapshot.
-    /// This helps diagnose any state drift between bootstrap and live processing.
+    /// Push a new snapshot
     pub fn push(&mut self, latest: EpochSnapshot) {
         self.go = self.set.clone();
         self.set = self.mark.clone();
@@ -96,15 +67,6 @@ pub struct State {
 
     /// List of SPOs (by pool ID) retiring in the current epoch
     retiring_spos: Vec<PoolId>,
-
-    /// Pool IDs that just retired this epoch. If they re-register in the same epoch,
-    /// we should NOT count their deposits again (they never got refunded).
-    just_retired_pool_ids: OrdSet<PoolId>,
-
-    /// Pool IDs with pending updates from bootstrap. These pools already have their
-    /// deposits counted in the deposits pot, so they should not be counted as "new"
-    /// when they become active at the first epoch boundary after bootstrap.
-    pending_pool_ids: OrdSet<PoolId>,
 
     /// Map of staking address values
     /// Wrapped in an Arc so it doesn't get cloned in full by StateHistory
@@ -182,33 +144,9 @@ impl State {
         self.retiring_spos = bootstrap_msg.retiring_pools;
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
-        // Load pending pool IDs - these pools already have their deposits counted,
-        // so we should not count them as "new" when they become active
-        self.pending_pool_ids = bootstrap_msg.pending_pool_ids.into_iter().collect();
-        info!("Loaded {} pending pool IDs", self.pending_pool_ids.len());
-
-        // Debug: Check how many pending pools are NOT already in self.spos (truly new vs updates)
-        let pending_not_in_spos: Vec<_> =
-            self.pending_pool_ids.iter().filter(|id| !self.spos.contains_key(*id)).collect();
-        let pending_already_in_spos = self.pending_pool_ids.len() - pending_not_in_spos.len();
-        info!(
-            "  Pending pool breakdown: {} already active (param updates), {} not yet active (new registrations)",
-            pending_already_in_spos,
-            pending_not_in_spos.len()
-        );
-        for pool_id in &pending_not_in_spos {
-            info!("    New registration pending activation: {}", pool_id);
-        }
-
-        // Load DReps and calculate total deposits
+        // Load DReps
         self.dreps = bootstrap_msg.dreps;
-        self.drep_deposits = self.dreps.iter().map(|(_, deposit)| deposit).sum();
-        info!(
-            "Loaded {} DReps with total deposits: {} lovelace ({} ADA)",
-            self.dreps.len(),
-            self.drep_deposits,
-            self.drep_deposits / 1_000_000
-        );
+        info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
         self.pots = bootstrap_msg.pots;
@@ -550,11 +488,6 @@ impl State {
             }
         }
 
-        // Track pools that just retired - if they re-register in the same epoch,
-        // we should NOT count their deposits again (they never got refunded).
-        // Clear previous epoch's retired pools and add this epoch's.
-        self.just_retired_pool_ids = retiring.clone();
-
         self.spos = self
             .spos
             .iter()
@@ -729,12 +662,7 @@ impl State {
     }
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
-    /// epoch.
-    ///
-    /// After bootstrap, the first call to this function will set both `protocol_parameters`
-    /// and `previous_protocol_parameters` to ensure reward calculations have valid params.
-    /// Since protocol params rarely change between epochs, using current as previous
-    /// at bootstrap is a safe approximation.
+    /// epoch
     pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
         let different = match &self.protocol_parameters {
             Some(old_params) => old_params != &params_msg.params,
@@ -796,14 +724,10 @@ impl State {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
                 let mut filtered_rewards_result = rewards_result.clone();
-                let mut total_to_registered: u64 = 0;
-                let mut total_to_treasury_unreg: u64 = 0;
-                let mut count_to_treasury: usize = 0;
                 for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
                         if stake_addresses.is_registered(&reward.account) {
                             stake_addresses.add_to_reward(&reward.account, reward.amount);
-                            total_to_registered += reward.amount;
                             reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
@@ -811,15 +735,13 @@ impl State {
                                 pool: reward.pool,
                             });
                         } else {
-                            debug!(
-                                "Reward account {} deregistered - paying reward {} to treasury (unregRU)",
+                            warn!(
+                                "Reward account {} deregistered - paying reward {} to treasury",
                                 reward.account, reward.amount
                             );
-                            total_to_treasury_unreg += reward.amount;
-                            count_to_treasury += 1;
                             self.pots.treasury += reward.amount;
 
-                            // Remove from a filtered version for comparison and result
+                            // Remove from filtered version for comparison and result
                             if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
                                 rewards.retain(|r| r.account != reward.account);
                             }
@@ -844,31 +766,8 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust reserves for paid rewards
+                // Adjust the reserves for next time with amount actually paid
                 self.pots.reserves -= rewards_result.total_paid;
-
-                // NOTE: Unpaid leader rewards (for SPOs with unregistered reward accounts at
-                // calculation time) do NOT go to treasury. Per Shelley spec (Figure 51 createRUpd):
-                // - Rewards for unregistered accounts are filtered out via `addrsrew ✁ potentialRewards`
-                // - The leftover goes back to reserves via Δr2 = R - sum(rs)
-                //
-                // Summary logging for rewards application
-                info!(
-                    "Rewards application summary: total_paid={} ({} ADA), to_registered={} ({} ADA), to_treasury_unreg={} ({} ADA, {} accounts)",
-                    rewards_result.total_paid, rewards_result.total_paid / 1_000_000,
-                    total_to_registered, total_to_registered / 1_000_000,
-                    total_to_treasury_unreg, total_to_treasury_unreg / 1_000_000, count_to_treasury
-                );
-
-                // CRITICAL: Verify that total_paid = to_registered + to_treasury_unreg
-                let sum_applied = total_to_registered + total_to_treasury_unreg;
-                if sum_applied != rewards_result.total_paid {
-                    error!(
-                        "MISMATCH: total_paid ({}) != to_registered ({}) + to_treasury_unreg ({}), diff = {}",
-                        rewards_result.total_paid, total_to_registered, total_to_treasury_unreg,
-                        rewards_result.total_paid as i64 - sum_applied as i64
-                    );
-                }
             }
         };
 
@@ -920,68 +819,8 @@ impl State {
             .map(|sp| sp.protocol_params.pool_deposit)
             .unwrap_or(DEFAULT_POOL_DEPOSIT);
 
-        // Check for how many truly new SPOs:
-        // - NOT in self.spos (not currently active)
-        // - NOT in pending_pool_ids (not pending from bootstrap)
-        // - NOT in just_retired_pool_ids (not a pool that just retired and re-registered)
-        // Pools in pending_pool_ids already had their deposits counted during bootstrap.
-        // Pools in just_retired_pool_ids never got their deposits refunded, so we shouldn't add again.
-        let truly_new_pools: Vec<_> = new_spos
-            .keys()
-            .filter(|id| {
-                !self.spos.contains_key(*id)
-                    && !self.pending_pool_ids.contains(*id)
-                    && !self.just_retired_pool_ids.contains(*id)
-            })
-            .cloned()
-            .collect();
-        let new_count = truly_new_pools.len();
-
-        // Count how many pending pools are now becoming active (for logging)
-        let pending_becoming_active_pools: Vec<_> = new_spos
-            .keys()
-            .filter(|id| !self.spos.contains_key(*id) && self.pending_pool_ids.contains(*id))
-            .cloned()
-            .collect();
-        let pending_becoming_active = pending_becoming_active_pools.len();
-
-        // Count how many just-retired pools are re-registering (for logging)
-        let reregistered_pools: Vec<_> = new_spos
-            .keys()
-            .filter(|id| !self.spos.contains_key(*id) && self.just_retired_pool_ids.contains(*id))
-            .cloned()
-            .collect();
-        let reregistered_count = reregistered_pools.len();
-
-        // Debug: Log pools that are not in self.spos
-        let not_in_spos: Vec<_> =
-            new_spos.keys().filter(|id| !self.spos.contains_key(*id)).cloned().collect();
-
-        if !not_in_spos.is_empty() {
-            info!(
-                "SPO state epoch {}: {} pools not in self.spos, {} pending, {} re-registered, {} truly new",
-                spo_msg.epoch,
-                not_in_spos.len(),
-                pending_becoming_active,
-                reregistered_count,
-                new_count,
-            );
-            for pool_id in &truly_new_pools {
-                info!("  Truly new pool (adding deposit): {}", pool_id);
-            }
-            for pool_id in &pending_becoming_active_pools {
-                info!(
-                    "  Pending pool now active (deposit already counted): {}",
-                    pool_id
-                );
-            }
-            for pool_id in &reregistered_pools {
-                info!(
-                    "  Re-registered pool (deposit already counted, was retired): {}",
-                    pool_id
-                );
-            }
-        }
+        // Check for how many new SPOs
+        let new_count = new_spos.keys().filter(|id| !self.spos.contains_key(*id)).count();
 
         // Log new ones and pledge/cost/margin changes
         for (id, spo) in new_spos.iter() {
@@ -1005,14 +844,12 @@ impl State {
                 }
 
                 _ => {
-                    let is_pending = self.pending_pool_ids.contains(id);
                     debug!(
                         epoch = spo_msg.epoch,
                         pledge = spo.pledge,
                         cost = spo.cost,
                         margin = ?spo.margin,
                         reward = %spo.reward_account,
-                        was_pending = is_pending,
                         "Registered new SPO {}",
                         id
                     );
@@ -1021,25 +858,12 @@ impl State {
         }
 
         // They've each paid their deposit, so increment that (the UTXO spend is taken
-        // care of in UTXOState). Note: pending pools from bootstrap already have their
-        // deposits counted, so we only count truly new ones.
+        // care of in UTXOState)
         let total_deposits = (new_count as u64) * deposit;
         self.pots.deposits += total_deposits;
 
         if new_count > 0 {
             info!("{new_count} new SPOs, total new deposits {total_deposits}");
-        }
-
-        if pending_becoming_active > 0 {
-            info!(
-                "{pending_becoming_active} pending SPOs from bootstrap now active (deposits already counted)"
-            );
-        }
-
-        // Clear pending_pool_ids for any pools that are now active - they've transitioned
-        // and we no longer need to track them
-        for id in new_spos.keys() {
-            self.pending_pool_ids.remove(id);
         }
 
         // Check for any SPOs that have retired this epoch and need deposit refunds

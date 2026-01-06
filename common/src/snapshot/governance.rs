@@ -36,6 +36,13 @@ use crate::{
 pub use crate::rational_number::RationalNumber;
 pub use crate::Committee;
 
+/// Result of parsing ratify state
+struct RatifyState {
+    enacted_actions: Vec<GovActionState>,
+    expired_action_ids: Vec<GovActionId>,
+    enacted_withdrawals: HashMap<Credential, Lovelace>,
+}
+
 // ============================================================================
 // Type Aliases for Complex Types
 // ============================================================================
@@ -872,10 +879,14 @@ fn parse_drep_pulsing_state(decoder: &mut Decoder) -> Result<DRepPulsingResult> 
     let votes = parse_pulsing_snapshot(decoder).context("Failed to parse pulsing_snapshot")?;
 
     // Parse ratify_state [1]
-    let (enacted_actions, expired_action_ids, enacted_withdrawals) =
-        parse_ratify_state(decoder).context("Failed to parse ratify_state")?;
+    let ratify_state = parse_ratify_state(decoder).context("Failed to parse ratify_state")?;
 
-    Ok((votes, enacted_actions, expired_action_ids, enacted_withdrawals))
+    Ok((
+        votes,
+        ratify_state.enacted_actions,
+        ratify_state.expired_action_ids,
+        ratify_state.enacted_withdrawals,
+    ))
 }
 
 /// Parse pulsing_snapshot
@@ -1077,7 +1088,7 @@ fn parse_enact_state_withdrawals(decoder: &mut Decoder) -> Result<HashMap<Creden
 /// Returns: (enacted_actions, expired_action_ids, enacted_withdrawals)
 fn parse_ratify_state(
     decoder: &mut Decoder,
-) -> Result<(Vec<GovActionState>, Vec<GovActionId>, HashMap<Credential, Lovelace>)> {
+) -> Result<RatifyState> {
     decoder.array().context("Failed to parse ratify_state array")?;
 
     // Parse enact_state [0] to extract withdrawals
@@ -1145,7 +1156,11 @@ fn parse_ratify_state(
     // Skip delayed [3]
     decoder.skip().context("Failed to skip rs_delayed")?;
 
-    Ok((enacted, expired, enacted_withdrawals))
+    Ok(RatifyState {
+        enacted_actions: enacted,
+        expired_action_ids: expired,
+        enacted_withdrawals,
+    })
 }
 
 // ============================================================================

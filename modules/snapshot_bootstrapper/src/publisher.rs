@@ -449,6 +449,7 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
@@ -632,9 +633,9 @@ impl GovernanceStateCallback for SnapshotPublisher {
 impl SnapshotCallbacks for SnapshotPublisher {
     fn on_metadata(&mut self, metadata: SnapshotMetadata) -> Result<()> {
         let total_blocks_previous: u32 =
-            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count).sum();
         let total_blocks_current: u32 =
-            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count).sum();
 
         info!("Snapshot metadata for epoch {}", metadata.epoch);
         info!("  UTXOs: {:?}", metadata.utxo_count);

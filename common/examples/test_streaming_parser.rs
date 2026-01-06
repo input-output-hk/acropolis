@@ -385,9 +385,9 @@ impl SnapshotCallbacks for CountingCallbacks {
         }
         // Calculate total blocks produced
         let total_blocks_previous: u32 =
-            metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+            metadata.blocks_previous_epoch.iter().map(|p| p.block_count).sum();
         let total_blocks_current: u32 =
-            metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+            metadata.blocks_current_epoch.iter().map(|p| p.block_count).sum();
 
         eprintln!(
             "  Block production previous epoch: {} pools produced {} blocks total",
@@ -518,9 +518,9 @@ fn main() {
                     println!("  UTXO Count (metadata): {count}");
                 }
                 let total_blocks_previous: u32 =
-                    metadata.blocks_previous_epoch.iter().map(|p| p.block_count as u32).sum();
+                    metadata.blocks_previous_epoch.iter().map(|p| p.block_count).sum();
                 let total_blocks_current: u32 =
-                    metadata.blocks_current_epoch.iter().map(|p| p.block_count as u32).sum();
+                    metadata.blocks_current_epoch.iter().map(|p| p.block_count).sum();
                 println!(
                     "  Block production previous epoch: {} pools, {} blocks total",
                     metadata.blocks_previous_epoch.len(),
