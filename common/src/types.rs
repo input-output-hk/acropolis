@@ -21,6 +21,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
+use std::ops::Add;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -302,6 +303,11 @@ pub struct TxUTxODeltas {
     // Created and spent UTxOs
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
+
+    // NOTE:
+    // Total consumed doesn't include coins from UTxOs (inputs)
+    pub total_consumed: Option<Value>,
+    pub total_produced: Option<Value>,
 
     // State needed for validation
     // This is missing UTxO Authors
@@ -678,6 +684,16 @@ impl AddAssign<&Value> for Value {
                 self.assets.push((*policy_id, other_assets.clone()));
             }
         }
+    }
+}
+
+impl Add for Value {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        let mut result = self.clone();
+        result += &other;
+        result
     }
 }
 

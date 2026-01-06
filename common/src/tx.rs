@@ -1,7 +1,7 @@
 use crate::{
     protocol_params::ProtocolParams, validation::Phase1ValidationError,
     AlonzoBabbageUpdateProposal, NativeScript, TxCertificate, TxCertificateWithPos, TxOutput,
-    UTxOIdentifier, VKeyWitness, Withdrawal,
+    UTxOIdentifier, VKeyWitness, Value, Withdrawal,
 };
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
@@ -20,8 +20,12 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub fn calculate_total_output(&self) -> u128 {
-        self.produces.iter().map(|output| output.value.coin() as u128).sum()
+    pub fn calculate_total_output(&self) -> Value {
+        let mut total_output = Value::default();
+        for output in &self.produces {
+            total_output += &output.value;
+        }
+        total_output
     }
 
     pub fn calculate_total_deposits(&self, protocol_params: &ProtocolParams) -> u64 {
@@ -73,20 +77,21 @@ impl Transaction {
             .sum()
     }
 
-    pub fn calculate_total_consumed_except_inputs(&self, protocol_params: &ProtocolParams) -> u128 {
+    pub fn calculate_total_consumed_except_inputs(
+        &self,
+        protocol_params: &ProtocolParams,
+    ) -> Value {
         // sum all withdrawals amounts
-        let withdrawals_amounts: u128 =
-            self.withdrawals.iter().map(|withdrawal| withdrawal.value as u128).sum();
+        let withdrawals = self.withdrawals.iter().map(|withdrawal| withdrawal.value).sum::<u64>();
+        let refunds = self.calculate_total_refund(protocol_params);
 
-        let refunds_amounts = self.calculate_total_refund(protocol_params) as u128;
-
-        withdrawals_amounts + refunds_amounts
+        Value::new(withdrawals + refunds, vec![])
     }
 
-    pub fn calculate_total_produced(&self, protocol_params: &ProtocolParams) -> u128 {
+    pub fn calculate_total_produced(&self, protocol_params: &ProtocolParams) -> Value {
         let total_output = self.calculate_total_output();
-        let total_deposits = self.calculate_total_deposits(protocol_params) as u128;
+        let total_deposits = self.calculate_total_deposits(protocol_params);
 
-        total_output + (self.fee as u128) + total_deposits
+        total_output + Value::new(self.fee + total_deposits, vec![])
     }
 }

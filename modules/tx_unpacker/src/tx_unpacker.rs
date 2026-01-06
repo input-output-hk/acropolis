@@ -169,11 +169,11 @@ impl TxUnpacker {
                                     let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
-                                    total_output += tx_total_output;
+                                    total_output += tx_total_output.coin() as u128;
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
+                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output_coin={}",
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output.coin());
                                     }
 
                                     if let Some(error) = tx_error {
@@ -188,6 +188,8 @@ impl TxUnpacker {
                                             tx_identifier,
                                             consumes: tx_consumes,
                                             produces: tx_produces,
+                                            total_consumed: Some(tx_total_consumed_except_inputs),
+                                            total_produced: Some(tx_total_produced),
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),

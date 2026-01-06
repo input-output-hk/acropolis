@@ -871,6 +871,8 @@ mod tests {
             tx_identifier,
             consumes,
             produces,
+            total_consumed: None,
+            total_produced: None,
             vkey_hashes_needed: None,
             script_hashes_needed: None,
             vkey_hashes_provided: None,

@@ -428,6 +428,8 @@ impl State {
         let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
+            let total_consumed = tx_deltas.total_consumed.clone().unwrap_or_default();
+            let total_produced = tx_deltas.total_produced.clone().unwrap_or_default();
             let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
             let mut script_hashes_needed =
                 tx_deltas.script_hashes_needed.clone().unwrap_or_default();
@@ -437,6 +439,8 @@ impl State {
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
                     &tx_deltas.consumes,
+                    total_consumed,
+                    total_produced,
                     &mut vkey_hashes_needed,
                     &mut script_hashes_needed,
                     &vkey_hashes_provided,
@@ -562,6 +566,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
+                total_consumed: None,
+                total_produced: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -936,6 +942,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
+                total_consumed: None,
+                total_produced: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -956,6 +964,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![input],
                 produces: vec![],
+                total_consumed: None,
+                total_produced: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

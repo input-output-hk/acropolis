@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier};
+use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier, Value};
 use anyhow::Result;
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
@@ -8,7 +8,6 @@ pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
 /// Validate every transaction's input exists in the current UTxO set.
 /// This prevents double spending.
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L468
-#[allow(dead_code)]
 pub fn validate_bad_inputs_utxo(
     inputs: &[UTxOIdentifier],
     utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
@@ -26,12 +25,43 @@ pub fn validate_bad_inputs_utxo(
     Ok(())
 }
 
+pub fn validate_value_not_conserved(
+    inputs: &[UTxOIdentifier],
+    total_consumed_except_inputs: Value,
+    total_produced: Value,
+    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+) -> UTxOValidationResult {
+    let mut total_consumed = total_consumed_except_inputs;
+    for input in inputs {
+        total_consumed +=
+            utxos_needed.get(input).map(|utxo| &utxo.value).unwrap_or(&Value::default());
+    }
+
+    if total_consumed != total_produced {
+        return Err(Box::new(UTxOValidationError::ValueNotConservedUTxO {
+            consumed: total_consumed,
+            produced: total_produced,
+        }));
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 pub fn validate(
     inputs: &[UTxOIdentifier],
+    total_consumed_except_inputs: Value,
+    total_produced: Value,
     utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
     validate_bad_inputs_utxo(inputs, utxos_needed)?;
+
+    validate_value_not_conserved(
+        inputs,
+        total_consumed_except_inputs,
+        total_produced,
+        utxos_needed,
+    )?;
+
     Ok(())
 }
 
@@ -60,6 +90,12 @@ mod tests {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
 
-        validate(&tx_inputs, &ctx.utxos).map_err(|e| *e)
+        validate(
+            &tx_inputs,
+            Value::default(),
+            Value::new(143945663102, vec![]),
+            &ctx.utxos,
+        )
+        .map_err(|e| *e)
     }
 }
