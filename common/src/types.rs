@@ -164,6 +164,8 @@ pub struct EpochBootstrapData {
     pub total_blocks_current: u64,
     /// Sum of previous epoch blocks
     pub total_blocks_previous: u64,
+    /// Total fees accumulated in the epoch
+    pub total_fees_current: u64,
 }
 
 impl EpochBootstrapData {
@@ -171,6 +173,7 @@ impl EpochBootstrapData {
         epoch: u64,
         blocks_previous_epoch: &[crate::types::PoolBlockProduction],
         blocks_current_epoch: &[crate::types::PoolBlockProduction],
+        total_fees_current: u64,
     ) -> Self {
         let blocks_previous: HashMap<PoolId, u64> =
             blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
@@ -187,6 +190,7 @@ impl EpochBootstrapData {
             spo_blocks_current: blocks_current,
             total_blocks_current: total_current,
             total_blocks_previous: total_previous,
+            total_fees_current,
         }
     }
 }
@@ -1059,12 +1063,26 @@ impl Display for VKeyWitness {
 pub type Slot = u64;
 
 /// Point on the chain
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    Eq,
+    PartialEq,
+    minicbor::Decode,
+    minicbor::Encode,
+)]
 pub enum Point {
     #[default]
+    #[n(0)]
     Origin,
+    #[n(1)]
     Specific {
+        #[n(0)]
         hash: BlockHash,
+        #[n(1)]
         slot: Slot,
     },
 }

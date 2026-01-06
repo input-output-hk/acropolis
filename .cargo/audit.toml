@@ -1,2 +1,5 @@
 [advisories]
+ignore = [
+    "RUSTSEC-2026-0001" # For justification, see https://github.com/rkyv/rkyv/issues/644#issuecomment-3710867164
+]
 informational_warnings = []
