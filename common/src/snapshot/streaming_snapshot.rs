@@ -1482,8 +1482,12 @@ impl StreamingSnapshotParser {
 
         // Calculate current epoch fees: us_fees contains cumulative fees, subtract previous epoch's
         let total_fees_current = us_fees.saturating_sub(fees_prev_epoch);
-        let epoch_bootstrap =
-            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch, total_fees_current);
+        let epoch_bootstrap = EpochBootstrapData::new(
+            epoch,
+            &blocks_previous_epoch,
+            &blocks_current_epoch,
+            total_fees_current,
+        );
         callbacks.on_epoch(epoch_bootstrap)?;
 
         let snapshot_metadata = SnapshotMetadata {
