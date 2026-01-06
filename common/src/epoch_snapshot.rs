@@ -6,7 +6,6 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
-use tracing::info;
 
 /// SPO data captured in a stake snapshot
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -102,34 +101,12 @@ impl EpochSnapshot {
             // if the reward account was registered at the time of the staking snapshot.
             let two_previous_reward_account_is_registered =
                 match two_previous_snapshot.spos.get(spo_id) {
-                    Some(old_spo) => {
-                        // SPO existed two epochs ago - check if their old reward account is registered
-                        let lookup_result = stake_addresses.get(&old_spo.reward_account);
-                        let is_registered =
-                            lookup_result.as_ref().map(|sas| sas.registered).unwrap_or(false);
-
-                        // Debug logging for failed checks
-                        if !is_registered {
-                            match lookup_result {
-                                Some(sas) => {
-                                    info!(
-                                        "SPO {} reward account {} from epoch {} NOT registered: found in stake_addresses but registered=false, rewards={}, utxo={}",
-                                        spo_id, old_spo.reward_account, two_previous_snapshot.epoch,
-                                        sas.rewards, sas.utxo_value
-                                    );
-                                }
-                                None => {
-                                    info!(
-                                        "SPO {} reward account {} from epoch {} NOT registered: not found in stake_addresses at all",
-                                        spo_id, old_spo.reward_account, two_previous_snapshot.epoch
-                                    );
-                                }
-                            }
-                        }
-                        is_registered
-                    }
+                    Some(old_spo) => stake_addresses
+                        .get(&old_spo.reward_account)
+                        .map(|sas| sas.registered)
+                        .unwrap_or(false),
                     None => {
-                        // SPO wasn't in snapshot from 2 epochs ago (newly registered or data issue).
+                        // SPO wasn't in snapshot from 2 epochs ago (newly registered).
                         // Check if their CURRENT reward account is registered as a fallback.
                         // Default to true if we can't verify - conservative approach to avoid
                         // incorrectly denying legitimate rewards.
@@ -191,20 +168,6 @@ impl EpochSnapshot {
         // Calculate the total rewards just for logging and comparison
         let total_rewards: u64 = stake_addresses.values().map(|sas| sas.rewards).sum();
 
-        // Log summary of two_previous registration check
-        let registered_count = snapshot
-            .spos
-            .values()
-            .filter(|s| s.two_previous_reward_account_is_registered)
-            .count();
-        let not_registered_count = snapshot.spos.len() - registered_count;
-        if not_registered_count > 0 {
-            info!(
-                "Live epoch {} snapshot: {} SPOs with two_previous NOT registered (out of {})",
-                epoch, not_registered_count, snapshot.spos.len()
-            );
-        }
-
         // Log to be comparable with the DBSync ada_pots table
         info!(
             epoch,
@@ -223,20 +186,6 @@ impl EpochSnapshot {
 
     /// Create a new snapshot from raw CBOR-parsed data (used during bootstrap parsing)
     /// Takes ownership of the maps to avoid cloning large data structures.
-    ///
-    /// # Arguments
-    /// * `epoch` - The epoch this snapshot is for
-    /// * `stake_map` - Map of stake credentials to their stake amounts
-    /// * `delegation_map` - Map of stake credentials to pool IDs they delegate to
-    /// * `pool_params_map` - Map of pool IDs to their registration parameters
-    /// * `block_counts` - Map of pool IDs to blocks produced
-    /// * `pots` - The pot balances at this epoch
-    /// * `network` - Network ID
-    /// * `two_previous_snapshot` - Optional snapshot from two epochs prior, used to check
-    ///   if reward accounts were registered. If None, `two_previous_reward_account_is_registered`
-    ///   will be set to true for all SPOs (conservative default for first epochs after bootstrap).
-    /// * `registered_credentials` - Optional set of registered credentials at the time of this
-    ///   snapshot. Used with `two_previous_snapshot` to determine if reward accounts are registered.
     pub fn from_raw(
         epoch: u64,
         stake_map: HashMap<StakeCredential, i64>,
@@ -245,32 +194,6 @@ impl EpochSnapshot {
         block_counts: &HashMap<PoolId, usize>,
         pots: Pots,
         network: NetworkId,
-    ) -> Self {
-        Self::from_raw_with_registration_check(
-            epoch,
-            stake_map,
-            delegation_map,
-            pool_params_map,
-            block_counts,
-            pots,
-            network,
-            None,
-            None,
-        )
-    }
-
-    /// Create a new snapshot from raw CBOR-parsed data with registration checking support
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_raw_with_registration_check(
-        epoch: u64,
-        stake_map: HashMap<StakeCredential, i64>,
-        delegation_map: HashMap<StakeCredential, PoolId>,
-        pool_params_map: HashMap<PoolId, PoolRegistration>,
-        block_counts: &HashMap<PoolId, usize>,
-        pots: Pots,
-        network: NetworkId,
-        two_previous_snapshot: Option<&EpochSnapshot>,
-        registered_credentials: Option<&std::collections::HashSet<StakeCredential>>,
     ) -> Self {
         // First pass: group delegations by pool (O(n) instead of O(n*m))
         let mut delegations_by_pool: HashMap<PoolId, Vec<(StakeAddress, Lovelace)>> =
@@ -303,40 +226,6 @@ impl EpochSnapshot {
             let blocks_produced = block_counts.get(&pool_id).copied().unwrap_or(0);
             total_blocks += blocks_produced;
 
-            // Check if the reward account from two epochs ago is registered.
-            // We look up the SPO in the two_previous_snapshot and check if their
-            // reward account credential is in the registered_credentials set.
-            let two_previous_reward_account_is_registered =
-                match (two_previous_snapshot, registered_credentials) {
-                    (Some(prev_snapshot), Some(registered)) => {
-                        // Look up this SPO in the snapshot from two epochs ago
-                        match prev_snapshot.spos.get(&pool_id) {
-                            Some(old_spo) => {
-                                // SPO existed two epochs ago - check their old reward account
-                                let is_registered =
-                                    registered.contains(&old_spo.reward_account.credential);
-                                if !is_registered {
-                                    info!(
-                                        "Bootstrap: SPO {} reward account {} (cred {:?}) from epoch {} NOT in registered_credentials set",
-                                        pool_id, old_spo.reward_account, old_spo.reward_account.credential, prev_snapshot.epoch
-                                    );
-                                }
-                                is_registered
-                            }
-                            None => {
-                                // SPO wasn't in snapshot from 2 epochs ago (newly registered).
-                                // For newly registered SPOs, we can't verify historical registration,
-                                // so we default to true (conservative approach to pay rewards).
-                                // This avoids denying legitimate rewards to new SPOs.
-                                true
-                            }
-                        }
-                    }
-                    // If we don't have the information, default to true (conservative)
-                    // This ensures rewards are paid when we can't verify
-                    _ => true,
-                };
-
             spos.insert(
                 pool_id,
                 SnapshotSPO {
@@ -347,25 +236,11 @@ impl EpochSnapshot {
                     margin: pool_reg.margin,
                     blocks_produced,
                     pool_owners: pool_reg.pool_owners,
-                    reward_account: pool_reg.reward_account.clone(),
-                    two_previous_reward_account_is_registered,
+                    reward_account: pool_reg.reward_account,
+                    two_previous_reward_account_is_registered: true,
                 },
             );
         }
-
-        // Log summary of registration check results
-        let registered_count = spos
-            .values()
-            .filter(|s| s.two_previous_reward_account_is_registered)
-            .count();
-        let not_registered_count = spos.len() - registered_count;
-        info!(
-            "Bootstrap epoch {} snapshot: {} SPOs, {} with two_previous registered, {} without",
-            epoch,
-            spos.len(),
-            registered_count,
-            not_registered_count
-        );
 
         EpochSnapshot {
             epoch,
@@ -402,17 +277,12 @@ impl EpochSnapshot {
 }
 
 /// Container for the three snapshots used in rewards calculation (mark, set, go)
-///
-/// In Cardano terminology:
-/// - Mark = current epoch snapshot (newest) - the one being built
-/// - Set = previous epoch snapshot (epoch - 1)
-/// - Go = two epochs ago snapshot (epoch - 2) - used for rewards calculation
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
     /// Mark snapshot (current epoch) - newest, has current epoch blocks
     pub mark: EpochSnapshot,
 
-    /// Set snapshot (epoch - 1) - has previous epoch blocks, used for staking in rewards calculation
+    /// Set snapshot (epoch - 1) - has previous epoch blocks
     pub set: EpochSnapshot,
 }
 

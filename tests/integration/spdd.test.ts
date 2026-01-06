@@ -112,72 +112,36 @@ async function validateEpoch(db: Client, epoch: number) {
         if (missing.length) console.log(`   Missing pools: ${missing.join(", ")}`);
         if (extra.length) console.log(`   Extra pools (in SPDD only): ${extra.join(", ")}`);
         if (mismatched.length) {
-            // Calculate differences with sign (positive = SPDD > DB, negative = DB > SPDD)
-            const withDiffs = mismatched.map((m) => ({
-                ...m,
-                diff: m.spdd - m.db, // signed difference
-                absDiff: m.spdd >= m.db ? m.spdd - m.db : m.db - m.spdd,
-            }));
+            const smallest = mismatched.reduce((best, curr) => {
+                const bestDiff = best.db >= best.spdd ? best.db - best.spdd : best.spdd - best.db;
+                const currDiff = curr.db >= curr.spdd ? curr.db - curr.spdd : curr.spdd - curr.db;
+                return currDiff < bestDiff ? curr : best;
+            });
 
-            // Sort by absolute difference
-            const sortedByDiff = [...withDiffs].sort((a, b) =>
-                a.absDiff > b.absDiff ? -1 : a.absDiff < b.absDiff ? 1 : 0
+            const diff =
+                smallest.db >= smallest.spdd
+                    ? smallest.db - smallest.spdd
+                    : smallest.spdd - smallest.db;
+
+            console.log(`   Mismatched pool with smallest difference:`);
+            console.log(
+                `   - ${smallest.id} (db: ${smallest.db}, spdd: ${smallest.spdd}, diff: ${diff})`
             );
 
-            // Aggregate statistics
-            const totalAbsDiff = withDiffs.reduce((sum, m) => sum + m.absDiff, 0n);
-            const spddHigher = withDiffs.filter((m) => m.diff > 0n).length;
-            const dbHigher = withDiffs.filter((m) => m.diff < 0n).length;
-            const sumPositiveDiffs = withDiffs
-                .filter((m) => m.diff > 0n)
-                .reduce((sum, m) => sum + m.diff, 0n);
-            const sumNegativeDiffs = withDiffs
-                .filter((m) => m.diff < 0n)
-                .reduce((sum, m) => sum + m.diff, 0n);
+            const smallestTotal = mismatched.reduce((best, curr) => {
+                const bestTotal = best.db + best.spdd;
+                const currTotal = curr.db + curr.spdd;
+                return currTotal < bestTotal ? curr : best;
+            });
 
-            // Total stake difference analysis
-            const totalDiff = apiTotal - dbTotal;
-            const diffPercent =
-                dbTotal > 0n ? (Number(totalDiff) / Number(dbTotal)) * 100 : 0;
+            const diff2 =
+                smallestTotal.db >= smallestTotal.spdd
+                    ? smallestTotal.db - smallestTotal.spdd
+                    : smallestTotal.spdd - smallestTotal.db;
 
-            console.log(`\n   📊 Mismatch Analysis:`);
+            console.log(`   Mismatched pool with smallest total stake:`);
             console.log(
-                `   Total stake diff: ${totalDiff} (${diffPercent.toFixed(6)}% of DB total)`
-            );
-            console.log(
-                `   Direction: ${spddHigher} pools SPDD>DB (+${sumPositiveDiffs}), ${dbHigher} pools DB>SPDD (${sumNegativeDiffs})`
-            );
-            console.log(`   Sum of absolute differences: ${totalAbsDiff}`);
-
-            // Show top 5 largest differences
-            console.log(`\n   🔝 Top 5 largest differences:`);
-            for (const m of sortedByDiff.slice(0, 5)) {
-                const sign = m.diff >= 0n ? "+" : "";
-                const pct =
-                    m.db > 0n ? ((Number(m.absDiff) / Number(m.db)) * 100).toFixed(4) : "N/A";
-                console.log(
-                    `   - ${m.id}: db=${m.db}, spdd=${m.spdd}, diff=${sign}${m.diff} (${pct}%)`
-                );
-            }
-
-            // Show smallest difference (potential rounding issues)
-            const smallest = sortedByDiff[sortedByDiff.length - 1];
-            console.log(`\n   🔬 Smallest difference (potential rounding):`);
-            console.log(
-                `   - ${smallest.id}: db=${smallest.db}, spdd=${smallest.spdd}, diff=${smallest.diff}`
-            );
-
-            // Bucket analysis - group by difference magnitude
-            const buckets = {
-                tiny: withDiffs.filter((m) => m.absDiff <= 1000n).length, // <= 1000 lovelace
-                small: withDiffs.filter((m) => m.absDiff > 1000n && m.absDiff <= 1000000n).length, // 1K-1M
-                medium: withDiffs.filter((m) => m.absDiff > 1000000n && m.absDiff <= 1000000000n)
-                    .length, // 1M-1B
-                large: withDiffs.filter((m) => m.absDiff > 1000000000n).length, // > 1B (1000 ADA)
-            };
-            console.log(`\n   📈 Difference distribution:`);
-            console.log(
-                `   Tiny (≤1K): ${buckets.tiny}, Small (1K-1M): ${buckets.small}, Medium (1M-1B): ${buckets.medium}, Large (>1B): ${buckets.large}`
+                `   - ${smallestTotal.id} (db: ${smallestTotal.db}, spdd: ${smallestTotal.spdd}, diff: ${diff2})`
             );
         }
         await pause();
