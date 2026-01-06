@@ -1,4 +1,4 @@
-# System description - bootstrap and sync with Conway ledger
+# System description - phase 1 validation
 
 In the [previous setup](system-ledger-with-api-and-history.md) we tracked the ledger
 state for the whole history of the chain, and provided a BlockFrost-compatible API and
@@ -113,6 +113,9 @@ flowchart LR
   click SDF "https://github.com/input-output-hk/acropolis/tree/main/modules/stake_delta_filter/"
   click PARAM "https://github.com/input-output-hk/acropolis/tree/main/modules/parameters_state/"
   click GOV "https://github.com/input-output-hk/acropolis/tree/main/modules/governance_state/"
+  click CON "https://github.com/input-output-hk/acropolis/tree/main/modules/consensus/"
+  click VRF "https://github.com/input-output-hk/acropolis/tree/main/modules/block_vrf_validator/"
+  click KES "https://github.com/input-output-hk/acropolis/tree/main/modules/block_kes_validator/"
 
   classDef NEW fill:#efe
   class CON NEW
@@ -159,8 +162,8 @@ one having a veto.  We'll need a central coordinator to request and then receive
 and take the relevant action on success or failure.
 
 To do this, we borrow from [NASA's Flight Control](https://www.youtube.com/watch?v=y8rNlFYRcgs).
-When an action is to be taken, the Flight Director calls for Go / NoGo from each specialist desk
-- Retro, Guidance, Surgeon - before proceeding to the next stage.  Although (thankfully) it rarely
+When an action is to be taken, the Flight Director calls for Go / NoGo from each specialist desk -
+Retro, Guidance, Surgeon - before proceeding to the next stage.  Although (thankfully) it rarely
 happens, one would assume that any single "NoGo" would be enough to halt the process.
 
 In our case our Flight Director is the new [Consensus](../../modules/consensus) module, and
