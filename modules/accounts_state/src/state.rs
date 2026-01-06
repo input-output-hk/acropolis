@@ -30,15 +30,16 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
-        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
+        PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
+        TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, NetworkId, PoolId,
-    PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards,
-    StakeAddress, StakeRewardDelta, TxCertificate,
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant,
+    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
+    NetworkId, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
+    RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
@@ -81,148 +82,9 @@ impl EpochSnapshots {
     /// the bootstrap Mark snapshot (being replaced) and the new live-calculated snapshot.
     /// This helps diagnose any state drift between bootstrap and live processing.
     pub fn push(&mut self, latest: EpochSnapshot) {
+        self.go = self.set.clone();
         self.set = self.mark.clone();
         self.mark = Arc::new(latest);
-    }
-
-    /// Compare two snapshots and log any significant differences.
-    ///
-    /// This is particularly useful for diagnosing bootstrap-to-live transition issues
-    /// where the first live-calculated snapshot may differ from bootstrap data.
-    pub fn compare_snapshots(label: &str, old: &EpochSnapshot, new: &EpochSnapshot) {
-        if old.epoch != new.epoch {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Epochs differ - old={}, new={}",
-                label, old.epoch, new.epoch
-            );
-        }
-
-        // Compare total active stake
-        let old_total_stake: u64 = old.spos.values().map(|s| s.total_stake).sum();
-        let new_total_stake: u64 = new.spos.values().map(|s| s.total_stake).sum();
-        let stake_diff = new_total_stake as i64 - old_total_stake as i64;
-
-        if stake_diff != 0 {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Total stake differs by {} lovelace ({} ADA) - old={}, new={}",
-                label,
-                stake_diff,
-                stake_diff / 1_000_000,
-                old_total_stake,
-                new_total_stake
-            );
-        }
-
-        // Compare pool counts
-        let old_pools = old.spos.len();
-        let new_pools = new.spos.len();
-        if old_pools != new_pools {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Pool count differs - old={}, new={}",
-                label, old_pools, new_pools
-            );
-
-            // Find pools in old but not new
-            let old_only: Vec<_> = old.spos.keys().filter(|k| !new.spos.contains_key(*k)).collect();
-            if !old_only.is_empty() {
-                info!(
-                    "[SNAPSHOT COMPARE] {}: {} pools in OLD but not NEW: {:?}",
-                    label,
-                    old_only.len(),
-                    old_only.iter().take(10).collect::<Vec<_>>()
-                );
-            }
-
-            // Find pools in new but not old
-            let new_only: Vec<_> = new.spos.keys().filter(|k| !old.spos.contains_key(*k)).collect();
-            if !new_only.is_empty() {
-                info!(
-                    "[SNAPSHOT COMPARE] {}: {} pools in NEW but not OLD: {:?}",
-                    label,
-                    new_only.len(),
-                    new_only.iter().take(10).collect::<Vec<_>>()
-                );
-            }
-        }
-
-        // Compare per-pool stake differences (find largest discrepancies)
-        let mut pool_diffs: Vec<(PoolId, i64)> = Vec::new();
-        for (pool_id, old_spo) in &old.spos {
-            if let Some(new_spo) = new.spos.get(pool_id) {
-                let diff = new_spo.total_stake as i64 - old_spo.total_stake as i64;
-                if diff != 0 {
-                    pool_diffs.push((*pool_id, diff));
-                }
-            }
-        }
-
-        if !pool_diffs.is_empty() {
-            // Sort by absolute difference
-            pool_diffs.sort_by_key(|(_, diff)| -diff.abs());
-
-            let total_diff: i64 = pool_diffs.iter().map(|(_, d)| *d).sum();
-            info!(
-                "[SNAPSHOT COMPARE] {}: {} pools with stake differences, total diff={} lovelace ({} ADA)",
-                label,
-                pool_diffs.len(),
-                total_diff,
-                total_diff / 1_000_000
-            );
-
-            // Log top 10 largest differences
-            for (pool_id, diff) in pool_diffs.iter().take(10) {
-                let old_stake = old.spos.get(pool_id).map(|s| s.total_stake).unwrap_or(0);
-                let new_stake = new.spos.get(pool_id).map(|s| s.total_stake).unwrap_or(0);
-                info!(
-                    "[SNAPSHOT COMPARE] {}: Pool {} stake diff {} ({} ADA): old={}, new={}",
-                    label,
-                    pool_id,
-                    diff,
-                    diff / 1_000_000,
-                    old_stake,
-                    new_stake
-                );
-            }
-        }
-
-        // Compare blocks produced
-        let old_blocks: usize = old.spos.values().map(|s| s.blocks_produced).sum();
-        let new_blocks: usize = new.spos.values().map(|s| s.blocks_produced).sum();
-        if old_blocks != new_blocks {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Total blocks differs - old={}, new={}",
-                label, old_blocks, new_blocks
-            );
-        }
-
-        // Compare pots
-        if old.pots.reserves != new.pots.reserves {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Reserves differ by {} - old={}, new={}",
-                label,
-                new.pots.reserves as i64 - old.pots.reserves as i64,
-                old.pots.reserves,
-                new.pots.reserves
-            );
-        }
-        if old.pots.treasury != new.pots.treasury {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Treasury differ by {} - old={}, new={}",
-                label,
-                new.pots.treasury as i64 - old.pots.treasury as i64,
-                old.pots.treasury,
-                new.pots.treasury
-            );
-        }
-        if old.pots.deposits != new.pots.deposits {
-            info!(
-                "[SNAPSHOT COMPARE] {}: Deposits differ by {} - old={}, new={}",
-                label,
-                new.pots.deposits as i64 - old.pots.deposits as i64,
-                old.pots.deposits,
-                new.pots.deposits
-            );
-        }
     }
 }
 
@@ -403,23 +265,6 @@ impl State {
             self.pots.reserves,
             self.pots.treasury,
             self.pots.deposits,
-        );
-
-        // Log bootstrap snapshot summary for later comparison
-        info!(
-            "[BOOTSTRAP SNAPSHOT] Mark (epoch {}): {} SPOs, {} total blocks, reserves={}, treasury={}, deposits={}",
-            self.epoch_snapshots.mark.epoch,
-            self.epoch_snapshots.mark.spos.len(),
-            self.epoch_snapshots.mark.blocks,
-            self.epoch_snapshots.mark.pots.reserves,
-            self.epoch_snapshots.mark.pots.treasury,
-            self.epoch_snapshots.mark.pots.deposits,
-        );
-        info!(
-            "[BOOTSTRAP SNAPSHOT] Set (epoch {}): {} SPOs, {} total blocks",
-            self.epoch_snapshots.set.epoch,
-            self.epoch_snapshots.set.spos.len(),
-            self.epoch_snapshots.set.blocks,
         );
 
         Ok(())
@@ -1496,6 +1341,141 @@ impl State {
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
         );
+
+        Ok(())
+    }
+
+    /// Handle governance procedures (new proposals submitted in a block)
+    ///
+    /// When a new governance proposal is submitted, the proposer pays a deposit
+    /// (govActionDeposit from protocol params, typically 100,000 ADA).
+    /// This deposit goes into the deposits pot.
+    pub fn handle_governance_procedures(
+        &mut self,
+        procedures_msg: &GovernanceProceduresMessage,
+    ) -> Result<()> {
+        for proposal in &procedures_msg.proposal_procedures {
+            // Add the proposal deposit to the deposits pot
+            self.pots.deposits += proposal.deposit;
+
+            info!(
+                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA), pots.deposits: {}",
+                proposal.gov_action_id,
+                proposal.deposit,
+                proposal.deposit / 1_000_000,
+                self.pots.deposits
+            );
+        }
+
+        if !procedures_msg.proposal_procedures.is_empty() {
+            info!(
+                "Processed {} governance proposals, total deposits added: {} lovelace",
+                procedures_msg.proposal_procedures.len(),
+                procedures_msg
+                    .proposal_procedures
+                    .iter()
+                    .map(|p| p.deposit)
+                    .sum::<u64>()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Handle governance outcomes (enacted/expired proposals at epoch boundary)
+    ///
+    /// At each epoch boundary, governance proposals may be enacted or expire.
+    /// In both cases, the proposer's deposit is refunded:
+    /// - If the proposer's reward account is registered, refund goes there
+    /// - Otherwise, the refund goes to treasury
+    ///
+    /// For TreasuryWithdrawal actions that are enacted, we also process the
+    /// withdrawal of funds from treasury to the specified reward accounts.
+    pub fn handle_governance_outcomes(
+        &mut self,
+        outcomes_msg: &GovernanceOutcomesMessage,
+    ) -> Result<()> {
+        let mut total_refunds: u64 = 0;
+        let mut total_to_treasury: u64 = 0;
+        let mut total_treasury_withdrawals: u64 = 0;
+
+        for outcome in &outcomes_msg.conway_outcomes {
+            let proposal = &outcome.voting.procedure;
+            let deposit = proposal.deposit;
+            let reward_account = &proposal.reward_account;
+
+            // Refund the deposit (applies to both enacted and expired proposals)
+            self.pots.deposits = self.pots.deposits.saturating_sub(deposit);
+            total_refunds += deposit;
+
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(reward_account) {
+                stake_addresses.add_to_reward(reward_account, deposit);
+                info!(
+                    "Governance proposal {:?} {} - refund {} lovelace to {}",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted { "enacted" } else { "expired" },
+                    deposit,
+                    reward_account
+                );
+            } else {
+                drop(stake_addresses);
+                self.pots.treasury += deposit;
+                total_to_treasury += deposit;
+                warn!(
+                    "Governance proposal {:?} {} - reward account {} not registered, refund {} to treasury",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted { "enacted" } else { "expired" },
+                    reward_account,
+                    deposit
+                );
+            }
+
+            // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
+            if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
+                &outcome.action_to_perform
+            {
+                for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    // Convert raw bytes to StakeAddress using from_binary (29-byte format)
+                    match StakeAddress::from_binary(reward_account_bytes) {
+                        Ok(reward_account) => {
+                            // Deduct from treasury
+                            self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
+                            total_treasury_withdrawals += *amount;
+
+                            // Credit to reward account
+                            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                            stake_addresses.add_to_reward(&reward_account, *amount);
+                            info!(
+                                "Treasury withdrawal: {} lovelace ({} ADA) to {}",
+                                amount,
+                                amount / 1_000_000,
+                                reward_account
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to parse reward account bytes for treasury withdrawal: {:?}, error: {}",
+                                reward_account_bytes, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if !outcomes_msg.conway_outcomes.is_empty() {
+            info!(
+                "Governance outcomes: {} proposals processed, total refunds: {} lovelace ({} ADA), \
+                 {} lovelace to treasury (unregistered accounts), treasury withdrawals: {} lovelace ({} ADA)",
+                outcomes_msg.conway_outcomes.len(),
+                total_refunds,
+                total_refunds / 1_000_000,
+                total_to_treasury,
+                total_treasury_withdrawals,
+                total_treasury_withdrawals / 1_000_000
+            );
+        }
 
         Ok(())
     }
