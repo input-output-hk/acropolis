@@ -470,12 +470,6 @@ impl SnapshotsCallback for CountingCallbacks {
         eprintln!("  Total stake: {:.2} ADA", set_total as f64 / 1_000_000.0);
         eprintln!();
 
-        eprintln!("Go Snapshot (epoch {}):", snapshots.go.epoch);
-        eprintln!("  SPOs: {}", snapshots.go.spos.len());
-        let go_total: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-        eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
-        eprintln!();
-
         Ok(())
     }
 }
