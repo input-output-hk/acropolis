@@ -528,9 +528,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.values().map(|spo| spo.delegators.len()).sum();
         let set_stake: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
 
-        let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
-        let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-
         info!("Snapshots Data:");
         info!(
             "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
@@ -545,13 +542,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.len(),
             set_delegators,
             set_stake / 1_000_000
-        );
-        info!(
-            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.go.epoch,
-            snapshots.go.spos.len(),
-            go_delegators,
-            go_stake / 1_000_000
         );
 
         Ok(())
