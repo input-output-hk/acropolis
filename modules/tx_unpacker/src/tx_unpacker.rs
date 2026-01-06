@@ -136,17 +136,22 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
+                                    let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    let tx_total_output = mapped_tx.calculate_total_output();
+                                    let tx_total_consumed_except_inputs = mapped_tx.calculate_total_consumed_except_inputs(&state.protocol_params);
+                                    let tx_total_produced = mapped_tx.calculate_total_produced(&state.protocol_params);
+
                                     let Transaction {
                                         consumes: tx_consumes,
                                         produces: tx_produces,
-                                        total_output: tx_total_output,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
                                         proposal_update: tx_proposal_update,
                                         vkey_witnesses,
                                         native_scripts,
                                         error: tx_error,
-                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                        ..
+                                    } = mapped_tx;
                                     let mut props = None;
                                     let mut votes = None;
 
