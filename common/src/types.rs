@@ -165,9 +165,8 @@ pub struct EpochBootstrapData {
     pub total_blocks_current: u64,
     /// Sum of previous epoch blocks
     pub total_blocks_previous: u64,
-    /// Fee snapshot (feeSS) - fees at epoch boundary for reward calculation
-    /// Per Shelley spec: rewardPot = feeSS + deltaR1
-    pub fee_ss: u64,
+    /// Total fees accumulated in the epoch
+    pub total_fees_current: u64,
 }
 
 impl EpochBootstrapData {
@@ -175,7 +174,7 @@ impl EpochBootstrapData {
         epoch: u64,
         blocks_previous_epoch: &[crate::types::PoolBlockProduction],
         blocks_current_epoch: &[crate::types::PoolBlockProduction],
-        fee_ss: u64,
+        total_fees_current: u64,
     ) -> Self {
         let blocks_previous: HashMap<PoolId, u64> =
             blocks_previous_epoch.iter().map(|p| (p.pool_id, p.block_count as u64)).collect();
@@ -192,7 +191,7 @@ impl EpochBootstrapData {
             spo_blocks_current: blocks_current,
             total_blocks_current: total_current,
             total_blocks_previous: total_previous,
-            fee_ss,
+            total_fees_current,
         }
     }
 }

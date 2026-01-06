@@ -1,5 +1,5 @@
 // ================================================================================================
-// Mark, Set, Go Snapshots - CBOR Parsing Support
+// Mark and Set Snapshots - CBOR Parsing Support
 // ================================================================================================
 
 use anyhow::{Context, Error, Result};
@@ -69,7 +69,7 @@ pub struct RawSnapshot {
 }
 
 impl RawSnapshot {
-    /// Parse a single snapshot (Mark, Set, or Go) from CBOR
+    /// Parse a single snapshot (Mark or Set) from CBOR
     pub fn parse(
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
@@ -130,33 +130,6 @@ impl RawSnapshot {
             network,
         )
     }
-
-    /// Convert this raw snapshot to a processed EpochSnapshot with registration checking
-    pub fn into_snapshot_with_registration_check(
-        self,
-        epoch: u64,
-        block_counts: &HashMap<PoolId, usize>,
-        pots: Pots,
-        network: NetworkId,
-        two_previous_snapshot: Option<&EpochSnapshot>,
-        registered_credentials: Option<&std::collections::HashSet<StakeCredential>>,
-    ) -> EpochSnapshot {
-        let stake_map: HashMap<_, _> = self.snapshot_stake.0.into_iter().collect();
-        let delegation_map: HashMap<_, _> = self.snapshot_delegations.0.into_iter().collect();
-        let pool_params_map: HashMap<_, _> = self.snapshot_pool_params.0.into_iter().collect();
-
-        EpochSnapshot::from_raw_with_registration_check(
-            epoch,
-            stake_map,
-            delegation_map,
-            pool_params_map,
-            block_counts,
-            pots,
-            network,
-            two_previous_snapshot,
-            registered_credentials,
-        )
-    }
 }
 
 /// Raw snapshots container from CBOR parsing
@@ -166,27 +139,29 @@ pub struct RawSnapshotsContainer {
     pub mark: RawSnapshot,
     /// Set snapshot (raw CBOR data)
     pub set: RawSnapshot,
-    /// Fee snapshot (feeSS) - fees at epoch boundary, used for reward calculation
-    /// Per Shelley spec: rewardPot = feeSS + deltaR1
-    pub fee_ss: u64,
+    /// Previous epoch's fees, used for reward calculation
+    pub fees: u64,
 }
 
 impl RawSnapshotsContainer {
     /// Convert raw snapshots to processed SnapshotsContainer
     ///
-    /// The CBOR file stores snapshots in order: [Mark, Set, Fee]
+    /// Block count assignments:
+    /// - Mark (epoch): Uses blocks_current_epoch
+    /// - Set (epoch-1): Uses blocks_previous_epoch
     ///
-    /// For a Mithril snapshot captured during epoch N:
-    /// - Mark = current epoch (N), receives blocks_current_epoch, no pots
-    /// - Set = previous epoch (N-1), receives blocks_previous_epoch, pots
+    /// Pots assignment (reserves, treasury, deposits - the global ADA accounting pots):
+    /// - Mark and Set: receive zeroed pots (Live pots in accounts state are used for rewards calculation)
     ///
-    /// The Set snapshot is used for staking in rewards calculation.
+    /// Why this is safe: On the first epoch after bootstrap, we skip monetary change
+    /// calculation (pots are already correct from bootstrap). The first `enter_epoch`
+    /// creates a fresh snapshot with correct pots that becomes the new mark. Subsequent
+    /// epochs will have correct pots propagated through the snapshot rotation.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
         blocks_previous_epoch: &HashMap<PoolId, usize>,
         blocks_current_epoch: &HashMap<PoolId, usize>,
-        pots: Pots,
         network: NetworkId,
     ) -> SnapshotsContainer {
         SnapshotsContainer {
@@ -199,55 +174,14 @@ impl RawSnapshotsContainer {
             set: self.set.into_snapshot(
                 epoch.saturating_sub(1),
                 blocks_previous_epoch,
-                pots,
-                network,
+                Pots::default(),
+                network.clone(),
             ),
         }
     }
-
-    /// Convert raw snapshots to processed SnapshotsContainer with registration checking.
-    ///
-    /// This version takes a set of registered credentials from DState to properly
-    /// determine `two_previous_reward_account_is_registered` for each SPO.
-    ///
-    /// For a Mithril snapshot captured during epoch N:
-    /// - Mark = current epoch (N), receives blocks_current_epoch, no pots
-    /// - Set = previous epoch (N-1), receives blocks_previous_epoch, pots
-    #[allow(clippy::too_many_arguments)]
-    pub fn into_snapshots_container_with_registration_check(
-        self,
-        epoch: u64,
-        blocks_previous_epoch: &HashMap<PoolId, usize>,
-        blocks_current_epoch: &HashMap<PoolId, usize>,
-        pots: Pots,
-        network: NetworkId,
-        registered_credentials: Option<&std::collections::HashSet<StakeCredential>>,
-    ) -> SnapshotsContainer {
-        // Set (epoch-1) - used for staking in rewards calculation
-        let set = self.set.into_snapshot_with_registration_check(
-            epoch.saturating_sub(1),
-            blocks_previous_epoch,
-            pots,
-            network.clone(),
-            None, // No previous snapshot available for bootstrap
-            registered_credentials,
-        );
-
-        // Mark (epoch) - current epoch
-        let mark = self.mark.into_snapshot_with_registration_check(
-            epoch,
-            blocks_current_epoch,
-            Pots::default(),
-            network,
-            None, // No previous snapshot available for bootstrap
-            registered_credentials,
-        );
-
-        SnapshotsContainer { mark, set }
-    }
 }
 
-/// Callback trait for mark, set, go snapshots
+/// Callback trait for mark and set snapshots
 pub trait SnapshotsCallback {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()>;
 }

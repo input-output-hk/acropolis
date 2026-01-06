@@ -69,6 +69,9 @@ pub struct EpochSnapshots {
 
     /// Set snapshot (epoch - 1) - used for staking in rewards calculation
     pub set: Arc<EpochSnapshot>,
+
+    /// Go snapshot (epoch - 2) - used for staking in rewards calculation
+    pub go: Arc<EpochSnapshot>,
 }
 
 impl EpochSnapshots {
@@ -357,6 +360,7 @@ impl State {
         self.epoch_snapshots = EpochSnapshots {
             mark: Arc::new(snapshots.mark),
             set: Arc::new(snapshots.set),
+            go: Arc::new(EpochSnapshot::default()),
         };
 
         if !self.epoch_snapshots.mark.spos.is_empty() {
@@ -607,55 +611,6 @@ impl State {
             // Pass in two-previous epoch snapshot for capture of SPO reward accounts
             self.epoch_snapshots.set.clone(),
         );
-
-        // =====================================================================
-        // DIAGNOSTIC: Compare bootstrap vs live snapshot on first epoch transition
-        // =====================================================================
-        // At the first epoch boundary after bootstrap, we create a live snapshot
-        // that replaces the bootstrap Mark. This comparison helps identify any
-        // state drift between bootstrap data and live processing.
-        if self.is_first_epoch_after_bootstrap {
-            info!(
-                "[BOOTSTRAP->LIVE TRANSITION] First epoch boundary after bootstrap (bootstrap epoch {})",
-                self.bootstrap_epoch.unwrap_or(0)
-            );
-            info!(
-                "[BOOTSTRAP->LIVE TRANSITION] Creating live snapshot for epoch {} to replace bootstrap Mark (epoch {})",
-                epoch - 1,
-                self.epoch_snapshots.mark.epoch
-            );
-
-            // Compare the new live snapshot with the bootstrap Mark if epochs match
-            // (they should be the same epoch, but the live one is freshly calculated)
-            if self.epoch_snapshots.mark.epoch == snapshot.epoch {
-                EpochSnapshots::compare_snapshots(
-                    "Bootstrap Mark vs Live Mark",
-                    &self.epoch_snapshots.mark,
-                    &snapshot,
-                );
-            } else {
-                info!(
-                    "[BOOTSTRAP->LIVE TRANSITION] Epoch mismatch: bootstrap Mark is epoch {}, live snapshot is epoch {}",
-                    self.epoch_snapshots.mark.epoch,
-                    snapshot.epoch
-                );
-            }
-
-            // Log summary of the new live snapshot
-            let live_total_stake: u64 = snapshot.spos.values().map(|s| s.total_stake).sum();
-            info!(
-                "[LIVE SNAPSHOT] New Mark (epoch {}): {} SPOs, total_stake={} ({} ADA), {} blocks",
-                snapshot.epoch,
-                snapshot.spos.len(),
-                live_total_stake,
-                live_total_stake / 1_000_000,
-                snapshot.blocks
-            );
-
-            // Clear the flag - subsequent epoch transitions are normal
-            self.is_first_epoch_after_bootstrap = false;
-        }
-
         self.epoch_snapshots.push(snapshot);
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
@@ -682,7 +637,7 @@ impl State {
 
         // Set up background task for rewards, capturing and emptying current deregistrations
         let performance = self.epoch_snapshots.mark.clone();
-        let staking = self.epoch_snapshots.set.clone();
+        let staking = self.epoch_snapshots.go.clone();
 
         // Calculate the sets of net registrations and deregistrations which happened between
         // staking and now

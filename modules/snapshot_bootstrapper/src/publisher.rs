@@ -213,9 +213,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            // Use fee_ss from snapshot - this is the fee pot at epoch boundary
-            // needed for reward calculation: rewardPot = feeSS + deltaR1
-            total_fees: data.fee_ss,
+            total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
