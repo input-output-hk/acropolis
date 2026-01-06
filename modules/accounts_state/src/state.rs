@@ -148,7 +148,7 @@ impl State {
         self.epoch_snapshots = EpochSnapshots {
             mark: Arc::new(snapshots.mark),
             set: Arc::new(snapshots.set),
-            go: Arc::new(snapshots.go),
+            go: Arc::new(EpochSnapshot::default()),
         };
 
         if !self.epoch_snapshots.mark.spos.is_empty() {
