@@ -287,68 +287,21 @@ impl<'b, C> minicbor::Decode<'b, C> for RewardUpdate {
 }
 
 // =============================================================================
-// RewardAns - accumulated reward answers from Pulser
-// =============================================================================
-
-/// Reward answers from the Pulser containing accumulated member rewards.
-///
-/// CDDL:
-/// ```cddl
-/// reward_ans = [
-///     accum_reward_ans : { * credential_staking => reward },
-///     recent_reward_ans : reward_event
-/// ]
-/// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RewardAns {
-    /// Accumulated rewards calculated so far (member rewards)
-    pub accum_rewards: VMap<StakeCredential, SnapshotSet<Reward>>,
-    // recent_reward_ans is skipped as we only need accum_rewards
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for RewardAns {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        let accum_rewards: VMap<StakeCredential, SnapshotSet<Reward>> = VMap::decode(d, ctx)?;
-        // Skip recent_reward_ans
-        d.skip()?;
-        Ok(RewardAns { accum_rewards })
-    }
-}
-
-// =============================================================================
-// Pulser - incremental reward calculation state
+// Pulser (opaque for now)
 // =============================================================================
 
 /// Pulser state - the incremental reward calculation state.
-///
-/// CDDL:
-/// ```cddl
-/// pulser = [
-///     pulser_n : int,
-///     pulser_free : freevars,
-///     pulser_balance : {* credential_staking => compactform_coin },
-///     pulser_ans : reward_ans
-/// ]
-/// ```
+/// For now we skip over this as it's complex internal state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pulser {
-    /// Accumulated reward answers containing member rewards
-    pub reward_ans: RewardAns,
+    // Opaque - we skip over the actual content for now
+    _private: (),
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for Pulser {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        // Skip pulser_n
-        d.skip()?;
-        // Skip pulser_free (freevars)
-        d.skip()?;
-        // Skip pulser_balance
-        d.skip()?;
-        // Parse pulser_ans to get accumulated rewards
-        let reward_ans = RewardAns::decode(d, ctx)?;
-        Ok(Pulser { reward_ans })
+impl Pulser {
+    /// Skip over pulser data in the CBOR stream
+    pub fn skip(d: &mut Decoder) -> Result<(), minicbor::decode::Error> {
+        d.skip()
     }
 }
 
@@ -365,10 +318,8 @@ impl<'b, C> minicbor::Decode<'b, C> for Pulser {
 pub enum PulsingRewardUpdate {
     /// Pulsing in progress - contains snapshot and pulser state
     Pulsing {
-        /// The reward snapshot with calculation inputs (contains leader rewards)
+        /// The reward snapshot with calculation inputs
         snapshot: RewardSnapshot,
-        /// The pulser state (contains accumulated member rewards)
-        pulser: Pulser,
     },
     /// Reward calculation complete
     Complete {
@@ -386,8 +337,8 @@ impl<'b, C> minicbor::Decode<'b, C> for PulsingRewardUpdate {
             0 => {
                 // Pulsing variant: [0, reward_snapshot, pulser]
                 let snapshot = RewardSnapshot::decode(d, ctx)?;
-                let pulser = Pulser::decode(d, ctx)?;
-                Ok(PulsingRewardUpdate::Pulsing { snapshot, pulser })
+                Pulser::skip(d)?; // Skip pulser state
+                Ok(PulsingRewardUpdate::Pulsing { snapshot })
             }
             1 => {
                 // Complete variant: [1, reward_update]

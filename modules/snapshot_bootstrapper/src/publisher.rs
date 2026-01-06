@@ -338,7 +338,6 @@ impl AccountsCallback for SnapshotPublisher {
             accounts: data.accounts,
             pools: data.pools,
             retiring_pools: data.retiring_pools,
-            pending_pool_ids: data.pending_pool_ids,
             dreps: data.dreps,
             pots: data.pots,
             bootstrap_snapshots: data.snapshots,

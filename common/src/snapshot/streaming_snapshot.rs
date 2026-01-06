@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
@@ -43,7 +43,6 @@ pub use crate::{
 };
 use crate::{PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
-use super::delegation_state::parse_dstate;
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
 
@@ -314,6 +313,29 @@ impl<C> minicbor::Encode<C> for DRep {
                 Ok(())
             }
         }
+    }
+}
+
+/// Account state from ledger (internal CBOR type for decoding)
+///
+/// This is converted to AccountState for the external API.
+#[derive(Debug)]
+pub struct Account {
+    pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
+    pub pointers: SnapshotSet<(u64, u64, u64)>,
+    pub pool: StrictMaybe<PoolId>,
+    pub drep: StrictMaybe<DRep>,
+}
+
+impl<'b, C> minicbor::Decode<'b, C> for Account {
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?;
+        Ok(Account {
+            rewards_and_deposit: d.decode_with(ctx)?,
+            pointers: d.decode_with(ctx)?,
+            pool: d.decode_with(ctx)?,
+            drep: d.decode_with(ctx)?,
+        })
     }
 }
 
@@ -606,10 +628,6 @@ pub struct AccountsBootstrapData {
     pub pools: Vec<PoolRegistration>,
     /// Pool IDs that are retiring
     pub retiring_pools: Vec<PoolId>,
-    /// Pool IDs with pending updates (will become active at next epoch boundary).
-    /// These pools already have their deposits counted in the deposits pot,
-    /// so they should not be counted as "new" when they become active.
-    pub pending_pool_ids: Vec<PoolId>,
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
     /// Treasury, reserves, and deposits for the snapshot epoch
@@ -918,23 +936,89 @@ impl StreamingSnapshotParser {
                 .context("Failed to parse PState for pools")?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
-            let dstate = parse_dstate(&mut decoder).context("Failed to parse DState")?;
+            // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
+            decoder.array().context("Failed to parse DState array")?;
+
+            // Parse unified rewards - it's actually an array containing the map
+            // UMap structure: [rewards_map, ...]
+            let umap_len = decoder.array().context("Failed to parse UMap array")?;
+
+            // Parse the rewards map [0]: StakeCredential -> Account
+            let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
+
+            // Skip remaining UMap elements if any
+            if let Some(len) = umap_len {
+                for _ in 1..len {
+                    decoder.skip()?;
+                }
+            }
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
+            decoder.skip()?;
+
+            // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
+            // Parse instant rewards (MIRs) and combine with regular rewards
+            // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
+            let instant_rewards_result = Self::parse_instant_rewards(&mut decoder)
+                .context("Failed to parse instant rewards")?;
 
             // Log instant rewards deltas
             info!(
                 "Instant rewards deltas: delta_treasury={}, delta_reserves={}",
-                dstate.instant_rewards.delta_treasury, dstate.instant_rewards.delta_reserves
+                instant_rewards_result.delta_treasury, instant_rewards_result.delta_reserves
             );
 
-            // Convert DState to AccountState list for API
-            let accounts = dstate.to_accounts(&network);
+            // Convert to AccountState for API, combining regular rewards with instant rewards
+            let accounts: Vec<AccountState> = accounts_map
+                .into_iter()
+                .map(|(credential, account)| {
+                    // Convert StakeCredential to stake address representation
+                    let stake_address = StakeAddress::new(credential.clone(), network.clone());
 
-            // Convert instant rewards for later use
-            let instant_rewards_result = InstantRewardsResult {
-                rewards: dstate.instant_rewards.combined_rewards(),
-                delta_treasury: dstate.instant_rewards.delta_treasury,
-                delta_reserves: dstate.instant_rewards.delta_reserves,
-            };
+                    // Extract rewards from rewards_and_deposit (first element of tuple)
+                    let regular_rewards = match &account.rewards_and_deposit {
+                        StrictMaybe::Just((reward, _deposit)) => *reward,
+                        StrictMaybe::Nothing => 0,
+                    };
+
+                    // Add instant rewards (MIRs) if any
+                    let mir_rewards =
+                        instant_rewards_result.rewards.get(&credential).copied().unwrap_or(0);
+                    let rewards = regular_rewards + mir_rewards;
+
+                    // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
+                    // PoolId is Hash<28>, we need to convert to Vec<u8>
+                    let delegated_spo = match &account.pool {
+                        StrictMaybe::Just(pool_id) => Some(*pool_id),
+                        StrictMaybe::Nothing => None,
+                    };
+
+                    // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
+                    let delegated_drep = match &account.drep {
+                        StrictMaybe::Just(drep) => Some(match drep {
+                            DRep::Key(hash) => DRepChoice::Key(*hash),
+                            DRep::Script(hash) => DRepChoice::Script(*hash),
+                            DRep::Abstain => DRepChoice::Abstain,
+                            DRep::NoConfidence => DRepChoice::NoConfidence,
+                        }),
+                        StrictMaybe::Nothing => None,
+                    };
+
+                    AccountState {
+                        stake_address,
+                        address_state: StakeAddressState {
+                            registered: true, // Accounts in DState are registered by definition
+                            utxo_value: 0,    // Will be populated from UTXO parsing
+                            rewards,
+                            delegated_spo,
+                            delegated_drep,
+                        },
+                    }
+                })
+                .collect();
 
             // Navigate to UTxOState [3][1][1]
             let utxo_state_len = decoder
@@ -1105,10 +1189,6 @@ impl StreamingSnapshotParser {
             }
         };
 
-        // Extract enacted withdrawals before moving governance_state to callback
-        // These are treasury withdrawals enacted via governance that affect reward accounting
-        let enacted_withdrawals = governance_state.enacted_withdrawals.clone();
-
         // Emit governance state callback
         callbacks.on_governance_state(governance_state)?;
 
@@ -1161,16 +1241,6 @@ impl StreamingSnapshotParser {
         );
         callbacks.on_snapshots(bootstrap_snapshots.clone())?;
 
-        // Build the set of registered credentials from DState accounts.
-        // This is used to properly determine `two_previous_reward_account_is_registered`
-        // for SPOs in the bootstrap snapshots.
-        let dstate_registered_credentials: std::collections::HashSet<StakeCredential> =
-            accounts.iter().map(|a| a.stake_address.credential.clone()).collect();
-        info!(
-            "Built registered credentials set with {} entries from DState",
-            dstate_registered_credentials.len()
-        );
-
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
         let retiring_pools: Vec<PoolId> = pools
@@ -1180,12 +1250,9 @@ impl StreamingSnapshotParser {
             .map(|(pool_id, _)| *pool_id)
             .collect();
 
-        let pending_pool_ids: Vec<PoolId> = pools.updates.keys().cloned().collect();
-
         info!(
-            "Pools: {} registered, {} pending updates, {} retiring, {} DReps",
+            "Pools: {} registered, {} retiring, {} DReps",
             pool_registrations.len(),
-            pending_pool_ids.len(),
             retiring_pools.len(),
             dreps.len()
         );
@@ -1198,28 +1265,23 @@ impl StreamingSnapshotParser {
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
         let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
+        // Subtract DRep deposits from us_deposited
+        // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
+        let deposits = deposits.saturating_sub(total_drep_deposits);
+
         info!(
-            "Deposit breakdown: total_deposits={} ADA, pool_deposits={} ADA ({} pools), drep_deposits={} ADA ({} dreps)",
+            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
             deposits / 1_000_000,
+            total_drep_deposits / 1_000_000,
             total_pool_deposits / 1_000_000,
             pool_registrations.len(),
-            total_drep_deposits / 1_000_000,
             drep_deposits.len()
         );
-
-        // Subtract DRep deposits from us_deposited.
-        // The Haskell node's deposits pot verification does NOT include DRep deposits,
-        // so we must exclude them to match. DRep deposits are tracked separately.
-        let deposits = deposits.saturating_sub(total_drep_deposits);
 
         // Merge UTXO values and pulsing reward update rewards into accounts
         // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
         // added to DState rewards (accumulated rewards from previous epochs).
-        //
-        // IMPORTANT: Accounts with enacted treasury withdrawals (es_withdrawals) should NOT receive
-        // pulsing rewards, as their rewards have already been processed through governance.
         let mut pulsing_rewards_total: u64 = 0;
-        let mut skipped_withdrawal_accounts: u64 = 0;
 
         let mut accounts_with_utxo_values: Vec<AccountState> = accounts
             .into_iter()
@@ -1228,10 +1290,7 @@ impl StreamingSnapshotParser {
                 {
                     account.address_state.utxo_value = utxo_value;
                 }
-                // Check if this account has an enacted withdrawal - if so, skip pulsing rewards
-                if enacted_withdrawals.contains_key(&account.stake_address.credential) {
-                    skipped_withdrawal_accounts += 1;
-                } else if let Some(&pulsing_reward) =
+                if let Some(&pulsing_reward) =
                     pulsing_result.rewards.get(&account.stake_address.credential)
                 {
                     account.address_state.rewards += pulsing_reward;
@@ -1241,57 +1300,33 @@ impl StreamingSnapshotParser {
             })
             .collect();
 
-        if skipped_withdrawal_accounts > 0 {
-            info!(
-                "Skipped pulsing rewards for {} accounts with enacted treasury withdrawals",
-                skipped_withdrawal_accounts
-            );
-        }
-
         // Add accounts for stake addresses that have UTXOs but aren't registered in DState
         // These are addresses that received funds but were never registered for staking
         let registered_credentials: std::collections::HashSet<_> =
             accounts_with_utxo_values.iter().map(|a| a.stake_address.credential.clone()).collect();
 
-        let mut unregistered_pulsing_rewards_total: u64 = 0;
         let unregistered_accounts: Vec<_> = stake_utxo_values
             .iter()
             .filter(|(credential, _)| !registered_credentials.contains(credential))
-            .map(|(credential, &utxo_value)| {
-                // Check if this unregistered account has pulsing rewards
-                // Skip pulsing rewards if they have enacted treasury withdrawals (same as registered accounts)
-                let rewards = if enacted_withdrawals.contains_key(credential) {
-                    0
-                } else {
-                    pulsing_result.rewards.get(credential).copied().unwrap_or(0)
-                };
-                if rewards > 0 {
-                    unregistered_pulsing_rewards_total += rewards;
-                }
-                AccountState {
-                    stake_address: StakeAddress::new(credential.clone(), network.clone()),
-                    address_state: StakeAddressState {
-                        registered: false,
-                        utxo_value,
-                        rewards,
-                        delegated_spo: None,
-                        delegated_drep: None,
-                    },
-                }
+            .map(|(credential, &utxo_value)| AccountState {
+                stake_address: StakeAddress::new(credential.clone(), network.clone()),
+                address_state: StakeAddressState {
+                    registered: false,
+                    utxo_value,
+                    rewards: 0,
+                    delegated_spo: None,
+                    delegated_drep: None,
+                },
             })
             .collect();
 
         if !unregistered_accounts.is_empty() {
             info!(
-                "Added {} unregistered stake addresses with UTXOs to bootstrap ({} ADA in pulsing rewards)",
-                unregistered_accounts.len(),
-                unregistered_pulsing_rewards_total / 1_000_000
+                "Added {} unregistered stake addresses with UTXOs to bootstrap",
+                unregistered_accounts.len()
             );
         }
         accounts_with_utxo_values.extend(unregistered_accounts);
-
-        // Add unregistered pulsing rewards to total
-        pulsing_rewards_total += unregistered_pulsing_rewards_total;
 
         // Calculate summary statistics
         let total_utxo_value: u64 = stake_utxo_values.values().sum();
@@ -1370,6 +1405,7 @@ impl StreamingSnapshotParser {
         // Plus adjustments for deregistered accounts with pending rewards
         // Plus governance proposal deposit refunds
         // Plus treasury donations
+        //
         // Use checked arithmetic to detect overflow
         let unclaimed_rewards_i64 =
             i64::try_from(unclaimed_rewards).expect("unclaimed_rewards exceeds i64::MAX");
@@ -1410,7 +1446,6 @@ impl StreamingSnapshotParser {
             accounts: accounts_with_utxo_values,
             pools: pool_registrations,
             retiring_pools,
-            pending_pool_ids,
             dreps: drep_deposits,
             pots: Pots {
                 reserves,
@@ -1670,8 +1705,7 @@ impl StreamingSnapshotParser {
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
         // Parse the block count (value) - how many blocks this pool produced
-        // Using u32 since CDDL specifies `uint` and large pools can produce >255 blocks
-        let block_count = decoder.u32().context("Failed to parse block count")?;
+        let block_count = decoder.u8().context("Failed to parse block count")? as u32;
 
         // Convert pool ID bytes to hex string
         let pool_id =
@@ -1732,7 +1766,6 @@ impl StreamingSnapshotParser {
                 let mut block_productions = Vec::new();
 
                 // Parse map content
-                let mut skipped_entries = 0;
                 if let Some(entry_count) = len {
                     for _i in 0..entry_count {
                         // Parse pool ID -> block count
@@ -1740,10 +1773,8 @@ impl StreamingSnapshotParser {
                             Ok(production) => {
                                 block_productions.push(production);
                             }
-                            Err(e) => {
-                                // Skip failed entries but count them
-                                tracing::warn!("Failed to parse block entry for epoch {}: {}", epoch, e);
-                                skipped_entries += 1;
+                            Err(_) => {
+                                // Skip failed entries
                                 decoder.skip().context("Failed to skip map key")?;
                                 decoder.skip().context("Failed to skip map value")?;
                             }
@@ -1762,10 +1793,8 @@ impl StreamingSnapshotParser {
                                     Ok(production) => {
                                         block_productions.push(production);
                                     }
-                                    Err(e) => {
-                                        // Skip failed entries but count them
-                                        tracing::warn!("Failed to parse block entry for epoch {}: {}", epoch, e);
-                                        skipped_entries += 1;
+                                    Err(_) => {
+                                        // Skip failed entries
                                         decoder.skip().context("Failed to skip map key")?;
                                         decoder.skip().context("Failed to skip map value")?;
                                     }
@@ -1773,25 +1802,6 @@ impl StreamingSnapshotParser {
                             }
                         }
                     }
-                }
-
-                // Log parsed blocks summary
-                let total_blocks: u32 = block_productions.iter().map(|p| p.block_count).sum();
-                if skipped_entries > 0 {
-                    tracing::warn!(
-                        "Parsed {} pools with {} total blocks for epoch {} (SKIPPED {} entries due to parse errors)",
-                        block_productions.len(),
-                        total_blocks,
-                        epoch,
-                        skipped_entries
-                    );
-                } else {
-                    info!(
-                        "Parsed {} pools with {} total blocks for epoch {}",
-                        block_productions.len(),
-                        total_blocks,
-                        epoch
-                    );
                 }
 
                 Ok(block_productions)
@@ -1826,6 +1836,49 @@ impl StreamingSnapshotParser {
         }
     }
 
+    /// Parse instant rewards (MIRs) from DState
+    ///
+    /// instantaneous_rewards = [
+    ///   ir_reserves : { * credential_staking => coin },
+    ///   ir_treasury : { * credential_staking => coin },
+    ///   ir_delta_reserves : delta_coin,
+    ///   ir_delta_treasury : delta_coin,
+    /// ]
+    ///
+    /// Returns combined rewards map and pot deltas from MIR transfers
+    fn parse_instant_rewards(decoder: &mut Decoder) -> Result<InstantRewardsResult> {
+        let ir_len = decoder
+            .array()
+            .context("Failed to parse instant_rewards array")?
+            .ok_or_else(|| anyhow!("instant_rewards must be a definite-length array"))?;
+
+        if ir_len < 4 {
+            return Err(anyhow!(
+                "instant_rewards array too short: expected 4 elements, got {ir_len}"
+            ));
+        }
+
+        // Parse ir_reserves and ir_treasury: { * credential_staking => coin }
+        let ir_reserves: HashMap<StakeCredential, u64> = decoder.decode()?;
+        let ir_treasury: HashMap<StakeCredential, u64> = decoder.decode()?;
+
+        // Parse ir_delta_reserves and ir_delta_treasury
+        let delta_reserves: i64 = decoder.decode()?;
+        let delta_treasury: i64 = decoder.decode()?;
+
+        // Combine rewards from both sources
+        let mut combined = ir_reserves;
+        for (credential, amount) in ir_treasury {
+            *combined.entry(credential).or_insert(0) += amount;
+        }
+
+        Ok(InstantRewardsResult {
+            rewards: combined,
+            delta_treasury,
+            delta_reserves,
+        })
+    }
+
     /// Parse pulsing_rew_update to extract reward information and pot deltas.
     ///
     /// The pulsing_rew_update is wrapped in a StrictMaybe, so we first check if it's
@@ -1854,109 +1907,24 @@ impl StreamingSnapshotParser {
 
         // Extract rewards and pot deltas based on variant
         let result = match pulsing_update {
-            PulsingRewardUpdate::Pulsing { snapshot, pulser } => {
-                // In Pulsing state, rewards are calculated incrementally during the epoch.
-                // - Leader rewards are in snapshot.leaders
-                // - Member rewards are in pulser.reward_ans.accum_rewards
-                //
-                // Per Shelley spec, the total rewards distributed should equal:
-                // R = rewardPot - delta_t1 (treasury's share)
-                // where rewardPot = feeSS + delta_r1 (from reserves)
-                //
-                // We validate completeness by comparing extracted rewards to expected.
-
-                let mut rewards: HashMap<StakeCredential, Lovelace> = HashMap::new();
-
-                // Count unique accounts for leader and member rewards
-                let leader_count = snapshot.leaders.0.len();
-                let member_count = pulser.reward_ans.accum_rewards.0.len();
-
-                // Add leader rewards from snapshot
-                let mut total_leader_rewards: u64 = 0;
-                for (cred, reward_set) in &snapshot.leaders.0 {
-                    let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
-                    *rewards.entry(cred.clone()).or_insert(0) += amount;
-                    total_leader_rewards += amount;
-                }
-
-                // Add member rewards from pulser's accumulated rewards
-                let mut total_member_rewards: u64 = 0;
-                for (cred, reward_set) in &pulser.reward_ans.accum_rewards.0 {
-                    let amount: Lovelace = reward_set.iter().map(|r| r.amount).sum();
-                    *rewards.entry(cred.clone()).or_insert(0) += amount;
-                    total_member_rewards += amount;
-                }
-
-                let total_rewards_extracted: u64 = rewards.values().sum();
-
-                // =====================================================================
-                // VALIDATION: Check pulsing rewards completeness
-                // =====================================================================
-                // The snapshot.r field contains the total reward pot available for distribution.
-                // delta_t1 is the treasury's share (goes to treasury, not distributed to accounts).
-                // Expected distributed rewards = r - delta_t1
-                //
-                // Note: In the Pulsing state, rewards may be incomplete if the snapshot was
-                // taken before all pulses completed. A significant shortfall (>1%) indicates
-                // incomplete pulsing, which could cause rewards to be missing.
-
-                let expected_rewards = snapshot.r.saturating_sub(snapshot.delta_t1);
-                let rewards_diff = expected_rewards as i64 - total_rewards_extracted as i64;
-                let shortfall_pct = if expected_rewards > 0 {
-                    (rewards_diff.abs() as f64 / expected_rewards as f64) * 100.0
-                } else {
-                    0.0
-                };
-
+            PulsingRewardUpdate::Pulsing { snapshot } => {
+                let rewards = snapshot
+                    .leaders
+                    .0
+                    .iter()
+                    .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
+                    .collect();
+                // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
+                // Both are positive values in RewardSnapshot
                 info!(
-                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}, \
-                     leader_accounts={} ({} ADA), member_accounts={} ({} ADA), \
-                     total_extracted={} ({} ADA)",
-                    snapshot.delta_r1,
-                    snapshot.delta_t1,
-                    snapshot.r,
-                    leader_count,
-                    total_leader_rewards / 1_000_000,
-                    member_count,
-                    total_member_rewards / 1_000_000,
-                    total_rewards_extracted,
-                    total_rewards_extracted / 1_000_000
+                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}",
+                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r
                 );
-
-                // Log validation result
-                if rewards_diff.abs() > 0 {
-                    let log_level = if shortfall_pct > 1.0 { "WARN" } else { "INFO" };
-                    if shortfall_pct > 1.0 {
-                        warn!(
-                            "[PULSING VALIDATION {}] Rewards may be INCOMPLETE: \
-                             extracted={} ({} ADA), expected={} ({} ADA), diff={} ({:.2}%)",
-                            log_level,
-                            total_rewards_extracted,
-                            total_rewards_extracted / 1_000_000,
-                            expected_rewards,
-                            expected_rewards / 1_000_000,
-                            rewards_diff,
-                            shortfall_pct
-                        );
-                    } else {
-                        info!(
-                            "[PULSING VALIDATION] Rewards difference within tolerance: \
-                             extracted={}, expected={}, diff={} ({:.2}%)",
-                            total_rewards_extracted, expected_rewards, rewards_diff, shortfall_pct
-                        );
-                    }
-                } else {
-                    info!(
-                        "[PULSING VALIDATION] Rewards complete: extracted={} matches expected={}",
-                        total_rewards_extracted, expected_rewards
-                    );
-                }
-
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: snapshot.delta_t1 as i64,
-                    delta_reserves: -(snapshot.delta_r1 as i64),
-                    delta_fees: 0,
+                    delta_reserves: -(snapshot.delta_r1 as i64), // Reserves decrease
+                    delta_fees: 0, // Pulsing variant doesn't have delta_fees
                 }
             }
             PulsingRewardUpdate::Complete { update } => {

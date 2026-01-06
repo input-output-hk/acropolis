@@ -116,12 +116,11 @@ impl State {
         let num_accounts = bootstrap_msg.accounts.len();
         let num_pools = bootstrap_msg.pools.len();
         let num_retiring = bootstrap_msg.retiring_pools.len();
-        let num_pending = bootstrap_msg.pending_pool_ids.len();
         let num_dreps = bootstrap_msg.dreps.len();
 
         info!(
-            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring, {} pending), {} dreps",
-            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_pending, num_dreps
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_dreps
         );
 
         // Load stake addresses

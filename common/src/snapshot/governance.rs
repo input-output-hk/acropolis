@@ -36,13 +36,6 @@ use crate::{
 pub use crate::rational_number::RationalNumber;
 pub use crate::Committee;
 
-/// Result of parsing ratify state
-struct RatifyState {
-    enacted_actions: Vec<GovActionState>,
-    expired_action_ids: Vec<GovActionId>,
-    enacted_withdrawals: HashMap<Credential, Lovelace>,
-}
-
 // ============================================================================
 // Type Aliases for Complex Types
 // ============================================================================
@@ -51,13 +44,7 @@ struct RatifyState {
 pub type VotesMap = HashMap<GovActionId, HashMap<Voter, VotingProcedure>>;
 
 /// Result of parsing DRep pulsing state
-/// (votes, enacted_actions, expired_action_ids, enacted_withdrawals)
-pub type DRepPulsingResult = (
-    VotesMap,
-    Vec<GovActionState>,
-    Vec<GovActionId>,
-    HashMap<Credential, Lovelace>,
-);
+pub type DRepPulsingResult = (VotesMap, Vec<GovActionState>, Vec<GovActionId>);
 
 /// Data needed for ConwayVoting bootstrap: (proposals, votes)
 pub type ConwayVotingData = (Vec<(u64, ProposalProcedure)>, VotesMap);
@@ -91,11 +78,6 @@ pub struct GovernanceState {
     pub enacted_actions: Vec<GovActionState>,
     /// Actions that have expired
     pub expired_action_ids: Vec<GovActionId>,
-    /// Treasury withdrawals from enact_state (credential -> amount)
-    /// These are withdrawals that have been enacted via governance.
-    /// Accounts with withdrawals here should NOT receive pulsing rewards
-    /// as they've already been credited.
-    pub enacted_withdrawals: HashMap<Credential, Lovelace>,
 }
 
 /// Gov action state - proposal with votes and timing info
@@ -194,14 +176,13 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
         .0;
 
     // Parse drep_pulsing_state [6]
-    let (votes, enacted_actions, expired_action_ids, enacted_withdrawals) =
+    let (votes, enacted_actions, expired_action_ids) =
         parse_drep_pulsing_state(decoder).context("Failed to parse drep_pulsing_state")?;
     info!(
-        "      Parsed {} voting records, {} enacted, {} expired, {} withdrawals",
+        "      Parsed {} voting records, {} enacted, {} expired",
         votes.len(),
         enacted_actions.len(),
-        expired_action_ids.len(),
-        enacted_withdrawals.len()
+        expired_action_ids.len()
     );
 
     Ok(GovernanceState {
@@ -216,7 +197,6 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
         votes,
         enacted_actions,
         expired_action_ids,
-        enacted_withdrawals,
     })
 }
 
@@ -879,14 +859,10 @@ fn parse_drep_pulsing_state(decoder: &mut Decoder) -> Result<DRepPulsingResult> 
     let votes = parse_pulsing_snapshot(decoder).context("Failed to parse pulsing_snapshot")?;
 
     // Parse ratify_state [1]
-    let ratify_state = parse_ratify_state(decoder).context("Failed to parse ratify_state")?;
+    let (enacted_actions, expired_action_ids) =
+        parse_ratify_state(decoder).context("Failed to parse ratify_state")?;
 
-    Ok((
-        votes,
-        ratify_state.enacted_actions,
-        ratify_state.expired_action_ids,
-        ratify_state.enacted_withdrawals,
-    ))
+    Ok((votes, enacted_actions, expired_action_ids))
 }
 
 /// Parse pulsing_snapshot
@@ -992,90 +968,6 @@ fn parse_pulsing_snapshot(
     Ok(all_votes)
 }
 
-/// Parse enact_state and extract es_withdrawals
-///
-/// enact_state = [
-///   es_committee: strict_maybe<committee>,       [0]
-///   es_constitution: constitution,               [1]
-///   es_current_pparams: pparams,                 [2]
-///   es_previous_pparams: pparams,                [3]
-///   es_treasury: coin,                           [4]
-///   es_withdrawals: { * credential => coin },    [5]
-///   es_prev_gov_action_ids: gov_relation,        [6]
-/// ]
-fn parse_enact_state_withdrawals(decoder: &mut Decoder) -> Result<HashMap<Credential, Lovelace>> {
-    decoder.array().context("Failed to parse enact_state array")?;
-
-    // Skip es_committee [0]
-    decoder.skip().context("Failed to skip es_committee")?;
-
-    // Skip es_constitution [1]
-    decoder.skip().context("Failed to skip es_constitution")?;
-
-    // Skip es_current_pparams [2]
-    decoder.skip().context("Failed to skip es_current_pparams")?;
-
-    // Skip es_previous_pparams [3]
-    decoder.skip().context("Failed to skip es_previous_pparams")?;
-
-    // Skip es_treasury [4]
-    decoder.skip().context("Failed to skip es_treasury")?;
-
-    // Parse es_withdrawals [5] - map of credential to coin
-    let mut withdrawals = HashMap::new();
-    let map_len = decoder.map().context("Failed to parse es_withdrawals map")?;
-
-    match map_len {
-        Some(len) => {
-            for _ in 0..len {
-                if let Ok(credential) = parse_credential(decoder) {
-                    let amount: Lovelace =
-                        decoder.decode().context("Failed to parse withdrawal amount")?;
-                    withdrawals.insert(credential, amount);
-                } else {
-                    // Skip credential we couldn't parse
-                    decoder.skip()?;
-                    decoder.skip()?;
-                }
-            }
-        }
-        None => {
-            // Indefinite-length map
-            loop {
-                match decoder.datatype()? {
-                    Type::Break => {
-                        decoder.skip()?;
-                        break;
-                    }
-                    _ => {
-                        if let Ok(credential) = parse_credential(decoder) {
-                            let amount: Lovelace =
-                                decoder.decode().context("Failed to parse withdrawal amount")?;
-                            withdrawals.insert(credential, amount);
-                        } else {
-                            decoder.skip()?;
-                            decoder.skip()?;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Skip es_prev_gov_action_ids [6]
-    decoder.skip().context("Failed to skip es_prev_gov_action_ids")?;
-
-    if !withdrawals.is_empty() {
-        info!(
-            "Parsed {} enacted treasury withdrawals totaling {} ADA",
-            withdrawals.len(),
-            withdrawals.values().sum::<Lovelace>() / 1_000_000
-        );
-    }
-
-    Ok(withdrawals)
-}
-
 /// Parse ratify_state
 ///
 /// ratify_state = [
@@ -1084,16 +976,11 @@ fn parse_enact_state_withdrawals(decoder: &mut Decoder) -> Result<HashMap<Creden
 ///   rs_expired: set<gov_action_id>,
 ///   rs_delayed: bool
 /// ]
-///
-/// Returns: (enacted_actions, expired_action_ids, enacted_withdrawals)
-fn parse_ratify_state(
-    decoder: &mut Decoder,
-) -> Result<RatifyState> {
+fn parse_ratify_state(decoder: &mut Decoder) -> Result<(Vec<GovActionState>, Vec<GovActionId>)> {
     decoder.array().context("Failed to parse ratify_state array")?;
 
-    // Parse enact_state [0] to extract withdrawals
-    let enacted_withdrawals =
-        parse_enact_state_withdrawals(decoder).context("Failed to parse rs_enact_state")?;
+    // Skip enact_state [0]
+    decoder.skip().context("Failed to skip rs_enact_state")?;
 
     // Parse enacted [1]
     let mut enacted = Vec::new();
@@ -1156,11 +1043,7 @@ fn parse_ratify_state(
     // Skip delayed [3]
     decoder.skip().context("Failed to skip rs_delayed")?;
 
-    Ok(RatifyState {
-        enacted_actions: enacted,
-        expired_action_ids: expired,
-        enacted_withdrawals,
-    })
+    Ok((enacted, expired))
 }
 
 // ============================================================================
