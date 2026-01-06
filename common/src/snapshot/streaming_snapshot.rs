@@ -1160,7 +1160,6 @@ impl StreamingSnapshotParser {
             bootstrap_snapshots.set.spos.len(),
         );
         callbacks.on_snapshots(bootstrap_snapshots.clone())?;
-
         // Build the set of registered credentials from DState accounts.
         // This is used to properly determine `two_previous_reward_account_is_registered`
         // for SPOs in the bootstrap snapshots.
