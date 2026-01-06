@@ -1160,6 +1160,7 @@ impl StreamingSnapshotParser {
             bootstrap_snapshots.set.spos.len(),
         );
         callbacks.on_snapshots(bootstrap_snapshots.clone())?;
+
         // Build the set of registered credentials from DState accounts.
         // This is used to properly determine `two_previous_reward_account_is_registered`
         // for SPOs in the bootstrap snapshots.
@@ -2147,7 +2148,6 @@ impl StreamingSnapshotParser {
             RawSnapshot::parse(decoder, ctx, "Mark").context("Failed to parse Mark snapshot")?;
         let set_snapshot =
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
-        // Skip Go snapshot to advance decoder
         decoder.skip()?;
         let fees = decoder.decode::<u64>().context("Failed to parse fees from snapshots")?;
 
