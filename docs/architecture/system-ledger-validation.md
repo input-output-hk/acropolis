@@ -57,11 +57,12 @@ flowchart LR
   VRF(Block VRF Validator)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
+  GEN -- cardano.sequence.bootstrapped --> KES
+  GEN -- cardano.sequence.bootstrapped --> VRF
   MSF -- cardano.block.available --> CON
   CON -- cardano.block.proposed --> BU
   MSF -- cardano.snapshot.complete --> PNI
   PNI -- cardano.block.available --> CON
-  CON -- cardano.block.proposed --> BU
   CON -- cardano.block.proposed --> VRF
   CON -- cardano.block.proposed --> KES
   BU  -- cardano.txs --> TXU
@@ -76,15 +77,21 @@ flowchart LR
   TXU  -- cardano.withdrawals --> AC
   TXU  -- cardano.governance --> GOV
   SPO  SPO_AC@-- cardano.spo.state --> AC
+  SPO  SPO_KES@-- cardano.spo.state --> KES
+  SPO  SPO_VRF@-- cardano.spo.state --> VRF
   GEN  -- cardano.pot.deltas --> AC
   TXU  -- cardano.block.txs --> ES
   AC AC_GOV_DREP@-- cardano.drep.distribution --> GOV
   AC AC_GOV_SPO@-- cardano.spo.distribution --> GOV
+  AC AC_VRF@-- cardano.spo.distribution --> VRF
   PARAM PARAM_GOV@-- cardano.protocol.parameters --> GOV
   PARAM PARAM_AC@-- cardano.protocol.parameters --> AC
-  PARAM PARAM_DREP@-- cardano.protocol.paramters --> DREP
+  PARAM PARAM_DREP@-- cardano.protocol.parameters --> DREP
+  PARAM PARAM_KES@-- cardano.protocol.parameters --> KES
+  PARAM PARAM_VRF@-- cardano.protocol.parameters --> VRF
   GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
   ES   ES_AC@-- cardano.epoch.activity --> AC
+  ES   ES_VRF@-- cardano.epoch.nonce --> VRF
   DREP DREP_AC@-- cardano.drep.state --> AC
   KES -- cardano.validation.kes --> CON
   VRF -- cardano.validation.vrf --> CON
@@ -104,18 +111,26 @@ flowchart LR
   click GOV "https://github.com/input-output-hk/acropolis/tree/main/modules/governance_state/"
 
   classDef NEW fill:#efe
-  class DREP NEW
+  class CON NEW
+  class VRF NEW
+  class KES NEW
 
   classDef EPOCH stroke:#008
   class SPO_AC EPOCH
+  class SPO_KES EPOCH
+  class SPO_VRF EPOCH
   class ES_AC EPOCH
+  class ES_VRF EPOCH
   class PARAM_GOV EPOCH
   class PARAM_AC EPOCH
   class GOV_PARAM EPOCH
   class DREP_AC EPOCH
   class AC_GOV_DREP EPOCH
   class AC_GOV_SPO EPOCH
+  class AC_VRF EPOCH
   class PARAM_DREP EPOCH
+  class PARAM_KES EPOCH
+  class PARAM_VRF EPOCH
 ```
 
 ## Flight Control
@@ -169,7 +184,8 @@ have been overriding this so far).
 Consensus sets the `Validate` bit in the `BlockIntent` before passing
 it on, and then waits for No/NoGo responses from a configured list of
 downstream modules - specifically a set of `cardano.validation.x` topics where `x` is
-a shorthand for the module name (e.g. `cardano.validation.utxo`).
+a shorthand for the module name (e.g. `cardano.validation.utxo`).  Note that it will wait
+for all modules to respond either Go or NoGo - silence is not an option.
 
 At this stage all it does is log any failures as
 a test of the validation system - later it will implement the Ouroboros longest/densest chain rules
@@ -178,11 +194,26 @@ to decide among different candidate chains being offered by upstream peers, and 
 
 ### Block KES Validator
 
-TODO
+The new [Block KES Validator](../../modules/block_kes_validator) takes proposed blocks
+(`cardano.block.proposed`) and checks the KES signature on the header.  For this it needs
+the SPO state (`cardano.spo.state`) and the protocol parameters (`cardano.protocol.parameters`)
+and the genesis values (`cardano.sequence.bootstrapped`).
+
+Depending on the result, it sends one or more ValidationOutcomes in a `cardano.validation.kes`
+message which is picked up by Consensus.
 
 ### Block VRF Validator
 
-TODO
+Similarly, the [Block VRF Validator](../../modules/block_vrf_validator) takes proposed blocks
+and checks that the VRF calculation is correct - hence proving that the SPO did have the right
+to produce a block in that slot.  Along with the SPO state, protocol parameters and genesis
+values that the Block KES Validator takes, it also captures epoch nonces from `cardano.epoch.nonce`
+and the full SPDD from `cardano.spo.distribution`.  Then knowing the relative stake of the
+producing SPO compared to the total and the VRF output governed by the nonce, it can do the
+validation.
+
+The result of this is again a set of ValidationOutcomes, this time in
+a `cardano.validation.vrf` message.
 
 ## Existing modules
 

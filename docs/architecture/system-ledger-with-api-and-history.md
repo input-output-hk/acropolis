@@ -354,7 +354,6 @@ a particular epoch (also only if historical SPDD enabled), also for the `/epochs
 
 The historical SPDD storage is enabled through configuration - see the
 [module page](../../modules/accounts_state) for details.
-TODO - does this duplicate SPDD_Store?
 
 ### UTXO State
 
