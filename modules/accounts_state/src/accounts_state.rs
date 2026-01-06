@@ -177,6 +177,7 @@ impl AccountsState {
             // !TODO this seems overly specific to our startup process
             let _ = stake_subscription.read().await?;
             let _ = parameters_subscription.read().await?;
+            let _ = governance_outcomes_subscription.read().await?;
 
             // Initialisation messages
             {
