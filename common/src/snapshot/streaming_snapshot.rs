@@ -1123,8 +1123,10 @@ impl StreamingSnapshotParser {
         // Parse deposits (UTxOState[1])
         let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
-        // Parse fees (UTxOState[2]) - parsed but not stored (not needed downstream)
-        let _fees = remainder_decoder.decode::<u64>().unwrap_or(0);
+        // Parse fees (UTxOState[2]) - cumulative fees in UTxO state
+        // Note: us_fees contains fees from both current AND previous epoch. We subtract
+        // fee_ss (previous epoch's fees from snapshots) later to get current epoch only.
+        let us_fees = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         // Parse governance state using the governance module
         // gov_state = [proposals, committee, constitution, current_pparams, previous_pparams, future_pparams, drep_pulsing_state]
@@ -1230,10 +1232,10 @@ impl StreamingSnapshotParser {
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
         );
 
-        let bootstrap_snapshots = match snapshots_result {
+        let (bootstrap_snapshots, fees_prev_epoch) = match snapshots_result {
             Ok(raw_snapshots) => {
                 info!("Successfully parsed mark/set/go snapshots!");
-                // Convert raw snapshots to processed SnapshotsContainer
+                let fees = raw_snapshots.fees;
                 let processed = raw_snapshots.into_snapshots_container(
                     epoch,
                     &blocks_prev_map,
@@ -1248,12 +1250,12 @@ impl StreamingSnapshotParser {
                     processed.go.spos.len()
                 );
                 callbacks.on_snapshots(processed.clone())?;
-                processed
+                (processed, fees)
             }
             Err(e) => {
                 info!("    Failed to parse snapshots: {}", e);
                 info!("    Using empty snapshots (pre-Shelley or parse error)...");
-                SnapshotsContainer::default()
+                (SnapshotsContainer::default(), 0)
             }
         };
 
@@ -1478,8 +1480,10 @@ impl StreamingSnapshotParser {
         callbacks.on_accounts(accounts_bootstrap_data)?;
         callbacks.on_proposals(Vec::new())?; // TODO: Parse from GovState
 
+        // Calculate current epoch fees: us_fees contains cumulative fees, subtract previous epoch's
+        let total_fees_current = us_fees.saturating_sub(fees_prev_epoch);
         let epoch_bootstrap =
-            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch);
+            EpochBootstrapData::new(epoch, &blocks_previous_epoch, &blocks_current_epoch, total_fees_current);
         callbacks.on_epoch(epoch_bootstrap)?;
 
         let snapshot_metadata = SnapshotMetadata {
@@ -2128,12 +2132,13 @@ impl StreamingSnapshotParser {
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
         let go_snapshot =
             RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
-        let _ = decoder.decode::<u64>().unwrap_or(0);
+        let fees = decoder.decode::<u64>().unwrap_or(0);
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
             set: set_snapshot,
             go: go_snapshot,
+            fees,
         })
     }
 }
