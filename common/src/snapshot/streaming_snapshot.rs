@@ -1232,32 +1232,23 @@ impl StreamingSnapshotParser {
             pulsing_result.delta_treasury, pulsing_result.delta_reserves
         );
 
-        let (bootstrap_snapshots, fees_prev_epoch) = match snapshots_result {
-            Ok(raw_snapshots) => {
-                info!("Successfully parsed mark/set/go snapshots!");
-                let fees = raw_snapshots.fees;
-                let processed = raw_snapshots.into_snapshots_container(
-                    epoch,
-                    &blocks_prev_map,
-                    &blocks_curr_map,
-                    pots.clone(),
-                    network.clone(),
-                );
-                info!(
-                    "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
-                    processed.mark.spos.len(),
-                    processed.set.spos.len(),
-                    processed.go.spos.len()
-                );
-                callbacks.on_snapshots(processed.clone())?;
-                (processed, fees)
-            }
-            Err(e) => {
-                info!("    Failed to parse snapshots: {}", e);
-                info!("    Using empty snapshots (pre-Shelley or parse error)...");
-                (SnapshotsContainer::default(), 0)
-            }
-        };
+        let raw_snapshots = snapshots_result.context("Failed to parse mark/set/go snapshots")?;
+        info!("Successfully parsed mark/set/go snapshots!");
+        let fees_prev_epoch = raw_snapshots.fees;
+        let bootstrap_snapshots = raw_snapshots.into_snapshots_container(
+            epoch,
+            &blocks_prev_map,
+            &blocks_curr_map,
+            pots.clone(),
+            network.clone(),
+        );
+        info!(
+            "Parsed snapshots: Mark {} SPOs, Set {} SPOs, Go {} SPOs",
+            bootstrap_snapshots.mark.spos.len(),
+            bootstrap_snapshots.set.spos.len(),
+            bootstrap_snapshots.go.spos.len()
+        );
+        callbacks.on_snapshots(bootstrap_snapshots.clone())?;
 
         // Build pool registrations list for AccountsBootstrapMessage
         let pool_registrations: Vec<PoolRegistration> = pools.pools.values().cloned().collect();
@@ -2136,7 +2127,7 @@ impl StreamingSnapshotParser {
             RawSnapshot::parse(decoder, ctx, "Set").context("Failed to parse Set snapshot")?;
         let go_snapshot =
             RawSnapshot::parse(decoder, ctx, "Go").context("Failed to parse Go snapshot")?;
-        let fees = decoder.decode::<u64>().unwrap_or(0);
+        let fees = decoder.decode::<u64>().context("Failed to parse fees from snapshots")?;
 
         Ok(RawSnapshotsContainer {
             mark: mark_snapshot,
