@@ -3,6 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
+use acropolis_common::messages::{GovernanceOutcomesMessage, GovernanceProceduresMessage};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -19,6 +20,7 @@ use acropolis_common::{
     PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
     StakeRewardDelta, TxCertificate,
 };
+use acropolis_common::{Era, GovernanceOutcomeVariant};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -314,6 +316,7 @@ impl State {
     fn enter_epoch(
         &mut self,
         epoch: u64,
+        era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
@@ -450,6 +453,7 @@ impl State {
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch - 1,
+                era,
                 performance,
                 staking,
                 &shelley_params,
@@ -758,6 +762,7 @@ impl State {
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
+        era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -773,6 +778,7 @@ impl State {
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
+            era,
             ea_msg.total_fees,
             spo_blocks,
             verifier,
@@ -1070,6 +1076,127 @@ impl State {
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
         );
+
+        Ok(())
+    }
+
+    pub fn handle_governance_procedures(
+        &mut self,
+        procedures_msg: &GovernanceProceduresMessage,
+    ) -> Result<()> {
+        for proposal in &procedures_msg.proposal_procedures {
+            // Add the proposal deposit to the deposits pot
+            self.pots.deposits += proposal.deposit;
+
+            info!(
+                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA), pots.deposits: {}",
+                proposal.gov_action_id,
+                proposal.deposit,
+                proposal.deposit / 1_000_000,
+                self.pots.deposits
+            );
+        }
+
+        if !procedures_msg.proposal_procedures.is_empty() {
+            info!(
+                "Processed {} governance proposals, total deposits added: {} lovelace",
+                procedures_msg.proposal_procedures.len(),
+                procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn handle_governance_outcomes(
+        &mut self,
+        outcomes_msg: &GovernanceOutcomesMessage,
+    ) -> Result<()> {
+        let mut total_refunds: u64 = 0;
+        let mut total_to_treasury: u64 = 0;
+        let mut total_treasury_withdrawals: u64 = 0;
+
+        for outcome in &outcomes_msg.conway_outcomes {
+            let proposal = &outcome.voting.procedure;
+            let deposit = proposal.deposit;
+            let reward_account = &proposal.reward_account;
+
+            // Refund the deposit (applies to both enacted and expired proposals)
+            self.pots.deposits = self.pots.deposits.saturating_sub(deposit);
+            total_refunds += deposit;
+
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(reward_account) {
+                stake_addresses.add_to_reward(reward_account, deposit);
+                info!(
+                    "Governance proposal {:?} {} - refund {} lovelace to {}",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted {
+                        "enacted"
+                    } else {
+                        "expired"
+                    },
+                    deposit,
+                    reward_account
+                );
+            } else {
+                drop(stake_addresses);
+                self.pots.treasury += deposit;
+                total_to_treasury += deposit;
+                warn!(
+                    "Governance proposal {:?} {} - reward account {} not registered, refund {} to treasury",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted { "enacted" } else { "expired" },
+                    reward_account,
+                    deposit
+                );
+            }
+
+            // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
+            if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
+                &outcome.action_to_perform
+            {
+                for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    // Convert raw bytes to StakeAddress using from_binary (29-byte format)
+                    match StakeAddress::from_binary(reward_account_bytes) {
+                        Ok(reward_account) => {
+                            // Deduct from treasury
+                            self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
+                            total_treasury_withdrawals += *amount;
+
+                            // Credit to reward account
+                            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                            stake_addresses.add_to_reward(&reward_account, *amount);
+                            info!(
+                                "Treasury withdrawal: {} lovelace ({} ADA) to {}",
+                                amount,
+                                amount / 1_000_000,
+                                reward_account
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to parse reward account bytes for treasury withdrawal: {:?}, error: {}",
+                                reward_account_bytes, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if !outcomes_msg.conway_outcomes.is_empty() {
+            info!(
+                "Governance outcomes: {} proposals processed, total refunds: {} lovelace ({} ADA), \
+                 {} lovelace to treasury (unregistered accounts), treasury withdrawals: {} lovelace ({} ADA)",
+                outcomes_msg.conway_outcomes.len(),
+                total_refunds,
+                total_refunds / 1_000_000,
+                total_to_treasury,
+                total_treasury_withdrawals,
+                total_treasury_withdrawals / 1_000_000
+            );
+        }
 
         Ok(())
     }
