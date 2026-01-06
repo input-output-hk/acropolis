@@ -82,6 +82,8 @@ pub fn calculate_rewards(
     let total_active_stake =
         BigDecimal::from(staking.spos.values().map(|s| s.total_stake).sum::<Lovelace>());
 
+    tracing::info!("Total active stake for {epoch}: {}", total_active_stake);
+
     info!(epoch, go=staking.epoch, mark=performance.epoch,
           %total_supply, %total_active_stake, %stake_rewards, total_blocks,
           "Calculating rewards:");
@@ -337,6 +339,7 @@ fn calculate_spo_rewards(
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
+        let mut owner_rewards: u64 = costs.to_u64().unwrap_or(0);
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
@@ -369,6 +372,9 @@ fn calculate_spo_rewards(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address
                     );
+                    if !spo.pool_owners.contains(&spo.reward_account) {
+                        owner_rewards += to_pay;
+                    }
                     continue;
                 }
 
@@ -393,10 +399,10 @@ fn calculate_spo_rewards(
             }
         }
 
-        debug!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+        debug!(%fixed_cost, %margin_cost, leader_reward=%owner_rewards, %to_delegators, total_paid,
                delegators_paid, "Reward split:");
 
-        costs.to_u64().unwrap_or(0)
+        owner_rewards
     };
 
     if pay_to_pool_reward_account {
