@@ -138,23 +138,23 @@ impl TxUnpacker {
 
                                     let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
                                     let tx_total_output = mapped_tx.calculate_total_output();
-                                    let tx_total_consumed_except_inputs = mapped_tx.calculate_total_consumed_except_inputs(&state.protocol_params);
-                                    let tx_total_produced = mapped_tx.calculate_total_produced(&state.protocol_params);
 
                                     let Transaction {
                                         consumes: tx_consumes,
                                         produces: tx_produces,
+                                        fee:tx_fee,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
                                         proposal_update: tx_proposal_update,
                                         vkey_witnesses,
                                         native_scripts,
                                         error: tx_error,
-                                        ..
                                     } = mapped_tx;
                                     let mut props = None;
                                     let mut votes = None;
 
+                                    let certs_identifiers = tx_certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+                                    let total_withdrawals = tx_withdrawals.iter().map(|w| w.value).sum::<u64>();
                                     let mut vkey_needed = HashSet::new();
                                     let mut script_needed = HashSet::new();
                                     utils::get_vkey_script_needed(
@@ -188,8 +188,9 @@ impl TxUnpacker {
                                             tx_identifier,
                                             consumes: tx_consumes,
                                             produces: tx_produces,
-                                            total_consumed: Some(tx_total_consumed_except_inputs),
-                                            total_produced: Some(tx_total_produced),
+                                            tx_fee: Some(tx_fee),
+                                            total_withdrawals: Some(total_withdrawals),
+                                            certs_identifiers: Some(certs_identifiers),
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),

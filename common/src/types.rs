@@ -2,9 +2,16 @@
 // We don't use these types in the acropolis_common crate itself
 #![allow(dead_code)]
 
+use crate::certificate::TxCertificateIdentifier;
 use crate::crypto::keyhash_224;
-use crate::drep::{
-    Anchor, DRepChoice, DRepDeregistration, DRepRegistration, DRepUpdate, DRepVotingThresholds,
+use crate::drep::{Anchor, DRepVotingThresholds};
+// Re-export certificate types for backward compatibility
+pub use crate::certificate::{
+    AuthCommitteeHot, CommitteeCredential, Deregistration, GenesisKeyDelegation,
+    InstantaneousRewardSource, InstantaneousRewardTarget, MoveInstantaneousReward,
+    PoolRegistration, PoolRetirement, Registration, ResignCommitteeCold, StakeAndVoteDelegation,
+    StakeDelegation, StakeRegistrationAndDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+    StakeRegistrationAndVoteDelegation, TxCertificate, TxCertificateWithPos, VoteDelegation,
 };
 use crate::hash::Hash;
 use crate::serialization::Bech32Conversion;
@@ -21,13 +28,13 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Add;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt,
     fmt::{Display, Formatter},
-    net::{Ipv4Addr, Ipv6Addr},
     ops::{AddAssign, Neg},
     str::FromStr,
 };
@@ -294,6 +301,61 @@ impl BlockInfo {
     }
 }
 
+// For stake address registration/deregistration (handles deposits/refunds)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StakeCertificateOutcome {
+    Registered(Lovelace),   // New registration → deposit taken
+    Deregistered(Lovelace), // Valid deregistration → refund given
+    AlreadyRegistered,      // Re-registration → no deposit
+    AlreadyDeregistered,    // Already gone → no refund
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeCertificateDelta {
+    pub cert_identifier: TxCertificateIdentifier,
+    pub outcome: StakeCertificateOutcome,
+}
+
+impl StakeCertificateOutcome {
+    pub fn deposit(&self) -> Lovelace {
+        match self {
+            StakeCertificateOutcome::Registered(deposit) => *deposit,
+            _ => 0,
+        }
+    }
+
+    pub fn refund(&self) -> Lovelace {
+        match self {
+            StakeCertificateOutcome::Deregistered(refund) => *refund,
+            _ => 0,
+        }
+    }
+}
+
+// For pool registration/retirement (handles pool deposits)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum PoolCertificateOutcome {
+    Registered(Lovelace), // New pool → deposit taken
+    Updated,              // Existing pool update → no deposit
+    RetirementQueued,     // Retirement queued
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolCertificateDelta {
+    pub cert_identifier: TxCertificateIdentifier,
+    pub outcome: PoolCertificateOutcome,
+}
+
+impl PoolCertificateOutcome {
+    pub fn deposit(&self) -> Lovelace {
+        match self {
+            PoolCertificateOutcome::Registered(deposit) => *deposit,
+            PoolCertificateOutcome::Updated => 0,
+            PoolCertificateOutcome::RetirementQueued => 0,
+        }
+    }
+}
+
 // Individual transaction UTxO deltas
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TxUTxODeltas {
@@ -304,12 +366,12 @@ pub struct TxUTxODeltas {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
 
-    // NOTE:
-    // Total consumed doesn't include coins from UTxOs (inputs)
-    pub total_consumed: Option<Value>,
-    pub total_produced: Option<Value>,
-
     // State needed for validation
+    pub tx_fee: Option<Lovelace>,
+    pub total_withdrawals: Option<Lovelace>,
+
+    pub certs_identifiers: Option<Vec<TxCertificateIdentifier>>,
+
     // This is missing UTxO Authors
     pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
     pub script_hashes_needed: Option<HashSet<ScriptHash>>,
@@ -319,6 +381,70 @@ pub struct TxUTxODeltas {
     // This includes only native scripts
     // missing Plutus Scripts
     pub script_hashes_provided: Option<Vec<ScriptHash>>,
+}
+
+impl TxUTxODeltas {
+    pub fn calculate_total_refund(
+        &self,
+        stake_certificates_deltas: &[StakeCertificateDelta],
+    ) -> Lovelace {
+        let mut total_refund: Lovelace = 0;
+        let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
+            return 0;
+        };
+
+        for cert_identifier in certs_identifiers.iter() {
+            total_refund += stake_certificates_deltas
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.refund())
+                .unwrap_or(0);
+        }
+        total_refund
+    }
+
+    pub fn calculate_total_deposit(
+        &self,
+        pool_certificates_deltas: &[PoolCertificateDelta],
+        stake_certificates_deltas: &[StakeCertificateDelta],
+    ) -> Lovelace {
+        let mut total_deposit: Lovelace = 0;
+        let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
+            return 0;
+        };
+
+        for cert_identifier in certs_identifiers.iter() {
+            total_deposit += pool_certificates_deltas
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.deposit())
+                .unwrap_or(0);
+            total_deposit += stake_certificates_deltas
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.deposit())
+                .unwrap_or(0);
+        }
+        total_deposit
+    }
+
+    pub fn calculate_total_produced(
+        &self,
+        pool_certificates_deltas: &[PoolCertificateDelta],
+        stake_certificates_deltas: &[StakeCertificateDelta],
+    ) -> Value {
+        let mut total_produced = Value::default();
+        total_produced += &Value::new(
+            self.calculate_total_deposit(pool_certificates_deltas, stake_certificates_deltas),
+            vec![],
+        );
+        total_produced += &Value::new(self.tx_fee.unwrap_or_default(), vec![]);
+
+        for output in &self.produces {
+            total_produced += &output.value;
+        }
+        total_produced
+    }
 }
 
 /// Individual address balance change
@@ -1415,69 +1541,6 @@ pub struct PoolMetadata {
     pub hash: DataHash,
 }
 
-/// Pool registration data
-#[serde_as]
-#[derive(
-    Debug,
-    Default,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    minicbor::Decode,
-    minicbor::Encode,
-    PartialEq,
-    Eq,
-)]
-pub struct PoolRegistration {
-    /// Operator pool key hash - used as ID
-    #[serde_as(as = "Hex")]
-    #[n(0)]
-    pub operator: PoolId,
-
-    /// VRF key hash
-    #[serde_as(as = "Hex")]
-    #[n(1)]
-    pub vrf_key_hash: VrfKeyHash,
-
-    /// Pledged Ada
-    #[n(2)]
-    pub pledge: Lovelace,
-
-    /// Fixed cost
-    #[n(3)]
-    pub cost: Lovelace,
-
-    /// Marginal cost (fraction)
-    #[n(4)]
-    pub margin: Ratio,
-
-    /// Reward account
-    #[n(5)]
-    pub reward_account: StakeAddress,
-
-    /// Pool owners by their key hash
-    #[n(6)]
-    pub pool_owners: Vec<StakeAddress>,
-
-    // Relays
-    #[n(7)]
-    pub relays: Vec<Relay>,
-
-    // Metadata
-    #[n(8)]
-    pub pool_metadata: Option<PoolMetadata>,
-}
-
-/// Pool retirement data
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolRetirement {
-    /// Operator pool key hash - used as ID
-    pub operator: PoolId,
-
-    /// Epoch it will retire at the end of
-    pub epoch: u64,
-}
-
 /// Pool Update Action
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolUpdateAction {
@@ -1531,16 +1594,6 @@ pub struct PoolEpochState {
     pub spo_reward: u64,
 }
 
-/// Stake delegation data
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeDelegation {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// Pool ID to delegate to
-    pub operator: PoolId,
-}
-
 /// SPO total delegation data (for SPDD)
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DelegatedStake {
@@ -1564,161 +1617,7 @@ pub struct SPORewards {
     pub operator_rewards: Lovelace,
 }
 
-/// Genesis key delegation
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenesisKeyDelegation {
-    /// Genesis hash
-    pub genesis_hash: Hash<28>,
-
-    /// Genesis delegate hash
-    pub genesis_delegate_hash: PoolId,
-
-    /// VRF key hash
-    pub vrf_key_hash: VrfKeyHash,
-}
-
-/// Source of a MIR
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum InstantaneousRewardSource {
-    Reserves,
-    Treasury,
-}
-
-impl fmt::Display for InstantaneousRewardSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InstantaneousRewardSource::Reserves => write!(f, "reserves"),
-            InstantaneousRewardSource::Treasury => write!(f, "treasury"),
-        }
-    }
-}
-
-/// Target of a MIR
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum InstantaneousRewardTarget {
-    StakeAddresses(Vec<(StakeAddress, i64)>),
-    OtherAccountingPot(u64),
-}
-
-/// Move instantaneous reward
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MoveInstantaneousReward {
-    /// Source
-    pub source: InstantaneousRewardSource,
-
-    /// Target
-    pub target: InstantaneousRewardTarget,
-}
-
-/// Register stake (Conway version) = 'reg_cert'
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Registration {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// Deposit paid
-    pub deposit: Lovelace,
-}
-
-/// Deregister stake (Conway version) = 'unreg_cert'
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Deregistration {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// Deposit to be refunded
-    pub refund: Lovelace,
-}
-
-/// Vote delegation (simple, existing registration) = vote_deleg_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VoteDelegation {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    // DRep choice
-    pub drep: DRepChoice,
-}
-
-/// Stake+vote delegation (to SPO and DRep) = stake_vote_deleg_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeAndVoteDelegation {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// Pool
-    pub operator: PoolId,
-
-    // DRep vote
-    pub drep: DRepChoice,
-}
-
-/// Stake delegation to SPO + registration = stake_reg_deleg_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndDelegation {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// Pool
-    pub operator: PoolId,
-
-    // Deposit paid
-    pub deposit: Lovelace,
-}
-
-/// Vote delegation to DRep + registration = vote_reg_deleg_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndVoteDelegation {
-    /// Stake address
-    pub stake_address: StakeAddress,
-
-    /// DRep choice
-    pub drep: DRepChoice,
-
-    // Deposit paid
-    pub deposit: Lovelace,
-}
-
-/// All the trimmings:
-/// Vote delegation to DRep + Stake delegation to SPO + registration
-/// = stake_vote_reg_deleg_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeRegistrationAndStakeAndVoteDelegation {
-    /// Stake credential
-    pub stake_address: StakeAddress,
-
-    /// Pool
-    pub operator: PoolId,
-
-    /// DRep choice
-    pub drep: DRepChoice,
-
-    // Deposit paid
-    pub deposit: Lovelace,
-}
-
-pub type CommitteeCredential = Credential;
 pub use crate::drep::DRepCredential;
-
-/// Authorise a committee hot credential
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AuthCommitteeHot {
-    /// Cold credential
-    pub cold_credential: CommitteeCredential,
-
-    /// Hot credential
-    pub hot_credential: CommitteeCredential,
-}
-
-/// Resign a committee cold credential
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ResignCommitteeCold {
-    /// Cold credential
-    pub cold_credential: CommitteeCredential,
-
-    /// Associated anchor (reasoning?)
-    pub anchor: Option<Anchor>,
-}
 
 /// Governance actions data structures
 
@@ -2572,126 +2471,6 @@ pub struct GovernanceOutcome {
     /// or if the proposal does not suppose formal action, this field is
     /// `NoFormalAction`
     pub action_to_perform: GovernanceOutcomeVariant,
-}
-
-/// Certificate in a transaction
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum TxCertificate {
-    /// Default
-    None(()),
-
-    /// Stake registration
-    StakeRegistration(StakeAddress),
-
-    /// Stake de-registration
-    StakeDeregistration(StakeAddress),
-
-    /// Stake Delegation to a pool
-    StakeDelegation(StakeDelegation),
-
-    /// Pool registration
-    PoolRegistration(PoolRegistration),
-
-    /// Pool retirement
-    PoolRetirement(PoolRetirement),
-
-    /// Genesis key delegation
-    GenesisKeyDelegation(GenesisKeyDelegation),
-
-    /// Move instantaneous rewards
-    MoveInstantaneousReward(MoveInstantaneousReward),
-
-    /// New stake registration
-    Registration(Registration),
-
-    /// Stake deregistration
-    Deregistration(Deregistration),
-
-    /// Vote delegation
-    VoteDelegation(VoteDelegation),
-
-    /// Combined stake and vote delegation
-    StakeAndVoteDelegation(StakeAndVoteDelegation),
-
-    /// Stake registration and SPO delegation
-    StakeRegistrationAndDelegation(StakeRegistrationAndDelegation),
-
-    /// Stake registration and vote delegation
-    StakeRegistrationAndVoteDelegation(StakeRegistrationAndVoteDelegation),
-
-    /// Stake registration and combined SPO and vote delegation
-    StakeRegistrationAndStakeAndVoteDelegation(StakeRegistrationAndStakeAndVoteDelegation),
-
-    /// Authorise a committee hot credential
-    AuthCommitteeHot(AuthCommitteeHot),
-
-    /// Resign a committee cold credential
-    ResignCommitteeCold(ResignCommitteeCold),
-
-    /// DRep registration
-    DRepRegistration(DRepRegistration),
-
-    /// DRep deregistration
-    DRepDeregistration(DRepDeregistration),
-
-    /// DRep update
-    DRepUpdate(DRepUpdate),
-}
-
-impl TxCertificate {
-    /// This function extracts required VKey Hashes
-    /// from TxCertificate
-    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
-    ///
-    /// returns (vkey_hashes, script_hashes)
-    pub fn get_cert_authors(
-        &self,
-        vkey_hashes: &mut HashSet<KeyHash>,
-        script_hashes: &mut HashSet<ScriptHash>,
-    ) {
-        let mut parse_cred = |cred: &StakeCredential| match cred {
-            StakeCredential::AddrKeyHash(vkey_hash) => {
-                vkey_hashes.insert(*vkey_hash);
-            }
-            StakeCredential::ScriptHash(script_hash) => {
-                script_hashes.insert(*script_hash);
-            }
-        };
-
-        match self {
-            // Deregistration requires witness from stake credential
-            Self::StakeDeregistration(addr) => {
-                parse_cred(&addr.credential);
-            }
-            // Delegation requries witness from delegator
-            Self::StakeDelegation(deleg) => {
-                parse_cred(&deleg.stake_address.credential);
-            }
-            // Pool registration requires witness from pool cold key and owners
-            Self::PoolRegistration(pool_reg) => {
-                vkey_hashes.insert(*pool_reg.operator);
-                vkey_hashes.extend(
-                    pool_reg.pool_owners.iter().map(|o| o.get_hash()).collect::<HashSet<_>>(),
-                );
-            }
-            // Pool retirement requires witness from pool cold key
-            Self::PoolRetirement(retirement) => {
-                vkey_hashes.insert(*retirement.operator);
-            }
-            // Genesis delegation requires witness from genesis key
-            Self::GenesisKeyDelegation(gen_deleg) => {
-                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
-            }
-            _ => {}
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TxCertificateWithPos {
-    pub cert: TxCertificate,
-    pub tx_identifier: TxIdentifier,
-    pub cert_index: u64,
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]

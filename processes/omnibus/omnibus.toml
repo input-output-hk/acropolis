@@ -20,7 +20,7 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
-pause = "none"
+pause = "epoch:209"
 # Stop constraint likewise
 stop = "none"
 
@@ -66,6 +66,8 @@ network-name = "mainnet"
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.delta"
+pool-certificates-deltas-subscribe-topic = "cardano.pool.certificates.deltas"
+stake-certificates-deltas-subscribe-topic = "cardano.stake.certificates.deltas"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes

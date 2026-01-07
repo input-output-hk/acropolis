@@ -6,7 +6,10 @@ use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{Address, AddressDelta, Era, UTXOValue, UTxOIdentifier, Value, ValueMap};
+use acropolis_common::{
+    Address, AddressDelta, Era, PoolCertificateDelta, StakeCertificateDelta, UTXOValue,
+    UTxOIdentifier, Value, ValueMap,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -414,6 +417,8 @@ impl State {
         &mut self,
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
+        pool_certificates_deltas: &[PoolCertificateDelta],
+        stake_certificates_deltas: &[StakeCertificateDelta],
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
 
@@ -428,8 +433,13 @@ impl State {
         let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
-            let total_consumed = tx_deltas.total_consumed.clone().unwrap_or_default();
-            let total_produced = tx_deltas.total_produced.clone().unwrap_or_default();
+            let total_consumed_except_inputs = Value::new(
+                tx_deltas.calculate_total_refund(stake_certificates_deltas)
+                    + tx_deltas.total_withdrawals.unwrap_or_default(),
+                vec![],
+            );
+            let total_produced = tx_deltas
+                .calculate_total_produced(pool_certificates_deltas, stake_certificates_deltas);
             let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
             let mut script_hashes_needed =
                 tx_deltas.script_hashes_needed.clone().unwrap_or_default();
@@ -439,7 +449,7 @@ impl State {
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
                     &tx_deltas.consumes,
-                    total_consumed,
+                    total_consumed_except_inputs,
                     total_produced,
                     &mut vkey_hashes_needed,
                     &mut script_hashes_needed,
@@ -566,8 +576,9 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
-                total_consumed: None,
-                total_produced: None,
+                tx_fee: None,
+                total_withdrawals: None,
+                certs_identifiers: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -942,8 +953,9 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
-                total_consumed: None,
-                total_produced: None,
+                tx_fee: None,
+                total_withdrawals: None,
+                certs_identifiers: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -964,8 +976,9 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![input],
                 produces: vec![],
-                total_consumed: None,
-                total_produced: None,
+                tx_fee: None,
+                total_withdrawals: None,
+                certs_identifiers: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

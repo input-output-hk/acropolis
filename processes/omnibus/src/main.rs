@@ -123,7 +123,7 @@ pub async fn main() -> Result<()> {
     SPDDState::register(&mut process);
     DRDDState::register(&mut process);
     Consensus::register(&mut process);
-    ChainStore::register(&mut process);
+    // ChainStore::register(&mut process);
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
     FakeBlockInjector::register(&mut process);

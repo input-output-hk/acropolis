@@ -132,6 +132,20 @@ pub struct StakeRewardDeltasMessage {
     pub deltas: Vec<StakeRewardDelta>,
 }
 
+/// Stake certificates deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeCertificatesDeltasMessage {
+    /// Set of deltas
+    pub deltas: Vec<StakeCertificateDelta>,
+}
+
+/// Pool certificates deltas message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolCertificatesDeltasMessage {
+    /// Set of deltas
+    pub deltas: Vec<PoolCertificateDelta>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockTxsMessage {
     /// Total transactions
@@ -334,6 +348,10 @@ pub enum CardanoMessage {
     SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
     StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
+
+    // Certificates deltas
+    StakeCertificatesDeltas(StakeCertificatesDeltasMessage), // Stake certificate deltas
+    PoolCertificatesDeltas(PoolCertificatesDeltasMessage),   // Pool certificate deltas
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
