@@ -1,6 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
+use acropolis_common::Era;
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
     SPORewards, StakeAddress,
@@ -48,16 +49,17 @@ pub struct RewardsResult {
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
 /// The epoch is the one that has just ended - we assume the snapshot for this has already been
 /// taken.
-/// Registrations/deregistrations are net changes between 'staking' and 'performance' snapshots
+/// Registrations are net changes between 'staking' and 'performance' snapshots (used for Shelley bug)
 /// Note immutable - only state change allowed is to push a new snapshot
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_rewards(
     epoch: u64,
+    era: Era,
     performance: Arc<EpochSnapshot>,
     staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
     stake_rewards: Lovelace,
     registrations: &HashSet<StakeAddress>,
-    deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult {
         epoch,
@@ -81,8 +83,6 @@ pub fn calculate_rewards(
     // Get total active stake across all SPOs
     let total_active_stake =
         BigDecimal::from(staking.spos.values().map(|s| s.total_stake).sum::<Lovelace>());
-
-    tracing::info!("Total active stake for {epoch}: {}", total_active_stake);
 
     info!(epoch, go=staking.epoch, mark=performance.epoch,
           %total_supply, %total_active_stake, %stake_rewards, total_blocks,
@@ -147,8 +147,7 @@ pub fn calculate_rewards(
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
         // QUESTION: Which one?  Lowest hash seems to work in epoch 212
-        // TODO turn this off at Allegra start
-        if pay_to_pool_reward_account {
+        if pay_to_pool_reward_account && era < Era::Allegra {
             // Check all SPOs to see if they match this reward account
             for (other_id, other_spo) in staking.spos.iter() {
                 if other_spo.reward_account == staking_spo.reward_account
@@ -185,7 +184,6 @@ pub fn calculate_rewards(
             params,
             staking.clone(),
             pay_to_pool_reward_account,
-            deregistrations,
         );
 
         if !rewards.is_empty() {
@@ -242,7 +240,6 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
-    deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -375,15 +372,6 @@ fn calculate_spo_rewards(
                     if !spo.pool_owners.contains(&spo.reward_account) {
                         owner_rewards += to_pay;
                     }
-                    continue;
-                }
-
-                // Check if it was deregistered between staking and now
-                if deregistrations.contains(delegator_stake_address) {
-                    info!(
-                        "Recently deregistered member account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
                     continue;
                 }
 

@@ -5,21 +5,12 @@ use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::{
-    math::update_value_with_delta,
-    messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
-        PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage,
-    },
-    protocol_params::ProtocolParams,
-    stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant,
-    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
-    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange,
-    RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
-};
+use acropolis_common::{math::update_value_with_delta, messages::{
+    AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+    EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
+    PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
+    TxCertificatesMessage, WithdrawalsMessage,
+}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -328,6 +319,7 @@ impl State {
     fn enter_epoch(
         &mut self,
         epoch: u64,
+        era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
@@ -464,12 +456,12 @@ impl State {
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch - 1,
+                era,
                 performance,
                 staking,
                 &shelley_params,
                 monetary_change.stake_rewards,
                 &registrations,
-                &deregistrations,
             )
         }))));
 
@@ -780,6 +772,7 @@ impl State {
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
+        era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -795,6 +788,7 @@ impl State {
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
+            era,
             ea_msg.total_fees,
             spo_blocks,
             verifier,
