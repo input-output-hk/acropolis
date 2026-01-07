@@ -535,7 +535,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "dashmap",
- "fjall 2.11.2",
+ "fjall 3.0.1",
  "hex",
  "pallas",
  "serde",
