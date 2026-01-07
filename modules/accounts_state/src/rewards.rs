@@ -363,15 +363,14 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Check pool's reward address
-                if &spo.reward_account == delegator_stake_address {
+                // Check pool's reward address - skip only if they're also a pool owner
+                if &spo.reward_account == delegator_stake_address
+                    && spo.pool_owners.contains(&spo.reward_account)
+                {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address
                     );
-                    if !spo.pool_owners.contains(&spo.reward_account) {
-                        owner_rewards += to_pay;
-                    }
                     continue;
                 }
 
