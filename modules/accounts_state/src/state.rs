@@ -5,12 +5,21 @@ use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::{math::update_value_with_delta, messages::{
-    AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-    EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
-    PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
-    TxCertificatesMessage, WithdrawalsMessage,
-}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
+use acropolis_common::{
+    math::update_value_with_delta,
+    messages::{
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
+        PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
+        TxCertificatesMessage, WithdrawalsMessage,
+    },
+    protocol_params::ProtocolParams,
+    stake_addresses::{StakeAddressMap, StakeAddressState},
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
+    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
+    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
+    SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
