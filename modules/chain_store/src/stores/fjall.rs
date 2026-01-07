@@ -3,12 +3,12 @@ use std::{fs, path::Path, sync::Arc};
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
 use config::Config;
-use fjall::{Batch, Keyspace, Partition};
+use fjall::{Database, Keyspace, OwnedWriteBatch};
 
 use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
-    keyspace: Keyspace,
+    db: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
     last_persisted_block: u64,
@@ -30,10 +30,9 @@ impl FjallStore {
         if clear && path.exists() {
             fs::remove_dir_all(path)?;
         }
-        let fjall_config = fjall::Config::new(path);
-        let keyspace = fjall_config.open()?;
-        let blocks = FjallBlockStore::new(&keyspace)?;
-        let txs = FjallTXStore::new(&keyspace)?;
+        let db = Database::builder(path).open()?;
+        let blocks = FjallBlockStore::new(&db)?;
+        let txs = FjallTXStore::new(&db)?;
 
         let last_persisted_block = if !clear {
             blocks
@@ -41,8 +40,9 @@ impl FjallStore {
                 .iter()
                 .next_back()
                 .and_then(|res| {
-                    res.ok()
-                        .and_then(|(key, _)| key.as_ref().try_into().ok().map(u64::from_be_bytes))
+                    res.key()
+                        .ok()
+                        .and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
                 })
                 .unwrap_or(0)
         } else {
@@ -50,7 +50,7 @@ impl FjallStore {
         };
 
         Ok(Self {
-            keyspace,
+            db,
             blocks,
             txs,
             last_persisted_block,
@@ -71,7 +71,7 @@ impl super::Store for FjallStore {
             extra,
         };
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.db.batch();
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
             let block_ref = TxBlockReference {
@@ -133,27 +133,26 @@ impl super::Store for FjallStore {
 }
 
 struct FjallBlockStore {
-    blocks: Partition,
-    block_hashes_by_slot: Partition,
-    block_hashes_by_number: Partition,
-    block_hashes_by_epoch_slot: Partition,
+    blocks: Keyspace,
+    block_hashes_by_slot: Keyspace,
+    block_hashes_by_number: Keyspace,
+    block_hashes_by_epoch_slot: Keyspace,
 }
 
 impl FjallBlockStore {
-    fn new(keyspace: &Keyspace) -> Result<Self> {
-        let blocks =
-            keyspace.open_partition(BLOCKS_PARTITION, fjall::PartitionCreateOptions::default())?;
-        let block_hashes_by_slot = keyspace.open_partition(
+    fn new(db: &Database) -> Result<Self> {
+        let blocks = db.keyspace(BLOCKS_PARTITION, fjall::KeyspaceCreateOptions::default)?;
+        let block_hashes_by_slot = db.keyspace(
             BLOCK_HASHES_BY_SLOT_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+            fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_number = keyspace.open_partition(
+        let block_hashes_by_number = db.keyspace(
             BLOCK_HASHES_BY_NUMBER_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+            fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_epoch_slot = keyspace.open_partition(
+        let block_hashes_by_epoch_slot = db.keyspace(
             BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+            fjall::KeyspaceCreateOptions::default,
         )?;
 
         Ok(Self {
@@ -164,7 +163,7 @@ impl FjallBlockStore {
         })
     }
 
-    fn insert(&self, batch: &mut Batch, info: &BlockInfo, raw: &Block) {
+    fn insert(&self, batch: &mut OwnedWriteBatch, info: &BlockInfo, raw: &Block) {
         let encoded = {
             let mut bytes = vec![];
             minicbor::encode(raw, &mut bytes).expect("infallible");
@@ -221,7 +220,7 @@ impl FjallBlockStore {
         let max_number_bytes = max_number.to_be_bytes();
         let mut blocks = vec![];
         for res in self.block_hashes_by_number.range(min_number_bytes..=max_number_bytes) {
-            let (_, hash) = res?;
+            let hash = res.value()?;
             if let Some(block) = self.get_by_hash(&hash)? {
                 blocks.push(block);
             }
@@ -244,9 +243,10 @@ impl FjallBlockStore {
     }
 
     fn get_latest(&self) -> Result<Option<Block>> {
-        let Some((_, hash)) = self.block_hashes_by_slot.last_key_value()? else {
+        let Some(res) = self.block_hashes_by_slot.last_key_value() else {
             return Ok(None);
         };
+        let hash = res.value()?;
         self.get_by_hash(&hash)
     }
 }
@@ -259,16 +259,15 @@ fn epoch_slot_key(epoch: u64, epoch_slot: u64) -> [u8; 16] {
 }
 
 struct FjallTXStore {
-    txs: Partition,
+    txs: Keyspace,
 }
 impl FjallTXStore {
-    fn new(keyspace: &Keyspace) -> Result<Self> {
-        let txs =
-            keyspace.open_partition(TXS_PARTITION, fjall::PartitionCreateOptions::default())?;
+    fn new(db: &Database) -> Result<Self> {
+        let txs = db.keyspace(TXS_PARTITION, fjall::KeyspaceCreateOptions::default)?;
         Ok(Self { txs })
     }
 
-    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: TxBlockReference) {
+    fn insert_tx(&self, batch: &mut OwnedWriteBatch, hash: TxHash, block_ref: TxBlockReference) {
         let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }

@@ -75,7 +75,7 @@ dependencies = [
  "chrono",
  "config",
  "csv",
- "fjall",
+ "fjall 2.11.2",
  "hex",
  "imbl",
  "itertools 0.14.0",
@@ -92,7 +92,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall",
+ "fjall 2.11.2",
  "minicbor 0.25.1",
  "tempfile",
  "tokio",
@@ -175,7 +175,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall",
+ "fjall 3.0.1",
  "hex",
  "minicbor 0.25.1",
  "pallas",
@@ -207,7 +207,7 @@ dependencies = [
  "bincode 1.3.3",
  "caryatid_sdk",
  "config",
- "fjall",
+ "fjall 2.11.2",
  "futures",
  "hex",
  "minicbor 0.25.1",
@@ -317,7 +317,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall",
+ "fjall 2.11.2",
  "hex",
  "minicbor 0.25.1",
  "rayon",
@@ -333,7 +333,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall",
+ "fjall 2.11.2",
  "minicbor 0.25.1",
  "tempfile",
  "tokio",
@@ -535,7 +535,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "dashmap",
- "fjall",
+ "fjall 2.11.2",
  "hex",
  "pallas",
  "serde",
@@ -564,7 +564,7 @@ dependencies = [
  "caryatid_sdk",
  "clap 4.5.53",
  "config",
- "fjall",
+ "fjall 2.11.2",
  "pallas",
  "tokio",
  "tracing",
@@ -1518,6 +1518,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "byteorder-lite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+
+[[package]]
 name = "bytes"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1531,6 +1537,12 @@ name = "byteview"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
+
+[[package]]
+name = "byteview"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dda4398f387cc6395a3e93b3867cd9abda914c97a0b344d1eefb2e5c51785fca"
 
 [[package]]
 name = "caryatid_macros"
@@ -2549,12 +2561,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b25ad44cd4360a0448a9b5a0a6f1c7a621101cca4578706d43c9a821418aebc"
 dependencies = [
  "byteorder",
- "byteview",
+ "byteview 0.6.1",
  "dashmap",
  "log",
- "lsm-tree",
+ "lsm-tree 2.10.4",
  "path-absolutize",
  "std-semaphore",
+ "tempfile",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "fjall"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f69637c02d38ad1b0f003101d0195a60368130aa17d9ef78b1557d265a22093"
+dependencies = [
+ "byteorder-lite",
+ "byteview 0.10.0",
+ "dashmap",
+ "flume 0.12.0",
+ "log",
+ "lsm-tree 3.0.1",
+ "lz4_flex",
  "tempfile",
  "xxhash-rust",
 ]
@@ -2584,6 +2613,15 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "nanorand",
+ "spin",
+]
+
+[[package]]
+name = "flume"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
+dependencies = [
  "spin",
 ]
 
@@ -3529,7 +3567,7 @@ dependencies = [
  "async-trait",
  "backon",
  "executor-trait 2.1.2",
- "flume",
+ "flume 0.11.1",
  "futures-core",
  "futures-io",
  "reactor-trait 2.8.0",
@@ -3623,10 +3661,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "lsm-tree"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b875f1dfe14f557f805b167fb9b0fc54c5560c7a4bd6ae02535b2846f276a8cb"
+dependencies = [
+ "byteorder-lite",
+ "byteview 0.10.0",
+ "crossbeam-skiplist",
+ "enum_dispatch",
+ "interval-heap",
+ "log",
+ "lz4_flex",
+ "quick_cache",
+ "rustc-hash",
+ "self_cell",
+ "sfa",
+ "tempfile",
+ "varint-rs",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "lz4_flex"
 version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "matchers"
@@ -3770,7 +3833,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "flate2",
- "flume",
+ "flume 0.11.1",
  "futures",
  "getrandom 0.2.16",
  "mithril-cardano-node-internal-database",
@@ -5052,7 +5115,7 @@ dependencies = [
  "async-io",
  "async-trait",
  "executor-trait 2.1.2",
- "flume",
+ "flume 0.11.1",
  "futures-core",
  "futures-io",
 ]
@@ -5766,6 +5829,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
+]
+
+[[package]]
+name = "sfa"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1296838937cab56cd6c4eeeb8718ec777383700c33f060e2869867bd01d1175"
+dependencies = [
+ "byteorder-lite",
+ "log",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -6674,6 +6748,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6818,7 +6898,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62fc7c4ce161f049607ecea654dca3f2d727da5371ae85e2e4f14ce2b98ed67c"
 dependencies = [
  "byteorder",
- "byteview",
+ "byteview 0.6.1",
  "interval-heap",
  "log",
  "path-absolutize",
