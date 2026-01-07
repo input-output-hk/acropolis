@@ -280,13 +280,9 @@ impl TxUnpacker {
                                             total_fees += fee;
                                         }
                                     } else if let Some(collateral) = tx.total_collateral() {
-                                        let returned = tx
-                                            .collateral_return()
-                                            .map(|o| o.value().coin())
-                                            .unwrap_or(0);
-
-                                        let burned = collateral - returned;
-                                        total_fees += burned;
+                                        total_fees += collateral;
+                                    } else {
+                                        total_fees += 5_000_000
                                     }
                                 }
 
