@@ -275,8 +275,18 @@ impl TxUnpacker {
                                     }
 
                                     // Capture the fees
-                                    if let Some(fee) = tx.fee() {
-                                        total_fees += fee;
+                                    if tx.is_valid() {
+                                        if let Some(fee) = tx.fee() {
+                                            total_fees += fee;
+                                        }
+                                    } else if let Some(collateral) = tx.total_collateral() {
+                                        let returned = tx
+                                            .collateral_return()
+                                            .map(|o| o.value().coin())
+                                            .unwrap_or(0);
+
+                                        let burned = collateral - returned;
+                                        total_fees += burned;
                                     }
                                 }
 
