@@ -70,12 +70,14 @@ impl TxUnpacker {
                     Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
                         complete.values.clone()
                     }
-                    _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+                    _ => panic!(
+                        "Unexpected message in genesis completion topic: {bootstrapped_message:?}"
+                    ),
                 };
 
                 Some(genesis)
             }
-            None => None
+            None => None,
         };
 
         loop {
@@ -422,24 +424,24 @@ impl TxUnpacker {
             if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
                 if let Some(ref genesis) = genesis {
                     if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                        message.as_ref() {
-                            let span = info_span!("tx_unpacker.validate", block = block.number);
-                            async {
-                                let mut validation_outcomes = ValidationOutcomes::new();
-                                if let Err(e) = state.validate(block, txs_msg,
-                                                               &genesis.genesis_delegs) {
-                                    validation_outcomes.push(*e);
-                                }
-
-                                validation_outcomes
-                                    .publish(&context, publish_tx_validation_topic, block)
-                                    .await
-                                    .unwrap_or_else(
-                                        |e| error!("Failed to publish tx validation: {e}"));
+                        message.as_ref()
+                    {
+                        let span = info_span!("tx_unpacker.validate", block = block.number);
+                        async {
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs)
+                            {
+                                validation_outcomes.push(*e);
                             }
-                            .instrument(span)
-                                .await;
+
+                            validation_outcomes
+                                .publish(&context, publish_tx_validation_topic, block)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                         }
+                        .instrument(span)
+                        .await;
+                    }
                 }
             }
 
@@ -501,7 +503,7 @@ impl TxUnpacker {
                 info!("Creating subscriber on '{topic}'");
                 Some(context.subscribe(&topic).await?)
             }
-            None => None
+            None => None,
         };
 
         // Optional subscription for bootstrap (only needed if we are validating)
@@ -511,7 +513,7 @@ impl TxUnpacker {
                 info!("Creating subscriber on '{topic}'");
                 Some(context.subscribe(&topic).await?)
             }
-            None => None
+            None => None,
         };
 
         let network_id: NetworkId =
