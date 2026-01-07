@@ -7,7 +7,7 @@ scripts.
 
 Now we need to step up to full validation with scripts as well.
 
-** This section is a proposed design, it does not exist yet (Jan 2026) **
+**This section is a proposed design, it does not exist yet (Jan 2026)**
 
 ## A brief background on scripts
 
@@ -210,7 +210,7 @@ but the outcome is an in-memory Script Context structure rather than a huge numb
 Another option would be to subscribe to all the messages from the Tx Unpacker but this is probably
 less efficient than redoing the (fairly simple) CBOR decoding.
 
-TODO: Validate this assumption
+*TODO: Validate this assumption*
 
 If one or more inputs in a transaction specify a reference script, it will look up the script
 by asking the Script Store with `cardano.script.lookup`.  It also needs the current cost model
