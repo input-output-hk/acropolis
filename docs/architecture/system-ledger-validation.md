@@ -258,6 +258,6 @@ $ cargo run --release -- --config configs/ledger-validation.toml
 ```
 
 ## Next steps
-Next, we'll add [phase 2 validation of scripts](script-validation.md).
+Next, we'll add [phase 2 validation of scripts](system-script-validation.md).
 
 
