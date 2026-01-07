@@ -31,6 +31,9 @@ members = [
     "modules/block_vrf_validator",          # Validate the VRF calculation in the block header
     "modules/block_kes_validator",          # Validate KES in the block header
     "modules/fake_block_injector",          # Fake block injector
+    "modules/rest_blockfrost",              # Blockfrost-compatible REST API
+    "modules/mcp_server",                   # Model Context Protocol server
+    "modules/custom_indexer",               # Custom indexer module
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process
