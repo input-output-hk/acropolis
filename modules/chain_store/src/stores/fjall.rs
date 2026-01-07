@@ -8,7 +8,7 @@ use fjall::{Database, Keyspace, OwnedWriteBatch};
 use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
-    db: Database,
+    database: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
     last_persisted_block: u64,
@@ -16,11 +16,11 @@ pub struct FjallStore {
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
 const DEFAULT_CLEAR_ON_START: bool = true;
-const BLOCKS_PARTITION: &str = "blocks";
-const BLOCK_HASHES_BY_SLOT_PARTITION: &str = "block-hashes-by-slot";
-const BLOCK_HASHES_BY_NUMBER_PARTITION: &str = "block-hashes-by-number";
-const BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION: &str = "block-hashes-by-epoch-slot";
-const TXS_PARTITION: &str = "txs";
+const BLOCKS_KEYSPACE: &str = "blocks";
+const BLOCK_HASHES_BY_SLOT_KEYSPACE: &str = "block-hashes-by-slot";
+const BLOCK_HASHES_BY_NUMBER_KEYSPACE: &str = "block-hashes-by-number";
+const BLOCK_HASHES_BY_EPOCH_SLOT_KEYSPACE: &str = "block-hashes-by-epoch-slot";
+const TXS_KEYSPACE: &str = "txs";
 
 impl FjallStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
@@ -30,9 +30,9 @@ impl FjallStore {
         if clear && path.exists() {
             fs::remove_dir_all(path)?;
         }
-        let db = Database::builder(path).open()?;
-        let blocks = FjallBlockStore::new(&db)?;
-        let txs = FjallTXStore::new(&db)?;
+        let database = Database::builder(path).open()?;
+        let blocks = FjallBlockStore::new(&database)?;
+        let txs = FjallTXStore::new(&database)?;
 
         let last_persisted_block = if !clear {
             blocks
@@ -50,7 +50,7 @@ impl FjallStore {
         };
 
         Ok(Self {
-            db,
+            database,
             blocks,
             txs,
             last_persisted_block,
@@ -71,7 +71,7 @@ impl super::Store for FjallStore {
             extra,
         };
 
-        let mut batch = self.db.batch();
+        let mut batch = self.database.batch();
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
             let block_ref = TxBlockReference {
@@ -140,18 +140,18 @@ struct FjallBlockStore {
 }
 
 impl FjallBlockStore {
-    fn new(db: &Database) -> Result<Self> {
-        let blocks = db.keyspace(BLOCKS_PARTITION, fjall::KeyspaceCreateOptions::default)?;
-        let block_hashes_by_slot = db.keyspace(
-            BLOCK_HASHES_BY_SLOT_PARTITION,
+    fn new(database: &Database) -> Result<Self> {
+        let blocks = database.keyspace(BLOCKS_KEYSPACE, fjall::KeyspaceCreateOptions::default)?;
+        let block_hashes_by_slot = database.keyspace(
+            BLOCK_HASHES_BY_SLOT_KEYSPACE,
             fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_number = db.keyspace(
-            BLOCK_HASHES_BY_NUMBER_PARTITION,
+        let block_hashes_by_number = database.keyspace(
+            BLOCK_HASHES_BY_NUMBER_KEYSPACE,
             fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_epoch_slot = db.keyspace(
-            BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION,
+        let block_hashes_by_epoch_slot = database.keyspace(
+            BLOCK_HASHES_BY_EPOCH_SLOT_KEYSPACE,
             fjall::KeyspaceCreateOptions::default,
         )?;
 
@@ -262,8 +262,8 @@ struct FjallTXStore {
     txs: Keyspace,
 }
 impl FjallTXStore {
-    fn new(db: &Database) -> Result<Self> {
-        let txs = db.keyspace(TXS_PARTITION, fjall::KeyspaceCreateOptions::default)?;
+    fn new(database: &Database) -> Result<Self> {
+        let txs = database.keyspace(TXS_KEYSPACE, fjall::KeyspaceCreateOptions::default)?;
         Ok(Self { txs })
     }
 
