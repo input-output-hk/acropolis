@@ -28,7 +28,7 @@ containing it.
 ### Script context
 
 A script is essentially a function that returns True or False.  If it returns False, the
-validation fails.  The inputs to the function - the *Script Context* include:
+validation fails.  The inputs to the function - the *Script Context* - include:
 
 * The contents of the spending transaction (inputs, outputs, certificates etc.)
 * The 'purpose' (spending a UTxO, authorising a withdrawal etc.)
@@ -61,8 +61,8 @@ There is also a great deeper dive into scripts on the
 We introduce the following new modules for Phase 2 validation:
 
 * [Script Store](../../modules/script_store) - captures reference scripts from UTxOs
-* [Script Validator](../../modules/script_validator)) - fetches the script (if required), builds the Script Context and passes them to...  This is the module that issues the final validation response for consensus.
-* [Script Runner uPLC](../../modules/script_runner_uplc) - the actual script interpreter
+* [Script Validator](../../modules/script_validator) - fetches the script (if required), builds the Script Context and passes them to the Script Runner.  This is the module that issues the final validation response for consensus.
+* [Script Runner (uPLC)](../../modules/script_runner_uplc) - the actual script interpreter, uPLC version
 
 The last two are split so we have the option of easily replacing the interpreter without
 needing to duplicate the script context logic.  Initially we intend to use the
