@@ -143,6 +143,7 @@ flowchart LR
   SCRIPTV SCRIPTV_SCRIPTS@-- cardano.script.lookup --> SCRIPTS
   SCRIPTV SCRIPTV_SCRIPTR@-- cardano.script.run --> SCRIPTR
   SCRIPTV SCRIPTV_UTXO@-- cardano.utxo.lookup --> UTXO
+  SCRIPTV -- cardano.validation.script --> CON
 
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
@@ -160,6 +161,9 @@ flowchart LR
   click CON "https://github.com/input-output-hk/acropolis/tree/main/modules/consensus/"
   click VRF "https://github.com/input-output-hk/acropolis/tree/main/modules/block_vrf_validator/"
   click KES "https://github.com/input-output-hk/acropolis/tree/main/modules/block_kes_validator/"
+  click SCRIPTS "https://github.com/input-output-hk/acropolis/tree/main/modules/script_store/"
+  click SCRIPTV "https://github.com/input-output-hk/acropolis/tree/main/modules/script_validator/"
+  click SCRIPTR "https://github.com/input-output-hk/acropolis/tree/main/modules/script_runner_uplc/"
 
   classDef NEW fill:#efe
   class SCRIPTS NEW
