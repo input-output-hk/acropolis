@@ -53,6 +53,9 @@ transactions can simulate this to make sure they attach the correct fee.
 As a script runs, there is a monitor which checks the total costs incurred, and will abort
 it if it goes over the budget expressed in the redeemer (which the fees must at least cover).
 
+There is also a great deeper dive into scripts on the
+[Aiken site](https://aiken-lang.org/fundamentals/eutxo).
+
 ## New modules
 
 We introduce the following new modules for Phase 2 validation:
@@ -231,10 +234,14 @@ and all the data required to run it, runs it, and returns a success or error res
 *Note: Amaru have made improvements to uPLC, we need to track whether they have been folded back
 upstream or if we need to use Amaru's fork*
 
+In the future we may want to use other interpreters, including the option of wrapping the
+Haskell Plutus Core interpreter in an external microservice.
+
 ## Configuration
 TODO
 
 ## Next steps
-Next, we'll add [phase 2 validation of scripts](system-script-validation.md).
+TODO
+
 
 
