@@ -242,7 +242,7 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
-    deregistrations: &HashSet<StakeAddress>,
+    _deregistrations: &HashSet<StakeAddress>,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -339,7 +339,7 @@ fn calculate_spo_rewards(
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
-        let mut owner_rewards: u64 = costs.to_u64().unwrap_or(0);
+        let owner_rewards: u64 = costs.to_u64().unwrap_or(0);
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
@@ -367,21 +367,11 @@ fn calculate_spo_rewards(
                 }
 
                 // Check pool's reward address
-                if &spo.reward_account == delegator_stake_address {
+                if &spo.reward_account == delegator_stake_address
+                    && spo.pool_owners.contains(&spo.reward_account)
+                {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    if !spo.pool_owners.contains(&spo.reward_account) {
-                        owner_rewards += to_pay;
-                    }
-                    continue;
-                }
-
-                // Check if it was deregistered between staking and now
-                if deregistrations.contains(delegator_stake_address) {
-                    info!(
-                        "Recently deregistered member account {}, losing {to_pay}",
                         delegator_stake_address
                     );
                     continue;
