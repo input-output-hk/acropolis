@@ -2,7 +2,7 @@
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
 use acropolis_common::certificate::TxCertificateIdentifier;
-use acropolis_common::messages::PoolCertificatesDeltasMessage;
+use acropolis_common::messages::{PoolCertificatesDeltasMessage, ProtocolParamsMessage};
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -740,6 +740,11 @@ impl State {
         }
 
         Ok(vld)
+    }
+
+    /// Handle ProtocolParamsMessage
+    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) {
+        self.protocol_parameters = Some(params_msg.params.clone());
     }
 
     pub fn dump(&self) -> SPOState {

@@ -66,6 +66,10 @@ const DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "stake-reward-deltas-subscribe-topic",
     "cardano.stake.reward.deltas",
 );
+const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
 const DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC: (&str, &str) =
     ("clock-tick-subscribe-topic", "clock.tick");
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -216,6 +220,7 @@ impl SPOState {
         mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut parameters_subscription: Box<dyn Subscription<Message>>,
         // publishers
         mut spo_state_publisher: SPOStatePublisher,
         mut pool_certificates_deltas_publisher: PoolCertificatesDeltasPublisher,
@@ -437,6 +442,24 @@ impl SPOState {
                     }
                 }
 
+                // Handle ProtocolParamsMessage
+
+                let (_, message) = parameters_subscription.read_ignoring_rollbacks().await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        let span =
+                            info_span!("spo_state.handle_parameters", block = block_info.number);
+                        async {
+                            ctx.check_sync(block_info);
+                            state.handle_parameters(params_msg);
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Handle EpochActivityMessage
                 if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
                     let (_, ea_message) =
@@ -618,6 +641,11 @@ impl SPOState {
             .get_string(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_subscribe_topic}'");
+
+        let parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating protocol parameters subscriber on '{parameters_subscribe_topic}'");
 
         let clock_tick_subscribe_topic = config
             .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
@@ -958,6 +986,8 @@ impl SPOState {
             None
         };
 
+        let parameters_subscription = context.subscribe(&parameters_subscribe_topic).await?;
+
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
         let pool_certificates_deltas_publisher = PoolCertificatesDeltasPublisher::new(
@@ -983,6 +1013,7 @@ impl SPOState {
                 stake_deltas_subscription,
                 spo_rewards_subscription,
                 stake_reward_deltas_subscription,
+                parameters_subscription,
                 spo_state_publisher,
                 pool_certificates_deltas_publisher,
                 validation_publish_topic,
