@@ -304,6 +304,12 @@ pub struct TxUTxODeltas {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
 
+    // Transaction fee
+    pub fee: u64,
+
+    // Tx validity flag
+    pub is_valid: bool,
+
     // State needed for validation
     // This is missing UTxO Authors
     pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
