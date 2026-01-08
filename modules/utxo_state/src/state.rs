@@ -6,7 +6,9 @@ use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
-use acropolis_common::{Address, AddressDelta, Era, UTXOValue, UTxOIdentifier, Value, ValueMap};
+use acropolis_common::{
+    Address, AddressDelta, Era, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -28,6 +30,14 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn finalise_block(&self, block: &BlockInfo);
 
     /// handle rollback
+    async fn rollback(&self, message: Arc<Message>);
+}
+
+#[async_trait]
+pub trait BlockTotalsObserver: Send + Sync {
+    async fn start_block(&self, block: &BlockInfo);
+    async fn observe_tx(&self, output: u64, fee: u64);
+    async fn finalise_block(&self, block: &BlockInfo);
     async fn rollback(&self, message: Arc<Message>);
 }
 
@@ -68,6 +78,9 @@ pub struct State {
     /// Address delta observer
     address_delta_observer: Option<Arc<dyn AddressDeltaObserver>>,
 
+    /// Block totals observer
+    block_totals_observer: Option<Arc<dyn BlockTotalsObserver>>,
+
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
 }
@@ -82,6 +95,7 @@ impl State {
             volatile_created: VolatileIndex::new(),
             volatile_spent: VolatileIndex::new(),
             address_delta_observer: None,
+            block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
         }
     }
@@ -123,6 +137,11 @@ impl State {
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
+    }
+
+    // Register the block totals observer
+    pub fn register_block_totals_observer(&mut self, observer: Arc<dyn BlockTotalsObserver>) {
+        self.block_totals_observer = Some(observer);
     }
 
     /// Look up a UTXO
@@ -323,8 +342,11 @@ impl State {
 
     /// Handle a message
     pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
-        // Start the block for observer
+        // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer.start_block(block).await;
+        }
+        if let Some(observer) = self.block_totals_observer.as_mut() {
             observer.start_block(block).await;
         }
 
@@ -333,50 +355,118 @@ impl State {
 
         // Process the deltas
         for tx in &deltas.deltas {
-            // Temporary map to sum UTxO deltas efficiently
-            let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
-
-            for input in &tx.consumes {
-                if let Some(utxo) = self.lookup_utxo(input).await? {
-                    // Remove or mark spent
-                    self.observe_input(input, block).await?;
-
-                    let addr = utxo.address.clone();
-                    let entry = address_map.entry(addr.clone()).or_default();
-
-                    entry.spent_utxos.push(*input);
-                    entry.sent.add_value(&utxo.value);
-                }
-            }
-
-            for output in &tx.produces {
-                self.observe_output(output, block).await?;
-
-                let addr = output.address.clone();
-                let entry = address_map.entry(addr.clone()).or_default();
-
-                entry.created_utxos.push(output.utxo_identifier);
-                entry.received.add_value(&output.value);
-            }
-
-            for (addr, entry) in address_map {
-                let delta = AddressDelta {
-                    address: addr,
-                    tx_identifier: tx.tx_identifier,
-                    spent_utxos: entry.spent_utxos,
-                    created_utxos: entry.created_utxos,
-                    sent: Value::from(entry.sent),
-                    received: Value::from(entry.received),
-                };
-                if let Some(observer) = self.address_delta_observer.as_ref() {
-                    observer.observe_delta(&delta).await;
-                }
+            if tx.is_valid {
+                self.handle_valid_tx(tx, block).await?;
+            } else {
+                self.handle_invalid_tx(tx, block).await?;
             }
         }
 
-        // End the block for observer
+        // End the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.finalise_block(block).await;
+        }
+        if let Some(observer) = self.block_totals_observer.as_mut() {
+            observer.finalise_block(block).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_valid_tx(&mut self, tx: &TxUTxODeltas, block: &BlockInfo) -> Result<()> {
+        // Temporary map to sum UTxO deltas efficiently
+        let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
+
+        for input in &tx.consumes {
+            if let Some(utxo) = self.lookup_utxo(input).await? {
+                // Remove or mark spent
+                self.observe_input(input, block).await?;
+
+                let addr = utxo.address.clone();
+                let entry = address_map.entry(addr.clone()).or_default();
+
+                entry.spent_utxos.push(*input);
+                entry.sent.add_value(&utxo.value);
+            }
+        }
+
+        let mut tx_output = 0;
+        for output in &tx.produces {
+            self.observe_output(output, block).await?;
+
+            let addr = output.address.clone();
+            let entry = address_map.entry(addr.clone()).or_default();
+
+            entry.created_utxos.push(output.utxo_identifier);
+            entry.received.add_value(&output.value);
+            tx_output += output.value.coin();
+        }
+
+        for (addr, entry) in address_map {
+            let delta = AddressDelta {
+                address: addr,
+                tx_identifier: tx.tx_identifier,
+                spent_utxos: entry.spent_utxos,
+                created_utxos: entry.created_utxos,
+                sent: Value::from(entry.sent),
+                received: Value::from(entry.received),
+            };
+            if let Some(observer) = self.address_delta_observer.as_ref() {
+                observer.observe_delta(&delta).await;
+            }
+        }
+
+        if let Some(observer) = self.block_totals_observer.as_ref() {
+            observer.observe_tx(tx_output, tx.fee).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_invalid_tx(&mut self, tx: &TxUTxODeltas, block: &BlockInfo) -> Result<()> {
+        let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
+        let mut tx_fees = 0;
+
+        for input in &tx.consumes {
+            if let Some(utxo) = self.lookup_utxo(input).await? {
+                self.observe_input(input, block).await?;
+
+                let entry = address_map.entry(utxo.address.clone()).or_default();
+                entry.spent_utxos.push(*input);
+                entry.sent.add_value(&utxo.value);
+                tx_fees += utxo.value.coin();
+            } else {
+                error!("Collateral UTxO {} not found", input);
+            }
+        }
+
+        if let Some(output) = &tx.produces.first() {
+            self.observe_output(output, block).await?;
+
+            let addr = output.address.clone();
+            let entry = address_map.entry(addr.clone()).or_default();
+
+            entry.created_utxos.push(output.utxo_identifier);
+            entry.received.add_value(&output.value);
+            tx_fees -= output.value.coin();
+        };
+
+        for (addr, entry) in address_map {
+            let delta = AddressDelta {
+                address: addr,
+                tx_identifier: tx.tx_identifier,
+                spent_utxos: entry.spent_utxos,
+                created_utxos: entry.created_utxos,
+                sent: Value::from(entry.sent),
+                received: Value::from(entry.received),
+            };
+            if let Some(observer) = self.address_delta_observer.as_ref() {
+                observer.observe_delta(&delta).await;
+            }
+        }
+
+        if let Some(observer) = self.block_totals_observer.as_ref() {
+            observer.observe_tx(0, tx_fees).await;
         }
 
         Ok(())
@@ -384,6 +474,9 @@ impl State {
 
     pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
         if let Some(observer) = self.address_delta_observer.as_mut() {
+            observer.rollback(message.clone()).await;
+        }
+        if let Some(observer) = self.block_totals_observer.as_mut() {
             observer.rollback(message).await;
         }
         Ok(())
@@ -562,6 +655,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
+                fee: 0,
+                is_valid: true,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -936,6 +1031,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![],
                 produces: vec![output.clone()],
+                fee: 0,
+                is_valid: true,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -956,6 +1053,8 @@ mod tests {
                 tx_identifier: Default::default(),
                 consumes: vec![input],
                 produces: vec![],
+                fee: 0,
+                is_valid: true,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
