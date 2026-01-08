@@ -245,7 +245,8 @@ Haskell Plutus Core interpreter in an external microservice.
 TODO
 
 ## Next steps
-TODO
+Next we will add [multi-peer consensus](system-multi-peer-consensus.md) and chain selection.
+
 
 
 

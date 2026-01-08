@@ -14,3 +14,5 @@ to become a full Cardano node.
   - [BlockFrost API](system-ledger-with-api-and-history.md) - Adding a BlockFrost REST API and history storage
   - [Phase 1 Validation](system-ledger-validation.md) - Validating incoming blocks and transactions, Phase 1
   - [Phase 2 Validation](system-script-validation.md) - Full validation of transactions and scripts
+  - [Multi-peer Consensus](system-multi-peer-consensus.md) - Real Ouroboros consensus rules and peer management
+
