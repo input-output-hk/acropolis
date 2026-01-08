@@ -22,27 +22,6 @@ pub fn get_all_resources() -> &'static [RouteDefinition] {
     ROUTES
 }
 
-/// Call the existing Blockfrost epoch info handler and return the JSON
-pub async fn get_epoch_info(
-    context: Arc<Context<Message>>,
-    config: Arc<Config>,
-    epoch_param: &str,
-) -> Result<Value> {
-    use acropolis_module_rest_blockfrost::handlers::epochs::handle_epoch_info_blockfrost;
-
-    let handlers_config = Arc::new(HandlersConfig::from(config.clone()));
-    let params = vec![epoch_param.to_string()];
-
-    let rest_response = handle_epoch_info_blockfrost(context, params, handlers_config)
-        .await
-        .map_err(|e: RESTError| anyhow::anyhow!("Blockfrost handler error: {}", e))?;
-
-    let json_value: Value = serde_json::from_str(&rest_response.body)
-        .map_err(|e| anyhow::anyhow!("Failed to parse JSON response: {}", e))?;
-
-    Ok(json_value)
-}
-
 /// Generic resource handler that dispatches to the appropriate Blockfrost handler
 /// based on the MCP URI
 pub async fn handle_resource(

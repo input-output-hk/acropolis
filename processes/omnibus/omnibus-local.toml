@@ -80,11 +80,11 @@ address = "127.0.0.1"
 port = 4340
 
 [module.mcp-server]
-# MCP server configuration - runs on stdio for AI assistant integration
-# To test: use MCP Inspector (npx @anthropics/mcp-inspector) or send JSON-RPC via stdio
-
-[mcp]
+# MCP server configuration - runs on HTTP with Streamable HTTP transport
+# AI clients can connect to http://<address>:<port>/mcp
 enabled = true
+address = "0.0.0.0"
+port = 4341
 
 [module.spy]
 # Enable for message spying

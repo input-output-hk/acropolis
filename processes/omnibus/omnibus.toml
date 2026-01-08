@@ -197,6 +197,13 @@ store-transactions = false
 address = "0.0.0.0"
 port = 4340
 
+[module.mcp-server]
+# MCP server configuration - runs on HTTP with Streamable HTTP transport
+# AI clients can connect to http://<address>:<port>/mcp
+enabled = true
+address = "0.0.0.0"
+port = 4341
+
 # Enable for message spying
 #[module.spy]
 #topic = "cardano.#"
