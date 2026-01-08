@@ -4,7 +4,7 @@ use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, Pots,
 };
 use anyhow::{anyhow, Result};
-use bigdecimal::{BigDecimal, One, RoundingMode, ToPrimitive};
+use bigdecimal::{BigDecimal, One, ToPrimitive};
 use tracing::info;
 
 /// Result of monetary calculation
@@ -43,7 +43,7 @@ pub fn calculate_monetary_change(
     let treasury_cut = &params.protocol_params.treasury_cut; // Tau
     let treasury_increase = (&total_reward_pot * BigDecimal::from(treasury_cut.numer())
         / BigDecimal::from(treasury_cut.denom()))
-    .with_scale_round(0, RoundingMode::Floor);
+    .with_scale(0);
 
     let treasury_increase_u64 =
         treasury_increase.to_u64().ok_or(anyhow!("Can't calculate integral treasury cut"))?;
@@ -97,7 +97,7 @@ fn calculate_monetary_expansion(
     let monetary_expansion =
         (BigDecimal::from(reserves) * eta * BigDecimal::from(monetary_expansion_factor.numer())
             / BigDecimal::from(monetary_expansion_factor.denom()))
-        .with_scale_round(0, RoundingMode::Floor);
+        .with_scale(0);
 
     info!(eta=%eta, rho=%monetary_expansion_factor, %monetary_expansion, "Monetary:");
 

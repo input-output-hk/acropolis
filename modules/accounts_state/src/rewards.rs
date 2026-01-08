@@ -7,7 +7,7 @@ use acropolis_common::{
     SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
-use bigdecimal::{BigDecimal, One, RoundingMode, ToPrimitive, Zero};
+use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
@@ -296,7 +296,7 @@ fn calculate_spo_rewards(
                         * ((relative_pool_saturation_size - capped_relative_pool_stake)
                             / relative_pool_saturation_size))))
                 / relative_pool_saturation_size))
-        .with_scale_round(0, RoundingMode::Floor);
+        .with_scale(0);
 
     // If decentralisation_param >= 0.8 => performance = 1
     // Shelley Delegation Spec 3.8.3
@@ -314,7 +314,7 @@ fn calculate_spo_rewards(
     };
 
     // Get actual pool rewards
-    let pool_rewards = (&optimum_rewards * &pool_performance).with_scale_round(0, RoundingMode::Floor);
+    let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
 
     debug!(%pool_stake, %relative_pool_stake, %pool_performance,
            %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
@@ -337,7 +337,7 @@ fn calculate_spo_rewards(
         let margin_cost = ((&pool_rewards - &fixed_cost)
             * (&margin
                 + (BigDecimal::one() - &margin) * (relative_owner_stake / relative_pool_stake)))
-            .with_scale_round(0, RoundingMode::Floor);
+            .with_scale(0);
         let costs = &fixed_cost + &margin_cost;
 
         // Pay the delegators - split the remainder proportional to the delegated stake,
@@ -357,7 +357,7 @@ fn calculate_spo_rewards(
 
                 // and hence how much of the total reward they get
                 let reward = &to_delegators * &proportion;
-                let to_pay = reward.with_scale_round(0, RoundingMode::Floor).to_u64().unwrap_or(0);
+                let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
 
                 // Skip if it's rounded to zero
                 if to_pay == 0 {
