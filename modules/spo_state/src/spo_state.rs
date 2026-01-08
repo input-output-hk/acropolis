@@ -229,6 +229,9 @@ impl SPOState {
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
+        } else {
+            // Consume initial protocol parameters (only needed for genesis bootstrap)
+            let _ = parameters_subscription.read().await?;
         }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
