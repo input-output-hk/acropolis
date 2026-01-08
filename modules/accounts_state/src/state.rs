@@ -748,7 +748,8 @@ impl State {
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
                 // Adjust the reserves for next time with amount actually paid
-                self.pots.reserves -= rewards_result.total_paid;
+                self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
+                self.pots.treasury += rewards_result.total_unpaid;
             }
         };
 

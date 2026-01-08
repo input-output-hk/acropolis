@@ -28,6 +28,9 @@ pub struct RewardDetail {
 
     // Pool that reward came from
     pub pool: PoolId,
+
+    // Does this account receieve its rewards
+    pub registered: bool,
 }
 
 /// Result of a rewards calculation
@@ -38,6 +41,9 @@ pub struct RewardsResult {
 
     /// Total rewards paid
     pub total_paid: u64,
+
+    /// Total rewards not paid due to unregistered accounts (goes to treasury)
+    pub total_unpaid: u64,
 
     /// Rewards to be paid
     pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
@@ -194,20 +200,26 @@ pub fn calculate_rewards(
                 operator_rewards: 0,
             };
             for reward in &rewards {
-                match reward.rtype {
-                    RewardType::Leader => {
-                        num_pools_paid += 1;
-                        spo_rewards.operator_rewards += reward.amount;
-                        total_paid_to_pools += reward.amount;
+                if reward.registered {
+                    // Reward will be paid to the account
+                    match reward.rtype {
+                        RewardType::Leader => {
+                            num_pools_paid += 1;
+                            spo_rewards.operator_rewards += reward.amount;
+                            total_paid_to_pools += reward.amount;
+                        }
+                        RewardType::Member => {
+                            num_delegators_paid += 1;
+                            total_paid_to_delegators += reward.amount;
+                        }
+                        RewardType::PoolRefund => {}
                     }
-                    RewardType::Member => {
-                        num_delegators_paid += 1;
-                        total_paid_to_delegators += reward.amount;
-                    }
-                    RewardType::PoolRefund => {}
+                    spo_rewards.total_rewards += reward.amount;
+                    result.total_paid += reward.amount;
+                } else {
+                    // Reward goes to treasury (unregistered account)
+                    result.total_unpaid += reward.amount;
                 }
-                spo_rewards.total_rewards += reward.amount;
-                result.total_paid += reward.amount;
             }
 
             result.rewards.insert(*operator_id, rewards);
@@ -383,6 +395,7 @@ fn calculate_spo_rewards(
                     rtype: RewardType::Member,
                     amount: to_pay,
                     pool: *operator_id,
+                    registered: true,
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -395,19 +408,13 @@ fn calculate_spo_rewards(
         owner_rewards
     };
 
-    if pay_to_pool_reward_account {
-        rewards.push(RewardDetail {
-            account: spo.reward_account.clone(),
-            rtype: RewardType::Leader,
-            amount: spo_benefit,
-            pool: *operator_id,
-        });
-    } else {
-        info!(
-            "SPO {}'s reward account {} not paid {}",
-            operator_id, spo.reward_account, spo_benefit,
-        );
-    }
+    rewards.push(RewardDetail {
+        account: spo.reward_account.clone(),
+        rtype: RewardType::Leader,
+        amount: spo_benefit,
+        pool: *operator_id,
+        registered: pay_to_pool_reward_account,
+    });
 
     rewards
 }
