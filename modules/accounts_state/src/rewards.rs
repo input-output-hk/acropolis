@@ -7,7 +7,7 @@ use acropolis_common::{
     SPORewards, StakeAddress,
 };
 use anyhow::{bail, Result};
-use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
+use bigdecimal::{BigDecimal, One, RoundingMode, ToPrimitive, Zero};
 use std::cmp::min;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
@@ -26,8 +26,11 @@ pub struct RewardDetail {
     /// Reward amount
     pub amount: Lovelace,
 
-    // Pool that reward came from
+    /// Pool that reward came from
     pub pool: PoolId,
+
+    /// Whether the account is registered (if false, reward goes to treasury)
+    pub registered: bool,
 }
 
 /// Result of a rewards calculation
@@ -38,6 +41,9 @@ pub struct RewardsResult {
 
     /// Total rewards paid
     pub total_paid: u64,
+
+    /// Total rewards not paid due to unregistered accounts (goes to treasury)
+    pub total_unpaid: u64,
 
     /// Rewards to be paid
     pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
@@ -192,20 +198,26 @@ pub fn calculate_rewards(
                 operator_rewards: 0,
             };
             for reward in &rewards {
-                match reward.rtype {
-                    RewardType::Leader => {
-                        num_pools_paid += 1;
-                        spo_rewards.operator_rewards += reward.amount;
-                        total_paid_to_pools += reward.amount;
+                if reward.registered {
+                    // Reward will be paid to the account
+                    match reward.rtype {
+                        RewardType::Leader => {
+                            num_pools_paid += 1;
+                            spo_rewards.operator_rewards += reward.amount;
+                            total_paid_to_pools += reward.amount;
+                        }
+                        RewardType::Member => {
+                            num_delegators_paid += 1;
+                            total_paid_to_delegators += reward.amount;
+                        }
+                        RewardType::PoolRefund => {}
                     }
-                    RewardType::Member => {
-                        num_delegators_paid += 1;
-                        total_paid_to_delegators += reward.amount;
-                    }
-                    RewardType::PoolRefund => {}
+                    spo_rewards.total_rewards += reward.amount;
+                    result.total_paid += reward.amount;
+                } else {
+                    // Reward goes to treasury (unregistered account)
+                    result.total_unpaid += reward.amount;
                 }
-                spo_rewards.total_rewards += reward.amount;
-                result.total_paid += reward.amount;
             }
 
             result.rewards.insert(*operator_id, rewards);
@@ -218,8 +230,9 @@ pub fn calculate_rewards(
         total_paid_to_delegators,
         num_pools_paid,
         total_paid_to_pools,
-        total = result.total_paid,
-        "Rewards actually paid:"
+        total_paid = result.total_paid,
+        total_unpaid = result.total_unpaid,
+        "Rewards calculated:"
     );
 
     Ok(result)
@@ -283,7 +296,7 @@ fn calculate_spo_rewards(
                         * ((relative_pool_saturation_size - capped_relative_pool_stake)
                             / relative_pool_saturation_size))))
                 / relative_pool_saturation_size))
-        .with_scale(0);
+        .with_scale_round(0, RoundingMode::Floor);
 
     // If decentralisation_param >= 0.8 => performance = 1
     // Shelley Delegation Spec 3.8.3
@@ -301,7 +314,7 @@ fn calculate_spo_rewards(
     };
 
     // Get actual pool rewards
-    let pool_rewards = (&optimum_rewards * &pool_performance).with_scale(0);
+    let pool_rewards = (&optimum_rewards * &pool_performance).with_scale_round(0, RoundingMode::Floor);
 
     debug!(%pool_stake, %relative_pool_stake, %pool_performance,
            %optimum_rewards, %pool_rewards, pool_owner_stake, %pool_pledge,
@@ -324,7 +337,7 @@ fn calculate_spo_rewards(
         let margin_cost = ((&pool_rewards - &fixed_cost)
             * (&margin
                 + (BigDecimal::one() - &margin) * (relative_owner_stake / relative_pool_stake)))
-            .with_scale(0);
+            .with_scale_round(0, RoundingMode::Floor);
         let costs = &fixed_cost + &margin_cost;
 
         // Pay the delegators - split the remainder proportional to the delegated stake,
@@ -336,7 +349,7 @@ fn calculate_spo_rewards(
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
-        let mut owner_rewards: u64 = costs.to_u64().unwrap_or(0);
+        let owner_rewards: u64 = costs.to_u64().unwrap_or(0);
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
@@ -344,7 +357,7 @@ fn calculate_spo_rewards(
 
                 // and hence how much of the total reward they get
                 let reward = &to_delegators * &proportion;
-                let to_pay = reward.with_scale(0).to_u64().unwrap_or(0);
+                let to_pay = reward.with_scale_round(0, RoundingMode::Floor).to_u64().unwrap_or(0);
 
                 // Skip if it's rounded to zero
                 if to_pay == 0 {
@@ -380,6 +393,7 @@ fn calculate_spo_rewards(
                     rtype: RewardType::Member,
                     amount: to_pay,
                     pool: *operator_id,
+                    registered: true, // Member rewards only go to registered delegators
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
@@ -392,16 +406,19 @@ fn calculate_spo_rewards(
         owner_rewards
     };
 
-    if pay_to_pool_reward_account {
-        rewards.push(RewardDetail {
-            account: spo.reward_account.clone(),
-            rtype: RewardType::Leader,
-            amount: spo_benefit,
-            pool: *operator_id,
-        });
-    } else {
+    // Always emit leader reward, but mark whether account is registered
+    // If not registered, the caller will send to treasury instead
+    rewards.push(RewardDetail {
+        account: spo.reward_account.clone(),
+        rtype: RewardType::Leader,
+        amount: spo_benefit,
+        pool: *operator_id,
+        registered: pay_to_pool_reward_account,
+    });
+
+    if !pay_to_pool_reward_account {
         info!(
-            "SPO {}'s reward account {} not paid {}",
+            "SPO {}'s reward account {} not registered - {} will go to treasury",
             operator_id, spo.reward_account, spo_benefit,
         );
     }

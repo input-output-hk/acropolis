@@ -402,7 +402,9 @@ impl State {
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
 
-        // Update the reserves and treasury (monetary.rs)
+        // Calculate monetary change (fees added to reserves, treasury cut taken)
+        // Note: monetary_change.pots has reserves with fees added and treasury cut subtracted,
+        // but does NOT subtract stake_rewards - that happens later when rewards are actually paid.
         let monetary_change = calculate_monetary_change(
             &shelley_params,
             &self.pots,
@@ -415,6 +417,7 @@ impl State {
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
+            stake_rewards = monetary_change.stake_rewards,
             "After monetary change"
         );
 
@@ -766,8 +769,11 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust the reserves for next time with amount actually paid
-                self.pots.reserves -= rewards_result.total_paid;
+                // Adjust the reserves - subtract total paid and unpaid (unpaid goes to treasury)
+                self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
+
+                // Unpaid rewards (due to unregistered accounts) go to treasury
+                self.pots.treasury += rewards_result.total_unpaid;
             }
         };
 
@@ -1050,13 +1056,6 @@ impl State {
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
-                    // DRep deposits ARE part of the main deposits pot per Haskell ledger spec.
-                    // utxosDeposited = sumObligation(oblStake + oblPool + oblDRep + oblProposal)
-                    // The deposit comes from UTxO and goes into the deposits pot.
-                    self.pots.deposits += reg.deposit;
-                    self.drep_deposits += reg.deposit;
-
-                    // Register the DRep
                     self.dreps.push((reg.credential.clone(), reg.deposit));
 
                     info!(
@@ -1066,13 +1065,6 @@ impl State {
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    // DRep deposits ARE part of the main deposits pot per Haskell ledger spec.
-                    // The actual refund is handled at the UTxO level (transaction outputs),
-                    // NOT paid to a reward account. We only need to update our deposit tracking.
-                    self.pots.deposits = self.pots.deposits.saturating_sub(dereg.refund);
-                    self.drep_deposits = self.drep_deposits.saturating_sub(dereg.refund);
-
-                    // Remove the DRep from registry
                     self.dreps.retain(|(cred, _)| cred != &dereg.credential);
 
                     // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)

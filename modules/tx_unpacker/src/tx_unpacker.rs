@@ -19,7 +19,7 @@ use futures::future::join_all;
 use pallas::codec::minicbor::encode;
 use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::state::State;
 mod crypto;
@@ -275,8 +275,16 @@ impl TxUnpacker {
                                     }
 
                                     // Capture the fees
-                                    if let Some(fee) = tx.fee() {
-                                        total_fees += fee;
+                                    // For failed Plutus transactions (is_valid == false), the collateral
+                                    // is consumed instead of the declared fee
+                                    if tx.is_valid() {
+                                        if let Some(fee) = tx.fee() {
+                                            total_fees += fee;
+                                        }
+                                    } else if let Some(collateral) = tx.total_collateral() {
+                                        total_fees += collateral;
+                                    } else {
+                                        total_fees += 5_000_000
                                     }
                                 }
 
