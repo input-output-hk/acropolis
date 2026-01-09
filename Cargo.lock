@@ -317,7 +317,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall 2.11.2",
+ "fjall 3.0.1",
  "hex",
  "minicbor 0.25.1",
  "rayon",
