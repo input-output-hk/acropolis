@@ -29,7 +29,7 @@ use state::State;
 const CONFIG_ENACT_STATE_TOPIC: &str = "enact-state-topic";
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
-const CONFIG_NETWORK_NAME: (&str, &str) = ("network-name", "mainnet");
+const CONFIG_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
 const CONFIG_STORE_HISTORY: (&str, bool) = ("store-history", false);
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
