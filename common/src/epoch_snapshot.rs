@@ -94,8 +94,7 @@ impl EpochSnapshot {
         // stake has been removed); we need both in rewards. Iterate over the union of
         // registered SPOs and block-producing pools to ensure retired pools that produced
         // blocks are included for rewards calculation.
-        let all_pool_ids: HashSet<&PoolId> =
-            spos.keys().chain(spo_block_counts.keys()).collect();
+        let all_pool_ids: HashSet<&PoolId> = spos.keys().chain(spo_block_counts.keys()).collect();
 
         for spo_id in all_pool_ids {
             let spo = spos.get(spo_id);
