@@ -154,27 +154,31 @@ pub fn calculate_rewards(
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
         // QUESTION: Which one?  Lowest hash seems to work in epoch 212
-        if pay_to_pool_reward_account && era < Era::Allegra {
-            // Check all SPOs to see if they match this reward account
-            for (other_id, other_spo) in staking.spos.iter() {
-                if other_spo.reward_account == staking_spo.reward_account
-                    && other_id.cmp(operator_id) == Ordering::Less
-                // Lower ID (hash) wins
-                {
-                    // It must have been paid a reward - we assume that checking it produced
-                    // any blocks is enough here - if not we'll have to do this as a post-process
-                    if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
-                        pay_to_pool_reward_account = false;
-                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+        if era == Era::Shelley {
+            if pay_to_pool_reward_account {
+                // Check all SPOs to see if they match this reward account
+                for (other_id, other_spo) in staking.spos.iter() {
+                    if other_spo.reward_account == staking_spo.reward_account
+                        && other_id.cmp(operator_id) == Ordering::Less
+                    // Lower ID (hash) wins
+                    {
+                        // It must have been paid a reward - we assume that checking it produced
+                        // any blocks is enough here - if not we'll have to do this as a post-process
+                        if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0)
+                            > 0
+                        {
+                            pay_to_pool_reward_account = false;
+                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                               operator_id,
                               other_id,
                               staking_spo.reward_account);
-                        break;
+                            break;
+                        }
                     }
                 }
+            } else {
+                info!("Reward account for SPO {} isn't registered", operator_id)
             }
-        } else {
-            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
