@@ -1140,27 +1140,27 @@ impl State {
     ///
     /// When a new governance proposal is submitted, the proposer pays a deposit
     /// (govActionDeposit from protocol params, typically 100,000 ADA).
-    /// This deposit goes into the deposits pot.
+    /// Note: Governance proposal deposits are tracked separately in the governance state
+    /// (oblProposal in the Cardano ledger), NOT in the UTxO state's us_deposited field.
+    /// Therefore, we do NOT modify pots.deposits here.
     pub fn handle_governance_procedures(
         &mut self,
         procedures_msg: &GovernanceProceduresMessage,
     ) -> Result<()> {
         for proposal in &procedures_msg.proposal_procedures {
-            // Add the proposal deposit to the deposits pot
-            self.pots.deposits += proposal.deposit;
-
+            // Note: Governance deposits are NOT added to pots.deposits
+            // They are tracked separately in the governance state
             info!(
-                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA), pots.deposits: {}",
+                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA)",
                 proposal.gov_action_id,
                 proposal.deposit,
                 proposal.deposit / 1_000_000,
-                self.pots.deposits
             );
         }
 
         if !procedures_msg.proposal_procedures.is_empty() {
             info!(
-                "Processed {} governance proposals, total deposits added: {} lovelace",
+                "Processed {} governance proposals, total deposits: {} lovelace",
                 procedures_msg.proposal_procedures.len(),
                 procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
             );
@@ -1175,6 +1175,10 @@ impl State {
     /// In both cases, the proposer's deposit is refunded:
     /// - If the proposer's reward account is registered, refund goes there
     /// - Otherwise, the refund goes to treasury
+    ///
+    /// Note: Governance deposits are tracked separately in the governance state
+    /// (oblProposal in the Cardano ledger), NOT in pots.deposits. The refund
+    /// comes from the governance state, not from pots.deposits.
     ///
     /// For TreasuryWithdrawal actions that are enacted, we also process the
     /// withdrawal of funds from treasury to the specified reward accounts.
@@ -1191,8 +1195,8 @@ impl State {
             let deposit = proposal.deposit;
             let reward_account = &proposal.reward_account;
 
-            // Refund the deposit (applies to both enacted and expired proposals)
-            self.pots.deposits = self.pots.deposits.saturating_sub(deposit);
+            // Note: We do NOT subtract from pots.deposits here because governance
+            // deposits are tracked separately in the governance state
             total_refunds += deposit;
 
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
