@@ -4,7 +4,7 @@ use crate::{
     StakeCredential,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 /// SPO data captured in a stake snapshot
@@ -91,9 +91,14 @@ impl EpochSnapshot {
         };
 
         // Add all SPOs - some may only have stake, some may only produce blocks (their
-        // stake has been removed); we need both in rewards
-        for (spo_id, spo) in spos {
-            // See how many blocks produced
+        // stake has been removed); we need both in rewards. Iterate over the union of
+        // registered SPOs and block-producing pools to ensure retired pools that produced
+        // blocks are included for rewards calculation.
+        let all_pool_ids: HashSet<&PoolId> =
+            spos.keys().chain(spo_block_counts.keys()).collect();
+
+        for spo_id in all_pool_ids {
+            let spo = spos.get(spo_id);
             let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
             // Check if the reward account from two epochs ago is still registered.
@@ -106,14 +111,19 @@ impl EpochSnapshot {
                         .map(|sas| sas.registered)
                         .unwrap_or(false),
                     None => {
-                        // SPO wasn't in snapshot from 2 epochs ago (newly registered).
+                        // SPO wasn't in snapshot from 2 epochs ago (newly registered or retired).
                         // Check if their CURRENT reward account is registered as a fallback.
                         // Default to true if we can't verify - conservative approach to avoid
                         // incorrectly denying legitimate rewards.
-                        stake_addresses
-                            .get(&spo.reward_account)
-                            .map(|sas| sas.registered)
-                            .unwrap_or(true)
+                        if let Some(spo) = spo {
+                            stake_addresses
+                                .get(&spo.reward_account)
+                                .map(|sas| sas.registered)
+                                .unwrap_or(true)
+                        } else {
+                            // Retired pool with no current registration - use false
+                            false
+                        }
                     }
                 };
             debug!(
@@ -124,9 +134,8 @@ impl EpochSnapshot {
                 two_previous_reward_account_is_registered
             );
 
-            // Add the new one
-            snapshot.spos.insert(
-                *spo_id,
+            // Build snapshot entry - full data if registered, minimal if only block producer
+            let snapshot_spo = if let Some(spo) = spo {
                 SnapshotSPO {
                     delegators: vec![],
                     total_stake: 0,
@@ -137,8 +146,21 @@ impl EpochSnapshot {
                     pool_owners: spo.pool_owners.clone(),
                     reward_account: spo.reward_account.clone(),
                     two_previous_reward_account_is_registered,
-                },
-            );
+                }
+            } else {
+                // Retired pool that produced blocks - minimal entry for block counting
+                debug!(
+                    epoch,
+                    "Adding retired SPO {} with {} blocks to snapshot", spo_id, blocks_produced
+                );
+                SnapshotSPO {
+                    blocks_produced,
+                    two_previous_reward_account_is_registered,
+                    ..Default::default()
+                }
+            };
+
+            snapshot.spos.insert(*spo_id, snapshot_spo);
         }
 
         // Scan all stake addresses and post to their delegated SPO's list
