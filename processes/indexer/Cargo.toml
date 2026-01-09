@@ -23,7 +23,7 @@ anyhow = { workspace = true }
 bincode = "1"
 clap = { workspace = true }
 config = { workspace = true }
-fjall = "2.7.0"
+fjall = "3.0.1"
 pallas = { workspace = true}
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }

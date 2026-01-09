@@ -75,7 +75,7 @@ dependencies = [
  "chrono",
  "config",
  "csv",
- "fjall 3.0.1",
+ "fjall",
  "hex",
  "imbl",
  "itertools 0.14.0",
@@ -92,7 +92,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall 3.0.1",
+ "fjall",
  "minicbor 0.25.1",
  "tempfile",
  "tokio",
@@ -175,7 +175,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall 3.0.1",
+ "fjall",
  "hex",
  "minicbor 0.25.1",
  "pallas",
@@ -207,7 +207,7 @@ dependencies = [
  "bincode 1.3.3",
  "caryatid_sdk",
  "config",
- "fjall 3.0.1",
+ "fjall",
  "futures",
  "hex",
  "minicbor 0.25.1",
@@ -317,7 +317,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall 3.0.1",
+ "fjall",
  "hex",
  "minicbor 0.25.1",
  "rayon",
@@ -333,7 +333,7 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
- "fjall 3.0.1",
+ "fjall",
  "minicbor 0.25.1",
  "tempfile",
  "tokio",
@@ -535,7 +535,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "dashmap",
- "fjall 3.0.1",
+ "fjall",
  "hex",
  "pallas",
  "serde",
@@ -564,7 +564,7 @@ dependencies = [
  "caryatid_sdk",
  "clap 4.5.53",
  "config",
- "fjall 2.11.2",
+ "fjall",
  "pallas",
  "tokio",
  "tracing",
@@ -1534,12 +1534,6 @@ dependencies = [
 
 [[package]]
 name = "byteview"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
-
-[[package]]
-name = "byteview"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dda4398f387cc6395a3e93b3867cd9abda914c97a0b344d1eefb2e5c51785fca"
@@ -2339,12 +2333,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "780955b8b195a21ab8e4ac6b60dd1dbdcec1dc6c51c0617964b08c81785e12c9"
 
 [[package]]
-name = "double-ended-peekable"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0d05e1c0dbad51b52c38bda7adceef61b9efc2baf04acfe8726a8c4630a6f57"
-
-[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2556,33 +2544,16 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "fjall"
-version = "2.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b25ad44cd4360a0448a9b5a0a6f1c7a621101cca4578706d43c9a821418aebc"
-dependencies = [
- "byteorder",
- "byteview 0.6.1",
- "dashmap",
- "log",
- "lsm-tree 2.10.4",
- "path-absolutize",
- "std-semaphore",
- "tempfile",
- "xxhash-rust",
-]
-
-[[package]]
-name = "fjall"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f69637c02d38ad1b0f003101d0195a60368130aa17d9ef78b1557d265a22093"
 dependencies = [
  "byteorder-lite",
- "byteview 0.10.0",
+ "byteview",
  "dashmap",
  "flume 0.12.0",
  "log",
- "lsm-tree 3.0.1",
+ "lsm-tree",
  "lz4_flex",
  "tempfile",
  "xxhash-rust",
@@ -2868,12 +2839,6 @@ dependencies = [
  "libc",
  "windows-sys 0.60.2",
 ]
-
-[[package]]
-name = "guardian"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17e2ac29387b1aa07a1e448f7bb4f35b500787971e965b02842b900afa5c8f6f"
 
 [[package]]
 name = "h2"
@@ -3638,36 +3603,12 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lsm-tree"
-version = "2.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "799399117a2bfb37660e08be33f470958babb98386b04185288d829df362ea15"
-dependencies = [
- "byteorder",
- "crossbeam-skiplist",
- "double-ended-peekable",
- "enum_dispatch",
- "guardian",
- "interval-heap",
- "log",
- "lz4_flex",
- "path-absolutize",
- "quick_cache",
- "rustc-hash",
- "self_cell",
- "tempfile",
- "value-log",
- "varint-rs",
- "xxhash-rust",
-]
-
-[[package]]
-name = "lsm-tree"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b875f1dfe14f557f805b167fb9b0fc54c5560c7a4bd6ae02535b2846f276a8cb"
 dependencies = [
  "byteorder-lite",
- "byteview 0.10.0",
+ "byteview",
  "crossbeam-skiplist",
  "enum_dispatch",
  "interval-heap",
@@ -4527,24 +4468,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "path-absolutize"
-version = "3.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4af381fe79fa195b4909485d99f73a80792331df0625188e707854f0b3383f5"
-dependencies = [
- "path-dedot",
-]
-
-[[package]]
-name = "path-dedot"
-version = "3.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07ba0ad7e047712414213ff67533e6dd477af0a4e1d14fb52343e53d30ea9397"
-dependencies = [
- "once_cell",
-]
 
 [[package]]
 name = "pathdiff"
@@ -6014,12 +5937,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "std-semaphore"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ae9eec00137a8eed469fb4148acd9fc6ac8c3f9b110f52cd34698c8b5bfa0e"
-
-[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6890,23 +6807,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "value-log"
-version = "1.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62fc7c4ce161f049607ecea654dca3f2d727da5371ae85e2e4f14ce2b98ed67c"
-dependencies = [
- "byteorder",
- "byteview 0.6.1",
- "interval-heap",
- "log",
- "path-absolutize",
- "rustc-hash",
- "tempfile",
- "varint-rs",
- "xxhash-rust",
-]
 
 [[package]]
 name = "varint-rs"
