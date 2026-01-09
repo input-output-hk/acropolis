@@ -330,6 +330,7 @@ impl State {
         epoch: u64,
         era: Era,
         total_fees: u64,
+        total_blocks: usize,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
@@ -374,9 +375,9 @@ impl State {
             "Entering"
         );
 
-        // Filter the block counts for SPOs that are registered - treating any we don't know
-        // as 'OBFT' style (the legacy nodes)
-        let total_non_obft_blocks = spo_block_counts.values().sum();
+        // Use total_blocks from the epoch activity message directly, rather than recalculating
+        // from spo_block_counts (which filters out unknown/retired SPOs)
+        let total_non_obft_blocks = total_blocks;
 
         // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -769,11 +770,9 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust the reserves - subtract total paid and unpaid (unpaid goes to treasury)
+                // Adjust the reserves - subtract total paid and unpaid
+                // (unpaid rewards are added to treasury in the payment loop above)
                 self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
-
-                // Unpaid rewards (due to unregistered accounts) go to treasury
-                self.pots.treasury += rewards_result.total_unpaid;
             }
         };
 
@@ -805,6 +804,7 @@ impl State {
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
+            ea_msg.total_blocks,
             spo_blocks,
             verifier,
         )?);
