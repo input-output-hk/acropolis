@@ -217,14 +217,22 @@ impl State {
 
     // Handle mint
     // This will update last block time
-    pub fn handle_mint(&mut self, block_info: &BlockInfo, issuer_vkey: Option<&[u8]>) {
+    pub fn handle_mint(
+        &mut self,
+        block_info: &BlockInfo,
+        issuer_vkey: Option<&[u8]>,
+        is_obft: bool,
+    ) {
         self.last_block_time = block_info.timestamp;
         self.last_block_height = block_info.number;
         self.epoch_blocks += 1;
-        if let Some(issuer_vkey) = issuer_vkey {
-            let spo_id = PoolId::from(keyhash_224(issuer_vkey));
-            // Count one on this hash
-            *(self.blocks_minted.entry(spo_id).or_insert(0)) += 1;
+
+        if !is_obft {
+            if let Some(issuer_vkey) = issuer_vkey {
+                let spo_id = PoolId::from(keyhash_224(issuer_vkey));
+                // Count one on this hash
+                *(self.blocks_minted.entry(spo_id).or_insert(0)) += 1;
+            }
         }
     }
 
@@ -375,9 +383,9 @@ mod tests {
         let mut state = State::new(&GenesisValues::mainnet());
         let issuer = b"issuer_key";
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(issuer));
+        state.handle_mint(&block, Some(issuer), false);
         block.number += 1;
-        state.handle_mint(&block, Some(issuer));
+        state.handle_mint(&block, Some(issuer), false);
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 1);
@@ -391,9 +399,9 @@ mod tests {
     fn handle_mint_without_issuer() {
         let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
-        state.handle_mint(&block, None);
+        state.handle_mint(&block, None, false);
         block.number += 1;
-        state.handle_mint(&block, None);
+        state.handle_mint(&block, None, false);
 
         assert_eq!(state.epoch_blocks, 2);
         assert_eq!(state.blocks_minted.len(), 0);
@@ -407,11 +415,11 @@ mod tests {
     fn handle_mint_multiple_issuer_records_counts() {
         let mut state = State::new(&GenesisValues::mainnet());
         let mut block = make_block(100);
-        state.handle_mint(&block, Some(b"issuer_1"));
+        state.handle_mint(&block, Some(b"issuer_1"), false);
         block.number += 1;
-        state.handle_mint(&block, Some(b"issuer_2"));
+        state.handle_mint(&block, Some(b"issuer_2"), false);
         block.number += 1;
-        state.handle_mint(&block, Some(b"issuer_2"));
+        state.handle_mint(&block, Some(b"issuer_2"), false);
 
         assert_eq!(state.epoch_blocks, 3);
         assert_eq!(state.blocks_minted.len(), 2);
@@ -470,7 +478,7 @@ mod tests {
         let genesis = GenesisValues::mainnet();
         let mut state = State::new(&genesis);
         let block = make_block(1);
-        state.handle_mint(&block, Some(b"issuer_1"));
+        state.handle_mint(&block, Some(b"issuer_1"), false);
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -526,7 +534,7 @@ mod tests {
         )));
         let mut state = history.lock().await.get_current_state();
         let mut block = make_block(1);
-        state.handle_mint(&block, Some(b"issuer_1"));
+        state.handle_mint(&block, Some(b"issuer_1"), false);
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -539,7 +547,7 @@ mod tests {
 
         let mut state = history.lock().await.get_current_state();
         block.number += 1;
-        state.handle_mint(&block, Some(b"issuer_1"));
+        state.handle_mint(&block, Some(b"issuer_1"), false);
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {
@@ -556,7 +564,7 @@ mod tests {
 
         block = make_rolled_back_block(0);
         let mut state = history.lock().await.get_rolled_back_state(block.number);
-        state.handle_mint(&block, Some(b"issuer_2"));
+        state.handle_mint(&block, Some(b"issuer_2"), false);
         state.handle_block_txs(
             &block,
             &BlockTxsMessage {

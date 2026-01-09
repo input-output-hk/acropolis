@@ -330,7 +330,6 @@ impl State {
         epoch: u64,
         era: Era,
         total_fees: u64,
-        total_blocks: usize,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
@@ -375,9 +374,9 @@ impl State {
             "Entering"
         );
 
-        // Use total_blocks from the epoch activity message directly, rather than recalculating
-        // from spo_block_counts (which filters out unknown/retired SPOs)
-        let total_non_obft_blocks = total_blocks;
+        // Filter the block counts for SPOs that are registered - treating any we don't know
+        // as 'OBFT' style (the legacy nodes)
+        let total_non_obft_blocks = spo_block_counts.values().sum();
 
         // Pay MIRs before snapshot, so reserves is correct for total_supply in rewards
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -789,27 +788,13 @@ impl State {
         era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<PoolId, usize> = ea_msg
-            .spo_blocks
-            .iter()
-            .filter(|(hash, _)| self.spos.contains_key(hash))
-            .map(|(hash, count)| (*hash, *count))
-            .collect();
-
-        // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
+        self.enter_epoch(
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
-            ea_msg.total_blocks,
-            spo_blocks,
+            ea_msg.spo_blocks.iter().cloned().collect(),
             verifier,
-        )?);
-
-        Ok(reward_deltas)
+        )
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last
