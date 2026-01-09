@@ -766,26 +766,13 @@ impl State {
         era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<PoolId, usize> = ea_msg
-            .spo_blocks
-            .iter()
-            .filter(|(hash, _)| self.spos.contains_key(hash))
-            .map(|(hash, count)| (*hash, *count))
-            .collect();
-
-        // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
+        self.enter_epoch(
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
-            spo_blocks,
+            ea_msg.spo_blocks.iter().cloned().collect(),
             verifier,
-        )?);
-
-        Ok(reward_deltas)
+        )
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last

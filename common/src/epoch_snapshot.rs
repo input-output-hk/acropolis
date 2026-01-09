@@ -4,7 +4,7 @@ use crate::{
     StakeCredential,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 /// SPO data captured in a stake snapshot
@@ -92,7 +92,10 @@ impl EpochSnapshot {
 
         // Add all SPOs - some may only have stake, some may only produce blocks (their
         // stake has been removed); we need both in rewards
-        for (spo_id, spo) in spos {
+        let all_pool_ids: HashSet<&PoolId> = spos.keys().chain(spo_block_counts.keys()).collect();
+
+        for spo_id in all_pool_ids {
+            let spo = spos.get(spo_id);
             // See how many blocks produced
             let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
@@ -103,7 +106,17 @@ impl EpochSnapshot {
                         .get(&old_spo.reward_account)
                         .map(|sas| sas.registered)
                         .unwrap_or(false),
-                    None => false,
+                    None => {
+                        if let Some(spo) = spo {
+                            stake_addresses
+                                .get(&spo.reward_account)
+                                .map(|sas| sas.registered)
+                                .unwrap_or(true)
+                        } else {
+                            // Retired pool with no current registration - use false
+                            false
+                        }
+                    }
                 };
             debug!(
                 epoch,
@@ -114,8 +127,7 @@ impl EpochSnapshot {
             );
 
             // Add the new one
-            snapshot.spos.insert(
-                *spo_id,
+            let snapshot_spo = if let Some(spo) = spo {
                 SnapshotSPO {
                     delegators: vec![],
                     total_stake: 0,
@@ -126,8 +138,21 @@ impl EpochSnapshot {
                     pool_owners: spo.pool_owners.clone(),
                     reward_account: spo.reward_account.clone(),
                     two_previous_reward_account_is_registered,
-                },
-            );
+                }
+            } else {
+                // Retired pool that produced blocks - minimal entry for block counting
+                debug!(
+                    epoch,
+                    "Adding retired SPO {} with {} blocks to snapshot", spo_id, blocks_produced
+                );
+                SnapshotSPO {
+                    blocks_produced,
+                    two_previous_reward_account_is_registered,
+                    ..Default::default()
+                }
+            };
+
+            snapshot.spos.insert(*spo_id, snapshot_spo);
         }
 
         // Scan all stake addresses and post to their delegated SPO's list
