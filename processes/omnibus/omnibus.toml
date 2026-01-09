@@ -4,7 +4,9 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+network = "mainnet"
+startup-mode = "genesis"   # Options: "genesis" | "snapshot"
+sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -19,23 +21,23 @@ genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c323
 download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
+# Stop constraint likewise
+stop = "none"
 
 [module.snapshot-bootstrapper]
 epoch = 507
-network = "mainnet"
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
 # ============================================================================
 # Core Module Configurations
 # ============================================================================
 [module.peer-network-interface]
-sync-point = "snapshot"
+sync-point = "dynamic"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
-magic-number = 764824073
 
 [module.consensus]
 # List of validation result topics to listen on
@@ -44,7 +46,7 @@ validators = [
 #           "cardano.validation.vrf",
 #           "cardano.validation.kes",
 #           "cardano.validation.utxo",
-           "cardano.validation.spo"
+#           "cardano.validation.spo"
 ]
 
 [module.block-unpacker]
@@ -58,7 +60,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
-publish-tx-validation-topic = "cardano.validation.txs"
+publish-tx-validation-topic = "cardano.validation.tx"
 network-name = "mainnet"
 
 [module.utxo-state]
@@ -127,8 +129,13 @@ store-votes = false
 store-drdd = false
 
 [module.governance-state]
+# Listen for DRep and SPO distributions
+stake-drep-distribution-topic = "cardano.drep.distribution"
+stake-spo-distribution-topic = "cardano.spo.distribution"
 
 [module.parameters-state]
+# Listen for governance actions
+enact-state-topic = "cardano.enact.state"
 store-history = false
 
 [module.stake-delta-filter]
@@ -138,6 +145,9 @@ write-full-cache = "false"
 [module.epochs-state]
 
 [module.accounts-state]
+# Optional subscription for when governance is active
+drep-state-topic = "cardano.drep.state"
+
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
@@ -187,25 +197,21 @@ store-transactions = false
 address = "0.0.0.0"
 port = 4340
 
-[module.spy]
 # Enable for message spying
+#[module.spy]
 #topic = "cardano.#"
 
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
-[message-bus.external]
-class = "rabbit-mq"
-url = "amqp://127.0.0.1:5672/%2f"
-exchange = "caryatid"
+# Enable if external routing required
+#[message-bus.external]
+#class = "rabbit-mq"
+#url = "amqp://127.0.0.1:5672/%2f"
+#exchange = "caryatid"
 
 [message-bus.internal]
 class = "in-memory"
-workers = 50
-dispatch-queue-size = 1000
-worker-queue-size = 100
-bulk-block-capacity = 50
-bulk-resume-capacity = 75
 
 # Message routing
 [[message-router.route]]  # Everything is internal only

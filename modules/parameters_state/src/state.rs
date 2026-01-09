@@ -2,8 +2,10 @@
 
 use crate::ParametersUpdater;
 use acropolis_common::{
-    messages::{GovernanceOutcomesMessage, ProtocolParamsMessage},
-    BlockInfo, Era,
+    messages::{
+        GovernanceOutcomesMessage, ProtocolParametersBootstrapMessage, ProtocolParamsMessage,
+    },
+    AlonzoBabbageVotingOutcome, Era, GovernanceOutcomeVariant,
 };
 use anyhow::Result;
 use std::ops::RangeInclusive;
@@ -32,8 +34,8 @@ impl State {
         }
     }
 
-    pub fn apply_genesis(&mut self, new_block: &BlockInfo) -> Result<()> {
-        let to_apply = Self::genesis_era_range(self.current_era, new_block.era);
+    pub fn apply_genesis(&mut self, new_era: &Era) -> Result<()> {
+        let to_apply = Self::genesis_era_range(self.current_era, *new_era);
         if to_apply.is_empty() {
             return Ok(());
         }
@@ -47,27 +49,68 @@ impl State {
 
         info!(
             "Applied genesis up to {}, resulting params {:?}",
-            new_block.era,
+            new_era,
             self.current_params.get_params()
         );
-        self.current_era = Some(new_block.era);
+        self.current_era = Some(*new_era);
         Ok(())
+    }
+
+    pub fn apply_governance_outcomes(
+        &mut self,
+        new_era: &Era,
+        alonzo_gov: &[AlonzoBabbageVotingOutcome],
+        conway_gov: &[GovernanceOutcomeVariant],
+    ) -> Result<()> {
+        info!("Current Era: {:?}", self.current_era);
+        if self.current_era != Some(*new_era) {
+            self.apply_genesis(new_era)?;
+        }
+        self.current_params.apply_enact_state(alonzo_gov, conway_gov)
     }
 
     pub async fn handle_enact_state(
         &mut self,
-        block: &BlockInfo,
+        new_era: &Era,
         msg: &GovernanceOutcomesMessage,
     ) -> Result<ProtocolParamsMessage> {
-        if self.current_era != Some(block.era) {
-            self.apply_genesis(block)?;
-        }
-        self.current_params.apply_enact_state(msg)?;
+        info!("Era: {:?}, applying enact state", new_era);
+        let conway_outcomes: Vec<_> =
+            msg.conway_outcomes.iter().map(|o| o.action_to_perform.clone()).collect();
+        self.apply_governance_outcomes(new_era, &msg.alonzo_babbage_outcomes, &conway_outcomes)?;
         let params_message = ProtocolParamsMessage {
             params: self.current_params.get_params(),
         };
 
         Ok(params_message)
+    }
+
+    /// Initialize state from Conway snapshot data
+    ///
+    /// This method bootstraps the protocol parameters state from a snapshot message.
+    /// It converts the protocol parameters from the snapshot into the internal representation
+    /// used for tracking parameter changes.
+    ///
+    /// # Arguments
+    ///
+    /// * `param_msg` - The bootstrap message containing protocol parameters from the snapshot
+    ///
+    /// # Behavior
+    ///
+    /// - Assumes Conway era as the current era
+    pub fn bootstrap(&mut self, param_msg: &ProtocolParametersBootstrapMessage) -> Result<u64> {
+        self.network_name = param_msg.network_name.clone();
+        self.current_era = Some(param_msg.era);
+
+        self.current_params.apply_bootstrap(&self.network_name, param_msg.params.clone())?;
+
+        info!(
+            "Bootstrapped ParametersState to era {:?} with params: {:?}",
+            self.current_era,
+            self.current_params.get_params()
+        );
+
+        Ok(param_msg.epoch)
     }
 
     #[allow(dead_code)]

@@ -30,8 +30,9 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, PolicyId, ReferenceScript,
-    ShelleyAddress, StakeAddress, TxHash, UTXOValue, UTxOIdentifier, Value,
+    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, NativeScript, PolicyId,
+    ReferenceScript, ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue,
+    UTxOIdentifier, Value,
 };
 
 // =============================================================================
@@ -47,6 +48,38 @@ pub struct UtxoEntry {
     pub id: UTxOIdentifier,
     /// UTxO value (address, lovelace, assets, datum, script_ref)
     pub value: UTXOValue,
+}
+
+impl UtxoEntry {
+    /// Get the transaction hash as a hex string
+    #[inline]
+    pub fn tx_hash_hex(&self) -> String {
+        self.id.tx_hash_hex()
+    }
+
+    /// Get the output index
+    #[inline]
+    pub fn output_index(&self) -> u16 {
+        self.id.output_index
+    }
+
+    /// Get the coin (lovelace) value of this UTXO
+    #[inline]
+    pub fn coin(&self) -> u64 {
+        self.value.coin()
+    }
+
+    /// Get the address bytes
+    #[inline]
+    pub fn address_bytes(&self) -> Vec<u8> {
+        self.value.address_bytes()
+    }
+
+    /// Extract the stake credential from the UTXO's address, if present.
+    #[inline]
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        self.value.extract_stake_credential()
+    }
 }
 
 // =============================================================================
@@ -308,7 +341,7 @@ fn decode_script_ref(d: &mut Decoder) -> Result<Option<ReferenceScript>, minicbo
     };
 
     let reference_script = match script_type {
-        0 => ReferenceScript::Native(script_bytes),
+        0 => ReferenceScript::Native(minicbor::decode::<NativeScript>(&script_bytes)?),
         1 => ReferenceScript::PlutusV1(script_bytes),
         2 => ReferenceScript::PlutusV2(script_bytes),
         3 => ReferenceScript::PlutusV3(script_bytes),
@@ -425,8 +458,6 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotValue {
 }
 
 // =============================================================================
-// Multi-Asset Decoding
-// =============================================================================
 
 /// Decode multiasset: {* policy_id => {* asset_name => amount } }
 fn decode_multiasset(d: &mut Decoder) -> Result<NativeAssets, minicbor::decode::Error> {
@@ -503,4 +534,244 @@ fn decode_native_asset(d: &mut Decoder) -> Result<NativeAsset, minicbor::decode:
     let amount = d.u64()?;
 
     Ok(NativeAsset { name, amount })
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{NetworkId, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart};
+
+    fn make_shelley_base_address() -> ShelleyAddress {
+        let payment_hash: [u8; 28] = [0x11; 28];
+        let stake_hash: [u8; 28] = [0x22; 28];
+        ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash.into()),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(stake_hash.into()),
+        }
+    }
+
+    fn make_enterprise_address() -> ShelleyAddress {
+        let payment_hash: [u8; 28] = [0x33; 28];
+        ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(payment_hash.into()),
+            delegation: ShelleyAddressDelegationPart::None,
+        }
+    }
+
+    // Helper to create a UTxOIdentifier
+    fn make_utxo_id(tx_hash_byte: u8, output_index: u16) -> UTxOIdentifier {
+        let tx_hash = TxHash::try_from([tx_hash_byte; 32].as_slice()).unwrap();
+        UTxOIdentifier::new(tx_hash, output_index)
+    }
+
+    // Helper to create a simple UTXOValue
+    fn make_utxo_value(lovelace: u64, address: Address) -> UTXOValue {
+        UTXOValue {
+            address,
+            value: Value {
+                lovelace,
+                assets: NativeAssets::default(),
+            },
+            datum: None,
+            reference_script: None,
+        }
+    }
+
+    #[test]
+    fn utxo_entry_tx_hash_hex() {
+        let id = make_utxo_id(0xAB, 5);
+        let value = make_utxo_value(1_000_000, Address::None);
+        let entry = UtxoEntry { id, value };
+
+        let hex = entry.tx_hash_hex();
+        assert!(hex.starts_with("abab"));
+        assert_eq!(hex.len(), 64);
+    }
+
+    #[test]
+    fn utxo_entry_output_index() {
+        let id = make_utxo_id(0x00, 42);
+        let value = make_utxo_value(0, Address::None);
+        let entry = UtxoEntry { id, value };
+
+        assert_eq!(entry.output_index(), 42);
+    }
+
+    #[test]
+    fn utxo_entry_coin() {
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(5_000_000, Address::None);
+        let entry = UtxoEntry { id, value };
+
+        assert_eq!(entry.coin(), 5_000_000);
+    }
+
+    #[test]
+    fn utxo_entry_address_bytes_shelley() {
+        let shelley = make_shelley_base_address();
+        let expected_bytes = shelley.to_bytes_key();
+
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(0, Address::Shelley(shelley));
+        let entry = UtxoEntry { id, value };
+
+        assert_eq!(entry.address_bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn utxo_entry_address_bytes_none() {
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(0, Address::None);
+        let entry = UtxoEntry { id, value };
+
+        assert!(entry.address_bytes().is_empty());
+    }
+
+    #[test]
+    fn utxo_entry_extract_stake_credential_base_address() {
+        let shelley = make_shelley_base_address();
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(0, Address::Shelley(shelley));
+        let entry = UtxoEntry { id, value };
+
+        let credential = entry.extract_stake_credential();
+        assert!(credential.is_some());
+
+        match credential.unwrap() {
+            StakeCredential::AddrKeyHash(hash) => {
+                assert_eq!(hash.as_ref(), &[0x22; 28]);
+            }
+            _ => panic!("Expected AddrKeyHash"),
+        }
+    }
+
+    #[test]
+    fn utxo_entry_extract_stake_credential_enterprise_address() {
+        let shelley = make_enterprise_address();
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(0, Address::Shelley(shelley));
+        let entry = UtxoEntry { id, value };
+
+        // Enterprise addresses have no stake credential
+        assert!(entry.extract_stake_credential().is_none());
+    }
+
+    #[test]
+    fn utxo_entry_extract_stake_credential_none_address() {
+        let id = make_utxo_id(0x00, 0);
+        let value = make_utxo_value(0, Address::None);
+        let entry = UtxoEntry { id, value };
+
+        assert!(entry.extract_stake_credential().is_none());
+    }
+
+    #[test]
+    fn decode_shelley_txout_array_format() {
+        let addr = make_shelley_base_address();
+        let addr_bytes = addr.to_bytes_key();
+
+        let mut cbor = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut cbor);
+        enc.array(2).unwrap();
+        enc.bytes(&addr_bytes).unwrap();
+        enc.u64(2_000_000).unwrap();
+
+        let mut dec = minicbor::Decoder::new(&cbor);
+        let result: Result<SnapshotUTXOValue, _> = dec.decode();
+        assert!(result.is_ok());
+
+        let utxo_value = result.unwrap().0;
+        assert_eq!(utxo_value.value.lovelace, 2_000_000);
+        assert!(utxo_value.datum.is_none());
+        assert!(utxo_value.reference_script.is_none());
+    }
+
+    #[test]
+    fn decode_babbage_txout_map_format() {
+        let addr = make_shelley_base_address();
+        let addr_bytes = addr.to_bytes_key();
+
+        let mut cbor = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut cbor);
+        enc.map(2).unwrap();
+        enc.u32(0).unwrap();
+        enc.bytes(&addr_bytes).unwrap();
+        enc.u32(1).unwrap();
+        enc.u64(3_000_000).unwrap();
+
+        let mut dec = minicbor::Decoder::new(&cbor);
+        let result: Result<SnapshotUTXOValue, _> = dec.decode();
+        assert!(result.is_ok());
+
+        let utxo_value = result.unwrap().0;
+        assert_eq!(utxo_value.value.lovelace, 3_000_000);
+    }
+
+    #[test]
+    fn decode_value_coin_only() {
+        let mut cbor = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut cbor);
+        enc.u64(1_500_000).unwrap();
+
+        let mut dec = minicbor::Decoder::new(&cbor);
+        let result: Result<SnapshotValue, _> = dec.decode();
+        assert!(result.is_ok());
+
+        let value = result.unwrap().0;
+        assert_eq!(value.lovelace, 1_500_000);
+        assert!(value.assets.is_empty());
+    }
+
+    #[test]
+    fn decode_value_with_multiasset() {
+        let policy_id = PolicyId::from([0x44; 28]);
+        let asset_name = b"TestToken";
+
+        let mut cbor = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut cbor);
+        enc.array(2).unwrap();
+        enc.u64(1_000_000).unwrap();
+        enc.map(1).unwrap();
+        enc.bytes(policy_id.as_ref()).unwrap();
+        enc.map(1).unwrap();
+        enc.bytes(asset_name).unwrap();
+        enc.u64(100).unwrap();
+
+        let mut dec = minicbor::Decoder::new(&cbor);
+        let result: Result<SnapshotValue, _> = dec.decode();
+        assert!(result.is_ok());
+
+        let value = result.unwrap().0;
+        assert_eq!(value.lovelace, 1_000_000);
+        assert_eq!(value.assets.len(), 1);
+
+        let (decoded_policy, assets) = &value.assets[0];
+        assert_eq!(decoded_policy, &policy_id);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].amount, 100);
+    }
+
+    #[test]
+    fn decode_utxo_identifier() {
+        let tx_hash: [u8; 32] = [0x55; 32];
+
+        let mut cbor = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut cbor);
+        enc.bytes(&tx_hash).unwrap();
+        enc.u64(7).unwrap();
+
+        let mut dec = minicbor::Decoder::new(&cbor);
+        let result: Result<SnapshotUTxOIdentifier, _> = dec.decode();
+        assert!(result.is_ok());
+
+        let id = result.unwrap().0;
+        assert_eq!(id.tx_hash.as_inner(), &tx_hash);
+        assert_eq!(id.output_index, 7);
+    }
 }

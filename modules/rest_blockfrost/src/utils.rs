@@ -167,8 +167,8 @@ mod tests {
         );
     }
 
-    fn policy_bytes() -> [u8; 28] {
-        [0u8; 28]
+    fn policy_id() -> PolicyId {
+        PolicyId::from([0u8; 28])
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn invalid_asset_name_too_long() {
-        let mut bytes = policy_bytes().to_vec();
+        let mut bytes = policy_id().to_vec();
         bytes.extend(vec![0u8; 33]);
         let hex_str = hex::encode(bytes);
         let result = split_policy_and_asset(&hex_str);
@@ -207,13 +207,13 @@ mod tests {
 
     #[test]
     fn valid_policy_and_asset() {
-        let mut bytes = policy_bytes().to_vec();
+        let mut bytes = policy_id().to_vec();
         bytes.extend_from_slice(b"MyToken");
         let hex_str = hex::encode(bytes);
         let result = split_policy_and_asset(&hex_str);
         assert!(result.is_ok());
         let (policy, name) = result.unwrap();
-        assert_eq!(policy, policy_bytes());
+        assert_eq!(policy, policy_id());
         assert_eq!(name.as_slice(), b"MyToken");
     }
 }

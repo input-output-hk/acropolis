@@ -3,8 +3,8 @@ use acropolis_common::protocol_params::{
     AlonzoParams, BabbageParams, ConwayParams, ProtocolParams, ShelleyProtocolParams,
 };
 use acropolis_common::{
-    messages::GovernanceOutcomesMessage, AlonzoBabbageVotingOutcome, Committee, CommitteeChange,
-    EnactStateElem, Era, GovernanceOutcomeVariant, ProtocolParamUpdate,
+    AlonzoBabbageVotingOutcome, Committee, CommitteeChange, EnactStateElem, Era,
+    GovernanceOutcomeVariant, ProtocolParamUpdate,
 };
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
@@ -261,14 +261,18 @@ impl ParametersUpdater {
         Ok(())
     }
 
-    pub fn apply_enact_state(&mut self, u: &GovernanceOutcomesMessage) -> Result<()> {
-        for outcome in u.alonzo_babbage_outcomes.iter() {
+    pub fn apply_enact_state(
+        &mut self,
+        alonzo: &[AlonzoBabbageVotingOutcome],
+        conway: &[GovernanceOutcomeVariant],
+    ) -> Result<()> {
+        for outcome in alonzo.iter() {
             tracing::info!("Updating alonzo/babbage outcome {:?}", outcome);
             self.apply_alonzo_babbage_outcome_elem(outcome)?;
         }
 
-        for outcome in u.conway_outcomes.iter() {
-            if let GovernanceOutcomeVariant::EnactStateElem(elem) = &outcome.action_to_perform {
+        for outcome in conway.iter() {
+            if let GovernanceOutcomeVariant::EnactStateElem(elem) = &outcome {
                 self.apply_enact_state_elem(elem)?;
             }
         }
@@ -310,6 +314,15 @@ impl ParametersUpdater {
                 Ok(())
             }
         }
+    }
+
+    pub fn apply_bootstrap(&mut self, network: &str, params: ProtocolParamUpdate) -> Result<()> {
+        self.apply_genesis(network, &Era::Byron)?;
+        self.apply_genesis(network, &Era::Shelley)?;
+        self.apply_genesis(network, &Era::Alonzo)?;
+        self.apply_genesis(network, &Era::Babbage)?;
+        self.apply_genesis(network, &Era::Conway)?;
+        self.update_params(&params)
     }
 
     pub fn get_params(&self) -> ProtocolParams {

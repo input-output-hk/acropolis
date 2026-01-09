@@ -111,6 +111,10 @@ impl<S: Clone + Default> StateHistory<S> {
         self.history.push_back(HistoryEntry { index: 0, state });
     }
 
+    pub fn bootstrap_init_with(&mut self, state: S, index: u64) {
+        self.history.push_back(HistoryEntry { index, state });
+    }
+
     /// Commit the new state
     pub fn commit(&mut self, index: u64, state: S) {
         match self.store {

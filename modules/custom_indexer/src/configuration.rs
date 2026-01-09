@@ -1,3 +1,4 @@
+use acropolis_common::configuration::SyncMode;
 use anyhow::Result;
 use config::Config;
 
@@ -5,7 +6,27 @@ use config::Config;
 #[serde(rename_all = "kebab-case")]
 pub struct CustomIndexerConfig {
     pub sync_command_publisher_topic: String,
+    pub genesis_complete_topic: String,
     pub txs_subscribe_topic: String,
+    #[serde(flatten)]
+    global: GlobalConfig,
+}
+
+impl CustomIndexerConfig {
+    pub fn sync_mode(&self) -> SyncMode {
+        self.global.startup.sync_mode.clone()
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct GlobalConfig {
+    pub startup: StartupConfig,
+}
+
+#[derive(serde::Deserialize)]
+pub struct StartupConfig {
+    #[serde(rename = "sync-mode")]
+    pub sync_mode: SyncMode,
 }
 
 impl CustomIndexerConfig {

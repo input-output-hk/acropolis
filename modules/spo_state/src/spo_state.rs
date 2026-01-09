@@ -2,15 +2,14 @@
 //! Accepts certificate events and derives the SPO state in memory
 
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::StateTransitionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
-    ledger_state::SPOState as LedgerSPOState,
     messages::{
-        CardanoMessage, Message, SPOStateMessage, SnapshotDumpMessage, SnapshotMessage,
-        SnapshotStateMessage, StateQuery, StateQueryResponse,
+        CardanoMessage, Message, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse,
     },
     queries::pools::{
         PoolActiveStakeInfo, PoolDelegators, PoolsListWithInfo, PoolsStateQuery,
@@ -150,6 +149,47 @@ impl SPOStateImpl {
 }
 
 impl SPOState {
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for SPO state snapshot bootstrap messages...");
+
+        loop {
+            let Ok((_, message)) = snapshot_subscription.read().await else {
+                info!("Snapshot subscription closed");
+                return Ok(());
+            };
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting SPO bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
+                    spo_bootstrap,
+                ))) => {
+                    info!(
+                        "Bootstrapping SPO state: {} pools, {} pending updates, {} retiring",
+                        spo_bootstrap.spo_state.pools.len(),
+                        spo_bootstrap.spo_state.updates.len(),
+                        spo_bootstrap.spo_state.retiring.len()
+                    );
+                    let block_number = spo_bootstrap.block_number;
+                    let mut guard = history.lock().await;
+                    guard.clear();
+                    guard.bootstrap_init_with(spo_bootstrap.spo_state.clone().into(), block_number);
+                    info!("SPO state bootstrap complete");
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting SPO state bootstrap loop");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Main async run loop
     #[allow(clippy::too_many_arguments)]
     async fn run(
@@ -159,12 +199,13 @@ impl SPOState {
         context: Arc<Context<Message>>,
         store_config: &StoreConfig,
         // subscribers
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut certificates_subscription: Box<dyn Subscription<Message>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
-        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        mut epoch_activity_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut spdd_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
@@ -172,6 +213,11 @@ impl SPOState {
         mut spo_state_publisher: SPOStatePublisher,
         validation_publish_topic: String,
     ) -> Result<()> {
+        // Wait for snapshot bootstrap if subscription is provided
+        if let Some(subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(history.clone(), subscription).await?;
+        }
+
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
@@ -270,8 +316,9 @@ impl SPOState {
                                 CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
                             )) = message.as_ref()
                             {
-                                retired_pools_history
-                                    .handle_deregistrations(block_info, retired_spos);
+                                let pool_ids: Vec<PoolId> =
+                                    retired_spos.iter().map(|(spo, _sa)| *spo).collect();
+                                retired_pools_history.handle_deregistrations(block_info, &pool_ids);
                             }
 
                             // publish spo message
@@ -297,19 +344,21 @@ impl SPOState {
 
             // read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                // Handle SPDD
-                let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::SPOStakeDistribution(spdd_message),
-                )) = spdd_message.as_ref()
-                {
-                    let span = info_span!("spo_state.handle_spdd", block = block_info.number);
-                    span.in_scope(|| {
-                        ctx.check_sync(block_info);
-                        // update epochs_history
-                        epochs_history.handle_spdd(block_info, spdd_message);
-                    });
+                if let Some(spdd_subscription) = spdd_subscription.as_mut() {
+                    // Handle SPDD
+                    let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::SPOStakeDistribution(spdd_message),
+                    )) = spdd_message.as_ref()
+                    {
+                        let span = info_span!("spo_state.handle_spdd", block = block_info.number);
+                        span.in_scope(|| {
+                            ctx.check_sync(block_info);
+                            // update epochs_history
+                            epochs_history.handle_spdd(block_info, spdd_message);
+                        });
+                    }
                 }
 
                 // Handle SPO rewards
@@ -364,28 +413,33 @@ impl SPOState {
                 }
 
                 // Handle EpochActivityMessage
-                let (_, ea_message) = epoch_activity_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((
-                    block_info,
-                    CardanoMessage::EpochActivity(epoch_activity_message),
-                )) = ea_message.as_ref()
-                {
-                    let span =
-                        info_span!("spo_state.handle_epoch_activity", block = block_info.number);
-                    span.in_scope(|| {
-                        ctx.check_sync(block_info);
-                        // update epochs_history
-                        let spos: Vec<(PoolId, usize)> = epoch_activity_message
-                            .spo_blocks
-                            .iter()
-                            .map(|(hash, count)| (*hash, *count))
-                            .collect();
-                        epochs_history.handle_epoch_activity(
-                            block_info,
-                            epoch_activity_message,
-                            &spos,
+                if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
+                    let (_, ea_message) =
+                        epoch_activity_subscription.read_ignoring_rollbacks().await?;
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::EpochActivity(epoch_activity_message),
+                    )) = ea_message.as_ref()
+                    {
+                        let span = info_span!(
+                            "spo_state.handle_epoch_activity",
+                            block = block_info.number
                         );
-                    });
+                        span.in_scope(|| {
+                            ctx.check_sync(block_info);
+                            // update epochs_history
+                            let spos: Vec<(PoolId, usize)> = epoch_activity_message
+                                .spo_blocks
+                                .iter()
+                                .map(|(hash, count)| (*hash, *count))
+                                .collect();
+                            epochs_history.handle_epoch_activity(
+                                block_info,
+                                epoch_activity_message,
+                                &spos,
+                            );
+                        });
+                    }
                 }
             }
 
@@ -576,7 +630,6 @@ impl SPOState {
         )));
         let history_spo_state = history.clone();
         let history_tick = history.clone();
-        let history_snapshot = history.clone();
 
         // Create epochs history
         let epochs_history = EpochsHistoryState::new(store_config.clone());
@@ -816,109 +869,59 @@ impl SPOState {
             }
         });
 
-        // Subscribe for snapshot messages if using snapshot startup
-        if StartupMethod::from_config(config.as_ref()).is_snapshot() {
+        // Subscribe for snapshot bootstrap if using snapshot startup
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
             info!("Creating subscriber for snapshot on '{snapshot_topic}'");
-            let mut subscription = context.subscribe(&snapshot_topic).await?;
-            let snapshot_topic = snapshot_topic.clone();
-            let context_snapshot = context.clone();
-            let history = history_snapshot.clone();
-            enum SnapshotState {
-                Preparing,
-                Started,
-            }
-            let mut snapshot_state = SnapshotState::Preparing;
-            context.run(async move {
-                loop {
-                    let Ok((_, message)) = subscription.read().await else {
-                        return;
-                    };
-
-                    let mut guard = history.lock().await;
-                    match message.as_ref() {
-                        Message::Snapshot(SnapshotMessage::Startup) => {
-                            match snapshot_state {
-                                SnapshotState::Preparing => {
-                                    info!("Received snapshot startup signal, awaiting SPO bootstrap data...");
-                                    snapshot_state = SnapshotState::Started;
-                                }
-                                _ => error!("Snapshot Startup message received but we have already left preparing state"),
-                            }
-                        }
-                        Message::Snapshot(SnapshotMessage::Bootstrap(
-                            SnapshotStateMessage::SPOState(spo_state),
-                        )) => {
-                            info!(
-                                "Bootstrapping SPO state: {} pools, {} pending updates, {} retiring",
-                                spo_state.pools.len(),
-                                spo_state.updates.len(),
-                                spo_state.retiring.len()
-                            );
-                            guard.clear();
-                            guard.commit_forced(spo_state.clone().into());
-                            info!("SPO state bootstrap complete");
-                        }
-                        Message::Snapshot(SnapshotMessage::DumpRequest(SnapshotDumpMessage {
-                            block_height,
-                        })) => {
-                            info!("inspecting state at block height {}", block_height);
-                            let maybe_spo_state =
-                                guard.get_by_index_reverse(*block_height).map(LedgerSPOState::from);
-
-                            if let Some(spo_state) = maybe_spo_state {
-                                context_snapshot
-                                    .message_bus
-                                    .publish(
-                                        &snapshot_topic,
-                                        Arc::new(Message::Snapshot(SnapshotMessage::Dump(
-                                            SnapshotStateMessage::SPOState(spo_state),
-                                        ))),
-                                    )
-                                    .await
-                                    .unwrap_or_else(|e| error!("failed to publish snapshot dump: {e}"))
-                            }
-                        }
-                        // There will be other snapshot messages that we're not interested in
-                        _ => ()
-                    }
-                }
-            });
+            Some(context.subscribe(&snapshot_topic).await?)
         } else {
             info!("Skipping snapshot subscription (startup method is not snapshot)");
-        }
+            None
+        };
 
         // Subscriptions
+        // Mandatory
         let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
         let block_subscription = context.subscribe(&block_subscribe_topic).await?;
-        let epoch_activity_subscription =
-            context.subscribe(&epoch_activity_subscribe_topic).await?;
-        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
+
+        // Optional depending on store features
         // only when stake_addresses are enabled
         let withdrawals_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&withdrawals_subscribe_topic).await?)
         } else {
             None
         };
+
         // when historical spo's votes are enabled
         let governance_subscription = if store_config.store_votes {
             Some(context.subscribe(&governance_subscribe_topic).await?)
         } else {
             None
         };
+
         // when epochs_history is enabled
         let spo_rewards_subscription = if store_config.store_epochs_history {
             Some(context.subscribe(&spo_rewards_subscribe_topic).await?)
         } else {
             None
         };
-        // when state_addresses are enabled
+        let epoch_activity_subscription = if store_config.store_epochs_history {
+            Some(context.subscribe(&epoch_activity_subscribe_topic).await?)
+        } else {
+            None
+        };
+        let spdd_subscription = if store_config.store_epochs_history {
+            Some(context.subscribe(&spdd_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        // when stake_addresses are enabled
         let stake_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_deltas_subscribe_topic).await?)
         } else {
             None
         };
-        // when state_addresses are enabled
         let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
             Some(context.subscribe(&stake_reward_deltas_subscribe_topic).await?)
         } else {
@@ -936,6 +939,7 @@ impl SPOState {
                 retired_pools_history,
                 context_copy,
                 &store_config,
+                snapshot_subscription,
                 certificates_subscription,
                 block_subscription,
                 withdrawals_subscription,

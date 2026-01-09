@@ -1,0 +1,18 @@
+# Bootstrap configuration for Acropolis omnibus process
+# Use with: --config omnibus.toml --config omnibus.bootstrap.toml
+# Later configs override earlier ones
+
+# ============================================================================
+# Startup Configuration
+# ============================================================================
+[global.startup]
+network = "mainnet"
+startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
+sync-mode = "mithril" # Options: "mithril" | "upstream"
+
+# ============================================================================
+# Bootstrap Module Configurations
+# ============================================================================
+[module.snapshot-bootstrapper]
+epoch = 507
+data-dir = "../../modules/snapshot_bootstrapper/data"

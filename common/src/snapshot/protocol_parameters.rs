@@ -1,5 +1,4 @@
-use crate::rational_number::RationalNumber;
-use crate::{protocol_params::ProtocolVersion, snapshot::streaming_snapshot::Epoch};
+use crate::{protocol_params::ProtocolVersion, rational_number::RationalNumber, RewardParams};
 pub use crate::{
     CostModel, CostModels, DRepVotingThresholds, ExUnitPrices, ExUnits, Lovelace,
     PoolVotingThresholds, ProtocolParamUpdate, Ratio,
@@ -7,57 +6,6 @@ pub use crate::{
 
 use crate::snapshot::decode::heterogeneous_array;
 use minicbor::{data::Tag, Decoder};
-
-/// Model from https://github.com/IntersectMBO/formal-ledger-specifications/blob/master/src/Ledger/PParams.lagda
-/// Some of the names have been adapted to improve readability.
-/// Also see https://github.com/IntersectMBO/cardano-ledger/blob/d90eb4df4651970972d860e95f1a3697a3de8977/eras/conway/impl/cddl-files/conway.cddl#L324
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProtocolParameters {
-    // Outside of all groups.
-    pub protocol_version: ProtocolVersion,
-
-    // Network group
-    pub max_block_body_size: u64,
-    pub max_transaction_size: u64,
-    pub max_block_header_size: u16,
-    pub max_tx_ex_units: ExUnits,
-    pub max_block_ex_units: ExUnits,
-    pub max_value_size: u64,
-    pub max_collateral_inputs: u16,
-
-    // Economic group
-    pub min_fee_a: Lovelace,
-    pub min_fee_b: u64,
-    pub stake_credential_deposit: Lovelace,
-    pub stake_pool_deposit: Lovelace,
-    pub monetary_expansion_rate: Ratio,
-    pub treasury_expansion_rate: Ratio,
-    pub min_pool_cost: u64,
-    pub lovelace_per_utxo_byte: Lovelace,
-    pub prices: ExUnitPrices,
-    pub min_fee_ref_script_lovelace_per_byte: Ratio,
-    pub max_ref_script_size_per_tx: u32,
-    pub max_ref_script_size_per_block: u32,
-    pub ref_script_cost_stride: u32,
-    pub ref_script_cost_multiplier: Ratio,
-
-    // Technical group
-    pub stake_pool_max_retirement_epoch: Epoch,
-    pub optimal_stake_pools_count: u16,
-    pub pledge_influence: Ratio,
-    pub collateral_percentage: u16,
-    pub cost_models: CostModels,
-
-    // Governance group
-    pub pool_voting_thresholds: PoolVotingThresholds,
-    pub drep_voting_thresholds: DRepVotingThresholds,
-    pub min_committee_size: u16,
-    pub max_committee_term_length: Epoch,
-    pub gov_action_lifetime: Epoch,
-    pub gov_action_deposit: Lovelace,
-    pub drep_deposit: Lovelace,
-    pub drep_expiry: Epoch,
-}
 
 fn allow_tag(d: &mut Decoder<'_>, expected: Tag) -> Result<(), minicbor::decode::Error> {
     if d.datatype()? == minicbor::data::Type::Tag {
@@ -72,98 +20,17 @@ fn allow_tag(d: &mut Decoder<'_>, expected: Tag) -> Result<(), minicbor::decode:
     Ok(())
 }
 
-fn decode_rationale(d: &mut Decoder<'_>) -> Result<Ratio, minicbor::decode::Error> {
+fn decode_rationale(d: &mut Decoder<'_>) -> Result<RationalNumber, minicbor::decode::Error> {
     allow_tag(d, Tag::new(30))?;
     heterogeneous_array(d, |d, assert_len| {
         assert_len(2)?;
         let numerator = d.u64()?;
         let denominator = d.u64()?;
-        Ok(Ratio {
+        Ok(RationalNumber(num_rational::Ratio::new(
             numerator,
             denominator,
-        })
+        )))
     })
-}
-
-impl Default for ProtocolParameters {
-    fn default() -> Self {
-        ProtocolParameters {
-            protocol_version: ProtocolVersion { major: 0, minor: 0 },
-            min_fee_a: 0,
-            min_fee_b: 0,
-            max_block_body_size: 0,
-            max_transaction_size: 0,
-            max_block_header_size: 0,
-            stake_credential_deposit: 0,
-            stake_pool_deposit: 0,
-            stake_pool_max_retirement_epoch: 0,
-            optimal_stake_pools_count: 0,
-            pledge_influence: Ratio {
-                numerator: 0,
-                denominator: 1,
-            },
-            monetary_expansion_rate: Ratio {
-                numerator: 0,
-                denominator: 1,
-            },
-            treasury_expansion_rate: Ratio {
-                numerator: 0,
-                denominator: 1,
-            },
-            min_pool_cost: 0,
-            lovelace_per_utxo_byte: 0,
-            cost_models: CostModels {
-                plutus_v1: None,
-                plutus_v2: None,
-                plutus_v3: None,
-            },
-            prices: ExUnitPrices {
-                mem_price: RationalNumber::from(0, 1),
-                step_price: RationalNumber::from(0, 1),
-            },
-            max_tx_ex_units: ExUnits { mem: 0, steps: 0 },
-            max_block_ex_units: ExUnits { mem: 0, steps: 0 },
-            max_value_size: 0,
-            collateral_percentage: 0,
-            max_collateral_inputs: 0,
-            pool_voting_thresholds: PoolVotingThresholds {
-                motion_no_confidence: RationalNumber::from(0, 1),
-                committee_normal: RationalNumber::from(0, 1),
-                committee_no_confidence: RationalNumber::from(0, 1),
-                hard_fork_initiation: RationalNumber::from(0, 1),
-                security_voting_threshold: RationalNumber::from(0, 1),
-            },
-            drep_voting_thresholds: DRepVotingThresholds {
-                motion_no_confidence: RationalNumber::from(0, 1),
-                committee_normal: RationalNumber::from(0, 1),
-                committee_no_confidence: RationalNumber::from(0, 1),
-                update_constitution: RationalNumber::from(0, 1),
-                hard_fork_initiation: RationalNumber::from(0, 1),
-                pp_network_group: RationalNumber::from(0, 1),
-                pp_economic_group: RationalNumber::from(0, 1),
-                pp_technical_group: RationalNumber::from(0, 1),
-                pp_governance_group: RationalNumber::from(0, 1),
-                treasury_withdrawal: RationalNumber::from(0, 1),
-            },
-            min_committee_size: 0,
-            max_committee_term_length: 0,
-            gov_action_lifetime: 0,
-            gov_action_deposit: 0,
-            drep_deposit: 0,
-            drep_expiry: 0,
-            min_fee_ref_script_lovelace_per_byte: Ratio {
-                numerator: 0,
-                denominator: 1,
-            },
-            max_ref_script_size_per_tx: 0,
-            max_ref_script_size_per_block: 0,
-            ref_script_cost_stride: 0,
-            ref_script_cost_multiplier: Ratio {
-                numerator: 1,
-                denominator: 1,
-            },
-        }
-    }
 }
 
 fn decode_protocol_version(
@@ -186,116 +53,227 @@ fn decode_protocol_version(
     })
 }
 
-impl<'b, C> minicbor::decode::Decode<'b, C> for ProtocolParameters {
-    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
+#[derive(Clone)]
+pub struct FutureParams(pub ProtocolParamUpdate);
 
-        // Check first field - for future params it might be a variant tag
-        let first_field_type = d.datatype()?;
+pub struct CurrentParams<'a> {
+    pub current: &'a ProtocolParamUpdate,
+}
 
-        // Peek at the value if it's U8
-        if first_field_type == minicbor::data::Type::U8 {
-            let tag_value = d.u8()?;
+impl<'b, 'a> minicbor::Decode<'b, CurrentParams<'a>> for FutureParams {
+    fn decode(
+        d: &mut minicbor::Decoder<'b>,
+        ctx: &mut CurrentParams<'a>,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?.ok_or_else(|| {
+            minicbor::decode::Error::message("future_pparams must be a definite array")
+        })?;
 
-            // future_pparams = [0] / [1, pparams_real] / [2, strict_maybe<pparams_real>]
-            if tag_value == 0 {
-                // Return default/empty protocol parameters
-                return Ok(ProtocolParameters::default());
-            } else if tag_value == 1 {
-                // Continue with normal parsing below (tag already consumed)
-            } else if tag_value == 2 {
-                // Next element might be Nothing or Just(params)
-                // For now, skip this case
-                return Err(minicbor::decode::Error::message(
-                    "Future params variant [2] not yet implemented",
-                ));
-            } else {
-                // Not a variant tag, this is the actual first field (max_block_header_size?)
-                let unknown_field = tag_value;
-                return Self::decode_real_params(d, ctx, unknown_field);
+        let merged = match len {
+            1 => {
+                let tag = d.u8()?;
+                if tag != 0 {
+                    return Err(minicbor::decode::Error::message(
+                        "invalid future_pparams tag for [0]",
+                    ));
+                }
+                ctx.current.clone()
             }
-        }
+            2 => {
+                let tag = d.u8()?;
 
-        // If we get here, we have variant [1] or [2] and need to parse the real params
-        // For variant [1], the next field should be the start of pparams_real
-        // which starts with the first real field (not a tag)
-        let first_field_type = d.datatype()?;
-        if first_field_type == minicbor::data::Type::U8 {
-            let first_field = d.u8()?;
-            Self::decode_real_params(d, ctx, first_field)
-        } else {
-            Err(minicbor::decode::Error::message(
-                "Expected U8 for first field of pparams_real",
-            ))
-        }
+                match tag {
+                    1 => {
+                        let update: ProtocolParamUpdate = d.decode()?;
+                        ctx.current.clone().merged_with(Some(update))
+                    }
+                    2 => match d.datatype()? {
+                        minicbor::data::Type::Null => {
+                            d.skip()?;
+                            ctx.current.clone()
+                        }
+                        _ => {
+                            let update: ProtocolParamUpdate = d.decode()?;
+                            ctx.current.clone().merged_with(Some(update))
+                        }
+                    },
+                    _ => {
+                        return Err(minicbor::decode::Error::message(
+                            "invalid future_pparams tag",
+                        ))
+                    }
+                }
+            }
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "invalid future_pparams shape",
+                ))
+            }
+        };
+
+        Ok(FutureParams(merged))
     }
 }
 
-impl ProtocolParameters {
-    fn decode_real_params<'b, C>(
-        d: &mut minicbor::Decoder<'b>,
-        ctx: &mut C,
-        first_field: u8,
-    ) -> Result<Self, minicbor::decode::Error> {
-        // first_field is field 0 which we already consumed (U8=44 or similar, unknown purpose)
+impl ProtocolParamUpdate {
+    pub fn merged_with(mut self, other: Option<ProtocolParamUpdate>) -> Self {
+        let Some(o) = other else {
+            return self;
+        };
 
-        // Read what appears to be the fee parameters
+        if o.minfee_a.is_some() {
+            self.minfee_a = o.minfee_a;
+        }
+        if o.minfee_b.is_some() {
+            self.minfee_b = o.minfee_b;
+        }
+        if o.max_block_body_size.is_some() {
+            self.max_block_body_size = o.max_block_body_size;
+        }
+        if o.max_transaction_size.is_some() {
+            self.max_transaction_size = o.max_transaction_size;
+        }
+        if o.max_block_header_size.is_some() {
+            self.max_block_header_size = o.max_block_header_size;
+        }
+        if o.key_deposit.is_some() {
+            self.key_deposit = o.key_deposit;
+        }
+        if o.pool_deposit.is_some() {
+            self.pool_deposit = o.pool_deposit;
+        }
+        if o.maximum_epoch.is_some() {
+            self.maximum_epoch = o.maximum_epoch;
+        }
+        if o.desired_number_of_stake_pools.is_some() {
+            self.desired_number_of_stake_pools = o.desired_number_of_stake_pools;
+        }
+        if o.pool_pledge_influence.is_some() {
+            self.pool_pledge_influence = o.pool_pledge_influence;
+        }
+        if o.expansion_rate.is_some() {
+            self.expansion_rate = o.expansion_rate;
+        }
+        if o.treasury_growth_rate.is_some() {
+            self.treasury_growth_rate = o.treasury_growth_rate;
+        }
+        if o.min_pool_cost.is_some() {
+            self.min_pool_cost = o.min_pool_cost;
+        }
+        if o.lovelace_per_utxo_word.is_some() {
+            self.lovelace_per_utxo_word = o.lovelace_per_utxo_word;
+        }
+        if o.cost_models_for_script_languages.is_some() {
+            self.cost_models_for_script_languages = o.cost_models_for_script_languages;
+        }
+        if o.execution_costs.is_some() {
+            self.execution_costs = o.execution_costs;
+        }
+        if o.max_tx_ex_units.is_some() {
+            self.max_tx_ex_units = o.max_tx_ex_units;
+        }
+        if o.max_block_ex_units.is_some() {
+            self.max_block_ex_units = o.max_block_ex_units;
+        }
+        if o.max_value_size.is_some() {
+            self.max_value_size = o.max_value_size;
+        }
+        if o.collateral_percentage.is_some() {
+            self.collateral_percentage = o.collateral_percentage;
+        }
+        if o.max_collateral_inputs.is_some() {
+            self.max_collateral_inputs = o.max_collateral_inputs;
+        }
+        if o.coins_per_utxo_byte.is_some() {
+            self.coins_per_utxo_byte = o.coins_per_utxo_byte;
+        }
+        if o.pool_voting_thresholds.is_some() {
+            self.pool_voting_thresholds = o.pool_voting_thresholds;
+        }
+        if o.drep_voting_thresholds.is_some() {
+            self.drep_voting_thresholds = o.drep_voting_thresholds;
+        }
+        if o.min_committee_size.is_some() {
+            self.min_committee_size = o.min_committee_size;
+        }
+        if o.committee_term_limit.is_some() {
+            self.committee_term_limit = o.committee_term_limit;
+        }
+        if o.governance_action_validity_period.is_some() {
+            self.governance_action_validity_period = o.governance_action_validity_period;
+        }
+        if o.governance_action_deposit.is_some() {
+            self.governance_action_deposit = o.governance_action_deposit;
+        }
+        if o.drep_deposit.is_some() {
+            self.drep_deposit = o.drep_deposit;
+        }
+        if o.drep_inactivity_period.is_some() {
+            self.drep_inactivity_period = o.drep_inactivity_period;
+        }
+        if o.minfee_refscript_cost_per_byte.is_some() {
+            self.minfee_refscript_cost_per_byte = o.minfee_refscript_cost_per_byte;
+        }
+        if o.decentralisation_constant.is_some() {
+            self.decentralisation_constant = o.decentralisation_constant;
+        }
+        if o.extra_enthropy.is_some() {
+            self.extra_enthropy = o.extra_enthropy;
+        }
+        if o.protocol_version.is_some() {
+            self.protocol_version = o.protocol_version;
+        }
+
+        self
+    }
+}
+
+impl<'b, C> minicbor::decode::Decode<'b, C> for ProtocolParamUpdate {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.array()?.ok_or_else(|| {
+            minicbor::decode::Error::message("ProtocolParamUpdate must be a definite array")
+        })?;
+
         let min_fee_a = d.u32()? as u64;
         let min_fee_b = d.u32()? as u64;
-
-        // Read what appears to be size limits (but check types - they might be u16 not u64)
-        let max_block_body_size = d.u16()? as u64;
+        let max_block_body_size = d.u32()? as u64;
         let max_transaction_size = d.u16()? as u64;
-
-        // Deposits
+        let max_block_header_size = d.u64()?;
         let stake_credential_deposit = d.u32()? as u64;
         let stake_pool_deposit = d.u32()? as u64;
-
-        // Retirement epoch
-        let stake_pool_max_retirement_epoch = d.u8()? as u64;
-
-        // Pool count
+        let stake_pool_max_retirement_epoch = d.u32()? as u64;
         let optimal_stake_pools_count = d.u16()?;
-
-        // Fields 9-11 should be ratios (Tag 30)
         let pledge_influence = decode_rationale(d)?;
         let monetary_expansion_rate = decode_rationale(d)?;
         let treasury_expansion_rate = decode_rationale(d)?;
-
-        // Field 12 should be protocol version array
         let protocol_version = decode_protocol_version(d)?;
-
-        // Field 13
         let min_pool_cost = d.u32()? as u64;
-
-        // Field 14
         let lovelace_per_utxo_byte = d.u16()? as u64;
+        let cost_models = if let Some(len) = d.map()? {
+            tracing::info!("cost_models map length = {}", len);
 
-        // Field 15: cost_models map - manually decode since CostModel format might be different
-        let mut plutus_v1 = None;
-        let mut plutus_v2 = None;
-        let mut plutus_v3 = None;
+            let mut cost_models = CostModels {
+                plutus_v1: None,
+                plutus_v2: None,
+                plutus_v3: None,
+            };
 
-        let map_len = d.map()?;
-
-        if let Some(len) = map_len {
-            for _ in 0..len {
+            for i in 0..len {
                 let lang_id: u8 = d.decode()?;
+                tracing::info!("cost_model[{}] lang_id = {}", i, lang_id);
 
-                // Try decoding as array of i64 (could be indefinite)
                 let array_len = d.array()?;
+                tracing::info!("cost_model[{}] array_len = {:?}", i, array_len);
 
                 let mut costs = Vec::new();
                 if array_len.is_none() {
-                    // Indefinite array - read until break
                     loop {
                         match d.datatype()? {
                             minicbor::data::Type::Break => {
-                                d.skip()?; // consume the break
+                                d.skip()?;
                                 break;
                             }
                             _ => {
-                                // Decode as i64, handling different integer sizes
                                 let cost: i64 = d.decode()?;
                                 costs.push(cost);
                             }
@@ -310,111 +288,99 @@ impl ProtocolParameters {
 
                 let cost_model = CostModel::new(costs);
                 match lang_id {
-                    0 => plutus_v1 = Some(cost_model),
-                    1 => plutus_v2 = Some(cost_model),
-                    2 => plutus_v3 = Some(cost_model),
+                    0 => cost_models.plutus_v1 = Some(cost_model),
+                    1 => cost_models.plutus_v2 = Some(cost_model),
+                    2 => cost_models.plutus_v3 = Some(cost_model),
                     _ => unreachable!("unexpected language version: {}", lang_id),
                 }
             }
-        }
 
-        // Field 16: prices - encoded as array containing two tag-30 ratios
-        d.array()?; // Outer array
-        let mem_price = decode_rationale(d)?; // First ratio (tag 30)
-        let step_price = decode_rationale(d)?; // Second ratio (tag 30)
-        let prices = ExUnitPrices {
-            mem_price: RationalNumber::from(mem_price.numerator, mem_price.denominator),
-            step_price: RationalNumber::from(step_price.numerator, step_price.denominator),
+            Some(cost_models)
+        } else {
+            None
         };
 
-        // Field 17: max_tx_ex_units
+        d.array()?;
+        let mem_price = decode_rationale(d)?;
+        let step_price = decode_rationale(d)?;
+        let prices = ExUnitPrices {
+            mem_price,
+            step_price,
+        };
+
         let max_tx_ex_units = d.decode_with(ctx)?;
-
-        // Field 18: max_block_ex_units
         let max_block_ex_units = d.decode_with(ctx)?;
-
-        // Field 19: max_value_size
         let max_value_size = d.u16()? as u64;
-
-        // Field 20: collateral_percentage
         let collateral_percentage = d.u16()?;
-
-        // Field 21: max_collateral_inputs
         let max_collateral_inputs = d.u16()?;
-
-        // Field 22: pool_voting_thresholds
         let pool_voting_thresholds = d.decode_with(ctx)?;
-
-        // Field 23: drep_voting_thresholds
         let drep_voting_thresholds = d.decode_with(ctx)?;
-
-        // Field 24: min_committee_size
         let min_committee_size = d.u16()?;
-
-        // Field 25: max_committee_term_length
         let max_committee_term_length = d.u64()?;
-
-        // Field 26: gov_action_lifetime
         let gov_action_lifetime = d.u64()?;
-
-        // Field 27: gov_action_deposit
         let gov_action_deposit = d.u64()?;
-
-        // Field 28: drep_deposit
         let drep_deposit = d.u64()?;
-
-        // Field 29: drep_expiry
         let drep_expiry = d.decode_with(ctx)?;
-
-        // Field 30: min_fee_ref_script_lovelace_per_byte
         let min_fee_ref_script_lovelace_per_byte = decode_rationale(d)?;
 
-        // Field 0 (U8=44) - still unknown, need to determine max_block_header_size
-        let max_block_header_size = first_field as u16;
+        Ok(ProtocolParamUpdate {
+            minfee_a: Some(min_fee_a),
+            minfee_b: Some(min_fee_b),
+            max_block_body_size: Some(max_block_body_size),
+            max_transaction_size: Some(max_transaction_size),
+            max_block_header_size: Some(max_block_header_size),
+            key_deposit: Some(stake_credential_deposit),
+            pool_deposit: Some(stake_pool_deposit),
+            maximum_epoch: Some(stake_pool_max_retirement_epoch),
+            desired_number_of_stake_pools: Some(optimal_stake_pools_count.into()),
+            pool_pledge_influence: Some(pledge_influence),
+            expansion_rate: Some(monetary_expansion_rate),
+            treasury_growth_rate: Some(treasury_expansion_rate),
+            min_pool_cost: Some(min_pool_cost),
+            lovelace_per_utxo_word: None,
+            cost_models_for_script_languages: cost_models,
+            execution_costs: Some(prices),
+            max_tx_ex_units: Some(max_tx_ex_units),
+            max_block_ex_units: Some(max_block_ex_units),
+            coins_per_utxo_byte: Some(lovelace_per_utxo_byte),
+            max_value_size: Some(max_value_size),
+            collateral_percentage: Some(collateral_percentage.into()),
+            max_collateral_inputs: Some(max_collateral_inputs.into()),
+            pool_voting_thresholds: Some(pool_voting_thresholds),
+            drep_voting_thresholds: Some(drep_voting_thresholds),
+            min_committee_size: Some(min_committee_size.into()),
+            committee_term_limit: Some(max_committee_term_length),
+            governance_action_validity_period: Some(gov_action_lifetime),
+            governance_action_deposit: Some(gov_action_deposit),
+            drep_deposit: Some(drep_deposit),
+            drep_inactivity_period: Some(drep_expiry),
+            minfee_refscript_cost_per_byte: Some(min_fee_ref_script_lovelace_per_byte),
+            decentralisation_constant: Some(RationalNumber::ZERO),
+            extra_enthropy: None,
+            protocol_version: Some(protocol_version),
+        })
+    }
+}
 
-        Ok(ProtocolParameters {
-            protocol_version,
-            min_fee_a,
-            min_fee_b,
-            max_block_body_size,
-            max_transaction_size,
-            max_block_header_size,
-            stake_credential_deposit,
-            stake_pool_deposit,
-            stake_pool_max_retirement_epoch,
-            optimal_stake_pools_count,
-            pledge_influence,
-            monetary_expansion_rate,
-            treasury_expansion_rate,
-            min_pool_cost,
-            lovelace_per_utxo_byte,
-            cost_models: CostModels {
-                plutus_v1,
-                plutus_v2,
-                plutus_v3,
-            },
-            prices,
-            max_tx_ex_units,
-            max_block_ex_units,
-            max_value_size,
-            collateral_percentage,
-            max_collateral_inputs,
-            pool_voting_thresholds,
-            drep_voting_thresholds,
-            min_committee_size,
-            max_committee_term_length,
-            gov_action_lifetime,
-            gov_action_deposit,
-            drep_deposit,
-            drep_expiry,
-            min_fee_ref_script_lovelace_per_byte,
-            max_ref_script_size_per_tx: 200 * 1024,
-            max_ref_script_size_per_block: 1024 * 1024,
-            ref_script_cost_stride: 25600,
-            ref_script_cost_multiplier: Ratio {
-                numerator: 12,
-                denominator: 10,
-            },
+impl ProtocolParamUpdate {
+    pub fn to_reward_params(&self) -> Result<RewardParams, anyhow::Error> {
+        Ok(RewardParams {
+            expansion_rate: self
+                .expansion_rate
+                .clone()
+                .expect("Current params must have expansion rate"),
+            treasury_growth_rate: self
+                .treasury_growth_rate
+                .clone()
+                .expect("Current params must have treasury growth rate"),
+            desired_number_of_stake_pools: self
+                .desired_number_of_stake_pools
+                .expect("Current params must have n opt"),
+            pool_pledge_influence: self
+                .pool_pledge_influence
+                .clone()
+                .expect("Current params must have pool pledge influence"),
+            min_pool_cost: self.min_pool_cost.expect("Current params must have min pool cost"),
         })
     }
 }

@@ -412,7 +412,7 @@ impl State {
 
         for tx in deltas {
             let mut tx_asset_ids = HashSet::new();
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 for (policy_id, assets) in &output.value.assets {
                     for asset in assets {
                         if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
@@ -589,7 +589,7 @@ impl State {
         let mut new_info = self.info.clone();
 
         for tx in deltas {
-            for output in &tx.outputs {
+            for output in &tx.produces {
                 let Some(Datum::Inline(blob)) = &output.datum else {
                     continue;
                 };
@@ -696,7 +696,7 @@ mod tests {
     use serde_cbor::Value as CborValue;
 
     fn dummy_policy(byte: u8) -> PolicyId {
-        [byte; 28]
+        PolicyId::from([byte; 28])
     }
 
     fn asset_name_from_str(s: &str) -> AssetName {
@@ -859,6 +859,22 @@ mod tests {
             },
             datum: datum.map(Datum::Inline),
             reference_script: None,
+        }
+    }
+
+    fn make_tx_utxo_deltas(
+        tx_identifier: TxIdentifier,
+        consumes: Vec<UTxOIdentifier>,
+        produces: Vec<TxOutput>,
+    ) -> TxUTxODeltas {
+        TxUTxODeltas {
+            tx_identifier,
+            consumes,
+            produces,
+            vkey_hashes_needed: None,
+            script_hashes_needed: None,
+            vkey_hashes_provided: None,
+            script_hashes_provided: None,
         }
     }
 
@@ -1036,7 +1052,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_updates_correct_asset() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [0u8; 28];
+        let policy_id = PolicyId::from([0u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1065,7 +1081,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_version_field_sets_v2() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28];
+        let policy_id = PolicyId::from([1u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1095,7 +1111,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_unknown_asset_is_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28];
+        let policy_id = PolicyId::from([2u8; 28]);
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1123,7 +1139,7 @@ mod tests {
     #[test]
     fn handle_cip25_metadata_invalid_cbor_is_skipped() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28];
+        let policy_id = PolicyId::from([3u8; 28]);
         let (state, asset_id, _) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1155,7 +1171,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_updates_onchain_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, reference_id, reference_name) = setup_state_with_asset(
             &mut registry,
@@ -1169,11 +1185,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, reference_name, Some(datum_blob.clone()));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
         let info = new_state.info.expect("info should be Some");
@@ -1186,7 +1198,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_non_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, normal_id, normal_name) = setup_state_with_asset(
             &mut registry,
@@ -1200,11 +1212,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, normal_name, Some(datum_blob.clone()));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1218,7 +1226,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_unknown_reference_assets() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1232,11 +1240,7 @@ mod tests {
         let datum_blob = vec![1, 2, 3, 4];
         let output = make_output(policy_id, name, Some(datum_blob));
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: Vec::new(),
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1252,7 +1256,7 @@ mod tests {
     #[test]
     fn handle_cip68_metadata_ignores_inputs_and_outputs_without_datum() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [7u8; 28];
+        let policy_id = PolicyId::from([7u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1266,11 +1270,7 @@ mod tests {
         let input = UTxOIdentifier::new(TxHash::default(), 0);
         let output = make_output(policy_id, name, None);
 
-        let tx_deltas = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: vec![input],
-            outputs: vec![output],
-        };
+        let tx_deltas = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![input], vec![output]);
 
         let new_state = state.handle_cip68_metadata(&[tx_deltas], &registry).unwrap();
 
@@ -1287,7 +1287,7 @@ mod tests {
     #[test]
     fn handle_cip68_version_detection() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [7u8; 28];
+        let policy_id = PolicyId::from([7u8; 28]);
 
         let (state, asset_id, name) = setup_state_with_asset(
             &mut registry,
@@ -1308,11 +1308,7 @@ mod tests {
 
         let output = make_output(policy_id, name, Some(datum.clone()));
 
-        let tx = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(0, 0),
-            inputs: vec![],
-            outputs: vec![output],
-        };
+        let tx = make_tx_utxo_deltas(TxIdentifier::new(0, 0), vec![], vec![output]);
         let new_state = state.handle_cip68_metadata(&[tx], &registry).unwrap();
         let record = new_state.info.as_ref().unwrap().get(&asset_id).unwrap();
 
@@ -1327,7 +1323,7 @@ mod tests {
     #[test]
     fn get_asset_info_reference_nft_strips_metadata() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [9u8; 28];
+        let policy_id = PolicyId::from([9u8; 28]);
 
         let (mut state, ref_id, _) = setup_state_with_asset(
             &mut registry,
@@ -1361,7 +1357,7 @@ mod tests {
     #[test]
     fn get_asset_info_resolves_user_token_metadata_from_reference_nft() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [5u8; 28];
+        let policy_id = PolicyId::from([5u8; 28]);
         let asset_name = [0x53, 0x4E, 0x45, 0x4B];
 
         let mut user_name = CIP67_LABEL_222.to_vec();
@@ -1409,7 +1405,7 @@ mod tests {
     #[test]
     fn handle_transactions_duplicate_tx_ignored() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [1u8; 28];
+        let policy_id = PolicyId::from([1u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1424,22 +1420,8 @@ mod tests {
 
         let tx_identifier = TxIdentifier::new(0, 0);
 
-        let tx1 = TxUTxODeltas {
-            tx_identifier,
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..output.clone()
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier,
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 1),
-                ..output
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(tx_identifier, vec![], vec![output.clone()]);
+        let tx2 = make_tx_utxo_deltas(tx_identifier, vec![], vec![output]);
 
         let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
@@ -1452,7 +1434,7 @@ mod tests {
     #[test]
     fn handle_transactions_updates_asset_transactions() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [2u8; 28];
+        let policy_id = PolicyId::from([2u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1466,22 +1448,8 @@ mod tests {
         let out1 = make_output(policy_id, asset_name, None);
         let out2 = make_output(policy_id, asset_name, None);
 
-        let tx1 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(9, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..out1
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(10, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..out2
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(TxIdentifier::new(9, 0), vec![], vec![out1]);
+        let tx2 = make_tx_utxo_deltas(TxIdentifier::new(10, 0), vec![], vec![out2]);
 
         let new_state = state.handle_transactions(&[tx1, tx2], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
@@ -1497,7 +1465,7 @@ mod tests {
     #[test]
     fn handle_transactions_prunes_on_store_transactions_config() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [3u8; 28];
+        let policy_id = PolicyId::from([3u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
@@ -1509,30 +1477,9 @@ mod tests {
         );
 
         let base_output = make_output(policy_id, asset_name, None);
-        let tx1 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(9, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output.clone()
-            }],
-        };
-        let tx2 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(8, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output.clone()
-            }],
-        };
-        let tx3 = TxUTxODeltas {
-            tx_identifier: TxIdentifier::new(7, 0),
-            inputs: Vec::new(),
-            outputs: vec![TxOutput {
-                utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
-                ..base_output
-            }],
-        };
+        let tx1 = make_tx_utxo_deltas(TxIdentifier::new(9, 0), vec![], vec![base_output.clone()]);
+        let tx2 = make_tx_utxo_deltas(TxIdentifier::new(8, 0), vec![], vec![base_output.clone()]);
+        let tx3 = make_tx_utxo_deltas(TxIdentifier::new(7, 0), vec![], vec![base_output]);
 
         let new_state = state.handle_transactions(&[tx1, tx2, tx3], &registry).unwrap();
         let txs = new_state.transactions.expect("transactions should exist");
@@ -1548,7 +1495,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_accumulates_address_balance() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [4u8; 28];
+        let policy_id = PolicyId::from([4u8; 28]);
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,
             policy_id,
@@ -1580,7 +1527,7 @@ mod tests {
     #[test]
     fn handle_address_deltas_removes_zero_balance_addresses() {
         let mut registry = AssetRegistry::new();
-        let policy_id: PolicyId = [5u8; 28];
+        let policy_id = PolicyId::from([5u8; 28]);
 
         let (state, asset_id, asset_name) = setup_state_with_asset(
             &mut registry,

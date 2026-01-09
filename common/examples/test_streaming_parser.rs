@@ -1,27 +1,25 @@
 // Example: Test streaming snapshot parser with large snapshot
 //
 // Usage: cargo run --example test_streaming_parser --release -- <snapshot_path>
-
-use acropolis_common::epoch_snapshot::SnapshotsContainer;
-use acropolis_common::ledger_state::SPOState;
-use acropolis_common::snapshot::protocol_parameters::ProtocolParameters;
-use acropolis_common::snapshot::streaming_snapshot::{
-    AccountsCallback, DRepCallback, DRepRecord, GovernanceProtocolParametersCallback, UtxoCallback,
+use acropolis_common::{
+    epoch_snapshot::SnapshotsContainer,
+    ledger_state::SPOState,
+    snapshot::{
+        streaming_snapshot::{AccountsCallback, GovernanceProtocolParametersCallback},
+        utxo::UtxoEntry,
+        AccountState, DRepCallback, EpochCallback, GovernanceProposal, PoolCallback,
+        ProposalCallback, SnapshotCallbacks, SnapshotMetadata, SnapshotsCallback,
+        StreamingSnapshotParser, UtxoCallback,
+    },
+    DRepCredential, NetworkId, PoolRegistration, ProtocolParamUpdate, RewardParams,
 };
-use acropolis_common::snapshot::utxo::UtxoEntry;
-use acropolis_common::snapshot::EpochCallback;
-use acropolis_common::snapshot::{
-    AccountState, GovernanceProposal, PoolCallback, ProposalCallback, SnapshotCallbacks,
-    SnapshotMetadata, SnapshotsCallback, StreamingSnapshotParser,
-};
-use acropolis_common::{DRepCredential, NetworkId, PoolRegistration};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::env;
 use std::time::Instant;
 use tracing::info;
 
-use acropolis_common::EpochBootstrapData;
+use acropolis_common::{DRepRecord, EpochBootstrapData};
 use env_logger::Env;
 
 // Simple counter callback that doesn't store data in memory
@@ -40,9 +38,9 @@ struct CountingCallbacks {
     sample_accounts: Vec<AccountState>,
     sample_dreps: Vec<(DRepCredential, DRepRecord)>,
     sample_proposals: Vec<GovernanceProposal>,
-    gs_previous_params: Option<ProtocolParameters>,
-    gs_current_params: Option<ProtocolParameters>,
-    gs_future_params: Option<ProtocolParameters>,
+    previous_reward_params: Option<RewardParams>,
+    current_reward_params: Option<RewardParams>,
+    params: Option<ProtocolParamUpdate>,
 }
 
 impl UtxoCallback for CountingCallbacks {
@@ -51,9 +49,14 @@ impl UtxoCallback for CountingCallbacks {
         // Keep first 10 for display
         if self.sample_utxos.len() < 10 {
             if self.sample_utxos.len() < 10 {
+                let addr_bytes = utxo.address_bytes();
                 eprintln!(
-                    "  UTXO #{}: {} → {:?}",
-                    self.utxo_count, utxo.id, utxo.value
+                    "  UTXO #{}: {}:{} → {} ({} lovelace)",
+                    self.utxo_count,
+                    &utxo.tx_hash_hex()[..16],
+                    utxo.output_index(),
+                    hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                    utxo.coin()
                 );
             }
             self.sample_utxos.push(utxo);
@@ -126,7 +129,7 @@ impl AccountsCallback for CountingCallbacks {
             data.pools.len(),
             data.retiring_pools.len(),
             data.dreps.len(),
-            data.snapshots.is_some()
+            data.snapshots
         );
 
         // Keep first 10 for summary
@@ -195,108 +198,156 @@ impl ProposalCallback for CountingCallbacks {
 impl GovernanceProtocolParametersCallback for CountingCallbacks {
     fn on_gs_protocol_parameters(
         &mut self,
-        gs_previous_params: ProtocolParameters,
-        gs_current_params: ProtocolParameters,
-        gs_future_params: ProtocolParameters,
+        epoch: u64,
+        previous_reward_params: RewardParams,
+        current_reward_params: RewardParams,
+        params: ProtocolParamUpdate,
     ) -> Result<()> {
-        eprintln!("\n=== Governance Protocol Parameters ===\n");
+        eprintln!("\n=== Governance Protocol Parameters for epoch {epoch} ===\n");
 
-        eprintln!("Previous Protocol Parameters:");
+        eprintln!("Previous Reward Parameters:");
+        eprintln!("  Expansion rate {}", previous_reward_params.expansion_rate);
         eprintln!(
-            "  Protocol Version: {}.{}",
-            gs_previous_params.protocol_version.major, gs_previous_params.protocol_version.minor
-        );
-        eprintln!("  Min Fee A: {}", gs_previous_params.min_fee_a);
-        eprintln!("  Min Fee B: {}", gs_previous_params.min_fee_b);
-        eprintln!(
-            "  Max Block Body Size: {}",
-            gs_previous_params.max_block_body_size
+            "  Treasury growth rate {}",
+            previous_reward_params.treasury_growth_rate
         );
         eprintln!(
-            "  Max Transaction Size: {}",
-            gs_previous_params.max_transaction_size
+            "  Desired number of pools: {}",
+            previous_reward_params.desired_number_of_stake_pools
         );
         eprintln!(
-            "  Max Block Header Size: {}",
-            gs_previous_params.max_block_header_size
+            "  Pledge influence: {}",
+            previous_reward_params.pool_pledge_influence
         );
-        eprintln!(
-            "  Stake Pool Deposit: {}",
-            gs_previous_params.stake_pool_deposit
-        );
-        eprintln!(
-            "  Stake Credential Deposit: {}",
-            gs_previous_params.stake_credential_deposit
-        );
-        eprintln!("  Min Pool Cost: {}", gs_previous_params.min_pool_cost);
-        eprintln!(
-            "  Monetary Expansion: {}/{}",
-            gs_previous_params.monetary_expansion_rate.numerator,
-            gs_previous_params.monetary_expansion_rate.denominator
-        );
-        eprintln!(
-            "  Treasury Expansion: {}/{}",
-            gs_previous_params.treasury_expansion_rate.numerator,
-            gs_previous_params.treasury_expansion_rate.denominator
-        );
+        eprintln!("  Min pool cost: {}", previous_reward_params.min_pool_cost);
 
-        eprintln!("\nCurrent Protocol Parameters:");
+        eprintln!("\nCurrent Reward Parameters:");
+        eprintln!("  Expansion rate: {}", current_reward_params.expansion_rate);
         eprintln!(
-            "  Protocol Version: {}.{}",
-            gs_current_params.protocol_version.major, gs_current_params.protocol_version.minor
-        );
-        eprintln!("  Min Fee A: {}", gs_current_params.min_fee_a);
-        eprintln!("  Min Fee B: {}", gs_current_params.min_fee_b);
-        eprintln!(
-            "  Max Block Body Size: {}",
-            gs_current_params.max_block_body_size
+            "  Treasury growth rate: {}",
+            current_reward_params.treasury_growth_rate
         );
         eprintln!(
-            "  Max Transaction Size: {}",
-            gs_current_params.max_transaction_size
+            "  Desired number of pools: {}",
+            current_reward_params.desired_number_of_stake_pools
         );
         eprintln!(
-            "  Max Block Header Size: {}",
-            gs_current_params.max_block_header_size
+            "  Pledge influence: {}",
+            current_reward_params.pool_pledge_influence
         );
-        eprintln!(
-            "  Stake Pool Deposit: {}",
-            gs_current_params.stake_pool_deposit
-        );
-        eprintln!(
-            "  Stake Credential Deposit: {}",
-            gs_current_params.stake_credential_deposit
-        );
-        eprintln!("  Min Pool Cost: {}", gs_current_params.min_pool_cost);
-        eprintln!(
-            "  Monetary Expansion: {}/{}",
-            gs_current_params.monetary_expansion_rate.numerator,
-            gs_current_params.monetary_expansion_rate.denominator
-        );
-        eprintln!(
-            "  Treasury Expansion: {}/{}",
-            gs_current_params.treasury_expansion_rate.numerator,
-            gs_current_params.treasury_expansion_rate.denominator
-        );
+        eprintln!("  Min pool cost: {}", current_reward_params.min_pool_cost);
 
-        eprintln!("\nFuture Protocol Parameters:");
+        eprintln!("\nBootstrap Parameters:");
+        eprintln!("  Min fee a: {}", params.minfee_a.unwrap());
+        eprintln!("  Min fee b: {}", params.minfee_b.unwrap());
         eprintln!(
-            "  Protocol Version: {}.{}",
-            gs_future_params.protocol_version.major, gs_future_params.protocol_version.minor
+            "  Max block body size: {}",
+            params.max_block_body_size.unwrap()
         );
-        eprintln!("  Min Fee A: {}", gs_future_params.min_fee_a);
-        eprintln!("  Min Fee B: {}", gs_future_params.min_fee_b);
         eprintln!(
-            "  Max Block Body Size: {}",
-            gs_future_params.max_block_body_size
+            "  Max transaction size: {}",
+            params.max_transaction_size.unwrap()
+        );
+        eprintln!(
+            "  Max block header size: {}",
+            params.max_block_header_size.unwrap()
+        );
+        eprintln!("  Key deposit: {}", params.key_deposit.unwrap());
+        eprintln!("  Pool deposit: {}", params.pool_deposit.unwrap());
+        eprintln!("  Pool max retire epoch: {}", params.maximum_epoch.unwrap());
+        eprintln!(
+            "  Desired number of stake pools: {}",
+            params.desired_number_of_stake_pools.unwrap()
+        );
+        eprintln!(
+            "  Pool pledge influence: {}",
+            params.pool_pledge_influence.clone().unwrap()
+        );
+        eprintln!(
+            "  Monetary expansion rate: {}",
+            params.expansion_rate.clone().unwrap()
+        );
+        eprintln!(
+            "  Treasury growth rate: {}",
+            params.treasury_growth_rate.clone().unwrap()
+        );
+        eprintln!("  Min pool cost: {}", params.min_pool_cost.unwrap());
+        eprintln!(
+            "  Execution prices: {:?}",
+            params.execution_costs.clone().unwrap()
+        );
+        eprintln!(
+            "  Max execution units: {:?}",
+            params.max_block_ex_units.unwrap()
+        );
+        eprintln!("  Max value size: {:?}", params.max_value_size.unwrap());
+        eprintln!(
+            "  Collateral percentage: {:?}",
+            params.collateral_percentage.unwrap()
+        );
+        eprintln!(
+            "  Max collateral inputs: {:?}",
+            params.max_collateral_inputs.unwrap()
+        );
+        eprintln!(
+            "  Coins per UTxO byte: {:?}",
+            params.coins_per_utxo_byte.unwrap()
+        );
+        eprintln!(
+            "  Min committee size: {:?}",
+            params.min_committee_size.unwrap()
+        );
+        eprintln!(
+            "  Max committee term limit: {:?}",
+            params.committee_term_limit.unwrap()
+        );
+        eprintln!(
+            "  Governance action validity period: {:?}",
+            params.governance_action_validity_period.unwrap()
+        );
+        eprintln!(
+            "  Governance action deposit: {:?}",
+            params.governance_action_deposit.unwrap()
+        );
+        eprintln!("  DRep deposit: {:?}", params.drep_deposit.unwrap());
+        eprintln!(
+            "  DRep inactivity period: {:?}",
+            params.drep_inactivity_period.unwrap()
+        );
+        eprintln!(
+            "  Min fee refscript cost per byte: {:?}",
+            params.minfee_refscript_cost_per_byte.clone().unwrap()
+        );
+        eprintln!(
+            "  Decentralization constant: {:?}",
+            params.decentralisation_constant.clone().unwrap()
+        );
+        eprintln!(
+            "  Protocol version: {:?}",
+            params.protocol_version.clone().unwrap()
         );
 
         // Store for later display
-        self.gs_previous_params = Some(gs_previous_params);
-        self.gs_current_params = Some(gs_current_params);
-        self.gs_future_params = Some(gs_future_params);
+        self.previous_reward_params = Some(previous_reward_params);
+        self.current_reward_params = Some(current_reward_params);
+        self.params = Some(params);
 
         eprintln!("\n=== End Protocol Parameters ===\n");
+        Ok(())
+    }
+}
+
+impl acropolis_common::snapshot::GovernanceStateCallback for CountingCallbacks {
+    fn on_governance_state(
+        &mut self,
+        state: acropolis_common::snapshot::GovernanceState,
+    ) -> Result<()> {
+        eprintln!(
+            "Governance State: epoch {}, {} proposals, {} votes",
+            state.epoch,
+            state.proposals.len(),
+            state.votes.len()
+        );
         Ok(())
     }
 }
@@ -419,12 +470,6 @@ impl SnapshotsCallback for CountingCallbacks {
         eprintln!("  Total stake: {:.2} ADA", set_total as f64 / 1_000_000.0);
         eprintln!();
 
-        eprintln!("Go Snapshot (epoch {}):", snapshots.go.epoch);
-        eprintln!("  SPOs: {}", snapshots.go.spos.len());
-        let go_total: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-        eprintln!("  Total stake: {:.2} ADA", go_total as f64 / 1_000_000.0);
-        eprintln!();
-
         Ok(())
     }
 }
@@ -502,7 +547,15 @@ fn main() {
             if !callbacks.sample_utxos.is_empty() {
                 println!("Sample UTXOs (first 10):");
                 for (i, utxo) in callbacks.sample_utxos.iter().enumerate() {
-                    println!("  {}: {} → {:?}", i + 1, utxo.id, utxo.value);
+                    let addr_bytes = utxo.address_bytes();
+                    println!(
+                        "  {}: {}:{} → {} ({} lovelace)",
+                        i + 1,
+                        &utxo.tx_hash_hex()[..16],
+                        utxo.output_index(),
+                        hex::encode(&addr_bytes[..addr_bytes.len().min(16)]),
+                        utxo.coin()
+                    );
                 }
                 println!();
             }

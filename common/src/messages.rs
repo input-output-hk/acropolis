@@ -1,5 +1,6 @@
 //! Definition of Acropolis messages
 
+use crate::address::StakeAddress;
 use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
@@ -51,13 +52,6 @@ pub struct RawBlockMessage {
 pub enum StateTransitionMessage {
     /// The chain has been rolled back to a specific point
     Rollback(Point),
-}
-
-/// Snapshot completion message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SnapshotCompleteMessage {
-    /// Last block in snapshot data
-    pub last_block: BlockInfo,
 }
 
 /// Transactions message
@@ -121,7 +115,7 @@ pub struct WithdrawalsMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PotDeltasMessage {
     /// Set of pot deltas
-    pub deltas: Vec<PotDelta>,
+    pub deltas: BootstrapPotDeltas,
 }
 
 /// Stake address part of address deltas message
@@ -303,7 +297,8 @@ pub struct SPOStateMessage {
     pub spos: Vec<PoolRegistration>,
 
     /// SPOs in the above list which retired at the start of this epoch, by operator ID
-    pub retired_spos: Vec<PoolId>,
+    /// and the reward account to pay the deposit refund to
+    pub retired_spos: Vec<(PoolId, StakeAddress)>,
 }
 
 /// Cardano message enum
@@ -313,7 +308,6 @@ pub enum CardanoMessage {
     BlockAvailable(RawBlockMessage),         // Block body available
     StateTransition(StateTransitionMessage), // Our position on the chain has changed
     BlockValidation(ValidationStatus),       // Result of a block validation
-    SnapshotComplete,                        // Mithril snapshot loaded
     ReceivedTxs(RawTxsMessage),              // Transaction available
     GenesisComplete(GenesisCompleteMessage), // Genesis UTXOs done + genesis params
     GenesisUTxOs(GenesisUTxOsMessage),       // Genesis UTxOs with their UTxOIdentifiers
@@ -346,6 +340,7 @@ pub enum CardanoMessage {
 pub enum SnapshotMessage {
     Startup, // subscribers should listen for incremental snapshot data
     Bootstrap(SnapshotStateMessage),
+    Complete, // all bootstrap data has been sent on this topic
     DumpRequest(SnapshotDumpMessage),
     Dump(SnapshotStateMessage),
 }
@@ -353,7 +348,24 @@ pub enum SnapshotMessage {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepBootstrapMessage {
     pub epoch: u64,
+    pub block_number: u64,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockKesValidatorBootstrapMessage {
+    pub epoch: u64,
+    pub block_number: u64,
+    /// Maps pool ID to the latest operational certificate counter
+    pub ocert_counters: HashMap<PoolId, u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolParametersBootstrapMessage {
+    pub network_name: String,
+    pub era: Era,
+    pub params: ProtocolParamUpdate,
+    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -416,6 +428,9 @@ pub struct AccountsBootstrapMessage {
     /// Epoch number this snapshot is for
     pub epoch: u64,
 
+    /// Block number this snapshot is for
+    pub block_number: u64,
+
     /// All account states (stake addresses with delegations and balances)
     pub accounts: Vec<AccountState>,
 
@@ -428,12 +443,28 @@ pub struct AccountsBootstrapMessage {
     /// All registered DReps with their deposits (credential, deposit amount)
     pub dreps: Vec<(DRepCredential, u64)>,
 
-    /// Pot balances (treasury, reserves, deposits)
+    /// Pot balances (treasury, reserves, deposits) for the set epoch
     pub pots: Pots,
 
+    /// Pot deltas to apply at epoch boundary transition
+    /// These come from pulsing_rew_update and instantaneous_rewards in the snapshot
+    pub pot_deltas: BootstrapPotDeltas,
+
     /// Fully processed bootstrap snapshots (Mark, Set, Go)
-    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state
-    pub bootstrap_snapshots: Option<SnapshotsContainer>,
+    /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
+    /// Empty (default) for pre-Shelley eras.
+    pub bootstrap_snapshots: SnapshotsContainer,
+}
+
+/// Deltas to apply to pots at epoch boundary during snapshot bootstrap
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct BootstrapPotDeltas {
+    /// Delta to treasury (positive = increase)
+    pub delta_treasury: i64,
+    /// Delta to reserves (positive = increase, typically negative due to monetary expansion)
+    pub delta_reserves: i64,
+    /// Delta to deposits (from stake/pool registrations/deregistrations)
+    pub delta_deposits: i64,
 }
 
 /// UTxO bootstrap message containing partial UTxO state
@@ -444,14 +475,59 @@ pub struct UTxOPartialState {
     pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
 }
 
+/// Governance bootstrap message containing all governance state from snapshot
+/// Includes proposals, votes, committee, and constitution
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceBootstrapMessage {
+    /// Current epoch when snapshot was taken
+    pub epoch: u64,
+    /// Active proposals with their voting epochs
+    pub proposals: Vec<(u64, ProposalProcedure)>,
+    /// Votes cast on proposals (action_id -> voter -> procedure)
+    pub votes: HashMap<GovActionId, HashMap<Voter, VotingProcedure>>,
+    /// Current committee (if any)
+    pub committee: Option<Committee>,
+    /// Current constitution
+    pub constitution: Constitution,
+    /// Proposal roots (previous action IDs by purpose)
+    pub proposal_roots: GovernanceProposalRoots,
+    /// Actions that have been enacted but not yet applied
+    pub enacted_action_ids: Vec<GovActionId>,
+    /// Actions that have expired
+    pub expired_action_ids: Vec<GovActionId>,
+}
+
+/// Previous governance action IDs by purpose (for proposal chaining)
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct GovernanceProposalRoots {
+    /// Previous parameter update action ID
+    pub pparam_update: Option<GovActionId>,
+    /// Previous hard fork action ID
+    pub hard_fork: Option<GovActionId>,
+    /// Previous committee action ID
+    pub committee: Option<GovActionId>,
+    /// Previous constitution action ID
+    pub constitution: Option<GovActionId>,
+}
+
+/// SPO bootstrap message containing pool state and block number
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SPOBootstrapMessage {
+    pub block_number: u64,
+    pub spo_state: SPOState,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotStateMessage {
-    SPOState(SPOState),
+    SPOState(SPOBootstrapMessage),
     EpochState(EpochBootstrapMessage),
     AccountsState(AccountsBootstrapMessage),
     UTxOPartialState(UTxOPartialState),
     DRepState(DRepBootstrapMessage),
+    ParametersState(ProtocolParametersBootstrapMessage),
+    GovernanceState(GovernanceBootstrapMessage),
+    BlockKesValidatorState(BlockKesValidatorBootstrapMessage),
 }
 
 // === Global message enum ===

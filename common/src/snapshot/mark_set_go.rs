@@ -1,5 +1,5 @@
 // ================================================================================================
-// Mark, Set, Go Snapshots - CBOR Parsing Support
+// Mark and Set Snapshots - CBOR Parsing Support
 // ================================================================================================
 
 use anyhow::{Context, Error, Result};
@@ -69,7 +69,7 @@ pub struct RawSnapshot {
 }
 
 impl RawSnapshot {
-    /// Parse a single snapshot (Mark, Set, or Go) from CBOR
+    /// Parse a single snapshot (Mark or Set) from CBOR
     pub fn parse(
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
@@ -139,36 +139,35 @@ pub struct RawSnapshotsContainer {
     pub mark: RawSnapshot,
     /// Set snapshot (raw CBOR data)
     pub set: RawSnapshot,
-    /// Go snapshot (raw CBOR data)
-    pub go: RawSnapshot,
-    /// Fee
-    pub fee: u64,
+    /// Previous epoch's fees, used for reward calculation
+    pub fees: u64,
 }
 
 impl RawSnapshotsContainer {
     /// Convert raw snapshots to processed SnapshotsContainer
     ///
     /// Block count assignments:
-    /// - Mark (epoch-2): No block data available, all pools get 0 blocks
+    /// - Mark (epoch): Uses blocks_current_epoch
     /// - Set (epoch-1): Uses blocks_previous_epoch
-    /// - Go (epoch): Uses blocks_current_epoch
     ///
-    /// Note: Pots are passed for the current epoch. For mark/set snapshots,
-    /// we don't have historical pots data during bootstrap, so they use default values.
+    /// Pots assignment (reserves, treasury, deposits - the global ADA accounting pots):
+    /// - Mark and Set: receive zeroed pots (Live pots in accounts state are used for rewards calculation)
+    ///
+    /// Why this is safe: On the first epoch after bootstrap, we skip monetary change
+    /// calculation (pots are already correct from bootstrap). The first `enter_epoch`
+    /// creates a fresh snapshot with correct pots that becomes the new mark. Subsequent
+    /// epochs will have correct pots propagated through the snapshot rotation.
     pub fn into_snapshots_container(
         self,
         epoch: u64,
         blocks_previous_epoch: &HashMap<PoolId, usize>,
         blocks_current_epoch: &HashMap<PoolId, usize>,
-        pots: Pots,
         network: NetworkId,
     ) -> SnapshotsContainer {
-        let empty_blocks = HashMap::new();
-
         SnapshotsContainer {
             mark: self.mark.into_snapshot(
-                epoch.saturating_sub(2),
-                &empty_blocks,
+                epoch,
+                blocks_current_epoch,
                 Pots::default(),
                 network.clone(),
             ),
@@ -178,12 +177,11 @@ impl RawSnapshotsContainer {
                 Pots::default(),
                 network.clone(),
             ),
-            go: self.go.into_snapshot(epoch, blocks_current_epoch, pots, network),
         }
     }
 }
 
-/// Callback trait for mark, set, go snapshots
+/// Callback trait for mark and set snapshots
 pub trait SnapshotsCallback {
     fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()>;
 }

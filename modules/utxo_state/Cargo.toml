@@ -10,6 +10,7 @@ license = "Apache-2.0"
 
 [dependencies]
 acropolis_common = { path = "../../common" }
+acropolis_codec = { path = "../../codec" }
 
 caryatid_sdk = { workspace = true }
 
@@ -25,3 +26,10 @@ tracing = { workspace = true }
 
 [lib]
 path = "src/utxo_state.rs"
+
+[dev-dependencies]
+hex.workspace = true
+pallas.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+test-case = "3.3.1"

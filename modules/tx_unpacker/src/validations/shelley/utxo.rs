@@ -37,16 +37,13 @@ fn compute_min_lovelace(value: &alonzo::Value, shelley_params: &ShelleyParams) -
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
 
-pub fn validate_shelley_tx(
-    mtx: &alonzo::MintedTx,
-    shelley_params: &ShelleyParams,
-) -> UTxOValidationResult {
+pub fn validate(mtx: &alonzo::MintedTx, shelley_params: &ShelleyParams) -> UTxOValidationResult {
     let network_id = shelley_params.network_id.clone();
     let transaction_body = &mtx.transaction_body;
 
     validate_input_set_empty_utxo(transaction_body)?;
-    validate_wrong_network(transaction_body, network_id.clone())?;
-    validate_wrong_network_withdrawal(transaction_body, network_id.clone())?;
+    validate_output_network(transaction_body, network_id.clone())?;
+    validate_withdrawal_network(transaction_body, network_id.clone())?;
     validate_output_too_small_utxo(transaction_body, shelley_params)?;
     Ok(())
 }
@@ -65,7 +62,7 @@ pub fn validate_input_set_empty_utxo(
 
 /// Validate every output address match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L481
-pub fn validate_wrong_network(
+pub fn validate_output_network(
     transaction_body: &alonzo::TransactionBody,
     network_id: NetworkId,
 ) -> UTxOValidationResult {
@@ -110,7 +107,7 @@ pub fn validate_wrong_network(
 
 /// Validate every withdrawal account addresses match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L497
-pub fn validate_wrong_network_withdrawal(
+pub fn validate_withdrawal_network(
     transaction_body: &alonzo::TransactionBody,
     network_id: NetworkId,
 ) -> UTxOValidationResult {
@@ -183,34 +180,59 @@ mod tests {
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("cd9037018278826d8ee2a80fe233862d0ff20bf61fc9f74543d682828c7cdb9f") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e"
+    ) =>
         matches Ok(());
-        "valid transaction 1"
+        "valid transaction 1 - with byron input & output"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
+    ) =>
         matches Ok(());
         "valid transaction 2"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "input_set_empty_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "input_set_empty_utxo"
+    ) =>
         matches Err(UTxOValidationError::InputSetEmptyUTxO);
         "input_set_empty_utxo"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "wrong_network") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "wrong_network"
+    ) =>
         matches Err(UTxOValidationError::WrongNetwork { expected: NetworkId::Mainnet, wrong_address, output_index })
         if wrong_address == Address::Shelley(ShelleyAddress::from_string("addr_test1qzvsy7ftzmrqj3hfs6ppczx263rups3fy3q0z0msnfw2e7s663nkrm3jz3sre0aupn4mdmdz8tdakdhgppaz58qkwe0q680lcj").unwrap()) 
             && output_index == 1;
         "wrong_network"
     )]
-    #[test_case(validation_fixture!("20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e", "output_too_small_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "20ded0bfef32fc5eefba2c1f43bcd99acc0b1c3284617c3cb355ad0eadccaa6e",
+        "output_too_small_utxo"
+    ) =>
         matches Err(UTxOValidationError::OutputTooSmallUTxO { output_index: 1, lovelace: 1, required_lovelace: 1000000 });
         "output_too_small_utxo"
     )]
     /// This tx contains withdrawal
-    #[test_case(validation_fixture!("a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a"
+    ) =>
         matches Ok(());
         "valid transaction 3 with withdrawal"
     )]
-    #[test_case(validation_fixture!("a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a", "wrong_network_withdrawal") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "a1aaa9c239f17e6feab5767f61457a3e6251cd0bb94a00a5d41847435caaa42a",
+        "wrong_network_withdrawal"
+    ) =>
         matches Err(UTxOValidationError::WrongNetworkWithdrawal { expected: NetworkId::Mainnet, wrong_account, withdrawal_index })
         if wrong_account == StakeAddress::from_string("stake_test1upfe3tuzexk65edjy8t4dsfjcs2scyhwwucwkf7qmmg3mmqx3st08").unwrap() 
             && withdrawal_index == 0;
@@ -220,6 +242,6 @@ mod tests {
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
-        validate_shelley_tx(mtx, &ctx.shelley_params).map_err(|e| *e)
+        validate(mtx, &ctx.shelley_params).map_err(|e| *e)
     }
 }

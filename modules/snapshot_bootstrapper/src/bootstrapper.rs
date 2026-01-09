@@ -3,6 +3,7 @@ mod configuration;
 mod context;
 mod downloader;
 mod nonces;
+mod opcerts;
 mod progress_reader;
 mod publisher;
 
@@ -10,8 +11,8 @@ use crate::configuration::BootstrapConfig;
 use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
+use acropolis_common::configuration::{StartupMode, SyncMode};
 use acropolis_common::{
-    configuration::StartupMethod,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
 };
@@ -48,14 +49,15 @@ pub struct SnapshotBootstrapper;
 impl SnapshotBootstrapper {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Check if this module is the selected startup method
-        let startup_method = StartupMethod::from_config(&config);
-        if !startup_method.is_snapshot() {
+        let startup_mode = StartupMode::from_config(&config);
+        if !startup_mode.is_snapshot() {
             info!(
                 "Snapshot bootstrapper not enabled (startup.method = '{}')",
-                startup_method
+                startup_mode
             );
             return Ok(());
         }
+        let sync_mode = SyncMode::from_config(&config);
 
         let cfg = BootstrapConfig::try_load(&config)?;
 
@@ -73,7 +75,7 @@ impl SnapshotBootstrapper {
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper");
             async {
-                if let Err(e) = Self::run(bootstrapped_sub, cfg, context).await {
+                if let Err(e) = Self::run(bootstrapped_sub, cfg, sync_mode, context).await {
                     error!("Snapshot bootstrap failed: {e:#}");
                 }
             }
@@ -87,32 +89,32 @@ impl SnapshotBootstrapper {
     async fn run(
         bootstrapped_sub: Box<dyn Subscription<Message>>,
         cfg: BootstrapConfig,
+        sync_mode: SyncMode,
         context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
         Self::wait_for_genesis(bootstrapped_sub).await?;
 
         let bootstrap_ctx = BootstrapContext::load(&cfg)?;
         info!(
-            "Loaded bootstrap data for epoch {}",
-            bootstrap_ctx.block_info.epoch
+            epoch = bootstrap_ctx.block_info.epoch,
+            slot = bootstrap_ctx.block_info.slot,
+            block = bootstrap_ctx.block_info.number,
+            opcert_pools = bootstrap_ctx.ocert_counters.len(),
+            snapshot = %bootstrap_ctx.snapshot.url,
+            "Loaded bootstrap data"
         );
-        info!("  Snapshot: {}", bootstrap_ctx.snapshot.url);
-        info!(
-            "  Block: slot={}, number={}",
-            bootstrap_ctx.block_info.slot, bootstrap_ctx.block_info.number
-        );
-
-        // Download
-        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
-        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         // Publish
         let mut publisher = SnapshotPublisher::new(
-            context,
-            cfg.completion_topic.clone(),
+            context.clone(),
             cfg.snapshot_topic.clone(),
+            cfg.sync_command_topic.clone(),
+            sync_mode,
             bootstrap_ctx.context(),
         );
+        // Download
+        let downloader = SnapshotDownloader::new(bootstrap_ctx.network_dir(), &cfg.download)?;
+        downloader.download(&bootstrap_ctx.snapshot).await.map_err(BootstrapError::Download)?;
 
         publisher.publish_start().await?;
 
@@ -129,7 +131,14 @@ impl SnapshotBootstrapper {
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
-        publisher.publish_completion(bootstrap_ctx.block_info).await?;
+        publisher
+            .publish_kes_validator_bootstrap(
+                bootstrap_ctx.block_info.epoch,
+                bootstrap_ctx.ocert_counters,
+            )
+            .await?;
+        publisher.publish_snapshot_complete().await?;
+        publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
         info!("Snapshot bootstrap completed");
         Ok(())

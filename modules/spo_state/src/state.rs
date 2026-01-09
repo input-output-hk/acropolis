@@ -273,17 +273,17 @@ impl State {
         debug!(epoch = self.epoch, "New epoch");
 
         // Flatten into vector of registrations, before retirement so retiring ones
-        // are still included
+        // are still included **
         let spos = self.spos.values().cloned().collect();
 
-        // Update any pending
+        // Now apply it fully to persistent state, including creating new ones
         for (operator, reg) in &self.pending_updates {
             self.spos.insert(*operator, reg.clone());
         }
         self.pending_updates.clear();
 
         // Deregister any pending
-        let mut retired_spos: Vec<PoolId> = Vec::new();
+        let mut retired_spos: Vec<(PoolId, StakeAddress)> = Vec::new();
         let deregistrations = self.pending_deregistrations.remove(&self.epoch);
         if let Some(deregistrations) = deregistrations {
             for dr in deregistrations {
@@ -291,8 +291,8 @@ impl State {
                 match self.spos.remove(&dr) {
                     None => vld
                         .push_anyhow(anyhow!("Retirement requested for unregistered SPO {}", dr,)),
-                    Some(_de_reg) => {
-                        retired_spos.push(dr);
+                    Some(de_reg) => {
+                        retired_spos.push((dr, de_reg.reward_account.clone()));
                     }
                 };
             }
@@ -302,7 +302,7 @@ impl State {
             block.clone(),
             CardanoMessage::SPOState(SPOStateMessage {
                 epoch: block.epoch - 1,
-                spos,
+                spos, // Note - list captured at ** before creation and deletion
                 retired_spos,
             }),
         )))
@@ -642,7 +642,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for withdrawal in withdrawals_msg.withdrawals.iter() {
-            stake_addresses.process_withdrawal(withdrawal);
+            stake_addresses.process_withdrawal(withdrawal)?;
         }
 
         Ok(())
@@ -655,7 +655,7 @@ impl State {
         };
         let mut stake_addresses = stake_addresses.lock().unwrap();
         for delta in deltas_msg.deltas.iter() {
-            stake_addresses.process_stake_delta(delta);
+            stake_addresses.process_stake_delta(delta)?;
         }
 
         Ok(())

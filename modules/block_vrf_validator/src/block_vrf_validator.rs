@@ -3,8 +3,12 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message},
+    configuration::StartupMode,
+    messages::{
+        AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
+    },
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     BlockInfo, BlockStatus,
 };
 use anyhow::Result;
@@ -17,9 +21,7 @@ mod state;
 use state::State;
 mod ouroboros;
 
-use crate::vrf_validation_publisher::VrfValidationPublisher;
 mod snapshot;
-mod vrf_validation_publisher;
 
 const DEFAULT_VALIDATION_VRF_PUBLISHER_TOPIC: (&str, &str) =
     ("validation-vrf-publisher-topic", "cardano.validation.vrf");
@@ -40,6 +42,8 @@ const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spo-state-subscribe-topic", "cardano.spo.state");
 const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
     ("spdd-subscribe-topic", "cardano.spo.distribution");
+const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 /// Block VRF Validator module
 #[module(
@@ -51,16 +55,71 @@ const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
 pub struct BlockVrfValidator;
 
 impl BlockVrfValidator {
+    /// Handle bootstrap message from snapshot
+    fn handle_bootstrap(state: &mut State, vrf_data: AccountsBootstrapMessage) -> Result<()> {
+        let epoch = vrf_data.epoch;
+        let pools_len = vrf_data.pools.len();
+
+        // Initialize VRF validator state from snapshot data
+        state.bootstrap(vrf_data)?;
+
+        info!(
+            "VRF state bootstrapped successfully for epoch {} with {} pools",
+            epoch, pools_len
+        );
+
+        Ok(())
+    }
+
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for snapshot bootstrap messages...");
+        loop {
+            let (_, message) = snapshot_subscription.read().await?;
+            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+
+            match message {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::AccountsState(accounts_data),
+                )) => {
+                    info!("Received AccountsState bootstrap message");
+
+                    let block_number = accounts_data.block_number;
+                    let mut state = State::default();
+
+                    Self::handle_bootstrap(&mut state, accounts_data)?;
+                    history.lock().await.bootstrap_init_with(state, block_number);
+                    info!("VRF validator bootstrap complete");
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting VRF validator bootstrap loop");
+                    return Ok(());
+                }
+                _ => {
+                    // Ignore other messages (e.g., EpochState, SPOState bootstrap messages)
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run(
+        context: Arc<Context<Message>>,
         history: Arc<Mutex<StateHistory<State>>>,
-        mut vrf_validation_publisher: VrfValidationPublisher,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
         mut spo_state_subscription: Box<dyn Subscription<Message>>,
         mut spdd_subscription: Box<dyn Subscription<Message>>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
+        publish_vrf_validation_topic: String,
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
@@ -70,8 +129,12 @@ impl BlockVrfValidator {
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
         };
 
-        // Consume initial protocol parameters
-        let _ = protocol_parameters_subscription.read().await?;
+        // Consume initial protocol parameters or bootstap message
+        if let Some(snapshot_subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
+        } else {
+            let _ = protocol_parameters_subscription.read().await?;
+        }
 
         loop {
             // Get a mutable state
@@ -153,15 +216,15 @@ impl BlockVrfValidator {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
-                        let result = state
-                            .validate_block_vrf(block_info, &block_msg.header, &genesis)
-                            .map_err(|e| *e);
-                        if let Err(e) = vrf_validation_publisher
-                            .publish_vrf_validation(block_info, result)
-                            .await
-                        {
-                            error!("Failed to publish VRF validation: {e}")
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block_info, &block_msg.header, &genesis) {
+                            validation_outcomes.push(*e);
                         }
+
+                        validation_outcomes
+                            .publish(&context, &publish_vrf_validation_topic, block_info)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
                     }
                     .instrument(span)
                     .await;
@@ -213,11 +276,18 @@ impl BlockVrfValidator {
             .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
 
-        // publishers
-        let vrf_validation_publisher =
-            VrfValidationPublisher::new(context.clone(), validation_vrf_publisher_topic);
+        let snapshot_subscribe_topic = config
+            .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         // Subscribers
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
+            info!("Creating subscriber for snapshot on '{snapshot_subscribe_topic}'");
+            Some(context.subscribe(&snapshot_subscribe_topic).await?)
+        } else {
+            info!("Skipping snapshot subscription (startup method is not snapshot)");
+            None
+        };
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
@@ -233,16 +303,19 @@ impl BlockVrfValidator {
         )));
 
         // Start run task
+        let context_run = context.clone();
         context.run(async move {
             Self::run(
+                context_run,
                 history,
-                vrf_validation_publisher,
                 bootstrapped_subscription,
                 block_subscription,
                 protocol_parameters_subscription,
                 epoch_nonce_subscription,
                 spo_state_subscription,
                 spdd_subscription,
+                snapshot_subscription,
+                validation_vrf_publisher_topic,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

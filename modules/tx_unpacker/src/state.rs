@@ -1,7 +1,9 @@
 use crate::validations;
 use acropolis_common::{
-    messages::ProtocolParamsMessage, protocol_params::ProtocolParams,
-    validation::TransactionValidationError, BlockInfo, Era,
+    messages::{ProtocolParamsMessage, RawTxsMessage},
+    protocol_params::ProtocolParams,
+    validation::{TransactionValidationError, ValidationError},
+    BlockInfo, GenesisDelegates,
 };
 use anyhow::Result;
 
@@ -21,21 +23,43 @@ impl State {
         self.protocol_params = msg.params.clone();
     }
 
-    pub fn validate_transaction(
+    fn validate_transaction(
         &self,
         block_info: &BlockInfo,
         raw_tx: &[u8],
-    ) -> Result<(), TransactionValidationError> {
-        match block_info.era {
-            Era::Shelley => {
-                let Some(shelley_params) = self.protocol_params.shelley.as_ref() else {
-                    return Err(TransactionValidationError::Other(
-                        "Shelley params are not set".to_string(),
-                    ));
-                };
-                validations::validate_shelley_tx(raw_tx, shelley_params, block_info.slot)
+        genesis_delegs: &GenesisDelegates,
+    ) -> Result<(), Box<TransactionValidationError>> {
+        validations::validate_tx(
+            raw_tx,
+            genesis_delegs,
+            &self.protocol_params.shelley,
+            block_info.slot,
+            block_info.era,
+        )
+    }
+
+    pub fn validate(
+        &self,
+        block_info: &BlockInfo,
+        txs_msg: &RawTxsMessage,
+        genesis_delegs: &GenesisDelegates,
+    ) -> Result<(), Box<ValidationError>> {
+        let mut bad_transactions = Vec::new();
+        for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
+            let tx_index = tx_index as u16;
+
+            // Validate transaction
+            if let Err(e) = self.validate_transaction(block_info, raw_tx, genesis_delegs) {
+                bad_transactions.push((tx_index, *e));
             }
-            _ => Ok(()),
+        }
+
+        if bad_transactions.is_empty() {
+            Ok(())
+        } else {
+            Err(Box::new(ValidationError::BadTransactions {
+                bad_transactions,
+            }))
         }
     }
 }

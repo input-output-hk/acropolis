@@ -1,24 +1,24 @@
 //! Acropolis Mithril snapshot fetcher module for Caryatid
 //! Fetches a snapshot from Mithril and replays all the blocks in it
 
+use acropolis_codec::map_to_block_era;
 use acropolis_common::{
-    configuration::StartupMethod,
+    commands::chain_sync::ChainSyncCommand,
+    configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era,
+    messages::{CardanoMessage, Command, Message, RawBlockMessage},
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Point,
 };
-use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{module, Context};
+use anyhow::{anyhow, Result};
+use caryatid_sdk::{module, Context, Subscription};
 use chrono::{Duration, Utc};
 use config::Config;
 use mithril_client::{
     feedback::{FeedbackReceiver, MithrilEvent},
     ClientBuilder, MessageBuilder, Snapshot,
 };
-use pallas::{
-    ledger::traverse::{Era as PallasEra, MultiEraBlock},
-    storage::hardano,
-};
+use pallas::storage::hardano;
+use pallas_traverse::MultiEraBlock;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -37,7 +37,7 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
 );
 const DEFAULT_BLOCK_PUBLISH_TOPIC: (&str, &str) =
     ("block-publish-topic", "cardano.block.available");
-const DEFAULT_COMPLETION_TOPIC: (&str, &str) = ("completion-topic", "cardano.snapshot.complete");
+const DEFAULT_SYNC_COMMAND_TOPIC: (&str, &str) = ("completion-topic", "cardano.sync.command");
 
 const DEFAULT_AGGREGATOR_URL: &str =
     "https://aggregator.release-mainnet.api.mithril.network/aggregator";
@@ -46,6 +46,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
+const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "downloads";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
@@ -241,20 +242,23 @@ impl MithrilSnapshotFetcher {
         context: Arc<Context<Message>>,
         config: Arc<Config>,
         genesis: GenesisValues,
+        point: hardano::immutable::Point,
     ) -> Result<()> {
         let block_publish_topic = config
             .get_string(DEFAULT_BLOCK_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_BLOCK_PUBLISH_TOPIC.1.to_string());
         info!("Publishing blocks on '{block_publish_topic}'");
 
-        let completion_topic = config
-            .get_string(DEFAULT_COMPLETION_TOPIC.0)
-            .unwrap_or(DEFAULT_COMPLETION_TOPIC.1.to_string());
-        info!("Publishing completion on '{completion_topic}'");
+        let sync_command_topic = config
+            .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
+            .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+        info!("Publishing completion on '{sync_command_topic}'");
 
         let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
+        let stop_constraint =
+            PauseType::from_config(&config, DEFAULT_STOP).unwrap_or(PauseType::NoPause);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -269,10 +273,17 @@ impl MithrilSnapshotFetcher {
 
         let mut last_block_info: Option<BlockInfo> = None;
 
-        let blocks = hardano::immutable::read_blocks(&path)?;
+        let mut blocks = hardano::immutable::read_blocks_from_point(&path, point)?;
+
+        // Skip first block if booting from snapshot as `read_blocks_from_point` is inclusive of the point
+        if StartupMode::from_config(&config).is_snapshot() {
+            let _ = blocks.next();
+        }
+
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
         for raw_block in blocks {
+            let mut stop = false;
             match raw_block {
                 Ok(raw_block) => {
                     let span = info_span!("mithril_snapshot_fetcher.raw_block");
@@ -314,19 +325,7 @@ impl MithrilSnapshotFetcher {
                         }
 
                         let timestamp = genesis.slot_to_timestamp(slot);
-
-                        let era = match block.era() {
-                            PallasEra::Byron => Era::Byron,
-                            PallasEra::Shelley => Era::Shelley,
-                            PallasEra::Allegra => Era::Allegra,
-                            PallasEra::Mary => Era::Mary,
-                            PallasEra::Alonzo => Era::Alonzo,
-                            PallasEra::Babbage => Era::Babbage,
-                            PallasEra::Conway => Era::Conway,
-                            x => bail!(
-                                "Block slot {slot}, number {number} has impossible era: {x:?}"
-                            ),
-                        };
+                        let era = map_to_block_era(&block)?;
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
@@ -353,30 +352,40 @@ impl MithrilSnapshotFetcher {
                             }
                         }
 
-                        // Send the block message
-                        let message = RawBlockMessage {
-                            header: block.header().cbor().to_vec(),
-                            body: raw_block,
-                        };
+                        // And stop constraint - note we can pause first if we want to
+                        if stop_constraint.should_pause(&block_info) {
+                            info!(number, slot, "Stopping early");
+                            stop = true;
+                        } else {
+                            // Send the block message
+                            let message = RawBlockMessage {
+                                header: block.header().cbor().to_vec(),
+                                body: raw_block,
+                            };
 
-                        let message_enum = Message::Cardano((
-                            block_info.clone(),
-                            CardanoMessage::BlockAvailable(message),
-                        ));
+                            let message_enum = Message::Cardano((
+                                block_info.clone(),
+                                CardanoMessage::BlockAvailable(message),
+                            ));
 
-                        context
-                            .message_bus
-                            .publish(&block_publish_topic, Arc::new(message_enum))
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
+                            context
+                                .message_bus
+                                .publish(&block_publish_topic, Arc::new(message_enum))
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish block message: {e}"));
 
-                        last_block_info = Some(block_info);
+                            last_block_info = Some(block_info);
+                        }
                         Ok::<(), anyhow::Error>(())
                     }
                     .instrument(span)
                     .await?;
                 }
                 Err(e) => error!("Error reading block: {e}"),
+            }
+
+            if stop {
+                break;
             }
         }
 
@@ -386,11 +395,12 @@ impl MithrilSnapshotFetcher {
                 "Finished snapshot at block {}, epoch {}",
                 last_block_info.number, last_block_info.epoch
             );
-            let message_enum =
-                Message::Cardano((last_block_info, CardanoMessage::SnapshotComplete));
+            let message_enum = Message::Command(Command::ChainSync(
+                ChainSyncCommand::FindIntersect(last_block_info.to_point()),
+            ));
             context
                 .message_bus
-                .publish(&completion_topic, Arc::new(message_enum))
+                .publish(&sync_command_topic, Arc::new(message_enum))
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
         }
@@ -399,13 +409,7 @@ impl MithrilSnapshotFetcher {
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // Check if this module is the selected startup method
-        let startup_method = StartupMethod::from_config(&config);
-        if !startup_method.is_mithril() {
-            info!(
-                "Mithril Snapshot Fetcher not enabled (startup.method = '{}')",
-                startup_method
-            );
+        if !SyncMode::from_config(&config).is_mithril() {
             return Ok(());
         }
 
@@ -416,6 +420,16 @@ impl MithrilSnapshotFetcher {
 
         let mut bootstrapped_subscription =
             context.subscribe(&bootstrapped_subscribe_topic).await?;
+        let mut sync_command_subscription = if StartupMode::from_config(&config).is_snapshot() {
+            let sync_command_topic = config
+                .get_string(DEFAULT_SYNC_COMMAND_TOPIC.0)
+                .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
+
+            Some(context.subscribe(&sync_command_topic).await?)
+        } else {
+            None
+        };
+
         context.clone().run(async move {
             let Ok((_, bootstrapped_message)) = bootstrapped_subscription.read().await else {
                 return;
@@ -426,6 +440,14 @@ impl MithrilSnapshotFetcher {
                     complete.values.clone()
                 }
                 x => panic!("unexpected bootstrapped message: {x:?}"),
+            };
+
+            let point = match get_start_point(&mut sync_command_subscription).await {
+                Ok(point) => point,
+                Err(e) => {
+                    error!("Failed to get start point: {e}");
+                    return;
+                }
             };
 
             let mut delay = 1;
@@ -442,7 +464,7 @@ impl MithrilSnapshotFetcher {
                 delay = (delay * 2).min(60);
             }
 
-            if let Err(e) = Self::process_snapshot(context, config, genesis).await {
+            if let Err(e) = Self::process_snapshot(context, config, genesis, point).await {
                 error!("Failed to process Mithril snapshot: {e}");
             }
         });
@@ -466,6 +488,29 @@ async fn prompt_pause(description: String) -> bool {
     })
     .await
     .unwrap()
+}
+
+async fn get_start_point(
+    sync_command_subscription: &mut Option<Box<dyn Subscription<Message>>>,
+) -> Result<hardano::immutable::Point> {
+    if let Some(sync_sub) = sync_command_subscription.as_mut() {
+        loop {
+            let (_, sync_msg) = sync_sub.read().await?;
+
+            if let Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point))) =
+                sync_msg.as_ref()
+            {
+                return Ok(match point {
+                    Point::Origin => hardano::immutable::Point::Origin,
+                    Point::Specific { hash, slot } => {
+                        hardano::immutable::Point::Specific(*slot, hash.to_vec())
+                    }
+                });
+            }
+        }
+    } else {
+        Ok(hardano::immutable::Point::Origin)
+    }
 }
 
 #[cfg(test)]

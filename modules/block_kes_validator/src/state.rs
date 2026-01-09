@@ -1,12 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{ProtocolParamsMessage, SPOStateMessage},
-    validation::KesValidationError,
+    validation::{KesValidationError, ValidationError},
     BlockInfo, PoolId,
 };
-use imbl::HashMap;
+use imbl::HashMap as ImblHashMap;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::error;
 
@@ -15,7 +15,7 @@ use crate::ouroboros;
 #[derive(Default, Debug, Clone)]
 pub struct State {
     /// Tracks the latest operational certificate counter for each pool
-    pub ocert_counters: HashMap<PoolId, u64>,
+    pub ocert_counters: ImblHashMap<PoolId, u64>,
 
     pub slots_per_kes_period: Option<u64>,
 
@@ -27,11 +27,15 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         Self {
-            ocert_counters: HashMap::new(),
+            ocert_counters: ImblHashMap::new(),
             slots_per_kes_period: None,
             max_kes_evolutions: None,
             active_spos: HashSet::new(),
         }
+    }
+
+    pub fn bootstrap(&mut self, ocert_counters: HashMap<PoolId, u64>) {
+        self.ocert_counters = ocert_counters.into_iter().collect();
     }
 
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
@@ -49,12 +53,12 @@ impl State {
         self.ocert_counters.insert(pool_id, declared_sequence_number);
     }
 
-    pub fn validate_block_kes(
+    pub fn validate(
         &self,
         block_info: &BlockInfo,
         raw_header: &[u8],
         genesis: &GenesisValues,
-    ) -> Result<Option<(PoolId, u64)>, Box<KesValidationError>> {
+    ) -> Result<Option<(PoolId, u64)>, Box<ValidationError>> {
         // Validation starts after Shelley Era
         if block_info.epoch < genesis.shelley_epoch {
             return Ok(None);
@@ -64,22 +68,23 @@ impl State {
             Ok(header) => header,
             Err(e) => {
                 error!("Can't decode header {}: {e}", block_info.slot);
-                return Err(Box::new(KesValidationError::Other(format!(
-                    "Can't decode header {}: {e}",
-                    block_info.slot
-                ))));
+                return Err(Box::new(ValidationError::CborDecodeError {
+                    era: block_info.era,
+                    slot: block_info.slot,
+                    reason: e.to_string(),
+                }));
             }
         };
 
         let Some(slots_per_kes_period) = self.slots_per_kes_period else {
-            return Err(Box::new(KesValidationError::Other(
-                "Slots per KES period is not set".to_string(),
-            )));
+            return Err(Box::new(
+                KesValidationError::Other("Slots per KES period is not set".to_string()).into(),
+            ));
         };
         let Some(max_kes_evolutions) = self.max_kes_evolutions else {
-            return Err(Box::new(KesValidationError::Other(
-                "Max KES evolutions is not set".to_string(),
-            )));
+            return Err(Box::new(
+                KesValidationError::Other("Max KES evolutions is not set".to_string()).into(),
+            ));
         };
 
         let result = ouroboros::kes_validation::validate_block_kes(
@@ -95,6 +100,6 @@ impl State {
             Ok(Some((pool_id, declared_sequence_number)))
         });
 
-        result
+        result.map_err(|e| Box::new((*e).into()))
     }
 }

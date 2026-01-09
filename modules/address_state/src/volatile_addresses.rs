@@ -60,7 +60,8 @@ impl VolatileAddresses {
 
     pub fn prune_volatile(&mut self) -> Vec<HashMap<Address, AddressEntry>> {
         let epoch = self.last_persisted_epoch.map(|e| e + 1).unwrap_or(0);
-        let blocks_to_drain = (self.epoch_start_block - self.start_block) as usize;
+        let blocks_to_drain = (self.epoch_start_block.saturating_sub(self.start_block) as usize)
+            .min(self.window.len());
 
         self.start_block += blocks_to_drain as u64;
         self.last_persisted_epoch = Some(epoch);

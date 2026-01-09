@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use acropolis_common::{
     messages::{
@@ -9,6 +9,7 @@ use acropolis_common::{
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
+    validation::ValidationOutcomes,
     *,
 };
 use anyhow::Result;
@@ -16,21 +17,29 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::join_all;
 use pallas::codec::minicbor::encode;
-use pallas::ledger::{traverse, traverse::MultiEraTx};
+use pallas::ledger::traverse::MultiEraTx;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span};
+use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::state::State;
+mod crypto;
 mod state;
-mod tx_validation_publisher;
+mod utils;
 mod validations;
-use tx_validation_publisher::TxValidationPublisher;
 
 #[cfg(test)]
 mod test_utils;
 
-const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: &str = "cardano.txs";
-const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("transactions-subscribe-topic", "cardano.txs");
+const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
+const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "bootstrapped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+);
 
 const CIP25_METADATA_LABEL: u64 = 721;
 
@@ -56,11 +65,20 @@ impl TxUnpacker {
         publish_certificates_topic: Option<String>,
         publish_governance_procedures_topic: Option<String>,
         publish_block_txs_topic: Option<String>,
-        tx_validation_publisher: Option<TxValidationPublisher>,
+        publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
+        mut bootstrapped_sub: Box<dyn Subscription<Message>>,
         mut protocol_params_sub: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
+        let (_, bootstrapped_message) = bootstrapped_sub.read().await?;
+        let genesis = match bootstrapped_message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                complete.values.clone()
+            }
+            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+        };
+
         loop {
             let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
@@ -118,22 +136,42 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
-                                    let (inputs, outputs, tx_total_output, error) =
-                                        acropolis_codec::map_transaction_inputs_outputs( &tx);
-                                    let certs = tx.certs();
-                                    let tx_withdrawals = tx.withdrawals_sorted_set();
+                                    let Transaction {
+                                        consumes: tx_consumes,
+                                        produces: tx_produces,
+                                        total_output: tx_total_output,
+                                        certs: tx_certs,
+                                        withdrawals: tx_withdrawals,
+                                        proposal_update: tx_proposal_update,
+                                        vkey_witnesses,
+                                        native_scripts,
+                                        error: tx_error,
+                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
                                     let mut props = None;
                                     let mut votes = None;
+
+                                    let mut vkey_needed = HashSet::new();
+                                    let mut script_needed = HashSet::new();
+                                    utils::get_vkey_script_needed(
+                                        &tx_certs,
+                                        &tx_withdrawals,
+                                        &tx_proposal_update,
+                                        &state.protocol_params,
+                                        &mut vkey_needed,
+                                        &mut script_needed,
+                                    );
+                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
+                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output;
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               inputs.len(), outputs.len(), certs.len(), total_output);
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
                                     }
 
-                                    if let Some(error) = error {
+                                    if let Some(error) = tx_error {
                                         error!(
                                             "Errors decoding transaction {tx_hash}: {error}"
                                         );
@@ -143,8 +181,12 @@ impl TxUnpacker {
                                         // Group deltas by tx
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
-                                            inputs,
-                                            outputs,
+                                            consumes: tx_consumes,
+                                            produces: tx_produces,
+                                            vkey_hashes_needed: Some(vkey_needed),
+                                            script_hashes_needed: Some(script_needed),
+                                            vkey_hashes_provided: Some(vkey_hashes_provided),
+                                            script_hashes_provided: Some(script_hashes_provided),
                                         });
                                     }
 
@@ -180,84 +222,17 @@ impl TxUnpacker {
                                     }
 
                                     if publish_certificates_topic.is_some() {
-                                        for (cert_index, cert) in certs.iter().enumerate() {
-                                            match acropolis_codec::map_certificate(
-                                                cert,
-                                                tx_identifier,
-                                                cert_index,
-                                                network_id.clone(),
-                                            ) {
-                                                Ok(tx_cert) => {
-                                                    certificates.push(tx_cert);
-                                                }
-                                                Err(_e) => {
-                                                    // TODO error unexpected
-                                                    //error!("{e}");
-                                                }
-                                            }
-                                        }
+                                        certificates.extend(tx_certs);
                                     }
 
                                     if publish_withdrawals_topic.is_some() {
-                                        for (key, value) in tx_withdrawals {
-                                            match StakeAddress::from_binary(key) {
-                                                Ok(stake_address) => {
-                                                    withdrawals.push(Withdrawal {
-                                                        address: stake_address,
-                                                        value,
-                                                        tx_identifier,
-                                                    });
-                                                }
-                                                Err(e) => error!("Bad stake address: {e:#}"),
-                                            }
-                                        }
+                                        withdrawals.extend(tx_withdrawals);
                                     }
 
-                                    if publish_governance_procedures_topic.is_some() {
-                                        //Self::decode_legacy_updates(&mut legacy_update_proposals, &block, &raw_tx);
-                                        if block.era >= Era::Shelley && block.era < Era::Babbage {
-                                            if let Ok(alonzo) = MultiEraTx::decode_for_era(
-                                                traverse::Era::Alonzo,
-                                                raw_tx,
-                                            ) {
-                                                if let Some(update) = alonzo.update() {
-                                                    if let Some(alonzo_update) = update.as_alonzo() {
-                                                        match acropolis_codec::map_alonzo_update(
-                                                            alonzo_update,
-                                                        ) {
-                                                            Ok(proposals) => {
-                                                                alonzo_babbage_update_proposals
-                                                                    .push(proposals)
-                                                            }
-                                                            Err(e) => error!(
-                                                                "Cannot decode alonzo update: {e}"
-                                                            ),
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } else if block.era >= Era::Babbage && block.era < Era::Conway {
-                                            if let Ok(babbage) = MultiEraTx::decode_for_era(
-                                                traverse::Era::Babbage,
-                                                raw_tx,
-                                            ) {
-                                                if let Some(update) = babbage.update() {
-                                                    if let Some(babbage_update) = update.as_babbage() {
-                                                        match acropolis_codec::map_babbage_update(
-                                                            babbage_update,
-                                                        ) {
-                                                            Ok(proposals) => {
-                                                                alonzo_babbage_update_proposals
-                                                                    .push(proposals)
-                                                            }
-                                                            Err(e) => error!(
-                                                                "Cannot decode babbage update: {e}"
-                                                            ),
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                   if publish_governance_procedures_topic.is_some() {
+                                    if let Some(proposal_update) = tx_proposal_update {
+                                        alonzo_babbage_update_proposals.push(proposal_update);
+                                    }
                                     }
 
                                     if let Some(conway) = tx.as_conway() {
@@ -443,23 +418,24 @@ impl TxUnpacker {
                 }
             }
 
-            if let Some(tx_validation_publisher) = tx_validation_publisher.as_ref() {
+            if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
                 if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
                     message.as_ref()
                 {
-                    let mut tx_errors = Vec::new();
-                    for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
-                        let tx_index = tx_index as u16;
-
-                        // Validate transaction
-                        if let Err(e) = state.validate_transaction(block, raw_tx) {
-                            tx_errors.push((tx_index, e));
+                    let span = info_span!("tx_unpacker.validate", block = block.number);
+                    async {
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
+                            validation_outcomes.push(*e);
                         }
+
+                        validation_outcomes
+                            .publish(&context, publish_tx_validation_topic, block)
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                     }
-                    tx_validation_publisher
-                        .publish_tx_validation(block, tx_errors)
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                    .instrument(span)
+                    .await;
                 }
             }
 
@@ -505,25 +481,25 @@ impl TxUnpacker {
         }
 
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
-        let tx_validation_publisher = if let Some(ref topic) = publish_tx_validation_topic {
-            info!("Publishing tx validation on '{topic}'");
-            Some(TxValidationPublisher::new(context.clone(), topic.clone()))
-        } else {
-            None
-        };
 
         // Subscribers
         let transactions_subscribe_topic = config
-            .get_string("subscribe-topic")
-            .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.to_string());
+            .get_string(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
 
+        let bootstrapped_subscribe_topic = config
+            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{bootstrapped_subscribe_topic}'");
+
         let protocol_params_subscribe_topic = config
-            .get_string("protocol-params-subscribe-topic")
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.to_string());
+            .get_string(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{protocol_params_subscribe_topic}'");
 
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
+        let bootstrapped_sub = context.subscribe(&bootstrapped_subscribe_topic).await?;
         let protocol_params_sub = context.subscribe(&protocol_params_subscribe_topic).await?;
 
         let network_id: NetworkId =
@@ -547,8 +523,9 @@ impl TxUnpacker {
                 publish_certificates_topic,
                 publish_governance_procedures_topic,
                 publish_block_txs_topic,
-                tx_validation_publisher,
+                publish_tx_validation_topic,
                 txs_sub,
+                bootstrapped_sub,
                 protocol_params_sub,
             )
             .await

@@ -557,7 +557,11 @@ impl From<(u64, ProtocolParams)> for ProtocolParamsRest {
                 .unwrap_or_default(),
             protocol_major_ver: shelley_params.map(|p| p.protocol_version.major),
             protocol_minor_ver: shelley_params.map(|p| p.protocol_version.minor),
-            min_utxo: shelley_params.map(|p| p.min_utxo_value.to_string()),
+            min_utxo: match (&babbage, &shelley_params) {
+                (Some(b), _) => Some(b.coins_per_utxo_byte.to_string()),
+                (None, Some(s)) => Some(s.min_utxo_value.to_string()),
+                _ => None,
+            },
             min_pool_cost: shelley_params.map(|p| p.min_pool_cost.to_string()),
             // TODO: Calculate nonce, store in epoch state, and return here
             nonce: Some("Not implemented".to_string()),
@@ -953,18 +957,16 @@ impl UTxOREST {
             None => (None, None),
         };
 
-        let reference_script_hash = entry.reference_script.as_ref().map(|script| {
-            let bytes = match script {
-                ReferenceScript::Native(b)
-                | ReferenceScript::PlutusV1(b)
-                | ReferenceScript::PlutusV2(b)
-                | ReferenceScript::PlutusV3(b) => b,
-            };
-
-            let mut hasher = Blake2b512::new();
-            hasher.update(bytes);
-            let result = hasher.finalize();
-            hex::encode(&result[..32])
+        let reference_script_hash = entry.reference_script.as_ref().map(|script| match script {
+            ReferenceScript::PlutusV1(b)
+            | ReferenceScript::PlutusV2(b)
+            | ReferenceScript::PlutusV3(b) => {
+                let mut hasher = Blake2b512::new();
+                hasher.update(b);
+                let result = hasher.finalize();
+                hex::encode(&result[..32])
+            }
+            ReferenceScript::Native(b) => b.compute_hash().to_string(),
         });
 
         Self {

@@ -2,15 +2,15 @@
 //! Reads genesis files and outputs initial UTXO events
 
 use acropolis_common::{
-    configuration::StartupMethod,
+    configuration::StartupMode,
     genesis_values::GenesisValues,
     hash::Hash,
     messages::{
-        CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message, PotDeltasMessage,
-        UTXODeltasMessage,
+        BootstrapPotDeltas, CardanoMessage, GenesisCompleteMessage, GenesisUTxOsMessage, Message,
+        PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, Pot, PotDelta, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
+    Lovelace, LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
     UTxOIdentifier, Value,
 };
 use anyhow::Result;
@@ -68,7 +68,7 @@ impl GenesisBootstrapper {
             config.get_string("startup-topic").unwrap_or(DEFAULT_STARTUP_TOPIC.to_string());
         info!("Creating startup subscriber on '{startup_topic}'");
 
-        let snapshot_bootstrap = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let snapshot_bootstrap = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         let mut subscription = context.subscribe(&startup_topic).await?;
         context.clone().run(async move {
@@ -84,8 +84,9 @@ impl GenesisBootstrapper {
                     .unwrap_or(DEFAULT_COMPLETION_TOPIC.to_string());
                 info!("Completing with '{completion_topic}'");
 
-                let network_name =
-                    config.get_string("network-name").unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+                let network_name = config
+                    .get_string("startup.network-name")
+                    .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
                 let (byron_genesis, shelley_genesis, shelley_start_epoch) =
                     match network_name.as_ref() {
@@ -173,8 +174,12 @@ impl GenesisBootstrapper {
 
                         utxo_deltas_message.deltas.push(TxUTxODeltas {
                             tx_identifier,
-                            inputs: Vec::new(),
-                            outputs: vec![tx_output],
+                            consumes: Vec::new(),
+                            produces: vec![tx_output],
+                            vkey_hashes_needed: None,
+                            script_hashes_needed: None,
+                            vkey_hashes_provided: None,
+                            script_hashes_provided: None,
                         });
                         total_allocated += amount;
                     }
@@ -195,11 +200,13 @@ impl GenesisBootstrapper {
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                     // Send the pot update message with the remaining reserves
-                    let mut pot_deltas_message = PotDeltasMessage { deltas: Vec::new() };
-                    pot_deltas_message.deltas.push(PotDelta {
-                        pot: Pot::Reserves,
-                        delta: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
-                    });
+                    let pot_deltas_message = PotDeltasMessage {
+                        deltas: BootstrapPotDeltas {
+                            delta_reserves: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
+                            delta_treasury: 0,
+                            delta_deposits: 0,
+                        },
+                    };
 
                     let message_enum = Message::Cardano((
                         block_info.clone(),
@@ -244,6 +251,7 @@ impl GenesisBootstrapper {
                             .collect::<Vec<(&str, (&str, &str))>>(),
                     )
                     .unwrap(),
+                    magic_number: MagicNumber::new(byron_genesis.protocol_consts.protocol_magic),
                 };
 
                 // Send completion message
@@ -256,6 +264,7 @@ impl GenesisBootstrapper {
                     .publish(&completion_topic, Arc::new(message_enum))
                     .await
                     .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                info!("Publishing genesis complete message on '{completion_topic}'");
             }
             .instrument(span)
             .await;

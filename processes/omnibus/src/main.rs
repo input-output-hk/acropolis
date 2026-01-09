@@ -19,6 +19,7 @@ use acropolis_module_consensus::Consensus;
 use acropolis_module_drdd_state::DRDDState;
 use acropolis_module_drep_state::DRepState;
 use acropolis_module_epochs_state::EpochsState;
+use acropolis_module_fake_block_injector::FakeBlockInjector;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
@@ -54,8 +55,8 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[derive(Debug, clap::Parser)]
 #[command(name = "acropolis_process_omnibus")]
 struct Args {
-    #[arg(long, value_name = "PATH", default_value_t = option_env!("ACROPOLIS_OMNIBUS_DEFAULT_CONFIG").unwrap_or("omnibus.toml").to_string())]
-    config: String,
+    #[arg(long, value_name = "PATH", default_values_t = vec![option_env!("ACROPOLIS_OMNIBUS_DEFAULT_CONFIG").unwrap_or("omnibus.toml").to_string()])]
+    config: Vec<String>,
 }
 
 /// Standard main
@@ -90,12 +91,11 @@ pub async fn main() -> Result<()> {
     info!("Acropolis omnibus process");
 
     // Read the config
-    let config = Arc::new(
-        Config::builder()
-            .add_source(File::with_name(&args.config))
-            .add_source(Environment::with_prefix("ACROPOLIS"))
-            .build()?,
-    );
+    let mut builder = Config::builder();
+    for file in &args.config {
+        builder = builder.add_source(File::with_name(file));
+    }
+    let config = Arc::new(builder.add_source(Environment::with_prefix("ACROPOLIS")).build()?);
 
     // Create the process
     let mut process = Process::<Message>::create(config).await;
@@ -126,6 +126,7 @@ pub async fn main() -> Result<()> {
     ChainStore::register(&mut process);
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
+    FakeBlockInjector::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);

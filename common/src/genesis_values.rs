@@ -6,7 +6,7 @@ use crate::{
         slot_to_timestamp_with_params,
     },
     hash::Hash,
-    GenesisDelegates,
+    GenesisDelegates, MagicNumber,
 };
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
     "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
@@ -19,6 +19,7 @@ pub struct GenesisValues {
     pub shelley_epoch_len: u64,
     pub shelley_genesis_hash: Hash<32>,
     pub genesis_delegs: GenesisDelegates,
+    pub magic_number: MagicNumber,
 }
 
 impl GenesisValues {
@@ -80,6 +81,7 @@ impl GenesisValues {
                 ),
             ])
             .unwrap(),
+            magic_number: MagicNumber::new(764824073),
         }
     }
 

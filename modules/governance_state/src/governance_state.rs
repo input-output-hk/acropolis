@@ -1,14 +1,15 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, StateQuery, StateQueryResponse,
-        StateTransitionMessage,
+        ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
+        StateQuery, StateQueryResponse, StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -33,16 +34,17 @@ mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
-const DEFAULT_SUBSCRIBE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const DEFAULT_DREP_DISTRIBUTION_TOPIC: (&str, &str) =
-    ("stake-drep-distribution-topic", "cardano.drep.distribution");
-const DEFAULT_SPO_DISTRIBUTION_TOPIC: (&str, &str) =
-    ("stake-spo-distribution-topic", "cardano.spo.distribution");
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
+const CONFIG_GOVERNANCE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
+const CONFIG_DREP_DISTRIBUTION_TOPIC: &str = "stake-drep-distribution-topic";
+const CONFIG_SPO_DISTRIBUTION_TOPIC: &str = "stake-spo-distribution-topic";
+const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("protocol-parameters-topic", "cardano.protocol.parameters");
-const DEFAULT_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
-const DEFAULT_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
+const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+const CONFIG_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
+/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
+const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 
@@ -55,13 +57,14 @@ const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
-    subscribe_topic: String,
-    drep_distribution_topic: String,
-    spo_distribution_topic: String,
+    governance_topic: String,
+    drep_distribution_topic: Option<String>,
+    spo_distribution_topic: Option<String>,
     protocol_parameters_topic: String,
     enact_state_topic: String,
     governance_query_topic: String,
     validation_outcome_topic: String,
+    snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
 }
 
@@ -72,15 +75,24 @@ impl GovernanceStateConfig {
         actual
     }
 
+    fn conf_option(config: &Arc<Config>, key: &str) -> Option<String> {
+        let actual = config.get_string(key).ok();
+        if let Some(ref value) = actual {
+            info!("Creating subscriber on '{}' for {}", value, key);
+        }
+        actual
+    }
+
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
-            subscribe_topic: Self::conf(config, DEFAULT_SUBSCRIBE_TOPIC),
-            drep_distribution_topic: Self::conf(config, DEFAULT_DREP_DISTRIBUTION_TOPIC),
-            spo_distribution_topic: Self::conf(config, DEFAULT_SPO_DISTRIBUTION_TOPIC),
-            protocol_parameters_topic: Self::conf(config, DEFAULT_PROTOCOL_PARAMETERS_TOPIC),
-            enact_state_topic: Self::conf(config, DEFAULT_ENACT_STATE_TOPIC),
+            governance_topic: Self::conf(config, CONFIG_GOVERNANCE_TOPIC),
+            drep_distribution_topic: Self::conf_option(config, CONFIG_DREP_DISTRIBUTION_TOPIC),
+            spo_distribution_topic: Self::conf_option(config, CONFIG_SPO_DISTRIBUTION_TOPIC),
+            protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
+            enact_state_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
-            validation_outcome_topic: Self::conf(config, DEFAULT_VALIDATION_OUTCOME_TOPIC),
+            validation_outcome_topic: Self::conf(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
+            snapshot_subscribe_topic: Self::conf(config, CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC),
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
@@ -103,12 +115,57 @@ impl GovernanceState {
     );
     declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
 
+    /// Wait for and process snapshot bootstrap messages
+    async fn wait_for_bootstrap(
+        state: Arc<Mutex<State>>,
+        mut snapshot_subscription: Box<dyn Subscription<Message>>,
+    ) -> Result<()> {
+        info!("Waiting for governance state snapshot bootstrap messages...");
+
+        loop {
+            let Ok((_, message)) = snapshot_subscription.read().await else {
+                info!("Snapshot subscription closed");
+                return Ok(());
+            };
+
+            match message.as_ref() {
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Snapshot Startup message received");
+                }
+                Message::Snapshot(SnapshotMessage::Bootstrap(
+                    SnapshotStateMessage::GovernanceState(gov_msg),
+                )) => {
+                    let mut locked = state.lock().await;
+                    // Use a default voting length if conway params not yet available
+                    // The actual voting length will be set when protocol params arrive
+                    let voting_length = locked
+                        .get_conway_voting()
+                        .get_conway_params()
+                        .map(|p| p.gov_action_lifetime as u64)
+                        .unwrap_or(6); // Default to 6 epochs if not set
+
+                    locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
+                    info!(
+                        "Snapshot Bootstrap message received, {} proposals loaded",
+                        gov_msg.proposals.len()
+                    );
+                }
+                Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting bootstrap loop");
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
+        snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut governance_s: Box<dyn Subscription<Message>>,
-        mut drep_s: Box<dyn Subscription<Message>>,
-        mut spo_s: Box<dyn Subscription<Message>>,
+        mut drep_s: Option<Box<dyn Subscription<Message>>>,
+        mut spo_s: Option<Box<dyn Subscription<Message>>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
@@ -116,6 +173,11 @@ impl GovernanceState {
             config.enact_state_topic.clone(),
             config.verification_output_file.clone(),
         )));
+
+        // Wait for snapshot bootstrap if subscription is provided
+        if let Some(subscription) = snapshot_subscription {
+            Self::wait_for_bootstrap(state.clone(), subscription).await?;
+        }
 
         // Ticker to log stats
         let state_tick = state.clone();
@@ -244,28 +306,32 @@ impl GovernanceState {
 
                     if blk_g.epoch > 0 {
                         // TODO: make sync more stable
-                        let (blk_drep, d_drep) = Self::read_drep(&mut drep_s).await?;
-                        if blk_g != blk_drep {
-                            outcomes.push_anyhow(anyhow!(
-                                "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
-                            ));
-                        }
+                        if let Some(ref mut drep_s) = drep_s {
+                            if let Some(ref mut spo_s) = spo_s {
+                                let (blk_drep, d_drep) = Self::read_drep(drep_s).await?;
+                                if blk_g != blk_drep {
+                                    outcomes.push_anyhow(anyhow!(
+                                        "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
+                                    ));
+                                }
 
-                        let (blk_spo, d_spo) = Self::read_spo(&mut spo_s).await?;
-                        if blk_g != blk_spo {
-                            outcomes.push_anyhow(anyhow!(
-                                "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                            ));
-                        }
+                                let (blk_spo, d_spo) = Self::read_spo(spo_s).await?;
+                                if blk_g != blk_spo {
+                                    outcomes.push_anyhow(anyhow!(
+                                        "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
+                                    ));
+                                }
 
-                        if blk_spo.epoch != d_spo.epoch + 1 {
-                            outcomes.push_anyhow(anyhow!(
-                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                d_spo.epoch
-                            ));
-                        }
+                                if blk_spo.epoch != d_spo.epoch + 1 {
+                                    outcomes.push_anyhow(anyhow!(
+                                        "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                        d_spo.epoch
+                                    ));
+                                }
 
-                        state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                                state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
+                            }
+                        }
                     }
 
                     {
@@ -281,13 +347,30 @@ impl GovernanceState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = GovernanceStateConfig::new(&config);
-        let gt = context.clone().subscribe(&cfg.subscribe_topic).await?;
-        let dt = context.clone().subscribe(&cfg.drep_distribution_topic).await?;
-        let st = context.clone().subscribe(&cfg.spo_distribution_topic).await?;
+
+        // Subscribe for snapshot bootstrap if starting from snapshot
+        let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
+            Some(context.subscribe(&cfg.snapshot_subscribe_topic).await?)
+        } else {
+            None
+        };
+
+        let gt = context.clone().subscribe(&cfg.governance_topic).await?;
+        let dt = match cfg.drep_distribution_topic {
+            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
+            None => None,
+        };
+        let st = match cfg.spo_distribution_topic {
+            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
+            None => None,
+        };
+
         let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, gt, dt, st, pt).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(context, cfg, snapshot_subscription, gt, dt, st, pt)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())
