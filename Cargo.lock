@@ -75,7 +75,7 @@ dependencies = [
  "chrono",
  "config",
  "csv",
- "fjall 2.11.2",
+ "fjall 3.0.1",
  "hex",
  "imbl",
  "itertools 0.14.0",
