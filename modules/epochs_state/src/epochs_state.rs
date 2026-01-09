@@ -140,6 +140,7 @@ impl EpochsState {
         // Consume initial protocol parameters (only needed for genesis bootstrap)
         if !is_snapshot_mode {
             let _ = protocol_parameters_subscription.read().await?;
+            let _ = block_txs_subscription.read().await?;
         }
 
         loop {
