@@ -89,9 +89,7 @@ impl FjallCursorStore {
         s.strip_prefix(CURSOR_PREFIX).map(|n| n.to_string())
     }
 
-    fn prefix_iter(
-        &self,
-    ) -> impl Iterator<Item = fjall::Guard> + '_ {
+    fn prefix_iter(&self) -> impl Iterator<Item = fjall::Guard> + '_ {
         self.keyspace.prefix(CURSOR_PREFIX)
     }
 }
