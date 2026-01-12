@@ -9,9 +9,8 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage,
-        PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage,
+        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
