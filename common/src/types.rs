@@ -146,8 +146,7 @@ pub struct PoolBlockProduction {
     pub pool_id: PoolId,
 
     /// Number of blocks produced by this pool in the epoch
-    /// Using u32 to handle pools that may produce more than 255 blocks per epoch
-    pub block_count: u32,
+    pub block_count: u8,
 
     /// Epoch number
     pub epoch: u64,

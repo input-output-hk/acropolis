@@ -1705,7 +1705,7 @@ impl StreamingSnapshotParser {
         let pool_id_bytes = decoder.bytes().context("Failed to parse pool ID bytes")?;
 
         // Parse the block count (value) - how many blocks this pool produced
-        let block_count = decoder.u8().context("Failed to parse block count")? as u32;
+        let block_count = decoder.u8().context("Failed to parse block count")?;
 
         // Convert pool ID bytes to hex string
         let pool_id =
