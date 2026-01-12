@@ -429,8 +429,8 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
     fn on_gs_protocol_parameters(
         &mut self,
         epoch: u64,
-        previous_reward_params: RewardParams,
-        current_reward_params: RewardParams,
+        _: RewardParams,
+        _: RewardParams,
         params: ProtocolParamUpdate,
     ) -> Result<()> {
         publish_gov_state(
@@ -440,15 +440,12 @@ impl GovernanceProtocolParametersCallback for SnapshotPublisher {
             self.epoch_context.era,
             self.epoch_context.magic_number.clone(),
             params,
-            previous_reward_params,
-            current_reward_params,
         );
 
         Ok(())
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn publish_gov_state(
     context: &Arc<Context<Message>>,
     topic: &str,
@@ -456,18 +453,8 @@ fn publish_gov_state(
     era: Era,
     magic_number: MagicNumber,
     params: ProtocolParamUpdate,
-    previous_reward_params: RewardParams,
-    current_reward_params: RewardParams,
 ) {
-    info!(
-        "Received governance protocol parameters for epoch {epoch} \
-         (previous_reward_params: k={}, a0={}, rho={}, tau={}, min_pool_cost={})",
-        previous_reward_params.desired_number_of_stake_pools,
-        previous_reward_params.pool_pledge_influence,
-        previous_reward_params.expansion_rate,
-        previous_reward_params.treasury_growth_rate,
-        previous_reward_params.min_pool_cost,
-    );
+    info!("Received governance protocol parameters for epoch {epoch}",);
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
@@ -475,8 +462,6 @@ fn publish_gov_state(
             params,
             era,
             network_name: magic_number.to_network_name().to_string(),
-            previous_reward_params: Some(previous_reward_params),
-            current_reward_params: Some(current_reward_params),
         }),
     )));
 

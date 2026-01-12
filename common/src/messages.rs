@@ -366,13 +366,6 @@ pub struct ProtocolParametersBootstrapMessage {
     pub era: Era,
     pub params: ProtocolParamUpdate,
     pub epoch: u64,
-    /// Previous epoch's reward parameters, needed for reward calculation at first epoch boundary.
-    /// At bootstrap, rewards for epoch N are calculated using protocol params from epoch N-1.
-    #[serde(default)]
-    pub previous_reward_params: Option<RewardParams>,
-    /// Current epoch's reward parameters.
-    #[serde(default)]
-    pub current_reward_params: Option<RewardParams>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

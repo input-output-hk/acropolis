@@ -657,14 +657,7 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            // Rotate: previous = current, current = new.
-            // Special case: if both are None (first message), set previous to new params
-            // instead of None so reward calculations have valid params.
-            if self.previous_protocol_parameters.is_none() && self.protocol_parameters.is_none() {
-                self.previous_protocol_parameters = Some(params_msg.params.clone());
-            } else {
-                self.previous_protocol_parameters = self.protocol_parameters.clone();
-            }
+            self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
         }
 
