@@ -6,6 +6,8 @@ use crate::{
 pub struct Transaction {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
+    pub fee: u64,
+    pub is_valid: bool,
     pub total_output: u128,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
