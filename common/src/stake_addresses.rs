@@ -300,17 +300,18 @@ impl StakeAddressMap {
         sas_data
             .par_iter() // Rayon multi-threaded iterator
             .for_each(|(spo, (utxo_value, rewards))| {
+                let total_stake = *utxo_value + *rewards;
                 spo_stakes
                     .entry(*spo)
                     .and_modify(|v| {
-                        v.active += *utxo_value;
+                        v.active += total_stake;
                         v.active_delegators_count += 1;
-                        v.live += *utxo_value + *rewards;
+                        v.live += total_stake;
                     })
                     .or_insert(DelegatedStake {
-                        active: *utxo_value,
+                        active: total_stake,
                         active_delegators_count: 1,
-                        live: *utxo_value + *rewards,
+                        live: total_stake,
                     });
             });
 
