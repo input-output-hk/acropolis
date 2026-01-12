@@ -7,6 +7,7 @@ pub struct Transaction {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
     pub fee: u64,
+    pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,

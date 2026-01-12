@@ -28,6 +28,8 @@ mod test_utils;
 mod address_delta_publisher;
 mod volatile_index;
 use address_delta_publisher::AddressDeltaPublisher;
+mod block_totals_publisher;
+use block_totals_publisher::BlockTotalsPublisher;
 mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
 mod dashmap_immutable_utxo_store;
@@ -232,8 +234,12 @@ impl UTXOState {
         let mut state = State::new(store);
 
         // Create address delta publisher and pass it observations
-        let publisher = AddressDeltaPublisher::new(context.clone(), config);
-        state.register_address_delta_observer(Arc::new(publisher));
+        let deltas_publisher = AddressDeltaPublisher::new(context.clone(), config.clone());
+        state.register_address_delta_observer(Arc::new(deltas_publisher));
+
+        // Create block totals publisher and pass it observations
+        let totals_publisher = BlockTotalsPublisher::new(context.clone(), config);
+        state.register_block_totals_observer(Arc::new(totals_publisher));
 
         let state = Arc::new(Mutex::new(state));
 

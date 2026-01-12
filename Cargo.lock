@@ -59,6 +59,7 @@ dependencies = [
  "serde_with 3.16.1",
  "sha2 0.10.9",
  "tempfile",
+ "test-case",
  "thiserror 2.0.17",
  "tokio",
  "tracing",

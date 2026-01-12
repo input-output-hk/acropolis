@@ -20,7 +20,7 @@ use crate::{
     declare_hash_type, declare_hash_type_with_bech32, protocol_params,
     rational_number::RationalNumber,
 };
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
@@ -366,10 +366,14 @@ pub struct TxUTxODeltas {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
 
-    // State needed for validation
-    pub tx_fee: Option<Lovelace>,
-    pub total_withdrawals: Option<Lovelace>,
+    // Transaction fee
+    pub fee: u64,
 
+    // Tx validity flag
+    pub is_valid: bool,
+
+    // State needed for validation
+    pub total_withdrawals: Option<Lovelace>,
     pub certs_identifiers: Option<Vec<TxCertificateIdentifier>>,
 
     // This is missing UTxO Authors
@@ -438,7 +442,7 @@ impl TxUTxODeltas {
             self.calculate_total_deposit(pool_certificates_deltas, stake_certificates_deltas),
             vec![],
         );
-        total_produced += &Value::new(self.tx_fee.unwrap_or_default(), vec![]);
+        total_produced += &Value::new(self.fee, vec![]);
 
         for output in &self.produces {
             total_produced += &output.value;
@@ -1249,8 +1253,24 @@ impl Display for Point {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Origin => write!(f, "origin"),
-            Self::Specific { hash, slot } => write!(f, "{hash}@{slot}"),
+            Self::Specific { hash, slot } => write!(f, "{slot}.{hash}"),
         }
+    }
+}
+
+impl FromStr for Point {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "origin" {
+            return Ok(Self::Origin);
+        }
+        let Some((slot_str, hash_str)) = s.split_once(".") else {
+            bail!("invalid point: missing \".\"");
+        };
+        let slot = slot_str.parse().context("invalid slot")?;
+        let hash = hash_str.parse().context("invalid hash")?;
+        Ok(Self::Specific { hash, slot })
     }
 }
 
@@ -2583,6 +2603,7 @@ mod tests {
     use super::*;
     use crate::hash::Hash;
     use anyhow::Result;
+    use test_case::test_case;
 
     #[test]
     fn era_order() -> Result<()> {
@@ -2717,7 +2738,7 @@ mod tests {
     }
 
     #[test]
-    fn serialize_stake_addres() -> Result<()> {
+    fn serialize_stake_address() -> Result<()> {
         let serialized = "{\
             \"network\":\"Mainnet\",\
             \"credential\":{\
@@ -2753,5 +2774,29 @@ mod tests {
             ScriptHash::from_str("c3a33acb8903cf42611e26b15c7731f537867c6469f5bf69c837e4a3")
                 .unwrap()
         );
+    }
+
+    #[test_case("origin")]
+    #[test_case("48460699.7bfb6a677df577d2f0371236ecf63554b54b35b663d3ad9159695a609306e629")]
+    #[test_case("123665404.5acee019d5550554aff5a044ed3b700decf29460e100218381f85a767af8c09f")]
+    fn should_round_trip_points(point_str: &str) {
+        let point: Point = point_str.parse().expect("invalid point");
+        assert_eq!(point.to_string(), point_str);
+    }
+
+    #[test_case("onigiri", "invalid point: missing \".\"")]
+    #[test_case(
+        "4846069a.7bfb6a677df577d2f0371236ecf63554b54b35b663d3ad9159695a609306e629",
+        "invalid slot"
+    )]
+    #[test_case(
+        "123665404.5acee019d5550554aff5a044ed3b700decf29460e100218381f85a767af8c09fff",
+        "invalid hash"
+    )]
+    fn should_report_errors_parsing_points(point_str: &str, message: &str) {
+        let Err(error) = point_str.parse::<Point>() else {
+            panic!("expected parsing error, got success");
+        };
+        assert_eq!(error.to_string(), message);
     }
 }

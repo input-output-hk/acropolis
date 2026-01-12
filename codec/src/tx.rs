@@ -78,6 +78,9 @@ pub fn map_transaction(
 ) -> Transaction {
     let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
 
+    let fee = tx.fee().unwrap_or(0);
+    let is_valid = tx.is_valid();
+
     let mut errors = input_output_errors;
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
@@ -144,7 +147,8 @@ pub fn map_transaction(
     Transaction {
         consumes,
         produces,
-        fee: tx.fee().unwrap_or(0),
+        fee,
+        is_valid,
         certs,
         withdrawals,
         proposal_update: alonzo_babbage_update_proposal,
