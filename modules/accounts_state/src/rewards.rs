@@ -150,6 +150,10 @@ pub fn calculate_rewards(
             }
         }
 
+        if !pay_to_pool_reward_account {
+            info!("Reward account for SPO {} isn't registered", operator_id);
+        }
+
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
         // QUESTION: Which one?  Lowest hash seems to work in epoch 212
@@ -172,8 +176,6 @@ pub fn calculate_rewards(
                     }
                 }
             }
-        } else {
-            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -367,7 +369,7 @@ fn calculate_spo_rewards(
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
                        delegator_stake_address);
 
-                // Pool owners don't get member rewards (seems unfair!)
+                // Pool owners don't get member rewards - they get their share via leader rewards
                 if spo.pool_owners.contains(delegator_stake_address) {
                     debug!(
                         "Skipping pool owner reward account {}, losing {to_pay}",
@@ -388,12 +390,15 @@ fn calculate_spo_rewards(
                 }
 
                 // Transfer from reserves to this account
+                // Note: Member rewards are paid to delegators regardless of whether the pool's
+                // reward account is registered. Only leader rewards are affected by pool reward
+                // account registration status.
                 rewards.push(RewardDetail {
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
                     pool: *operator_id,
-                    registered: true, // Member rewards only go to registered delegators
+                    registered: true, // Member rewards are always paid to registered delegators
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;

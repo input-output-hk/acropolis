@@ -186,6 +186,35 @@ impl EpochSnapshot {
             }
         }
 
+        // Add retired pools that produced blocks (for block counting in rewards)
+        // These are added AFTER stake distribution so they don't receive delegator stake.
+        for (spo_id, &blocks_produced) in spo_block_counts {
+            if blocks_produced > 0 && !snapshot.spos.contains_key(spo_id) {
+                // Check if the reward account from two epochs ago is still registered
+                let two_previous_reward_account_is_registered =
+                    two_previous_snapshot.spos.get(spo_id).is_some_and(|old_spo| {
+                        stake_addresses
+                            .get(&old_spo.reward_account)
+                            .map(|sas| sas.registered)
+                            .unwrap_or(false)
+                    });
+
+                debug!(
+                    epoch,
+                    "Adding retired SPO {} with {} blocks to snapshot", spo_id, blocks_produced
+                );
+
+                snapshot.spos.insert(
+                    *spo_id,
+                    SnapshotSPO {
+                        blocks_produced,
+                        two_previous_reward_account_is_registered,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
         // Calculate the total rewards just for logging and comparison
         let total_rewards: u64 = stake_addresses.values().map(|sas| sas.rewards).sum();
 

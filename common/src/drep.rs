@@ -54,7 +54,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
 /// - `drepExpiry: EpochNo` - computed as (currentEpoch + ppDRepActivity - numDormantEpochs)
 /// - `drepDelegs: Set Credential` - reverse index of who delegated TO this DRep
 ///
-/// See: cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Governance/DRepPulser.hs
+/// See: https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/src/Cardano/Ledger/Conway/Governance/DRepPulser.hs
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DRepRecord {
     /// Deposit amount in lovelace

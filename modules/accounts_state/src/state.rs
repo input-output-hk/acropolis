@@ -749,14 +749,18 @@ impl State {
                                 rewards.retain(|r| r.account != reward.account);
                             }
 
-                            if let Some((_, spor)) = filtered_rewards_result
-                                .spo_rewards
-                                .iter_mut()
-                                .find(|(fspo, _)| *fspo == spo)
-                            {
-                                spor.total_rewards -= reward.amount;
-                                if reward.rtype == RewardType::Leader {
-                                    spor.operator_rewards -= reward.amount;
+                            // Only subtract from spo_rewards if it was originally counted
+                            // (reward.registered was true in calculate_rewards)
+                            if reward.registered {
+                                if let Some((_, spor)) = filtered_rewards_result
+                                    .spo_rewards
+                                    .iter_mut()
+                                    .find(|(fspo, _)| *fspo == spo)
+                                {
+                                    spor.total_rewards -= reward.amount;
+                                    if reward.rtype == RewardType::Leader {
+                                        spor.operator_rewards -= reward.amount;
+                                    }
                                 }
                             }
                         }

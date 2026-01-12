@@ -464,9 +464,9 @@ impl StakeAddressMap {
     /// TODO: This currently iterates ALL stake addresses to find delegations (O(n)).
     /// The Haskell ledger maintains a reverse index (`drepDelegs`) on each DRepState
     /// that tracks which credentials delegated TO that DRep, enabling O(k) clearing
-    /// where k = number of delegators. Consider adding similar reverse tracking for
-    /// better performance at scale.
-    /// See: cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
+    /// where k = number of delegators. We could Consider adding similar reverse tracking for
+    /// better performance.
+    /// See: https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
     /// `clearDRepDelegations` function.
     pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
         for sas in self.inner.values_mut() {
