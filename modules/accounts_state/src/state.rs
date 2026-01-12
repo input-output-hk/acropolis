@@ -5,20 +5,11 @@ use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::{
-    math::update_value_with_delta,
-    messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
-        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-    },
-    protocol_params::ProtocolParams,
-    stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
-    StakeRewardDelta, TxCertificate,
-};
+use acropolis_common::{math::update_value_with_delta, messages::{
+    AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+    EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+    StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -27,6 +18,7 @@ use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn, Level};
+use acropolis_common::messages::{GovernanceOutcomesMessage, GovernanceProceduresMessage};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -656,7 +648,15 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            self.previous_protocol_parameters = self.protocol_parameters.clone();
+            // At bootstrap, previous_protocol_parameters is None and protocol_parameters
+            // will also be None. In this case, set previous to the new params as well,
+            // since protocol params rarely change between epochs.
+            if self.previous_protocol_parameters.is_none() && self.protocol_parameters.is_none() {
+                info!("Bootstrap: setting previous_protocol_parameters to match current");
+                self.previous_protocol_parameters = Some(params_msg.params.clone());
+            } else {
+                self.previous_protocol_parameters = self.protocol_parameters.clone();
+            }
             self.protocol_parameters = Some(params_msg.params.clone());
         }
 
@@ -1000,6 +1000,18 @@ impl State {
                     self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
+                TxCertificate::DRepRegistration(reg) => {
+                    self.dreps.push((reg.credential.clone(), reg.deposit));
+                }
+
+                TxCertificate::DRepDeregistration(dereg) => {
+                    self.dreps.retain(|(cred, _)| cred != &dereg.credential);
+
+                    // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                    stake_addresses.deregister_drep(&dereg.credential);
+                }
+
                 _ => (),
             };
         }
@@ -1070,6 +1082,144 @@ impl State {
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
         );
+
+        Ok(())
+    }
+
+    /// Handle governance procedures (new proposals submitted in a block)
+    ///
+    /// When a new governance proposal is submitted, the proposer pays a deposit
+    /// (govActionDeposit from protocol params, typically 100,000 ADA).
+    /// Note: Governance proposal deposits are tracked separately in the governance state
+    /// (oblProposal in the Cardano ledger), NOT in the UTxO state's us_deposited field.
+    /// Therefore, we do NOT modify pots.deposits here.
+    pub fn handle_governance_procedures(
+        &mut self,
+        procedures_msg: &GovernanceProceduresMessage,
+    ) -> Result<()> {
+        for proposal in &procedures_msg.proposal_procedures {
+            // Note: Governance deposits are NOT added to pots.deposits
+            // They are tracked separately in the governance state
+            info!(
+                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA)",
+                proposal.gov_action_id,
+                proposal.deposit,
+                proposal.deposit / 1_000_000,
+            );
+        }
+
+        if !procedures_msg.proposal_procedures.is_empty() {
+            info!(
+                "Processed {} governance proposals, total deposits: {} lovelace",
+                procedures_msg.proposal_procedures.len(),
+                procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Handle governance outcomes (enacted/expired proposals at epoch boundary)
+    ///
+    /// At each epoch boundary, governance proposals may be enacted or expire.
+    /// In both cases, the proposer's deposit is refunded:
+    /// - If the proposer's reward account is registered, refund goes there
+    /// - Otherwise, the refund goes to treasury
+    ///
+    /// Note: Governance deposits are tracked separately in the governance state
+    /// (oblProposal in the Cardano ledger), NOT in pots.deposits. The refund
+    /// comes from the governance state, not from pots.deposits.
+    ///
+    /// For TreasuryWithdrawal actions that are enacted, we also process the
+    /// withdrawal of funds from treasury to the specified reward accounts.
+    pub fn handle_governance_outcomes(
+        &mut self,
+        outcomes_msg: &GovernanceOutcomesMessage,
+    ) -> Result<()> {
+        let mut total_refunds: u64 = 0;
+        let mut total_to_treasury: u64 = 0;
+        let mut total_treasury_withdrawals: u64 = 0;
+
+        for outcome in &outcomes_msg.conway_outcomes {
+            let proposal = &outcome.voting.procedure;
+            let deposit = proposal.deposit;
+            let reward_account = &proposal.reward_account;
+
+            // Note: We do NOT subtract from pots.deposits here because governance
+            // deposits are tracked separately in the governance state
+            total_refunds += deposit;
+
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(reward_account) {
+                stake_addresses.add_to_reward(reward_account, deposit);
+                info!(
+                    "Governance proposal {:?} {} - refund {} lovelace to {}",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted {
+                        "enacted"
+                    } else {
+                        "expired"
+                    },
+                    deposit,
+                    reward_account
+                );
+            } else {
+                drop(stake_addresses);
+                self.pots.treasury += deposit;
+                total_to_treasury += deposit;
+                warn!(
+                    "Governance proposal {:?} {} - reward account {} not registered, refund {} to treasury",
+                    proposal.gov_action_id,
+                    if outcome.voting.accepted { "enacted" } else { "expired" },
+                    reward_account,
+                    deposit
+                );
+            }
+
+            // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
+            if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
+                &outcome.action_to_perform
+            {
+                for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    match StakeAddress::from_binary(reward_account_bytes) {
+                        Ok(reward_account) => {
+                            // Deduct from treasury
+                            self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
+                            total_treasury_withdrawals += *amount;
+
+                            // Credit to reward account
+                            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                            stake_addresses.add_to_reward(&reward_account, *amount);
+                            info!(
+                                "Treasury withdrawal: {} lovelace ({} ADA) to {}",
+                                amount,
+                                amount / 1_000_000,
+                                reward_account
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to parse reward account bytes for treasury withdrawal: {:?}, error: {}",
+                                reward_account_bytes, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if !outcomes_msg.conway_outcomes.is_empty() {
+            info!(
+                "Governance outcomes: {} proposals processed, total refunds: {} lovelace ({} ADA), \
+                 {} lovelace to treasury (unregistered accounts), treasury withdrawals: {} lovelace ({} ADA)",
+                outcomes_msg.conway_outcomes.len(),
+                total_refunds,
+                total_refunds / 1_000_000,
+                total_to_treasury,
+                total_treasury_withdrawals,
+                total_treasury_withdrawals / 1_000_000
+            );
+        }
 
         Ok(())
     }
