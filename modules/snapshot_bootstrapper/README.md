@@ -23,13 +23,15 @@ The snapshot bootstrapper:
 ## Default Configuration
 
 ```toml
+[global.startup]
+network-name = "mainnet"
+
 [module.snapshot-bootstrapper]
 
 # Target epoch to download and process.
 epoch = 500
 
-# Network and data
-network = "mainnet"
+# Data directory
 data-dir = "./data"
 
 # Message topics

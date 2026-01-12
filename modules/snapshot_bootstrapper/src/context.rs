@@ -53,7 +53,7 @@ impl BootstrapContext {
         let target_epoch = cfg.epoch;
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
-        let genesis = genesis_for_network(&cfg.network);
+        let genesis = genesis_for_network(&cfg.startup.network_name);
 
         let nonces_file = NonceContext::load(&network_dir)?;
 
