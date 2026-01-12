@@ -273,14 +273,11 @@ pub struct SnapshotsContainer {
 
     /// Set snapshot (epoch - 1)
     pub set: EpochSnapshot,
-
-    /// Go snapshot (current epoch)
-    pub go: EpochSnapshot,
 }
 
 impl Display for SnapshotsContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Mark: {}, Set: {}, Go: {}", self.mark, self.set, self.go)
+        writeln!(f, "Mark: {}, Set: {}", self.mark, self.set)
     }
 }
 

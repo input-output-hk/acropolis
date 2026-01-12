@@ -4,7 +4,7 @@
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
 use acropolis_common::caryatid::SubscriptionExt;
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::StateQuery;
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
@@ -170,7 +170,7 @@ impl HistoricalEpochsState {
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Subscription topics
         let blocks_subscribe_topic = config

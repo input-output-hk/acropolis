@@ -1,23 +1,37 @@
-use std::{collections::HashMap, future::Future, path::Path};
+use std::{
+    collections::{HashMap, VecDeque},
+    path::Path,
+};
 
 use acropolis_common::Point;
 use anyhow::Result;
+use caryatid_sdk::async_trait;
 use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
 use tokio::sync::Mutex;
 use tracing::warn;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    PartialEq,
+    Eq,
+    minicbor::Decode,
+    minicbor::Encode,
+)]
 pub struct CursorEntry {
-    pub tip: Point,
-    pub halted: bool,
+    #[n(0)]
+    pub points: VecDeque<Point>,
+    #[n(1)]
+    pub next_tx: Option<u64>,
 }
 
+#[async_trait]
 pub trait CursorStore: Send + Sync + 'static {
-    fn load(&self) -> impl Future<Output = Result<HashMap<String, CursorEntry>>> + Send;
-    fn save(
-        &self,
-        entries: &HashMap<String, CursorEntry>,
-    ) -> impl Future<Output = Result<(), CursorSaveError>> + Send;
+    async fn load(&self) -> Result<HashMap<String, CursorEntry>>;
+    async fn save(&self, entries: &HashMap<String, CursorEntry>) -> Result<()>;
 }
 
 // In memory cursor store (Not persisted across runs)
@@ -37,13 +51,14 @@ impl Default for InMemoryCursorStore {
     }
 }
 
+#[async_trait]
 impl CursorStore for InMemoryCursorStore {
     async fn load(&self) -> Result<HashMap<String, CursorEntry>> {
         let guard = self.entries.lock().await;
         Ok(guard.clone())
     }
 
-    async fn save(&self, entries: &HashMap<String, CursorEntry>) -> Result<(), CursorSaveError> {
+    async fn save(&self, entries: &HashMap<String, CursorEntry>) -> Result<()> {
         let mut guard = self.entries.lock().await;
         *guard = entries.clone();
         Ok(())
@@ -82,6 +97,7 @@ impl FjallCursorStore {
     }
 }
 
+#[async_trait]
 impl CursorStore for FjallCursorStore {
     async fn load(&self) -> Result<HashMap<String, CursorEntry>> {
         let mut out = HashMap::new();
@@ -115,7 +131,7 @@ impl CursorStore for FjallCursorStore {
         Ok(out)
     }
 
-    async fn save(&self, entries: &HashMap<String, CursorEntry>) -> Result<(), CursorSaveError> {
+    async fn save(&self, entries: &HashMap<String, CursorEntry>) -> Result<()> {
         let mut failed = Vec::new();
 
         for (name, entry) in entries {
@@ -146,13 +162,7 @@ impl CursorStore for FjallCursorStore {
         if failed.is_empty() {
             Ok(())
         } else {
-            Err(CursorSaveError { failed })
+            Err(anyhow::anyhow!("failed to save cursors"))
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to save cursor tips for: {failed:?}")]
-pub struct CursorSaveError {
-    pub failed: Vec<String>,
 }

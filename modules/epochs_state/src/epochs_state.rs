@@ -1,7 +1,7 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use acropolis_common::configuration::StartupMethod;
+use acropolis_common::configuration::StartupMode;
 use acropolis_common::messages::{EpochBootstrapMessage, SnapshotMessage, SnapshotStateMessage};
 use acropolis_common::{
     caryatid::SubscriptionExt,
@@ -140,6 +140,7 @@ impl EpochsState {
         // Consume initial protocol parameters (only needed for genesis bootstrap)
         if !is_snapshot_mode {
             let _ = protocol_parameters_subscription.read().await?;
+            let _ = block_txs_subscription.read().await?;
         }
 
         loop {
@@ -315,7 +316,7 @@ impl EpochsState {
         let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
-        let is_snapshot_mode = StartupMethod::from_config(config.as_ref()).is_snapshot();
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
         let snapshot_subscription = if is_snapshot_mode {
             Some(context.subscribe(&snapshot_subscribe_topic).await?)
         } else {

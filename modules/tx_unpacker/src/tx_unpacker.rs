@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use acropolis_common::{
     messages::{
-        AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
+        AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
@@ -64,7 +64,6 @@ impl TxUnpacker {
         publish_withdrawals_topic: Option<String>,
         publish_certificates_topic: Option<String>,
         publish_governance_procedures_topic: Option<String>,
-        publish_block_txs_topic: Option<String>,
         publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
@@ -120,8 +119,6 @@ impl TxUnpacker {
                     let mut proposal_procedures = Vec::new();
                     let mut alonzo_babbage_update_proposals = Vec::new();
                     let mut total_output: u128 = 0;
-                    let mut total_fees: u64 = 0;
-                    let total_txs = txs_msg.txs.len() as u64;
                     let block_number = block.number as u32;
 
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
@@ -139,6 +136,8 @@ impl TxUnpacker {
                                     let Transaction {
                                         consumes: tx_consumes,
                                         produces: tx_produces,
+                                        fee: tx_fee,
+                                        is_valid,
                                         total_output: tx_total_output,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
@@ -183,6 +182,8 @@ impl TxUnpacker {
                                             tx_identifier,
                                             consumes: tx_consumes,
                                             produces: tx_produces,
+                                            fee: tx_fee,
+                                            is_valid,
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),
@@ -273,11 +274,6 @@ impl TxUnpacker {
                                                 }
                                         }
                                     }
-
-                                    // Capture the fees
-                                    if let Some(fee) = tx.fee() {
-                                        total_fees += fee;
-                                    }
                                 }
 
                                 Err(e) => {
@@ -343,19 +339,6 @@ impl TxUnpacker {
                         futures.push(context.message_bus.publish(topic, governance_msg.clone()));
                     }
 
-                    if let Some(ref topic) = publish_block_txs_topic {
-                        let msg = Message::Cardano((
-                            block.clone(),
-                            CardanoMessage::BlockInfoMessage(BlockTxsMessage {
-                                total_txs,
-                                total_output,
-                                total_fees,
-                            }),
-                        ));
-
-                        futures.push(context.message_bus.publish(topic, Arc::new(msg)));
-                    }
-
                     join_all(futures)
                         .await
                         .into_iter()
@@ -385,10 +368,6 @@ impl TxUnpacker {
                     }
 
                     if let Some(ref topic) = publish_governance_procedures_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
-                    }
-
-                    if let Some(ref topic) = publish_block_txs_topic {
                         futures.push(context.message_bus.publish(topic, message.clone()));
                     }
 
@@ -522,7 +501,6 @@ impl TxUnpacker {
                 publish_withdrawals_topic,
                 publish_certificates_topic,
                 publish_governance_procedures_topic,
-                publish_block_txs_topic,
                 publish_tx_validation_topic,
                 txs_sub,
                 bootstrapped_sub,

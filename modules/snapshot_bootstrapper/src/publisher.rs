@@ -1,3 +1,4 @@
+use acropolis_common::configuration::SyncMode;
 use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
@@ -8,8 +9,8 @@ use acropolis_common::{
     genesis_values::GenesisValues,
     ledger_state::SPOState,
     messages::{
-        AccountsBootstrapMessage, DRepBootstrapMessage, EpochBootstrapMessage,
-        GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
+        AccountsBootstrapMessage, BlockKesValidatorBootstrapMessage, DRepBootstrapMessage,
+        EpochBootstrapMessage, GovernanceBootstrapMessage, GovernanceProposalRoots, Message,
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
@@ -22,7 +23,7 @@ use acropolis_common::{
         UtxoCallback,
     },
     stake_addresses::AccountState,
-    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, UTXOValue, UTxOIdentifier,
+    DRepCredential, DRepRecord, EpochBootstrapData, Era, Point, PoolId, UTXOValue, UTxOIdentifier,
 };
 
 use anyhow::Result;
@@ -98,6 +99,7 @@ pub struct SnapshotPublisher {
     context: Arc<Context<Message>>,
     snapshot_topic: String,
     sync_command_topic: String,
+    sync_mode: SyncMode,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
     utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
@@ -107,7 +109,6 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
-    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -115,12 +116,14 @@ impl SnapshotPublisher {
         context: Arc<Context<Message>>,
         snapshot_topic: String,
         sync_command_topic: String,
+        sync_mode: SyncMode,
         epoch_context: EpochContext,
     ) -> Self {
         Self {
             context,
             snapshot_topic,
             sync_command_topic,
+            sync_mode,
             metadata: None,
             utxo_count: 0,
             utxo_batch: Vec::with_capacity(UTXO_BATCH_SIZE),
@@ -130,7 +133,6 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
-            snapshot_fee: 0,
         }
     }
 
@@ -151,13 +153,44 @@ impl SnapshotPublisher {
         Ok(())
     }
 
+    /// Publish operational certificate counters for block KES validator bootstrap
+    pub async fn publish_kes_validator_bootstrap(
+        &self,
+        epoch: u64,
+        ocert_counters: HashMap<PoolId, u64>,
+    ) -> Result<()> {
+        info!(
+            "Publishing KES validator bootstrap with {} opcert counters on '{}'",
+            ocert_counters.len(),
+            self.snapshot_topic
+        );
+
+        let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
+            SnapshotStateMessage::BlockKesValidatorState(BlockKesValidatorBootstrapMessage {
+                epoch,
+                block_number: self.epoch_context.last_block_height,
+                ocert_counters,
+            }),
+        )));
+
+        self.context.publish(&self.snapshot_topic, message).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to publish KES validator bootstrap message: {}", e);
+        });
+
+        Ok(())
+    }
+
     pub async fn start_chain_sync(&self, point: Point) -> Result<()> {
         info!(
             "Publishing sync command on {} for slot {}",
             self.sync_command_topic,
             point.slot()
         );
-        let message = Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)));
+        let message = if self.sync_mode.is_mithril() {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
+        } else {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
+        };
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await
@@ -180,7 +213,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: self.snapshot_fee,
+            total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -493,9 +526,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.values().map(|spo| spo.delegators.len()).sum();
         let set_stake: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
 
-        let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
-        let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-
         info!("Snapshots Data:");
         info!(
             "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
@@ -510,13 +540,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.len(),
             set_delegators,
             set_stake / 1_000_000
-        );
-        info!(
-            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.go.epoch,
-            snapshots.go.spos.len(),
-            go_delegators,
-            go_stake / 1_000_000
         );
 
         Ok(())
