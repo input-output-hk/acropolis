@@ -78,9 +78,6 @@ pub struct State {
     /// Global account pots
     pots: Pots,
 
-    /// DRep deposits (tracked separately from main deposits pot per Haskell node behavior)
-    drep_deposits: Lovelace,
-
     /// All registered DReps
     dreps: Vec<(DRepCredential, Lovelace)>,
 
@@ -101,13 +98,6 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
-
-    /// Flag indicating this is the first epoch after bootstrap.
-    /// Used to enable diagnostic logging comparing bootstrap vs live snapshots.
-    is_first_epoch_after_bootstrap: bool,
-
-    /// The epoch we bootstrapped at, for logging purposes
-    bootstrap_epoch: Option<u64>,
 }
 
 impl State {
@@ -186,11 +176,6 @@ impl State {
         update_value_with_delta(&mut self.pots.treasury, deltas.delta_treasury)?;
         update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
         update_value_with_delta(&mut self.pots.deposits, deltas.delta_deposits)?;
-
-        // Mark that we're in bootstrap mode - the first epoch boundary after this
-        // will create a live snapshot that we'll compare against bootstrap data
-        self.is_first_epoch_after_bootstrap = true;
-        self.bootstrap_epoch = Some(bootstrap_msg.epoch);
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
@@ -941,31 +926,7 @@ impl State {
     }
 
     pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
-        // Convert current and new DReps to maps for comparison
-        let old_dreps: HashMap<DRepCredential, Lovelace> = self.dreps.iter().cloned().collect();
-        let new_dreps: HashMap<DRepCredential, Lovelace> = drep_msg.dreps.iter().cloned().collect();
-
-        // Find truly new DReps (in new but not in old)
-        let new_registrations: Vec<_> =
-            new_dreps.keys().filter(|cred| !old_dreps.contains_key(*cred)).collect();
-
-        // Find deregistered DReps (in old but not in new)
-        let deregistrations: Vec<_> =
-            old_dreps.keys().filter(|cred| !new_dreps.contains_key(*cred)).collect();
-
-        if !new_registrations.is_empty() || !deregistrations.is_empty() {
-            info!(
-                "DRep state epoch {}: {} new registrations, {} deregistrations (deposits already handled via certificates)",
-                drep_msg.epoch,
-                new_registrations.len(),
-                deregistrations.len()
-            );
-        }
-
-        // Update to authoritative list from node
-        // Note: deposits are handled immediately via certificates, so we don't adjust pots here
         self.dreps = drep_msg.dreps.clone();
-        self.drep_deposits = self.dreps.iter().map(|(_, deposit)| deposit).sum();
     }
 
     /// Record a stake delegation
@@ -1046,11 +1007,6 @@ impl State {
 
                 TxCertificate::DRepRegistration(reg) => {
                     self.dreps.push((reg.credential.clone(), reg.deposit));
-
-                    info!(
-                        "DRep registration: {:?}, deposit: {}, pots.deposits: {}, drep_deposits: {}",
-                        reg.credential, reg.deposit, self.pots.deposits, self.drep_deposits
-                    );
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
@@ -1059,11 +1015,6 @@ impl State {
                     // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)
                     let mut stake_addresses = self.stake_addresses.lock().unwrap();
                     stake_addresses.deregister_drep(&dereg.credential);
-
-                    info!(
-                        "DRep deregistration: {:?}, refund: {} (via UTxO), pots.deposits: {}, drep_deposits: {}",
-                        dereg.credential, dereg.refund, self.pots.deposits, self.drep_deposits
-                    );
                 }
 
                 _ => (),
