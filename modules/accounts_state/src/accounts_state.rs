@@ -380,6 +380,37 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
+                // Handle governance outcomes (enacted/expired proposals) at epoch boundary
+                // This must happen after complete_previous_epoch_rewards_calculation and before enter_epoch
+                let (_, message) =
+                    governance_outcomes_subscription.read_ignoring_rollbacks().await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::GovernanceOutcomes(outcomes_msg),
+                    )) => {
+                        let span = info_span!(
+                            "account_state.handle_governance_outcomes",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, block_info);
+                            state
+                                .handle_governance_outcomes(outcomes_msg)
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!(
+                                        "GovernanceOutcomes handling error: {e:#}"
+                                    ))
+                                })
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Handle epoch activity
                 let (_, message) = ea_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
@@ -495,38 +526,6 @@ impl AccountsState {
                 }
 
                 _ => error!("Unexpected message type: {message:?}"),
-            }
-
-            // Handle governance outcomes (enacted/expired proposals) at epoch boundary
-            if new_epoch {
-                let (_, message) =
-                    governance_outcomes_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((
-                        block_info,
-                        CardanoMessage::GovernanceOutcomes(outcomes_msg),
-                    )) => {
-                        let span = info_span!(
-                            "account_state.handle_governance_outcomes",
-                            block = block_info.number
-                        );
-                        async {
-                            Self::check_sync(&current_block, block_info);
-                            state
-                                .handle_governance_outcomes(outcomes_msg)
-                                .inspect_err(|e| {
-                                    vld.push_anyhow(anyhow!(
-                                        "GovernanceOutcomes handling error: {e:#}"
-                                    ))
-                                })
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
             }
 
             // Commit the new state

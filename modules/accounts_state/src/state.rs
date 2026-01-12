@@ -3,7 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
-use acropolis_common::messages::{GovernanceOutcomesMessage};
+use acropolis_common::messages::GovernanceOutcomesMessage;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -657,11 +657,13 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            // At bootstrap, previous_protocol_parameters is None and protocol_parameters
-            // will also be None. In this case, set previous to the new params as well,
-            // since protocol params rarely change between epochs.
+            // On first protocol params message, both previous and current are None.
+            // Set previous to the new params as well since we don't have historical
+            // params and they rarely change between epochs.
             if self.previous_protocol_parameters.is_none() && self.protocol_parameters.is_none() {
-                info!("Bootstrap: setting previous_protocol_parameters to match current");
+                debug!(
+                    "First protocol params: setting previous_protocol_parameters to match current"
+                );
                 self.previous_protocol_parameters = Some(params_msg.params.clone());
             } else {
                 self.previous_protocol_parameters = self.protocol_parameters.clone();
