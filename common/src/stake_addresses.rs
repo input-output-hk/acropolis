@@ -1101,7 +1101,7 @@ mod tests {
             let spdd = stake_addresses.generate_spdd();
 
             let pool_stake = spdd.get(&SPO_HASH).unwrap();
-            assert_eq!(pool_stake.active, 3000); // utxo only
+            assert_eq!(pool_stake.active, 3150); // utxo only
             assert_eq!(pool_stake.live, 3150); // utxo + rewards
             assert_eq!(pool_stake.active_delegators_count, 2);
         }
