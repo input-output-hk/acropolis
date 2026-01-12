@@ -3,7 +3,7 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
-use acropolis_common::messages::{GovernanceOutcomesMessage, GovernanceProceduresMessage};
+use acropolis_common::messages::{GovernanceOutcomesMessage};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -1095,39 +1095,6 @@ impl State {
         Ok(())
     }
 
-    /// Handle governance procedures (new proposals submitted in a block)
-    ///
-    /// When a new governance proposal is submitted, the proposer pays a deposit
-    /// (govActionDeposit from protocol params, typically 100,000 ADA).
-    /// Note: Governance proposal deposits are tracked separately in the governance state
-    /// (oblProposal in the Cardano ledger), NOT in the UTxO state's us_deposited field.
-    /// Therefore, we do NOT modify pots.deposits here.
-    pub fn handle_governance_procedures(
-        &mut self,
-        procedures_msg: &GovernanceProceduresMessage,
-    ) -> Result<()> {
-        for proposal in &procedures_msg.proposal_procedures {
-            // Note: Governance deposits are NOT added to pots.deposits
-            // They are tracked separately in the governance state
-            info!(
-                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA)",
-                proposal.gov_action_id,
-                proposal.deposit,
-                proposal.deposit / 1_000_000,
-            );
-        }
-
-        if !procedures_msg.proposal_procedures.is_empty() {
-            info!(
-                "Processed {} governance proposals, total deposits: {} lovelace",
-                procedures_msg.proposal_procedures.len(),
-                procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
-            );
-        }
-
-        Ok(())
-    }
-
     /// Handle governance outcomes (enacted/expired proposals at epoch boundary)
     ///
     /// At each epoch boundary, governance proposals may be enacted or expire.
@@ -1161,28 +1128,10 @@ impl State {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             if stake_addresses.is_registered(reward_account) {
                 stake_addresses.add_to_reward(reward_account, deposit);
-                info!(
-                    "Governance proposal {:?} {} - refund {} lovelace to {}",
-                    proposal.gov_action_id,
-                    if outcome.voting.accepted {
-                        "enacted"
-                    } else {
-                        "expired"
-                    },
-                    deposit,
-                    reward_account
-                );
             } else {
                 drop(stake_addresses);
                 self.pots.treasury += deposit;
                 total_to_treasury += deposit;
-                warn!(
-                    "Governance proposal {:?} {} - reward account {} not registered, refund {} to treasury",
-                    proposal.gov_action_id,
-                    if outcome.voting.accepted { "enacted" } else { "expired" },
-                    reward_account,
-                    deposit
-                );
             }
 
             // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
@@ -1218,7 +1167,7 @@ impl State {
         }
 
         if !outcomes_msg.conway_outcomes.is_empty() {
-            info!(
+            debug!(
                 "Governance outcomes: {} proposals processed, total refunds: {} lovelace ({} ADA), \
                  {} lovelace to treasury (unregistered accounts), treasury withdrawals: {} lovelace ({} ADA)",
                 outcomes_msg.conway_outcomes.len(),
