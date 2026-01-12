@@ -91,7 +91,7 @@ for the Conway era governance here.
 
 ### DReps
 The new concept that Conway introduces is that of the "Delegated Representative" or DRep.  These
-are like MPs or members of Congress, in that they vote on governance proposals of behalf of those
+are like MPs or members of Congress, in that they vote on governance proposals on behalf of those
 they represent.  Instead of being elected for a particular area they gain their mandate by
 Cardano stakeholders delegating to them, and wield voting power in proportion to their total
 delegations.
