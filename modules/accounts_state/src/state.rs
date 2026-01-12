@@ -3,13 +3,23 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
+use acropolis_common::messages::{GovernanceOutcomesMessage, GovernanceProceduresMessage};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::{math::update_value_with_delta, messages::{
-    AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-    EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
-    StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
+use acropolis_common::{
+    math::update_value_with_delta,
+    messages::{
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+    },
+    protocol_params::ProtocolParams,
+    stake_addresses::{StakeAddressMap, StakeAddressState},
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, GovernanceOutcomeVariant,
+    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
+    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
+    SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -18,7 +28,6 @@ use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::{debug, error, info, warn, Level};
-use acropolis_common::messages::{GovernanceOutcomesMessage, GovernanceProceduresMessage};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
