@@ -1707,14 +1707,15 @@ pub struct ResignCommitteeCold {
 /// Governance actions data structures
 
 #[derive(
-    serde::Serialize,
     Default,
+    serde::Serialize,
     serde::Deserialize,
     Debug,
     PartialEq,
     Eq,
     Clone,
     Copy,
+    minicbor::Encode,
     minicbor::Decode,
 )]
 pub struct ExUnits {

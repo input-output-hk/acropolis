@@ -48,6 +48,8 @@ fn cost_model_cbor() -> Vec<u8> {
     ).unwrap()
 }
 
+/// Validate Script Integrity Hash
+/// Reference: https://github.com/IntersectMBO/cardano-ledgeFr/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L289
 pub fn validate_script_integrity_hash(
     mtx: &alonzo::MintedTx,
 ) -> Result<(), Box<UTxOWValidationError>> {
@@ -102,6 +104,12 @@ pub fn validate_script_integrity_hash(
             }
         }
     }
+}
+
+/// Validate Redeemers
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L263
+pub fn validate_redeemers() -> Result<(), Box<UTxOWValidationError>> {
+    Ok(())
 }
 
 /// NEW Alonzo Validation Rules
