@@ -9,8 +9,8 @@ use crate::{
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
     Address, BlockInfo, CommitteeCredential, DataHash, Era, GenesisKeyhash, GovActionId, KeyHash,
-    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
-    VKeyWitness, Value, Voter, VrfKeyHash,
+    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, ScriptIntegrityHash, Slot,
+    StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -207,6 +207,7 @@ pub enum UTxOValidationError {
 /// UTxOW Rules Failure
 /// Shelley Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L97
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOWValidationError {
     /// **Cause:** The VKey witness has invalid signature
@@ -275,6 +276,19 @@ pub enum UTxOWValidationError {
     MissingTxMetadata {
         // hash of metadata included in tx body
         metadata_hash: DataHash,
+    },
+
+    /// **Cause:** Script integrity hash mismatch
+    #[error(
+        "Script integrity hash mismatch: expected={}, actual={}, reason={}", 
+        hex::encode(expected.unwrap_or_default()), 
+        hex::encode(actual.unwrap_or_default()),
+        reason
+    )]
+    ScriptIntegrityHashMismatch {
+        expected: Option<ScriptIntegrityHash>,
+        actual: Option<ScriptIntegrityHash>,
+        reason: String,
     },
 }
 
