@@ -2005,7 +2005,7 @@ pub enum ProtocolParamType {
     SecurityProperty,
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone)]
 pub struct RewardParams {
     pub expansion_rate: RationalNumber,
     pub treasury_growth_rate: RationalNumber,

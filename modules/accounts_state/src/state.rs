@@ -9,7 +9,7 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, GovernanceProceduresMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage,
         PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
         TxCertificatesMessage, WithdrawalsMessage,
     },
@@ -659,15 +659,7 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            // At bootstrap, previous_protocol_parameters is None and protocol_parameters
-            // will also be None. In this case, set previous to the new params as well,
-            // since protocol params rarely change between epochs.
-            if self.previous_protocol_parameters.is_none() && self.protocol_parameters.is_none() {
-                info!("Bootstrap: setting previous_protocol_parameters to match current");
-                self.previous_protocol_parameters = Some(params_msg.params.clone());
-            } else {
-                self.previous_protocol_parameters = self.protocol_parameters.clone();
-            }
+            self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
         }
 
@@ -1087,39 +1079,6 @@ impl State {
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
         );
-
-        Ok(())
-    }
-
-    /// Handle governance procedures (new proposals submitted in a block)
-    ///
-    /// When a new governance proposal is submitted, the proposer pays a deposit
-    /// (govActionDeposit from protocol params, typically 100,000 ADA).
-    /// Note: Governance proposal deposits are tracked separately in the governance state
-    /// (oblProposal in the Cardano ledger), NOT in the UTxO state's us_deposited field.
-    /// Therefore, we do NOT modify pots.deposits here.
-    pub fn handle_governance_procedures(
-        &mut self,
-        procedures_msg: &GovernanceProceduresMessage,
-    ) -> Result<()> {
-        for proposal in &procedures_msg.proposal_procedures {
-            // Note: Governance deposits are NOT added to pots.deposits
-            // They are tracked separately in the governance state
-            info!(
-                "Governance proposal submitted: {:?}, deposit: {} lovelace ({} ADA)",
-                proposal.gov_action_id,
-                proposal.deposit,
-                proposal.deposit / 1_000_000,
-            );
-        }
-
-        if !procedures_msg.proposal_procedures.is_empty() {
-            info!(
-                "Processed {} governance proposals, total deposits: {} lovelace",
-                procedures_msg.proposal_procedures.len(),
-                procedures_msg.proposal_procedures.iter().map(|p| p.deposit).sum::<u64>()
-            );
-        }
 
         Ok(())
     }
