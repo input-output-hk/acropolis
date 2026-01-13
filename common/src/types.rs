@@ -1550,14 +1550,11 @@ pub struct StakeDelegation {
 /// SPO total delegation data (for SPDD)
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct DelegatedStake {
-    /// Active stake - UTXO values only (used for reward calcs)
+    /// Active stake - UTXO values and rewards
     pub active: Lovelace,
 
     /// Active delegators count - delegators making active stakes (used for pool history)
     pub active_delegators_count: u64,
-
-    /// Total 'live' stake - UTXO values and rewards (used for VRF)
-    pub live: Lovelace,
 }
 
 /// SPO rewards data (for SPORewardsMessage)
