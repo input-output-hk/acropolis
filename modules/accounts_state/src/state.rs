@@ -458,6 +458,7 @@ impl State {
                 &shelley_params,
                 monetary_change.stake_rewards,
                 &registrations,
+                &deregistrations,
             )
         }))));
 
@@ -768,13 +769,28 @@ impl State {
         era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        self.enter_epoch(
+        let spo_blocks: HashMap<PoolId, usize> = if era < Era::Allegra {
+            // Filter out SPOs we don't know (OBFT in early Shelley)
+            ea_msg
+                .spo_blocks
+                .iter()
+                .filter(|(hash, _)| self.spos.contains_key(hash))
+                .map(|(hash, count)| (*hash, *count))
+                .collect()
+        } else {
+            ea_msg.spo_blocks.iter().cloned().collect()
+        };
+
+        // Enter epoch - note the message specifies the epoch that has just *ended*
+        let reward_deltas = self.enter_epoch(
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
-            ea_msg.spo_blocks.iter().cloned().collect(),
+            spo_blocks,
             verifier,
-        )
+        )?;
+
+        Ok(reward_deltas)
     }
 
     /// Handle an SPOStateMessage with the full set of SPOs valid at the end of the last

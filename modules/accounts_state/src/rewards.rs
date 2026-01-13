@@ -66,6 +66,7 @@ pub fn calculate_rewards(
     params: &ShelleyParams,
     stake_rewards: Lovelace,
     registrations: &HashSet<StakeAddress>,
+    deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
     let mut result = RewardsResult {
         epoch,
@@ -192,6 +193,8 @@ pub fn calculate_rewards(
             params,
             staking.clone(),
             pay_to_pool_reward_account,
+            deregistrations,
+            era,
         );
 
         if !rewards.is_empty() {
@@ -255,6 +258,8 @@ fn calculate_spo_rewards(
     params: &ShelleyParams,
     staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
+    deregistrations: &HashSet<StakeAddress>,
+    era: Era,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -378,12 +383,24 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Check pool's reward address - skip only if they're also a pool owner
+                // Check pool's reward address
+                // Pre-Allegra: skip unconditionally if it's the pool reward account
+                // Post-Allegra: skip only if they're also a pool owner
                 if &spo.reward_account == delegator_stake_address
-                    && spo.pool_owners.contains(&spo.reward_account)
+                    && (era < Era::Allegra || spo.pool_owners.contains(&spo.reward_account))
                 {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
+                        delegator_stake_address
+                    );
+                    continue;
+                }
+
+                // Check if it was deregistered between staking and now
+                // This only applied before Allegra - after Allegra, deregistered accounts still get rewards
+                if era < Era::Allegra && deregistrations.contains(delegator_stake_address) {
+                    info!(
+                        "Recently deregistered member account {}, losing {to_pay}",
                         delegator_stake_address
                     );
                     continue;
@@ -413,19 +430,36 @@ fn calculate_spo_rewards(
 
     // Always emit leader reward, but mark whether account is registered
     // If not registered, the caller will send to treasury instead
-    rewards.push(RewardDetail {
-        account: spo.reward_account.clone(),
-        rtype: RewardType::Leader,
-        amount: spo_benefit,
-        pool: *operator_id,
-        registered: pay_to_pool_reward_account,
-    });
+    if era < Era::Allegra {
+        if pay_to_pool_reward_account {
+            rewards.push(RewardDetail {
+                account: spo.reward_account.clone(),
+                rtype: RewardType::Leader,
+                amount: spo_benefit,
+                pool: *operator_id,
+                registered: true,
+            });
+        } else {
+            info!(
+                "SPO {}'s reward account {} not paid {}",
+                operator_id, spo.reward_account, spo_benefit,
+            );
+        }
+    } else {
+        rewards.push(RewardDetail {
+            account: spo.reward_account.clone(),
+            rtype: RewardType::Leader,
+            amount: spo_benefit,
+            pool: *operator_id,
+            registered: pay_to_pool_reward_account,
+        });
 
-    if !pay_to_pool_reward_account {
-        info!(
-            "SPO {}'s reward account {} not registered - {} will go to treasury",
-            operator_id, spo.reward_account, spo_benefit,
-        );
+        if !pay_to_pool_reward_account {
+            info!(
+                "SPO {}'s reward account {} not registered - {} will go to treasury",
+                operator_id, spo.reward_account, spo_benefit,
+            );
+        }
     }
 
     rewards
