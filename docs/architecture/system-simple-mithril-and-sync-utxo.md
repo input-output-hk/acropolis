@@ -51,7 +51,7 @@ To this we have added a [Peer Network Interface](../../modules/peer_network_inte
 just slots into the existing graph.
 
 When the Mithril Snapshot Fetcher has come to the end of the block data
-in the snapshot, it sends a `cardano.sequence.bootstrapped` message indicating how far it got (it
+in the snapshot, it sends a `cardano.snapshot.complete` message indicating how far it got (it
 was already doing this but no-one was listening, so we didn't mention it before).
 
 This is then picked up by the Peer Network Interface, which is

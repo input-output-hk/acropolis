@@ -240,7 +240,7 @@ indexes that allows it to retrieve blocks by hash, slot, number or epoch-slot co
 transactions by hash.
 
 It then provides handlers to allow querying blocks and transactions through
-`cardano.query.blocks` and `cardano.query.transactions` requests.  We're just usnig the Chain
+`cardano.query.blocks` and `cardano.query.transactions` requests.  We're just using the Chain
 Store to provide the BlockFrost API for now, but we'll see [later](TODO) it will be used to
 serve blocks to downstream peers, too.
 
