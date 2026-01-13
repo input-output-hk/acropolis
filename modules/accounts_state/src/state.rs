@@ -39,13 +39,13 @@ const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
-    /// Mark snapshot (current epoch) - newest
+    /// Latest snapshot (epoch i)
     pub mark: Arc<EpochSnapshot>,
 
-    /// Set snapshot (epoch - 1) - used for staking in rewards calculation
+    /// Previous snapshot (epoch i-1)
     pub set: Arc<EpochSnapshot>,
 
-    /// Go snapshot (epoch - 2) - used for staking in rewards calculation
+    /// One before that (epoch i-2)
     pub go: Arc<EpochSnapshot>,
 }
 
@@ -143,7 +143,7 @@ impl State {
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
 
-        // Load mark/set snapshots
+        // Load mark/set/go snapshots
         let snapshots = bootstrap_msg.bootstrap_snapshots;
         self.epoch_snapshots = EpochSnapshots {
             mark: Arc::new(snapshots.mark),
@@ -153,11 +153,13 @@ impl State {
 
         if !self.epoch_snapshots.mark.spos.is_empty() {
             info!(
-                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs)",
+                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
                 self.epoch_snapshots.mark.epoch,
                 self.epoch_snapshots.mark.spos.len(),
                 self.epoch_snapshots.set.epoch,
                 self.epoch_snapshots.set.spos.len(),
+                self.epoch_snapshots.go.epoch,
+                self.epoch_snapshots.go.spos.len(),
             );
         } else {
             info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
@@ -386,9 +388,7 @@ impl State {
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
 
-        // Calculate monetary change (fees added to reserves, treasury cut taken)
-        // Note: monetary_change.pots has reserves with fees added and treasury cut subtracted,
-        // but does NOT subtract stake_rewards - that happens later when rewards are actually paid.
+        // Update the reserves and treasury (monetary.rs)
         let monetary_change = calculate_monetary_change(
             &shelley_params,
             &self.pots,
@@ -401,7 +401,6 @@ impl State {
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
-            stake_rewards = monetary_change.stake_rewards,
             "After monetary change"
         );
 
@@ -769,8 +768,8 @@ impl State {
         era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
+        // Filter out SPOs we don't know (OBFT in early Shelley)
         let spo_blocks: HashMap<PoolId, usize> = if era < Era::Allegra {
-            // Filter out SPOs we don't know (OBFT in early Shelley)
             ea_msg
                 .spo_blocks
                 .iter()
@@ -1098,19 +1097,11 @@ impl State {
         Ok(())
     }
 
-    /// Handle governance outcomes (enacted/expired proposals at epoch boundary)
+    /// Handle governance outcomes (enacted/expired proposals) at epoch boundary
     ///
-    /// At each epoch boundary, governance proposals may be enacted or expire.
-    /// In both cases, the proposer's deposit is refunded:
-    /// - If the proposer's reward account is registered, refund goes there
-    /// - Otherwise, the refund goes to treasury
-    ///
-    /// Note: Governance deposits are tracked separately in the governance state
-    /// (oblProposal in the Cardano ledger), NOT in pots.deposits. The refund
-    /// comes from the governance state, not from pots.deposits.
-    ///
-    /// For TreasuryWithdrawal actions that are enacted, we also process the
-    /// withdrawal of funds from treasury to the specified reward accounts.
+    /// For each proposal outcome:
+    /// - Refund deposit to proposer's reward account (if registered), else to treasury
+    /// - For enacted TreasuryWithdrawal actions: transfer funds from treasury to reward accounts
     pub fn handle_governance_outcomes(
         &mut self,
         outcomes_msg: &GovernanceOutcomesMessage,

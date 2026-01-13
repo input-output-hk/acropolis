@@ -261,6 +261,9 @@ fn calculate_spo_rewards(
     deregistrations: &HashSet<StakeAddress>,
     era: Era,
 ) -> Vec<RewardDetail> {
+    // Pre-Allegra had several checks that must be honored in rewards calculation
+    let is_pre_allegra = era < Era::Allegra;
+
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
@@ -374,21 +377,20 @@ fn calculate_spo_rewards(
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
                        delegator_stake_address);
 
-                // Pool owners don't get member rewards - they get their share via leader rewards
-                if spo.pool_owners.contains(delegator_stake_address) {
+                let is_pool_owner = spo.pool_owners.contains(delegator_stake_address);
+                let is_reward_account = &spo.reward_account == delegator_stake_address;
+
+                // Pool owners get their share via leader rewards, not member rewards
+                if is_pool_owner {
                     debug!(
-                        "Skipping pool owner reward account {}, losing {to_pay}",
+                        "Skipping pool owner {}, losing {to_pay}",
                         delegator_stake_address
                     );
                     continue;
                 }
 
-                // Check pool's reward address
-                // Pre-Allegra: skip unconditionally if it's the pool reward account
-                // Post-Allegra: skip only if they're also a pool owner
-                if &spo.reward_account == delegator_stake_address
-                    && (era < Era::Allegra || spo.pool_owners.contains(&spo.reward_account))
-                {
+                // Pre-Allegra: skip pool reward account unconditionally (Shelley bug)
+                if is_reward_account && is_pre_allegra {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address
@@ -398,7 +400,7 @@ fn calculate_spo_rewards(
 
                 // Check if it was deregistered between staking and now
                 // This only applied before Allegra - after Allegra, deregistered accounts still get rewards
-                if era < Era::Allegra && deregistrations.contains(delegator_stake_address) {
+                if is_pre_allegra && deregistrations.contains(delegator_stake_address) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
                         delegator_stake_address
@@ -430,7 +432,7 @@ fn calculate_spo_rewards(
 
     // Always emit leader reward, but mark whether account is registered
     // If not registered, the caller will send to treasury instead
-    if era < Era::Allegra {
+    if is_pre_allegra {
         if pay_to_pool_reward_account {
             rewards.push(RewardDetail {
                 account: spo.reward_account.clone(),
