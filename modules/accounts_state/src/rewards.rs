@@ -1,10 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
-use acropolis_common::{
-    protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
-    SPORewards, StakeAddress,
-};
+use acropolis_common::{protocol_params::ShelleyParams, rational_number::RationalNumber, Era, Lovelace, PoolId, RewardType, SPORewards, StakeAddress};
 use anyhow::{bail, Result};
 use bigdecimal::{BigDecimal, One, ToPrimitive, Zero};
 use std::cmp::min;
@@ -50,8 +47,10 @@ pub struct RewardsResult {
 /// taken.
 /// Registrations/deregistrations are net changes between 'staking' and 'performance' snapshots
 /// Note immutable - only state change allowed is to push a new snapshot
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_rewards(
     epoch: u64,
+    era: Era,
     performance: Arc<EpochSnapshot>,
     staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
@@ -145,8 +144,7 @@ pub fn calculate_rewards(
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
         // QUESTION: Which one?  Lowest hash seems to work in epoch 212
-        // TODO turn this off at Allegra start
-        if pay_to_pool_reward_account {
+        if pay_to_pool_reward_account && era < Era::Allegra {
             // Check all SPOs to see if they match this reward account
             for (other_id, other_spo) in staking.spos.iter() {
                 if other_spo.reward_account == staking_spo.reward_account

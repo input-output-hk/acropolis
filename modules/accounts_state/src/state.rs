@@ -5,20 +5,11 @@ use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::{
-    math::update_value_with_delta,
-    messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
-        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
-    },
-    protocol_params::ProtocolParams,
-    stake_addresses::{StakeAddressMap, StakeAddressState},
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, InstantaneousRewardSource,
-    InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo,
-    PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress,
-    StakeRewardDelta, TxCertificate,
-};
+use acropolis_common::{math::update_value_with_delta, messages::{
+    AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+    EpochActivityMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+    StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+}, protocol_params::ProtocolParams, stake_addresses::{StakeAddressMap, StakeAddressState}, BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward, PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind, SPORewards, StakeAddress, StakeRewardDelta, TxCertificate};
 pub(crate) use acropolis_common::{Pots, RewardType};
 use anyhow::Result;
 use imbl::{OrdMap, OrdSet};
@@ -314,6 +305,7 @@ impl State {
     fn enter_epoch(
         &mut self,
         epoch: u64,
+        era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
@@ -387,7 +379,9 @@ impl State {
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
 
-        // Update the reserves and treasury (monetary.rs)
+        // Calculate monetary change (fees added to reserves, treasury cut taken)
+        // Note: monetary_change.pots has reserves with fees added and treasury cut subtracted,
+        // but does NOT subtract stake_rewards - that happens later when rewards are actually paid.
         let monetary_change = calculate_monetary_change(
             &shelley_params,
             &self.pots,
@@ -400,6 +394,7 @@ impl State {
             epoch,
             reserves = self.pots.reserves,
             treasury = self.pots.treasury,
+            stake_rewards = monetary_change.stake_rewards,
             "After monetary change"
         );
 
@@ -450,6 +445,7 @@ impl State {
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch - 1,
+                era,
                 performance,
                 staking,
                 &shelley_params,
@@ -758,25 +754,29 @@ impl State {
     pub async fn handle_epoch_activity(
         &mut self,
         ea_msg: &EpochActivityMessage,
+        era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
-
-        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<PoolId, usize> = ea_msg
-            .spo_blocks
-            .iter()
-            .filter(|(hash, _)| self.spos.contains_key(hash))
-            .map(|(hash, count)| (*hash, *count))
-            .collect();
+        let spo_blocks: HashMap<PoolId, usize> = if era < Era::Allegra {
+            // Filter out SPOs we don't know (OBFT in early Shelley)
+            ea_msg
+                .spo_blocks
+                .iter()
+                .filter(|(hash, _)| self.spos.contains_key(hash))
+                .map(|(hash, count)| (*hash, *count))
+                .collect()
+        } else {
+            ea_msg.spo_blocks.iter().cloned().collect()
+        };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
+        let reward_deltas = self.enter_epoch(
             ea_msg.epoch + 1,
+            era,
             ea_msg.total_fees,
             spo_blocks,
             verifier,
-        )?);
+        )?;
 
         Ok(reward_deltas)
     }
