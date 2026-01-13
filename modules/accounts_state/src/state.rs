@@ -89,6 +89,9 @@ pub struct State {
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
 
+    /// Proposal refunds to apply next epoch (list of reward accounts to refund to)
+    proposal_refunds: Vec<(StakeAddress, Lovelace)>,
+
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
@@ -384,6 +387,7 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
+        reward_deltas.extend(self.pay_proposal_refunds());
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -520,6 +524,33 @@ impl State {
                 self.start_rewards_tx = None;
             }
         }
+    }
+
+    fn pay_proposal_refunds(&mut self) -> Vec<StakeRewardDelta> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
+        let refunds = take(&mut self.proposal_refunds);
+
+        for (reward_account, deposit) in refunds {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(&reward_account) {
+                reward_deltas.push(StakeRewardDelta {
+                    stake_address: reward_account.clone(),
+                    delta: deposit,
+                    reward_type: RewardType::ProposalRefund,
+                    pool: PoolId::default(),
+                });
+                stake_addresses.add_to_reward(&reward_account, deposit);
+            } else {
+                warn!(
+                    "Reward account {} deregistered - paying refund to treasury",
+                    reward_account
+                );
+                self.pots.treasury += deposit;
+            }
+        }
+
+        reward_deltas
     }
 
     /// Pay pool refunds
@@ -768,7 +799,9 @@ impl State {
         era: Era,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        // Filter out SPOs we don't know (OBFT in early Shelley)
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
+        // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
         let spo_blocks: HashMap<PoolId, usize> = if era < Era::Allegra {
             ea_msg
                 .spo_blocks
@@ -781,13 +814,13 @@ impl State {
         };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        let reward_deltas = self.enter_epoch(
+        reward_deltas.extend(self.enter_epoch(
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
             spo_blocks,
             verifier,
-        )?;
+        )?);
 
         Ok(reward_deltas)
     }
@@ -942,10 +975,22 @@ impl State {
         stake_addresses.record_stake_delegation(stake_address, spo);
     }
 
-    /// record a drep delegation
+    /// Record a DRep registration
+    fn record_drep_registration(&mut self, drep: &DRepCredential, deposit: u64) {
+        self.dreps.push((drep.clone(), deposit));
+    }
+
+    /// record a DRep delegation
     fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_drep_delegation(stake_address, drep);
+    }
+
+    /// Record a DRep deregistration
+    fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
+        self.dreps.retain(|(cred, _)| cred != drep);
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        stake_addresses.deregister_drep(drep);
     }
 
     /// Handle TxCertificates
@@ -1012,15 +1057,11 @@ impl State {
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
-                    self.dreps.push((reg.credential.clone(), reg.deposit));
+                    self.record_drep_registration(&reg.credential, reg.deposit);
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    self.dreps.retain(|(cred, _)| cred != &dereg.credential);
-
-                    // Clear all delegations TO this DRep (per Haskell ledger: clearDRepDelegations)
-                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                    stake_addresses.deregister_drep(&dereg.credential);
+                    self.record_drep_deregistration(&dereg.credential);
                 }
 
                 _ => (),
@@ -1097,65 +1138,26 @@ impl State {
         Ok(())
     }
 
-    /// Handle governance outcomes (enacted/expired proposals) at epoch boundary
-    ///
-    /// For each proposal outcome:
-    /// - Refund deposit to proposer's reward account (if registered), else to treasury
-    /// - For enacted TreasuryWithdrawal actions: transfer funds from treasury to reward accounts
     pub fn handle_governance_outcomes(
         &mut self,
         outcomes_msg: &GovernanceOutcomesMessage,
     ) -> Result<()> {
-        let mut total_refunds: u64 = 0;
-        let mut total_to_treasury: u64 = 0;
-        let mut total_treasury_withdrawals: u64 = 0;
-
         for outcome in &outcomes_msg.conway_outcomes {
             let proposal = &outcome.voting.procedure;
             let deposit = proposal.deposit;
-            let reward_account = &proposal.reward_account;
 
-            // Note: We do NOT subtract from pots.deposits here because governance
-            // deposits are tracked separately in the governance state
-            total_refunds += deposit;
-
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            if stake_addresses.is_registered(reward_account) {
-                stake_addresses.add_to_reward(reward_account, deposit);
-                info!(
-                    "Governance proposal {:?} {} - refund {} lovelace to {}",
-                    proposal.gov_action_id,
-                    if outcome.voting.accepted {
-                        "enacted"
-                    } else {
-                        "expired"
-                    },
-                    deposit,
-                    reward_account
-                );
-            } else {
-                drop(stake_addresses);
-                self.pots.treasury += deposit;
-                total_to_treasury += deposit;
-                warn!(
-                    "Governance proposal {:?} {} - reward account {} not registered, refund {} to treasury",
-                    proposal.gov_action_id,
-                    if outcome.voting.accepted { "enacted" } else { "expired" },
-                    reward_account,
-                    deposit
-                );
-            }
+            self.proposal_refunds.push((proposal.reward_account.clone(), deposit));
 
             // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
             if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
                 &outcome.action_to_perform
             {
                 for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    // Convert raw bytes to StakeAddress using from_binary (29-byte format)
                     match StakeAddress::from_binary(reward_account_bytes) {
                         Ok(reward_account) => {
                             // Deduct from treasury
                             self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
-                            total_treasury_withdrawals += *amount;
 
                             // Credit to reward account
                             let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1180,14 +1182,8 @@ impl State {
 
         if !outcomes_msg.conway_outcomes.is_empty() {
             info!(
-                "Governance outcomes: {} proposals processed, total refunds: {} lovelace ({} ADA), \
-                 {} lovelace to treasury (unregistered accounts), treasury withdrawals: {} lovelace ({} ADA)",
+                "Governance outcomes: {} proposals processed",
                 outcomes_msg.conway_outcomes.len(),
-                total_refunds,
-                total_refunds / 1_000_000,
-                total_to_treasury,
-                total_treasury_withdrawals,
-                total_treasury_withdrawals / 1_000_000
             );
         }
 
