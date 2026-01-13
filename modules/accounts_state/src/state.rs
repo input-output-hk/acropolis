@@ -964,10 +964,22 @@ impl State {
         stake_addresses.record_stake_delegation(stake_address, spo);
     }
 
-    /// record a drep delegation
+    /// Record a DRep registration
+    fn record_drep_registration(&mut self, drep: &DRepCredential, deposit: u64) {
+        self.dreps.push((drep.clone(), deposit));
+    }
+
+    /// record a DRep delegation
     fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         stake_addresses.record_drep_delegation(stake_address, drep);
+    }
+
+    /// Record a DRep deregistration
+    fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
+        self.dreps.retain(|(cred, _)| cred != drep);
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        stake_addresses.deregister_drep(drep);
     }
 
     /// Handle TxCertificates
@@ -1031,6 +1043,14 @@ impl State {
                     );
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                }
+
+                TxCertificate::DRepRegistration(reg) => {
+                    self.record_drep_registration(&reg.credential, reg.deposit);
+                }
+
+                TxCertificate::DRepDeregistration(dereg) => {
+                    self.record_drep_deregistration(&dereg.credential);
                 }
 
                 _ => (),
