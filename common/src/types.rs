@@ -381,6 +381,8 @@ pub enum RewardType {
     Member,
     #[n(2)]
     PoolRefund,
+    #[n(3)]
+    ProposalRefund,
 }
 
 impl fmt::Display for RewardType {
@@ -389,6 +391,7 @@ impl fmt::Display for RewardType {
             RewardType::Leader => write!(f, "leader"),
             RewardType::Member => write!(f, "member"),
             RewardType::PoolRefund => write!(f, "pool_deposit_refund"),
+            RewardType::ProposalRefund => write!(f, "proposal_refund"),
         }
     }
 }

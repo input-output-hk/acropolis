@@ -3,8 +3,10 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
+use acropolis_common::messages::GovernanceOutcomesMessage;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
+use acropolis_common::GovernanceOutcomeVariant;
 use acropolis_common::{
     math::update_value_with_delta,
     messages::{
@@ -88,6 +90,9 @@ pub struct State {
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
+
+    /// Proposal refunds to apply next epoch (list of reward accounts to refund to)
+    proposal_refunds: Vec<(StakeAddress, Lovelace)>,
 
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
@@ -383,6 +388,7 @@ impl State {
 
         // Pay the refunds after snapshot, so they don't appear in active_stake
         reward_deltas.extend(self.pay_pool_refunds());
+        reward_deltas.extend(self.pay_proposal_refunds());
 
         // Verify pots state
         verifier.verify_pots(epoch, &self.pots);
@@ -518,6 +524,33 @@ impl State {
                 self.start_rewards_tx = None;
             }
         }
+    }
+
+    fn pay_proposal_refunds(&mut self) -> Vec<StakeRewardDelta> {
+        let mut reward_deltas = Vec::<StakeRewardDelta>::new();
+
+        let refunds = take(&mut self.proposal_refunds);
+
+        for (reward_account, deposit) in refunds {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            if stake_addresses.is_registered(&reward_account) {
+                reward_deltas.push(StakeRewardDelta {
+                    stake_address: reward_account.clone(),
+                    delta: deposit,
+                    reward_type: RewardType::ProposalRefund,
+                    pool: PoolId::default(),
+                });
+                stake_addresses.add_to_reward(&reward_account, deposit);
+            } else {
+                warn!(
+                    "Reward account {} deregistered - paying refund to treasury",
+                    reward_account
+                );
+                self.pots.treasury += deposit;
+            }
+        }
+
+        reward_deltas
     }
 
     /// Pay pool refunds
@@ -1070,6 +1103,58 @@ impl State {
             &mut self.pots.deposits,
             pot_deltas.delta_deposits,
         );
+
+        Ok(())
+    }
+
+    pub fn handle_governance_outcomes(
+        &mut self,
+        outcomes_msg: &GovernanceOutcomesMessage,
+    ) -> Result<()> {
+        for outcome in &outcomes_msg.conway_outcomes {
+            let proposal = &outcome.voting.procedure;
+            let deposit = proposal.deposit;
+
+            self.proposal_refunds.push((proposal.reward_account.clone(), deposit));
+
+            // Handle treasury withdrawals for enacted TreasuryWithdrawal actions
+            if let GovernanceOutcomeVariant::TreasuryWithdrawal(withdrawal_action) =
+                &outcome.action_to_perform
+            {
+                for (reward_account_bytes, amount) in &withdrawal_action.rewards {
+                    // Convert raw bytes to StakeAddress using from_binary (29-byte format)
+                    match StakeAddress::from_binary(reward_account_bytes) {
+                        Ok(reward_account) => {
+                            // Deduct from treasury
+                            self.pots.treasury = self.pots.treasury.saturating_sub(*amount);
+
+                            // Credit to reward account
+                            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                            stake_addresses.add_to_reward(&reward_account, *amount);
+                            info!(
+                                "Treasury withdrawal: {} lovelace ({} ADA) to {}",
+                                amount,
+                                amount / 1_000_000,
+                                reward_account
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to parse reward account bytes for treasury withdrawal: {:?}, error: {}",
+                                reward_account_bytes, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        if !outcomes_msg.conway_outcomes.is_empty() {
+            info!(
+                "Governance outcomes: {} proposals processed",
+                outcomes_msg.conway_outcomes.len(),
+            );
+        }
 
         Ok(())
     }
