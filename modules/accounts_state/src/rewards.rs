@@ -55,8 +55,8 @@ pub struct RewardsResult {
 /// Calculate rewards for a given epoch based on current rewards state and protocol parameters
 /// The epoch is the one that has just ended - we assume the snapshot for this has already been
 /// taken.
-/// Registrations are net changes between 'staking' and 'performance' snapshots (used for Shelley bug)
-/// Note immutable - only state change allowed is to push a new snapshot
+/// Registrations/deregistrations are net changes between 'staking' and 'performance' snapshots
+/// Note immutable - the only state change allowed is to push a new snapshot
 #[allow(clippy::too_many_arguments)]
 pub fn calculate_rewards(
     epoch: u64,
@@ -151,10 +151,6 @@ pub fn calculate_rewards(
             }
         }
 
-        if !pay_to_pool_reward_account {
-            info!("Reward account for SPO {} isn't registered", operator_id);
-        }
-
         // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
         // shared a reward account, only one of them would get paid.
         // QUESTION: Which one?  Lowest hash seems to work in epoch 212
@@ -177,6 +173,8 @@ pub fn calculate_rewards(
                     }
                 }
             }
+        } else {
+            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -389,23 +387,25 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Pre-Allegra: skip pool reward account unconditionally (Shelley bug)
-                if is_reward_account && is_pre_allegra {
-                    debug!(
-                        "Skipping pool reward account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
-                }
+                // Pre-Allegra (Shelley/Mary) specific skip rules
+                if is_pre_allegra {
+                    // Check pool's reward address
+                    if is_reward_account {
+                        debug!(
+                            "Skipping pool reward account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
 
-                // Check if it was deregistered between staking and now
-                // This only applied before Allegra - after Allegra, deregistered accounts still get rewards
-                if is_pre_allegra && deregistrations.contains(delegator_stake_address) {
-                    info!(
-                        "Recently deregistered member account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
+                    // Check if it was deregistered between staking and now
+                    if deregistrations.contains(delegator_stake_address) {
+                        info!(
+                            "Recently deregistered member account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
                 }
 
                 // Transfer from reserves to this account
