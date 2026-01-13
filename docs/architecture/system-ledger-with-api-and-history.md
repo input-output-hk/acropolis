@@ -227,9 +227,9 @@ requests into request-response messages on the Caryatid message bus.  So, for ex
 
 ### Blockfrost REST
 The actual BlockFrost REST endpoints are provided by the
-[Blockfrost REST](../../modules/rest_blockfrost) has handlers for a variety of `rest.get.xxx`
+[Blockfrost REST](../../modules/rest_blockfrost) module. This module has handlers for a variety of `rest.get.xxx`
 requests, requests further queries from the ledger state modules (sometimes multiple, which
-it aggregates) and returns the corresponding REST response.
+it aggregates), and returns the corresponding REST response.
 
 ### Chain Store
 
