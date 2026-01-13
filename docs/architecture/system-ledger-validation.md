@@ -189,7 +189,7 @@ to `cardano.block.available` will now listen to
 have been overriding this so far).
 
 Consensus sets the `Validate` bit in the `BlockIntent` before passing
-it on, and then waits for No/NoGo responses from a configured list of
+it on, and then waits for Go/NoGo responses from a configured list of
 downstream modules - specifically a set of `cardano.validation.x` topics where `x` is
 a shorthand for the module name (e.g. `cardano.validation.utxo`).  Note that it will wait
 for all modules to respond either Go or NoGo - silence is not an option.
