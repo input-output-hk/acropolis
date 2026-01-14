@@ -315,10 +315,10 @@ impl EpochSnapshot {
 /// Container for the three snapshots used in rewards calculation (mark, set, go)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
-    /// Mark snapshot (current epoch) - newest, has current epoch blocks
+    /// Mark snapshot (current epoch)
     pub mark: EpochSnapshot,
 
-    /// Set snapshot (epoch - 1) - has previous epoch blocks
+    /// Set snapshot (epoch - 1)
     pub set: EpochSnapshot,
 }
 

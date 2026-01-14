@@ -196,7 +196,7 @@ impl Verifier {
                     rtype,
                     amount,
                     pool: spo,
-                    registered: true, // Verification data is for registered accounts
+                    registered: true,
                 });
             }
 
