@@ -31,6 +31,7 @@ pub mod state_history;
 pub mod tx;
 pub mod types;
 pub mod upstream_cache;
+pub mod utxo;
 pub mod validation;
 
 // Flattened re-exports
@@ -39,3 +40,4 @@ pub use self::drep::*;
 pub use self::metadata::*;
 pub use self::tx::*;
 pub use self::types::*;
+pub use self::utxo::*;
