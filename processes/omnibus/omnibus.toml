@@ -54,10 +54,6 @@ validators = [
 [module.rest-blockfrost]
 
 [module.tx-unpacker]
-# Subscriptions needed for validation
-bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
-protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
-
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
@@ -91,7 +87,7 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = true
+store-spdd = false
 
 [module.historical-accounts-state]
 # Clear state on start up (default true)
