@@ -800,7 +800,7 @@ impl State {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<PoolId, usize> = if era < Era::Allegra {
+        let spo_blocks: HashMap<PoolId, usize> = if era == Era::Shelley {
             ea_msg
                 .spo_blocks
                 .iter()

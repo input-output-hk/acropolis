@@ -151,30 +151,33 @@ pub fn calculate_rewards(
             }
         }
 
-        // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
-        // shared a reward account, only one of them would get paid.
-        // QUESTION: Which one?  Lowest hash seems to work in epoch 212
-        if pay_to_pool_reward_account && era < Era::Allegra {
-            // Check all SPOs to see if they match this reward account
-            for (other_id, other_spo) in staking.spos.iter() {
-                if other_spo.reward_account == staking_spo.reward_account
-                    && other_id.cmp(operator_id) == Ordering::Less
-                // Lower ID (hash) wins
-                {
-                    // It must have been paid a reward - we assume that checking it produced
-                    // any blocks is enough here - if not we'll have to do this as a post-process
-                    if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
-                        pay_to_pool_reward_account = false;
-                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                              operator_id,
-                              other_id,
-                              staking_spo.reward_account);
-                        break;
+        if era == Era::Shelley {
+            if pay_to_pool_reward_account {
+                // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
+                // shared a reward account, only one of them would get paid.
+                // QUESTION: Which one?  Lowest hash seems to work in epoch 212
+                // Check all SPOs to see if they match this reward account
+                for (other_id, other_spo) in staking.spos.iter() {
+                    if other_spo.reward_account == staking_spo.reward_account
+                        && other_id.cmp(operator_id) == Ordering::Less
+                    // Lower ID (hash) wins
+                    {
+                        // It must have been paid a reward - we assume that checking it produced
+                        // any blocks is enough here - if not we'll have to do this as a post-process
+                        if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0
+                        {
+                            pay_to_pool_reward_account = false;
+                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                                  operator_id,
+                                  other_id,
+                                  staking_spo.reward_account);
+                            break;
+                        }
                     }
                 }
+            } else {
+                info!("Reward account for SPO {} isn't registered", operator_id);
             }
-        } else {
-            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -260,8 +263,8 @@ fn calculate_spo_rewards(
     deregistrations: &HashSet<StakeAddress>,
     era: Era,
 ) -> Vec<RewardDetail> {
-    // Pre-Allegra had several checks that must be honored in rewards calculation
-    let is_pre_allegra = era < Era::Allegra;
+    // Pre-Allegra / Shelley had several checks that must be honored in rewards calculation
+    let is_shelley = era == Era::Shelley;
 
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -388,8 +391,8 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Pre-Allegra (Shelley/Mary) specific skip rules
-                if is_pre_allegra {
+                // Pre-Allegra (particularly Shelley/Mary) specific skip rules
+                if is_shelley {
                     // Check pool's reward address
                     if is_reward_account {
                         debug!(
@@ -433,7 +436,7 @@ fn calculate_spo_rewards(
 
     // Always emit leader reward, but mark whether account is registered
     // If not registered, the caller will send to treasury instead
-    if is_pre_allegra {
+    if is_shelley {
         if pay_to_pool_reward_account {
             rewards.push(RewardDetail {
                 account: spo.reward_account.clone(),
