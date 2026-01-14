@@ -238,7 +238,6 @@ mod tests {
             DelegatedStake {
                 active: 1,
                 active_delegators_count: 1,
-                live: 1,
             },
         )];
         epochs_history.handle_spdd(&block, &spdd_msg);

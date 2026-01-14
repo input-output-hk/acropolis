@@ -35,7 +35,7 @@ impl From<(&SPOStateMessage, &SPOStakeDistributionMessage)> for Snapshot {
             .map(|registration| (registration.operator, registration.vrf_key_hash))
             .collect();
         let active_stakes: HashMap<PoolId, u64> =
-            spdd_msg.spos.iter().map(|(pool_id, stake)| (*pool_id, stake.live)).collect();
+            spdd_msg.spos.iter().map(|(pool_id, stake)| (*pool_id, stake.active)).collect();
         let total_active_stakes = active_stakes.values().sum();
         Self {
             active_spos,

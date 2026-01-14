@@ -353,13 +353,13 @@ impl Verifier {
 
         let mut total_computed = 0;
         for (pool, computed_stake) in spdd.iter() {
-            total_computed += computed_stake.live;
+            total_computed += computed_stake.active;
             if let Some(ref_stake) = reference.get(pool) {
-                if *ref_stake != computed_stake.live {
-                    different.push((pool, ref_stake, computed_stake.live));
+                if *ref_stake != computed_stake.active {
+                    different.push((pool, ref_stake, computed_stake.active));
                 }
-            } else if computed_stake.live != 0 {
-                extra.push((pool, computed_stake.live));
+            } else if computed_stake.active != 0 {
+                extra.push((pool, computed_stake.active));
             }
         }
 
@@ -448,7 +448,6 @@ mod tests {
                     DelegatedStake {
                         active: *cmp,
                         active_delegators_count: 1,
-                        live: *cmp,
                     },
                 );
             }

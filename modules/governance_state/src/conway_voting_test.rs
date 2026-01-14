@@ -36,7 +36,6 @@ mod tests {
     struct PoolRecord(
         #[serde_as(as = "Base64")] PoolId, // key
         u64,                               // active stake
-        u64,                               // live stake
     );
 
     #[serde_as]
@@ -97,13 +96,12 @@ mod tests {
         let res = HashMap::from_iter(pools.iter().map(|(epoch, distr)| {
             (
                 *epoch,
-                HashMap::from_iter(distr.iter().map(|PoolRecord(id, active, live)| {
+                HashMap::from_iter(distr.iter().map(|PoolRecord(id, active)| {
                     (
                         *id,
                         DelegatedStake {
                             active: *active,
                             active_delegators_count: 0,
-                            live: *live,
                         },
                     )
                 })),
