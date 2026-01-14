@@ -164,7 +164,8 @@ pub fn calculate_rewards(
                     {
                         // It must have been paid a reward - we assume that checking it produced
                         // any blocks is enough here - if not we'll have to do this as a post-process
-                        if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0
+                        if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0)
+                            > 0
                         {
                             pay_to_pool_reward_account = false;
                             warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",

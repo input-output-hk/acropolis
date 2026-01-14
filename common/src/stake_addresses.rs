@@ -306,12 +306,10 @@ impl StakeAddressMap {
                     .and_modify(|v| {
                         v.active += total_stake;
                         v.active_delegators_count += 1;
-                        v.live += total_stake;
                     })
                     .or_insert(DelegatedStake {
                         active: total_stake,
                         active_delegators_count: 1,
-                        live: total_stake,
                     });
             });
 
@@ -1129,8 +1127,7 @@ mod tests {
             let spdd = stake_addresses.generate_spdd();
 
             let pool_stake = spdd.get(&SPO_HASH).unwrap();
-            assert_eq!(pool_stake.active, 3150); // utxo + rewards
-            assert_eq!(pool_stake.live, 3150); // utxo + rewards
+            assert_eq!(pool_stake.active, 3150);
             assert_eq!(pool_stake.active_delegators_count, 2);
         }
 
