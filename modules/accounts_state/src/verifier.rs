@@ -196,6 +196,7 @@ impl Verifier {
                     rtype,
                     amount,
                     pool: spo,
+                    registered: true,
                 });
             }
 

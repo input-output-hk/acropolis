@@ -391,7 +391,7 @@ impl AccountsState {
                         async {
                             Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg, verifier)
+                                .handle_epoch_activity(ea_msg, block_info.era, verifier)
                                 .await
                                 .inspect_err(|e| {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
