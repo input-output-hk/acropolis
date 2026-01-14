@@ -158,10 +158,15 @@ macro_rules! declare_cardano_reader {
                             );
                         }
                         info!("Creating subscriber on '{topic_name}' for '{}'", $param);
-                        Ok(Some(Self { sub: ctx.subscribe(&topic_name).await? }))
-                    },
+                        Ok(Some(Self {
+                            sub: ctx.subscribe(&topic_name).await?,
+                        }))
+                    }
                     Err(_) => {
-                        info!("Skipping subscriber creation for '{}', no topic in config", $param);
+                        info!(
+                            "Skipping subscriber creation for '{}', no topic in config",
+                            $param
+                        );
                         Ok(None)
                     }
                 }
@@ -181,7 +186,9 @@ macro_rules! declare_cardano_reader {
                 }
             }
 
-            pub async fn read_skip_rollbacks(&mut self) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
+            pub async fn read_skip_rollbacks(
+                &mut self,
+            ) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
                 loop {
                     match self.read_with_rollbacks().await? {
                         RollbackWrapper::Normal(blk) => return Ok(blk),

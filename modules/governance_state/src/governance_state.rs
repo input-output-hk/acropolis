@@ -62,12 +62,9 @@ declare_cardano_reader!(
     SPOStakeDistributionMessage
 );
 
-//const CONFIG_DREP_DISTRIBUTION_TOPIC: &str = "stake-drep-distribution-topic";
-//const CONFIG_SPO_DISTRIBUTION_TOPIC: &str = "stake-spo-distribution-topic";
 const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const CONFIG_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
-/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
@@ -82,10 +79,6 @@ const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
-    //governance_topic: String,
-    //drep_distribution_topic: Option<String>,
-    //spo_distribution_topic: Option<String>,
-    //protocol_parameters_topic: String,
     enact_publish_topic: String,
     governance_query_topic: String,
     validation_outcome_topic: String,
@@ -96,24 +89,15 @@ pub struct GovernanceStateConfig {
 impl GovernanceStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
-        info!("Creating subscriber on '{}' for {}", actual, keydef.0);
-        actual
-    }
-
-    fn conf_option(config: &Arc<Config>, key: &str) -> Option<String> {
-        let actual = config.get_string(key).ok();
-        if let Some(ref value) = actual {
-            info!("Creating subscriber on '{}' for {}", value, key);
-        }
+        info!(
+            "Creating subscriber/publisher on '{}' for {}",
+            actual, keydef.0
+        );
         actual
     }
 
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
-            //governance_topic: Self::conf(config, CONFIG_GOVERNANCE_TOPIC),
-            //drep_distribution_topic: Self::conf_option(config, CONFIG_DREP_DISTRIBUTION_TOPIC),
-            //spo_distribution_topic: Self::conf_option(config, CONFIG_SPO_DISTRIBUTION_TOPIC),
-            //protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
             enact_publish_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             validation_outcome_topic: Self::conf(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
@@ -177,27 +161,32 @@ impl GovernanceState {
         drep_reader: &mut Option<DRepReader>,
         spo_reader: &mut Option<SPOReader>,
     ) {
-        let Some(ref mut drep_r) = drep_reader else { return; };
-        let Some(ref mut spo_r) = spo_reader else { return; };
-        let Some((_, d_drep)) = vld.consume(
-            "drep",
-            drep_r.read_skip_rollbacks().await
-        ) else { return; };
-        let Some((blk_spo, d_spo)) = vld.consume(
-            "spo",
-            spo_r.read_skip_rollbacks().await
-        ) else { return; };
+        let Some(ref mut drep_r) = drep_reader else {
+            return;
+        };
+        let Some(ref mut spo_r) = spo_reader else {
+            return;
+        };
+        let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
+            return;
+        };
+        let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
+            return;
+        };
 
         if blk_spo.epoch != d_spo.epoch + 1 {
             vld.handle_error(
                 "spo",
-                &anyhow!("SPO distibution {blk_spo:?} != SPO epoch + 1 ({})", d_spo.epoch)
+                &anyhow!(
+                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                    d_spo.epoch
+                ),
             );
         }
 
         vld.handle(
             "drep stake",
-            state.lock().await.handle_drep_stake(&d_drep, &d_spo).await
+            state.lock().await.handle_drep_stake(&d_drep, &d_spo).await,
         );
     }
 
@@ -303,14 +292,15 @@ impl GovernanceState {
 
         loop {
             let mut vld = ValidationContext::new(&context, &config.validation_outcome_topic);
-            let (blk_g, gov_procs) = match vld.consume_sync(gov_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal(normal) => normal,
-                RollbackWrapper::Rollback(message) => {
-                    let mut state = state.lock().await;
-                    state.publish_rollback(message).await?;
-                    continue;
-                }
-            };
+            let (blk_g, gov_procs) =
+                match vld.consume_sync(gov_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal(normal) => normal,
+                    RollbackWrapper::Rollback(message) => {
+                        let mut state = state.lock().await;
+                        state.publish_rollback(message).await?;
+                        continue;
+                    }
+                };
 
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
@@ -320,44 +310,45 @@ impl GovernanceState {
                     let mut state = state.lock().await;
                     if let Some(gov_outcomes) = vld.handle(
                         "process outcome",
-                        state.process_new_epoch(&blk_g).map(|x| Some(x))
+                        state.process_new_epoch(&blk_g).map(|x| Some(x)),
                     ) {
-                        vld.handle(
-                            "send outcome",
-                            state.send(&blk_g, gov_outcomes).await
-                        );
+                        vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
                     }
                 }
 
                 // Governance may present in any block -- not only in 'new epoch' blocks.
                 vld.handle(
                     "governance",
-                    state.lock().await.handle_governance(&blk_g, &gov_procs).await
+                    state.lock().await.handle_governance(&blk_g, &gov_procs).await,
                 );
 
                 if blk_g.new_epoch {
-                    if let Some((_, params)) = vld.consume(
-                        "params",
-                        param_reader.read_skip_rollbacks().await
-                    ) {
+                    if let Some((_, params)) =
+                        vld.consume("params", param_reader.read_skip_rollbacks().await)
+                    {
                         vld.handle(
                             "params",
-                            state.lock().await.handle_protocol_parameters(&params).await
+                            state.lock().await.handle_protocol_parameters(&params).await,
                         );
                     }
 
                     if blk_g.epoch > 0 {
-                        Self::process_drep_spo(&mut vld, state.clone(), &mut drep_reader, &mut spo_reader).await;
+                        Self::process_drep_spo(
+                            &mut vld,
+                            state.clone(),
+                            &mut drep_reader,
+                            &mut spo_reader,
+                        )
+                        .await;
                     }
 
                     {
-                        vld.handle(
-                            "advancing epoch",
-                            state.lock().await.advance_epoch(&blk_g)
-                        );
+                        vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
                     }
                 }
-            }.instrument(span).await;
+            }
+            .instrument(span)
+            .await;
 
             vld.publish().await;
         }
@@ -373,7 +364,7 @@ impl GovernanceState {
             None
         };
 
-        let gt = GovReader::new(&context, &config).await?; //certs: CertReader::new(&context, &config).await?,
+        let gt = GovReader::new(&context, &config).await?;
         let dt = DRepReader::new_without_default(&context, &config).await?;
         let st = SPOReader::new_without_default(&context, &config).await?;
         let pt = ParamReader::new(&context, &config).await?;
