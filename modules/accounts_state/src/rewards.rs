@@ -203,6 +203,7 @@ pub fn calculate_rewards(
                         total_paid_to_delegators += reward.amount;
                     }
                     RewardType::PoolRefund => {}
+                    RewardType::ProposalRefund => {}
                 }
                 spo_rewards.total_rewards += reward.amount;
                 result.total_paid += reward.amount;
