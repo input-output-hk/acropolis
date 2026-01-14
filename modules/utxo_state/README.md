@@ -28,6 +28,6 @@ The utxo state module subscribes for UTXODeltasMessages `cardano.utxo.deltas`
 
 It doesn't currently publish any messages.
 
-Also subscribe to `PoolCertificatesDeltas` Messages and `StakeCertificatesDeltas` Messages
+Also subscribe to `StakeRegistrationUpdates` Messages and `PoolRegistrationUpdates` Messages
 in order to validate UTxO Rule `ValueNotConservedUTxO` because we need to 
-calculate transaction's `deposit` and `refund` for Pool & Stake Addresses' Registration
+calculate transaction's `deposit` and `refund` for Stake Address & Pool's Registration

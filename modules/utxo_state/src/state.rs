@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, PoolCertificateDelta, StakeCertificateDelta, TxUTxODeltas,
+    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
     UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
@@ -508,8 +508,8 @@ impl State {
         &mut self,
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
-        pool_certificates_deltas: &[PoolCertificateDelta],
-        stake_certificates_deltas: &[StakeCertificateDelta],
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
 
@@ -527,8 +527,8 @@ impl State {
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
                     tx_deltas,
-                    pool_certificates_deltas,
-                    stake_certificates_deltas,
+                    pool_registration_updates,
+                    stake_registration_updates,
                     &utxos_needed,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));

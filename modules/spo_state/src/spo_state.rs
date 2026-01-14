@@ -27,9 +27,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-mod certificates_deltas_publisher;
 mod epochs_history;
 mod historical_spo_state;
+mod registration_updates_publisher;
 mod retired_pools_history;
 mod spo_state_publisher;
 mod state;
@@ -38,9 +38,9 @@ mod store_config;
 mod test_utils;
 
 use crate::{
-    certificates_deltas_publisher::PoolCertificatesDeltasPublisher,
-    epochs_history::EpochsHistoryState, retired_pools_history::RetiredPoolsHistoryState,
-    spo_state_publisher::SPOStatePublisher,
+    epochs_history::EpochsHistoryState,
+    registration_updates_publisher::PoolRegistrationUpdatesPublisher,
+    retired_pools_history::RetiredPoolsHistoryState, spo_state_publisher::SPOStatePublisher,
 };
 use state::State;
 use store_config::StoreConfig;
@@ -79,9 +79,9 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
     ("publish-spo-state-topic", "cardano.spo.state");
 
-const DEFAULT_POOL_CERTIFICATES_DELTAS_PUBLISH_TOPIC: (&str, &str) = (
-    "publish-pool-certificates-deltas-topic",
-    "cardano.pool.certificates.deltas",
+const DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC: (&str, &str) = (
+    "publish-pool-registration-updates-topic",
+    "cardano.pool.registration.updates",
 );
 
 const DEFAULT_VALIDATION_PUBLISH_TOPIC: (&str, &str) =
@@ -223,7 +223,7 @@ impl SPOState {
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         // publishers
         mut spo_state_publisher: SPOStatePublisher,
-        mut pool_certificates_deltas_publisher: PoolCertificatesDeltasPublisher,
+        mut pool_registration_updates_publisher: PoolRegistrationUpdatesPublisher,
         validation_publish_topic: String,
     ) -> Result<()> {
         // Wait for snapshot bootstrap if subscription is provided
@@ -266,7 +266,7 @@ impl SPOState {
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
                     spo_state_publisher.publish_rollback(certs_message.clone()).await?;
-                    pool_certificates_deltas_publisher
+                    pool_registration_updates_publisher
                         .publish_rollback(certs_message.clone())
                         .await?;
                     false
@@ -329,7 +329,7 @@ impl SPOState {
                             .inspect_err(|e| ctx.handling_error("TxCerts", e))
                             .ok();
 
-                        if let Some((maybe_message, pool_certificates_deltas_message)) = result {
+                        if let Some((maybe_message, pool_registration_updates_message)) = result {
                             if let Some(message) = maybe_message {
                                 if let Message::Cardano((
                                     _,
@@ -351,12 +351,12 @@ impl SPOState {
                                 }
                             }
 
-                            if let Err(e) = pool_certificates_deltas_publisher
-                                .publish(pool_certificates_deltas_message)
+                            if let Err(e) = pool_registration_updates_publisher
+                                .publish(pool_registration_updates_message)
                                 .await
                             {
                                 ctx.validation.push_anyhow(anyhow!(
-                                    "Error publishing Pool Certificates Delta: {e:#}"
+                                    "Error publishing Pool Registration Updates: {e:#}"
                                 ))
                             }
                         }
@@ -665,10 +665,10 @@ impl SPOState {
             .unwrap_or(DEFAULT_SPO_STATE_PUBLISH_TOPIC.1.to_string());
         info!("Creating SPO state publisher on '{spo_state_publish_topic}'");
 
-        let pool_certificates_deltas_publish_topic = config
-            .get_string(DEFAULT_POOL_CERTIFICATES_DELTAS_PUBLISH_TOPIC.0)
-            .unwrap_or(DEFAULT_POOL_CERTIFICATES_DELTAS_PUBLISH_TOPIC.1.to_string());
-        info!("Creating pool certificates deltas publisher on '{pool_certificates_deltas_publish_topic}'");
+        let pool_registration_updates_publish_topic = config
+            .get_string(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.1.to_string());
+        info!("Creating pool registration updates publisher on '{pool_registration_updates_publish_topic}'");
 
         let validation_publish_topic = config
             .get_string(DEFAULT_VALIDATION_PUBLISH_TOPIC.0)
@@ -993,9 +993,9 @@ impl SPOState {
 
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
-        let pool_certificates_deltas_publisher = PoolCertificatesDeltasPublisher::new(
+        let pool_registration_updates_publisher = PoolRegistrationUpdatesPublisher::new(
             context.clone(),
-            pool_certificates_deltas_publish_topic,
+            pool_registration_updates_publish_topic,
         );
         let context_copy = context.clone();
 
@@ -1018,7 +1018,7 @@ impl SPOState {
                 stake_reward_deltas_subscription,
                 parameters_subscription,
                 spo_state_publisher,
-                pool_certificates_deltas_publisher,
+                pool_registration_updates_publisher,
                 validation_publish_topic,
             )
             .await

@@ -2,7 +2,7 @@
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
 use acropolis_common::certificate::TxCertificateIdentifier;
-use acropolis_common::messages::{PoolCertificatesDeltasMessage, ProtocolParamsMessage};
+use acropolis_common::messages::{PoolRegistrationUpdatesMessage, ProtocolParamsMessage};
 use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -18,7 +18,7 @@ use acropolis_common::{
     BlockInfo, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
     StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
-use acropolis_common::{PoolCertificateDelta, PoolCertificateOutcome};
+use acropolis_common::{PoolRegistrationOutcome, PoolRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
@@ -325,8 +325,8 @@ impl State {
         reg: &PoolRegistration,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) -> PoolCertificateDelta {
-        let pool_certificate_delta = if self.spos.contains_key(&reg.operator) {
+    ) -> PoolRegistrationUpdate {
+        let pool_registration_update = if self.spos.contains_key(&reg.operator) {
             debug!(
                 epoch = self.epoch,
                 block = block.number,
@@ -335,12 +335,12 @@ impl State {
                 reg
             );
             self.pending_updates.insert(reg.operator, reg.clone());
-            PoolCertificateDelta {
+            PoolRegistrationUpdate {
                 cert_identifier: TxCertificateIdentifier {
                     tx_identifier: *tx_identifier,
                     cert_index: *cert_index,
                 },
-                outcome: PoolCertificateOutcome::Updated,
+                outcome: PoolRegistrationOutcome::Updated,
             }
         } else {
             debug!(
@@ -351,12 +351,12 @@ impl State {
                 reg
             );
             self.spos.insert(reg.operator, reg.clone());
-            PoolCertificateDelta {
+            PoolRegistrationUpdate {
                 cert_identifier: TxCertificateIdentifier {
                     tx_identifier: *tx_identifier,
                     cert_index: *cert_index,
                 },
-                outcome: PoolCertificateOutcome::Registered(
+                outcome: PoolRegistrationOutcome::Registered(
                     self.protocol_parameters
                         .as_ref()
                         .and_then(|pp| pp.shelley.as_ref())
@@ -390,7 +390,7 @@ impl State {
                 .add_pool_updates(PoolUpdateEvent::register_event(*tx_identifier, *cert_index));
         }
 
-        pool_certificate_delta
+        pool_registration_update
     }
 
     fn handle_pool_retirement(
@@ -400,8 +400,8 @@ impl State {
         ret: &PoolRetirement,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) -> Option<PoolCertificateDelta> {
-        let mut pool_certificate_delta = None;
+    ) -> Option<PoolRegistrationUpdate> {
+        let mut pool_registration_update = None;
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
@@ -431,12 +431,12 @@ impl State {
                 }
             }
             self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator);
-            pool_certificate_delta = Some(PoolCertificateDelta {
+            pool_registration_update = Some(PoolRegistrationUpdate {
                 cert_identifier: TxCertificateIdentifier {
                     tx_identifier: *tx_identifier,
                     cert_index: *cert_index,
                 },
-                outcome: PoolCertificateOutcome::RetirementQueued,
+                outcome: PoolRegistrationOutcome::RetirementQueued,
             });
 
             // Note: not removing pending updates - the deregistation may happen many
@@ -457,7 +457,7 @@ impl State {
             }
         }
 
-        pool_certificate_delta
+        pool_registration_update
     }
 
     fn register_stake_address(&mut self, stake_address: &StakeAddress) {
@@ -583,14 +583,14 @@ impl State {
             maybe_message = Some(self.handle_new_epoch(block, vld));
         }
 
-        let mut pool_certificates_deltas: Vec<PoolCertificateDelta> = Vec::new();
+        let mut pool_registration_updates: Vec<PoolRegistrationUpdate> = Vec::new();
 
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match &tx_cert.cert {
                 // for spo_state
                 TxCertificate::PoolRegistration(reg) => {
-                    pool_certificates_deltas.push(self.handle_pool_registration(
+                    pool_registration_updates.push(self.handle_pool_registration(
                         block,
                         reg,
                         &tx_cert.tx_identifier,
@@ -605,7 +605,7 @@ impl State {
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
                     ) {
-                        pool_certificates_deltas.push(delta);
+                        pool_registration_updates.push(delta);
                     }
                 }
 
@@ -648,13 +648,13 @@ impl State {
             }
         }
 
-        let pool_certificates_deltas_message = Arc::new(Message::Cardano((
+        let pool_registration_updates_message = Arc::new(Message::Cardano((
             block.clone(),
-            CardanoMessage::PoolCertificatesDeltas(PoolCertificatesDeltasMessage {
-                deltas: pool_certificates_deltas,
+            CardanoMessage::PoolRegistrationUpdates(PoolRegistrationUpdatesMessage {
+                updates: pool_registration_updates,
             }),
         )));
-        Ok((maybe_message, pool_certificates_deltas_message))
+        Ok((maybe_message, pool_registration_updates_message))
     }
 
     pub fn handle_governance(

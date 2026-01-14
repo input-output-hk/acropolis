@@ -32,8 +32,8 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod spo_rewards_publisher;
 use spo_rewards_publisher::SPORewardsPublisher;
-mod certificates_deltas_publisher;
-use certificates_deltas_publisher::StakeCertificatesDeltasPublisher;
+mod registration_updates_publisher;
+use registration_updates_publisher::StakeRegistrationUpdatesPublisher;
 mod stake_reward_deltas_publisher;
 mod state;
 use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
@@ -61,7 +61,7 @@ const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
-const DEFAULT_STAKE_CERTIFICATES_DELTAS_TOPIC: &str = "cardano.stake.certificates.deltas";
+const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
 
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
@@ -153,7 +153,7 @@ impl AccountsState {
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
-        mut stake_certificates_deltas_publisher: StakeCertificatesDeltasPublisher,
+        mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
         validation_outcomes_topic: String,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
@@ -239,7 +239,7 @@ impl AccountsState {
                     spo_publisher.publish_rollback(certs_message.clone()).await?;
                     spo_rewards_publisher.publish_rollback(certs_message.clone()).await?;
                     stake_reward_deltas_publisher.publish_rollback(certs_message.clone()).await?;
-                    stake_certificates_deltas_publisher
+                    stake_registration_updates_publisher
                         .publish_rollback(certs_message.clone())
                         .await?;
                     false
@@ -432,21 +432,21 @@ impl AccountsState {
                     let span = info_span!("account_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, block_info);
-                        let stake_certificate_deltas = state
-                            .handle_tx_certificates(tx_certs_msg)
+                        let stake_registration_updates = state
+                            .handle_tx_certificates(tx_certs_msg, &mut vld)
                             .inspect_err(|e| {
                                 vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
                             })
                             .ok();
 
-                        // Publish stake certificate deltas
-                        if let Some(deltas) = stake_certificate_deltas {
-                            if let Err(e) = stake_certificates_deltas_publisher
-                                .publish(block_info, deltas)
+                        // Publish stake registration updates
+                        if let Some(updates) = stake_registration_updates {
+                            if let Err(e) = stake_registration_updates_publisher
+                                .publish(block_info, updates)
                                 .await
                             {
                                 vld.push_anyhow(anyhow!(
-                                    "Error publishing stake certificate deltas: {e:#}"
+                                    "Error publishing stake registration updates: {e:#}"
                                 ));
                             }
                         }
@@ -604,11 +604,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
 
-        let stake_certificates_deltas_topic = config
-            .get_string("publish-stake-certificates-deltas-topic")
-            .unwrap_or(DEFAULT_STAKE_CERTIFICATES_DELTAS_TOPIC.to_string());
+        let stake_registration_updates_topic = config
+            .get_string("publish-stake-registration-updates-topic")
+            .unwrap_or(DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC.to_string());
         info!(
-            "Creating stake certificates deltas publisher on '{stake_certificates_deltas_topic}'"
+            "Creating stake registration updates publisher on '{stake_registration_updates_topic}'"
         );
 
         let validation_outcomes_topic = config
@@ -872,8 +872,10 @@ impl AccountsState {
         let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
         let stake_reward_deltas_publisher =
             StakeRewardDeltasPublisher::new(context.clone(), stake_reward_deltas_topic);
-        let stake_certificates_deltas_publisher =
-            StakeCertificatesDeltasPublisher::new(context.clone(), stake_certificates_deltas_topic);
+        let stake_registration_updates_publisher = StakeRegistrationUpdatesPublisher::new(
+            context.clone(),
+            stake_registration_updates_topic,
+        );
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -910,7 +912,7 @@ impl AccountsState {
                 spo_publisher,
                 spo_rewards_publisher,
                 stake_reward_deltas_publisher,
-                stake_certificates_deltas_publisher,
+                stake_registration_updates_publisher,
                 validation_outcomes_topic,
                 spos_subscription,
                 ea_subscription,

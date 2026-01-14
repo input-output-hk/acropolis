@@ -2,16 +2,16 @@ use acropolis_common::{caryatid::RollbackAwarePublisher, messages::Message};
 use caryatid_sdk::Context;
 use std::sync::Arc;
 
-/// Message publisher for Pool Certificates Deltas
-pub struct PoolCertificatesDeltasPublisher(RollbackAwarePublisher<Message>);
+/// Message publisher for Pool Registration Updates
+pub struct PoolRegistrationUpdatesPublisher(RollbackAwarePublisher<Message>);
 
-impl PoolCertificatesDeltasPublisher {
+impl PoolRegistrationUpdatesPublisher {
     /// Construct with context and topic to publish on
     pub fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self(RollbackAwarePublisher::new(context, topic))
     }
 
-    /// Publish the Pool Certificates Deltas
+    /// Publish the Pool Registration Updates
     pub async fn publish(&mut self, message: Arc<Message>) -> anyhow::Result<()> {
         self.0.publish(message).await
     }

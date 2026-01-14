@@ -2,28 +2,29 @@ use std::collections::HashMap;
 
 use acropolis_common::{
     validation::{Phase1ValidationError, TransactionValidationError},
-    PoolCertificateDelta, StakeCertificateDelta, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value,
+    PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    Value,
 };
 use anyhow::Result;
 mod shelley;
 
 pub fn validate_shelley_tx(
     tx_deltas: &TxUTxODeltas,
-    pool_certificates_deltas: &[PoolCertificateDelta],
-    stake_certificates_deltas: &[StakeCertificateDelta],
+    pool_registration_updates: &[PoolRegistrationUpdate],
+    stake_registration_updates: &[StakeRegistrationUpdate],
     utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
 
     // Consumed except inputs = Refund + Withrawals + Value Minted
-    let total_refund = tx_deltas.calculate_total_refund(stake_certificates_deltas);
+    let total_refund = tx_deltas.calculate_total_refund(stake_registration_updates);
     let total_withdrawals = tx_deltas.total_withdrawals.unwrap_or_default();
     let mut total_consumed_except_inputs = Value::new(total_refund + total_withdrawals, vec![]);
     total_consumed_except_inputs += tx_deltas.value_minted.as_ref().unwrap_or(&Value::default());
 
     // Produced = Outputs + Fee + Deposits + Value Burnt
     let mut total_produced =
-        tx_deltas.calculate_total_produced(pool_certificates_deltas, stake_certificates_deltas);
+        tx_deltas.calculate_total_produced(pool_registration_updates, stake_registration_updates);
     total_produced += tx_deltas.value_burnt.as_ref().unwrap_or(&Value::default());
 
     let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();

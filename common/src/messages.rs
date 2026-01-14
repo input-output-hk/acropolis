@@ -132,18 +132,16 @@ pub struct StakeRewardDeltasMessage {
     pub deltas: Vec<StakeRewardDelta>,
 }
 
-/// Stake certificates deltas message
+/// Stake registration updates message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeCertificatesDeltasMessage {
-    /// Set of deltas
-    pub deltas: Vec<StakeCertificateDelta>,
+pub struct StakeRegistrationUpdatesMessage {
+    pub updates: Vec<StakeRegistrationUpdate>,
 }
 
-/// Pool certificates deltas message
+/// Pool registration updates message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolCertificatesDeltasMessage {
-    /// Set of deltas
-    pub deltas: Vec<PoolCertificateDelta>,
+pub struct PoolRegistrationUpdatesMessage {
+    pub updates: Vec<PoolRegistrationUpdate>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -350,8 +348,8 @@ pub enum CardanoMessage {
     StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
 
     // Certificates deltas
-    StakeCertificatesDeltas(StakeCertificatesDeltasMessage), // Stake certificate deltas
-    PoolCertificatesDeltas(PoolCertificatesDeltasMessage),   // Pool certificate deltas
+    StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
+    PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

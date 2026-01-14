@@ -303,30 +303,28 @@ impl BlockInfo {
 
 // For stake address registration/deregistration (handles deposits/refunds)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum StakeCertificateOutcome {
+pub enum StakeRegistrationOutcome {
     Registered(Lovelace),   // New registration → deposit taken
     Deregistered(Lovelace), // Valid deregistration → refund given
-    AlreadyRegistered,      // Re-registration → no deposit
-    AlreadyDeregistered,    // Already gone → no refund
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct StakeCertificateDelta {
+pub struct StakeRegistrationUpdate {
     pub cert_identifier: TxCertificateIdentifier,
-    pub outcome: StakeCertificateOutcome,
+    pub outcome: StakeRegistrationOutcome,
 }
 
-impl StakeCertificateOutcome {
+impl StakeRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
-            StakeCertificateOutcome::Registered(deposit) => *deposit,
+            StakeRegistrationOutcome::Registered(deposit) => *deposit,
             _ => 0,
         }
     }
 
     pub fn refund(&self) -> Lovelace {
         match self {
-            StakeCertificateOutcome::Deregistered(refund) => *refund,
+            StakeRegistrationOutcome::Deregistered(refund) => *refund,
             _ => 0,
         }
     }
@@ -334,24 +332,24 @@ impl StakeCertificateOutcome {
 
 // For pool registration/retirement (handles pool deposits)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum PoolCertificateOutcome {
+pub enum PoolRegistrationOutcome {
     Registered(Lovelace), // New pool → deposit taken
     Updated,              // Existing pool update → no deposit
     RetirementQueued,     // Retirement queued
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoolCertificateDelta {
+pub struct PoolRegistrationUpdate {
     pub cert_identifier: TxCertificateIdentifier,
-    pub outcome: PoolCertificateOutcome,
+    pub outcome: PoolRegistrationOutcome,
 }
 
-impl PoolCertificateOutcome {
+impl PoolRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
-            PoolCertificateOutcome::Registered(deposit) => *deposit,
-            PoolCertificateOutcome::Updated => 0,
-            PoolCertificateOutcome::RetirementQueued => 0,
+            PoolRegistrationOutcome::Registered(deposit) => *deposit,
+            PoolRegistrationOutcome::Updated => 0,
+            PoolRegistrationOutcome::RetirementQueued => 0,
         }
     }
 }
@@ -392,7 +390,7 @@ pub struct TxUTxODeltas {
 impl TxUTxODeltas {
     pub fn calculate_total_refund(
         &self,
-        stake_certificates_deltas: &[StakeCertificateDelta],
+        stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Lovelace {
         let mut total_refund: Lovelace = 0;
         let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
@@ -400,7 +398,7 @@ impl TxUTxODeltas {
         };
 
         for cert_identifier in certs_identifiers.iter() {
-            total_refund += stake_certificates_deltas
+            total_refund += stake_registration_updates
                 .iter()
                 .find(|delta| delta.cert_identifier.eq(cert_identifier))
                 .map(|delta| delta.outcome.refund())
@@ -411,8 +409,8 @@ impl TxUTxODeltas {
 
     pub fn calculate_total_deposit(
         &self,
-        pool_certificates_deltas: &[PoolCertificateDelta],
-        stake_certificates_deltas: &[StakeCertificateDelta],
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Lovelace {
         let mut total_deposit: Lovelace = 0;
         let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
@@ -420,12 +418,12 @@ impl TxUTxODeltas {
         };
 
         for cert_identifier in certs_identifiers.iter() {
-            total_deposit += pool_certificates_deltas
+            total_deposit += pool_registration_updates
                 .iter()
                 .find(|delta| delta.cert_identifier.eq(cert_identifier))
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
-            total_deposit += stake_certificates_deltas
+            total_deposit += stake_registration_updates
                 .iter()
                 .find(|delta| delta.cert_identifier.eq(cert_identifier))
                 .map(|delta| delta.outcome.deposit())
@@ -436,12 +434,12 @@ impl TxUTxODeltas {
 
     pub fn calculate_total_produced(
         &self,
-        pool_certificates_deltas: &[PoolCertificateDelta],
-        stake_certificates_deltas: &[StakeCertificateDelta],
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Value {
         let mut total_produced = Value::default();
         total_produced += &Value::new(
-            self.calculate_total_deposit(pool_certificates_deltas, stake_certificates_deltas),
+            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates),
             vec![],
         );
         total_produced += &Value::new(self.fee, vec![]);

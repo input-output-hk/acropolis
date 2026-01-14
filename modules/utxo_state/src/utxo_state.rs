@@ -70,8 +70,8 @@ impl UTXOState {
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut pool_certificates_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut stake_certificates_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
     ) -> Result<()> {
         let mut genesis_utxo_consumed = false;
@@ -85,40 +85,40 @@ impl UTXOState {
                 current_block_info = Some(block_info.clone());
             }
 
-            // Read from pool certificates deltas subscription if available
-            let mut pool_certificates_deltas = vec![];
+            // Read from pool registration updates subscription if available
+            let mut pool_registration_updates = vec![];
             if genesis_utxo_consumed {
-                if let Some(subscription) = pool_certificates_deltas_subscription.as_mut() {
+                if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read pool certificates deltas subscription error");
+                        error!("Failed to read pool registration updates subscription error");
                         continue;
                     };
                     if let Message::Cardano((
                         block_info,
-                        CardanoMessage::PoolCertificatesDeltas(deltas_msg),
+                        CardanoMessage::PoolRegistrationUpdates(updates_msg),
                     )) = message.as_ref()
                     {
                         Self::check_sync(&current_block_info, block_info);
-                        pool_certificates_deltas = deltas_msg.deltas.clone();
+                        pool_registration_updates = updates_msg.updates.clone();
                     }
                 }
             }
 
-            // Read from stake certificates deltas subscription if available
-            let mut stake_certificates_deltas = vec![];
+            // Read from stake registration updates subscription if available
+            let mut stake_registration_updates = vec![];
             if genesis_utxo_consumed {
-                if let Some(subscription) = stake_certificates_deltas_subscription.as_mut() {
+                if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
-                        error!("Failed to read stake certificates deltas subscription error");
+                        error!("Failed to read stake registration updates subscription error");
                         continue;
                     };
                     if let Message::Cardano((
                         block_info,
-                        CardanoMessage::StakeCertificatesDeltas(deltas_msg),
+                        CardanoMessage::StakeRegistrationUpdates(updates_msg),
                     )) = message.as_ref()
                     {
                         Self::check_sync(&current_block_info, block_info);
-                        stake_certificates_deltas = deltas_msg.deltas.clone();
+                        stake_registration_updates = updates_msg.updates.clone();
                     }
                 }
             }
@@ -135,8 +135,8 @@ impl UTXOState {
                             .validate(
                                 block,
                                 deltas_msg,
-                                &pool_certificates_deltas,
-                                &stake_certificates_deltas,
+                                &pool_registration_updates,
+                                &stake_registration_updates,
                             )
                             .await
                         {
@@ -193,15 +193,15 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
 
-        let pool_certificates_deltas_subscribe_topic =
-            config.get_string("pool-certificates-deltas-subscribe-topic").ok();
-        if let Some(ref topic) = pool_certificates_deltas_subscribe_topic {
-            info!("Creating pool certificates deltas subscriber on '{topic}'");
+        let pool_registration_updates_subscribe_topic =
+            config.get_string("pool-registration-updates-subscribe-topic").ok();
+        if let Some(ref topic) = pool_registration_updates_subscribe_topic {
+            info!("Creating pool registration updates subscriber on '{topic}'");
         }
-        let stake_certificates_deltas_subscribe_topic =
-            config.get_string("stake-certificates-deltas-subscribe-topic").ok();
-        if let Some(ref topic) = stake_certificates_deltas_subscribe_topic {
-            info!("Creating stake certificates deltas subscriber on '{topic}'");
+        let stake_registration_updates_subscribe_topic =
+            config.get_string("stake-registration-updates-subscribe-topic").ok();
+        if let Some(ref topic) = stake_registration_updates_subscribe_topic {
+            info!("Creating stake registration updates subscriber on '{topic}'");
         }
 
         let snapshot_topic = config
@@ -245,14 +245,14 @@ impl UTXOState {
 
         // Subscribers
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
-        let pool_certificates_deltas_subscription =
-            if let Some(topic) = pool_certificates_deltas_subscribe_topic {
+        let pool_registration_updates_subscription =
+            if let Some(topic) = pool_registration_updates_subscribe_topic {
                 Some(context.subscribe(&topic).await?)
             } else {
                 None
             };
-        let stake_certificates_deltas_subscription =
-            if let Some(topic) = stake_certificates_deltas_subscribe_topic {
+        let stake_registration_updates_subscription =
+            if let Some(topic) = stake_registration_updates_subscribe_topic {
                 Some(context.subscribe(&topic).await?)
             } else {
                 None
@@ -265,8 +265,8 @@ impl UTXOState {
                 context_run,
                 state_run,
                 utxo_deltas_subscription,
-                pool_certificates_deltas_subscription,
-                stake_certificates_deltas_subscription,
+                pool_registration_updates_subscription,
+                stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
             )
             .await
