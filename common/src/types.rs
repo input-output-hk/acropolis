@@ -375,6 +375,8 @@ pub struct TxUTxODeltas {
     // State needed for validation
     pub total_withdrawals: Option<Lovelace>,
     pub certs_identifiers: Option<Vec<TxCertificateIdentifier>>,
+    pub value_minted: Option<Value>,
+    pub value_burnt: Option<Value>,
 
     // This is missing UTxO Authors
     pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
@@ -790,6 +792,59 @@ impl Value {
 
     pub fn coin(&self) -> u64 {
         self.lovelace
+    }
+
+    pub fn try_apply_assets_delta(&mut self, delta: &NativeAssetsDelta) -> Result<()> {
+        for (policy_id, asset_deltas) in delta.iter() {
+            // Find or create the policy entry
+            if !self.assets.iter().any(|(pid, _)| pid == policy_id) {
+                self.assets.push((*policy_id, Vec::new()));
+            }
+
+            let existing_assets =
+                &mut self.assets.iter_mut().find(|(pid, _)| pid == policy_id).unwrap().1;
+
+            for asset_delta in asset_deltas {
+                if let Some(existing_asset) =
+                    existing_assets.iter_mut().find(|a| a.name == asset_delta.name)
+                {
+                    // Asset exists, apply delta
+                    let new_amount = existing_asset.amount.checked_add_signed(asset_delta.amount);
+                    match new_amount {
+                        Some(0) => {
+                            // Mark for removal (will be cleaned up below)
+                            existing_asset.amount = 0;
+                        }
+                        Some(amt) => {
+                            existing_asset.amount = amt;
+                        }
+                        None => {
+                            return Err(anyhow::anyhow!("Asset amount would become negative"));
+                        }
+                    }
+                } else {
+                    // Asset doesn't exist, add if delta is positive
+                    if asset_delta.amount > 0 {
+                        existing_assets.push(NativeAsset {
+                            name: asset_delta.name,
+                            amount: asset_delta.amount as u64,
+                        });
+                    } else if asset_delta.amount < 0 {
+                        // Trying to subtract from non-existent asset
+                        return Err(anyhow::anyhow!("Asset amount would become negative"));
+                    }
+                    // If delta is 0, do nothing
+                }
+            }
+
+            // Remove assets with amount 0
+            existing_assets.retain(|a| a.amount > 0);
+        }
+
+        // Remove policies with no assets left
+        self.assets.retain(|(_, assets)| !assets.is_empty());
+
+        Ok(())
     }
 }
 
@@ -2798,5 +2853,84 @@ mod tests {
             panic!("expected parsing error, got success");
         };
         assert_eq!(error.to_string(), message);
+    }
+
+    #[test]
+    fn should_apply_assets_delta() {
+        let mut value = Value::new(1000000, vec![]);
+        let delta = vec![(
+            PolicyId::new([0; 28]),
+            vec![NativeAssetDelta {
+                name: AssetName::new(b"asset1").unwrap(),
+                amount: 100,
+            }],
+        )];
+        value.try_apply_assets_delta(&delta).unwrap();
+        assert_eq!(
+            value.assets,
+            vec![(
+                PolicyId::new([0; 28]),
+                vec![NativeAsset {
+                    name: AssetName::new(b"asset1").unwrap(),
+                    amount: 100,
+                }],
+            )]
+        );
+
+        let delta = vec![(
+            PolicyId::new([0; 28]),
+            vec![
+                NativeAssetDelta {
+                    name: AssetName::new(b"asset1").unwrap(),
+                    amount: -50,
+                },
+                NativeAssetDelta {
+                    name: AssetName::new(b"asset2").unwrap(),
+                    amount: 50,
+                },
+            ],
+        )];
+        value.try_apply_assets_delta(&delta).unwrap();
+        assert_eq!(
+            value.assets,
+            vec![(
+                PolicyId::new([0; 28]),
+                vec![
+                    NativeAsset {
+                        name: AssetName::new(b"asset1").unwrap(),
+                        amount: 50,
+                    },
+                    NativeAsset {
+                        name: AssetName::new(b"asset2").unwrap(),
+                        amount: 50,
+                    },
+                ],
+            )]
+        );
+
+        let delta = vec![(
+            PolicyId::new([0; 28]),
+            vec![
+                NativeAssetDelta {
+                    name: AssetName::new(b"asset1").unwrap(),
+                    amount: -50,
+                },
+                NativeAssetDelta {
+                    name: AssetName::new(b"asset2").unwrap(),
+                    amount: -50,
+                },
+            ],
+        )];
+        value.try_apply_assets_delta(&delta).unwrap();
+        assert_eq!(value.assets, vec![]);
+
+        let delta = vec![(
+            PolicyId::new([1; 28]),
+            vec![NativeAssetDelta {
+                name: AssetName::new(b"asset1").unwrap(),
+                amount: -100,
+            }],
+        )];
+        assert!(value.try_apply_assets_delta(&delta).is_err());
     }
 }

@@ -46,7 +46,6 @@ pub fn validate_value_not_conserved(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn validate(
     inputs: &[UTxOIdentifier],
     total_consumed_except_inputs: Value,

@@ -524,28 +524,11 @@ impl State {
         let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
-            let total_consumed_except_inputs = Value::new(
-                tx_deltas.calculate_total_refund(stake_certificates_deltas)
-                    + tx_deltas.total_withdrawals.unwrap_or_default(),
-                vec![],
-            );
-            let total_produced = tx_deltas
-                .calculate_total_produced(pool_certificates_deltas, stake_certificates_deltas);
-            let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
-            let mut script_hashes_needed =
-                tx_deltas.script_hashes_needed.clone().unwrap_or_default();
-            let vkey_hashes_provided = tx_deltas.vkey_hashes_provided.clone().unwrap_or_default();
-            let script_hashes_provided =
-                tx_deltas.script_hashes_provided.clone().unwrap_or_default();
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
-                    &tx_deltas.consumes,
-                    total_consumed_except_inputs,
-                    total_produced,
-                    &mut vkey_hashes_needed,
-                    &mut script_hashes_needed,
-                    &vkey_hashes_provided,
-                    &script_hashes_provided,
+                    tx_deltas,
+                    pool_certificates_deltas,
+                    stake_certificates_deltas,
                     &utxos_needed,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
@@ -671,6 +654,8 @@ mod tests {
                 is_valid: true,
                 total_withdrawals: None,
                 certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -1049,6 +1034,8 @@ mod tests {
                 is_valid: true,
                 total_withdrawals: None,
                 certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -1073,6 +1060,8 @@ mod tests {
                 is_valid: true,
                 total_withdrawals: None,
                 certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

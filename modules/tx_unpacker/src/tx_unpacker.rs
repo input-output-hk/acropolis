@@ -169,6 +169,19 @@ impl TxUnpacker {
                                     // sum up total output lovelace for a block
                                     total_output += tx_total_output.coin() as u128;
 
+                                    // Mint or burn deltas
+                                    let mut mint_burn_deltas:NativeAssetsDelta =
+                                            Vec::new();
+
+                                    // Mint deltas
+                                    for policy_group in tx.mints().iter() {
+                                        if let Some((policy_id, deltas)) =
+                                            acropolis_codec::map_mint_burn(policy_group)
+                                        {
+                                            mint_burn_deltas.push((policy_id, deltas));
+                                        }
+                                    }
+
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output_coin={}",
                                                tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output.coin());
@@ -182,6 +195,7 @@ impl TxUnpacker {
 
                                     if publish_utxo_deltas_topic.is_some() {
                                         // Group deltas by tx
+                                        let (value_minted, value_burnt) = utils::get_value_minted_burnt_from_deltas(&mint_burn_deltas);
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
                                             consumes: tx_consumes,
@@ -190,6 +204,8 @@ impl TxUnpacker {
                                             is_valid,
                                             total_withdrawals: Some(total_withdrawals),
                                             certs_identifiers: Some(certs_identifiers),
+                                            value_minted: Some(value_minted),
+                                            value_burnt: Some(value_burnt),
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),
@@ -198,18 +214,6 @@ impl TxUnpacker {
                                     }
 
                                     if publish_asset_deltas_topic.is_some() {
-                                        let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> =
-                                            Vec::new();
-
-                                        // Mint deltas
-                                        for policy_group in tx.mints().iter() {
-                                            if let Some((policy_id, deltas)) =
-                                                acropolis_codec::map_mint_burn(policy_group)
-                                            {
-                                                tx_deltas.push((policy_id, deltas));
-                                            }
-                                        }
-
                                         if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL)
                                         {
                                             let mut metadata_raw = Vec::new();
@@ -223,8 +227,8 @@ impl TxUnpacker {
                                             }
                                         }
 
-                                        if !tx_deltas.is_empty() {
-                                            asset_deltas.push((tx_identifier, tx_deltas));
+                                        if !mint_burn_deltas.is_empty() {
+                                            asset_deltas.push((tx_identifier, mint_burn_deltas));
                                         }
                                     }
 
