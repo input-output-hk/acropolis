@@ -6,7 +6,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network = "mainnet"
+network-name = "mainnet"
 startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril" # Options: "mithril" | "upstream"
 

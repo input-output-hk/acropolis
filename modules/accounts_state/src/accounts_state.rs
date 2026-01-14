@@ -52,6 +52,7 @@ const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
+const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
@@ -157,6 +158,7 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
@@ -173,6 +175,7 @@ impl AccountsState {
             // !TODO this seems overly specific to our startup process
             let _ = stake_subscription.read().await?;
             let _ = parameters_subscription.read().await?;
+            let _ = governance_outcomes_subscription.read().await?;
 
             // Initialisation messages
             {
@@ -415,6 +418,36 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
+                // Handle governance outcomes (enacted/expired proposals) at epoch boundary
+                let (_, message) =
+                    governance_outcomes_subscription.read_ignoring_rollbacks().await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::GovernanceOutcomes(outcomes_msg),
+                    )) => {
+                        let span = info_span!(
+                            "account_state.handle_governance_outcomes",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, block_info);
+                            state
+                                .handle_governance_outcomes(outcomes_msg)
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!(
+                                        "GovernanceOutcomes handling error: {e:#}"
+                                    ))
+                                })
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Clear the skip flag after first epoch transition
                 skip_first_epoch_rewards = false;
             }
@@ -548,6 +581,11 @@ impl AccountsState {
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+
+        let governance_outcomes_topic = config
+            .get_string("governance-outcomes-topic")
+            .unwrap_or(DEFAULT_GOVERNANCE_OUTCOMES_TOPIC.to_string());
+        info!("Creating governance outcomes subscriber on '{governance_outcomes_topic}'");
 
         let parameters_topic = config
             .get_string("protocol-parameters-topic")
@@ -854,6 +892,8 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let governance_outcomes_subscription =
+            context.subscribe(&governance_outcomes_topic).await?;
         let drep_state_subscription = match drep_state_topic {
             Some(ref topic) => Some(context.subscribe(topic).await?),
             None => None,
@@ -889,6 +929,7 @@ impl AccountsState {
                 withdrawals_subscription,
                 pot_deltas_subscription,
                 stake_subscription,
+                governance_outcomes_subscription,
                 drep_state_subscription,
                 parameters_subscription,
                 &verifier,

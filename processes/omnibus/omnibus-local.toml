@@ -1,7 +1,10 @@
 # Top-level configuration for Acropolis omnibus process
 
-[module.genesis-bootstrapper]
+[global.startup]
 network-name = "preview" # "sanchonet", "preview", "mainnet"
+topic = "cardano.sequence.start"
+
+[module.genesis-bootstrapper]
 
 #[module.mithril-snapshot-fetcher]
 #aggregator-url = "https://aggregator.pre-release-preview.api.mithril.network/aggregator"
@@ -56,7 +59,6 @@ store-stake-addresses = false
 
 [module.parameters-state]
 store-history = false
-network-name = "preview" # "sanchonet", "preview", "mainnet"
 
 [module.stake-delta-filter]
 cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
@@ -80,9 +82,6 @@ port = 4340
 [module.spy]
 # Enable for message spying
 #topic = "cardano.drep.state"
-
-[global.startup]
-topic = "cardano.sequence.start"
 
 [message-bus.external]
 class = "rabbit-mq"
