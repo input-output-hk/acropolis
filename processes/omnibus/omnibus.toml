@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network = "mainnet"
+network-name = "mainnet"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
