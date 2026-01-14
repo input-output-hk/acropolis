@@ -365,6 +365,12 @@ pub fn process_message(
 
                     // Shelley addresses (stake delegated to some different address)
                     ShelleyAddressDelegationPart::Pointer(ref ptr) => {
+                        if let Some(conway_start_slot) = cache.conway_start_slot {
+                            if block.slot > conway_start_slot {
+                                continue;
+                            }
+                        }
+
                         match cache.decode_pointer(ptr) {
                             None => {
                                 tracing::warn!("Pointer {ptr:?} is not registered in cache");
