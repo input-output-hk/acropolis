@@ -109,21 +109,7 @@ impl EpochSnapshot {
                         .get(&old_spo.reward_account)
                         .map(|sas| sas.registered)
                         .unwrap_or(false),
-                    None => {
-                        // SPO wasn't in snapshot from 2 epochs ago (newly registered or retired).
-                        // Check if their CURRENT reward account is registered as a fallback.
-                        // Default to true if we can't verify - conservative approach to avoid
-                        // incorrectly denying legitimate rewards.
-                        if let Some(spo) = spo {
-                            stake_addresses
-                                .get(&spo.reward_account)
-                                .map(|sas| sas.registered)
-                                .unwrap_or(true)
-                        } else {
-                            // Retired pool with no current registration - use false
-                            false
-                        }
-                    }
+                    None => false,
                 };
             debug!(
                 epoch,
