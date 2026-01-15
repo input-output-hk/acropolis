@@ -80,6 +80,8 @@ impl DRepStorageConfig {
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
+    /// Last epoch where DReps were considered "active".
+    pub last_activity_epoch: HashMap<DRepCredential, u64>,
     pub historical_dreps: Option<HashMap<DRepCredential, HistoricalDRepState>>,
 }
 
@@ -88,6 +90,7 @@ impl State {
         Self {
             config,
             dreps: HashMap::new(),
+            last_activity_epoch: HashMap::new(),
             historical_dreps: if config.any_enabled() {
                 Some(HashMap::new())
             } else {
@@ -238,12 +241,12 @@ impl State {
     pub fn process_votes(
         &mut self,
         voting_procedures: &[(TxHash, VotingProcedures)],
+        epoch: u64,
     ) -> Result<()> {
-        let Some(hist_map) = self.historical_dreps.as_mut() else {
-            return Ok(());
-        };
-
         let cfg = self.config;
+        let mut hist_map = self.historical_dreps.as_mut();
+
+        // Always update `last_activity_epoch` for DReps. Update historical only if enabled.
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
@@ -252,18 +255,29 @@ impl State {
                     _ => continue,
                 };
 
-                let entry = hist_map
-                    .entry(drep_cred)
-                    .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
+                self.last_activity_epoch.insert(drep_cred.clone(), epoch);
 
-                let votes = entry.votes.as_mut().unwrap();
+                if let Some(ref mut hist_map) = hist_map {
+                    let entry = hist_map
+                        .entry(drep_cred)
+                        .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
 
-                for vp in single_votes.voting_procedures.values() {
-                    votes.push(VoteRecord {
-                        tx_hash: *tx_hash,
-                        vote_index: vp.vote_index,
-                        vote: vp.vote.clone(),
-                    });
+                    // Voting is activity: reset inactivity fields if we track them.
+                    if let Some(info) = entry.info.as_mut() {
+                        info.expired = false;
+                        info.active_epoch = Some(epoch);
+                        info.last_active_epoch = epoch;
+                    }
+
+                    if let Some(votes) = entry.votes.as_mut() {
+                        for vp in single_votes.voting_procedures.values() {
+                            votes.push(VoteRecord {
+                                tx_hash: *tx_hash,
+                                vote_index: vp.vote_index,
+                                vote: vp.vote.clone(),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -282,10 +296,11 @@ impl State {
             return Ok(());
         };
 
-        for (_cred, drep_record) in historical_dreps.iter_mut() {
+        for (cred, drep_record) in historical_dreps.iter_mut() {
             if let Some(info) = drep_record.info.as_mut() {
-                if let (Some(active_epoch), false) = (info.active_epoch, info.expired) {
-                    if active_epoch + expired_offset <= current_epoch {
+                let last_active = self.last_activity_epoch.get(cred).copied().or(info.active_epoch);
+                if let (Some(last_active), false) = (last_active, info.expired) {
+                    if last_active + expired_offset <= current_epoch {
                         info.expired = true;
                     }
                 }
@@ -301,6 +316,23 @@ impl State {
             distribution.push((drep.clone(), drep_info.deposit));
         }
         distribution
+    }
+
+    pub fn inactive_drep_list(
+        &self,
+        current_epoch: u64,
+        d_rep_activity: u32,
+    ) -> Vec<DRepCredential> {
+        let expired_offset = d_rep_activity as u64;
+        let mut inactives = Vec::new();
+        for cred in self.dreps.keys() {
+            if let Some(last) = self.last_activity_epoch.get(cred).copied() {
+                if last + expired_offset <= current_epoch {
+                    inactives.push(cred.clone());
+                }
+            }
+        }
+        inactives
     }
 
     fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64) -> Result<bool> {
@@ -326,6 +358,9 @@ impl State {
                         true
                     }
                 };
+
+                // New cert resets epoch for dreps inactivity.
+                self.last_activity_epoch.insert(reg.credential.clone(), epoch);
 
                 if self.historical_dreps.is_some() {
                     if let Err(err) = self.update_historical(&reg.credential, true, |entry| {
@@ -365,6 +400,8 @@ impl State {
                     ));
                 }
 
+                self.last_activity_epoch.remove(&reg.credential);
+
                 // Update history if enabled
                 if self.historical_dreps.is_some() {
                     if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
@@ -397,11 +434,15 @@ impl State {
                 })?;
                 drep.anchor = reg.anchor.clone();
 
+                // DRep update resets epoch for dreps inactivity.
+                self.last_activity_epoch.insert(reg.credential.clone(), epoch);
+
                 // Update history if enabled
                 if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
                     if let Some(info) = entry.info.as_mut() {
                         info.expired = false;
                         info.retired = false;
+                        info.active_epoch = Some(epoch);
                         info.last_active_epoch = epoch;
                     }
                     if let Some(updates) = entry.updates.as_mut() {
@@ -545,6 +586,8 @@ impl State {
     pub fn bootstrap(&mut self, drep_msg: &DRepBootstrapMessage) {
         for (cred, record) in &drep_msg.dreps {
             self.dreps.insert(cred.clone(), record.clone());
+            // Snapshot does not include activity, assume active at snapshot epoch.
+            self.last_activity_epoch.insert(cred.clone(), drep_msg.epoch);
             // update historical state if enabled
             if let Some(hist_map) = self.historical_dreps.as_mut() {
                 let cfg = self.config;
@@ -555,8 +598,8 @@ impl State {
                     info.deposit = record.deposit;
                     info.expired = false;
                     info.retired = false;
-                    info.active_epoch = None;
-                    info.last_active_epoch = 0; // unknown from snapshot
+                    info.active_epoch = Some(drep_msg.epoch);
+                    info.last_active_epoch = drep_msg.epoch; // assumed from snapshot
                 }
             }
         }
@@ -758,6 +801,83 @@ mod tests {
         assert!(state.process_one_cert(&unregister_tx_cert, 1).unwrap());
         assert_eq!(state.get_count(), 0);
         assert!(state.get_drep(&tx_cred).is_none());
+    }
+
+    #[test]
+    fn test_drep_inactivity() {
+        let tx_cred = Credential::AddrKeyHash(CRED_1.into());
+
+        // Enable historical for checking on expired/active_epoch fields.
+        let config = DRepStorageConfig {
+            store_info: true,
+            ..Default::default()
+        };
+        let mut state = State::new(config);
+
+        // Register at epoch 10
+        let register_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
+                credential: tx_cred.clone(),
+                deposit: 500000000,
+                anchor: None,
+            }),
+            tx_identifier: TxIdentifier::default(),
+            cert_index: 0,
+        };
+        assert!(state.process_one_cert(&register_cert, 10).unwrap());
+        assert_eq!(
+            state.last_activity_epoch.get(&tx_cred).copied(),
+            Some(10),
+            "registration should set last_activity_epoch"
+        );
+
+        // Expire at epoch 30
+        state.update_drep_expirations(30, 20).unwrap();
+        let historical = state.historical_dreps.as_ref().unwrap();
+        let drep_info = historical.get(&tx_cred).unwrap().info.as_ref().unwrap();
+        assert!(drep_info.expired, "DRep should be expired at epoch 30");
+
+        // Update at epoch 31 => should reset activity and clear expired
+        let update_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepUpdate(DRepUpdate {
+                credential: tx_cred.clone(),
+                anchor: None,
+            }),
+            tx_identifier: TxIdentifier::default(),
+            cert_index: 0,
+        };
+        state.process_one_cert(&update_cert, 31).unwrap();
+        assert_eq!(
+            state.last_activity_epoch.get(&tx_cred).copied(),
+            Some(31),
+            "DRepUpdate should reset last_activity_epoch"
+        );
+
+        let historical = state.historical_dreps.as_ref().unwrap();
+        let drep_info = historical.get(&tx_cred).unwrap().info.as_ref().unwrap();
+        assert!(
+            !drep_info.expired,
+            "DRep should not be expired after update"
+        );
+        assert_eq!(
+            drep_info.active_epoch,
+            Some(31),
+            "active_epoch should be reset to 31 after DRepUpdate"
+        );
+
+        // Next epoch boundary shouldn't re-expire immediately
+        state.update_drep_expirations(32, 20).unwrap();
+        let inactive = state.inactive_drep_list(32, 20);
+        assert!(
+            !inactive.contains(&tx_cred),
+            "DRep should not be considered inactive at epoch 32 after updating at epoch 31"
+        );
+        let historical = state.historical_dreps.as_ref().unwrap();
+        let drep_info = historical.get(&tx_cred).unwrap().info.as_ref().unwrap();
+        assert!(
+            !drep_info.expired,
+            "Historical DRep should not be re-expired at epoch 32 after updating at epoch 31"
+        );
     }
 
     #[test]
