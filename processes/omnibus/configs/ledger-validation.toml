@@ -1,6 +1,6 @@
 # Top-level configuration for Acropolis omnibus process
-# Bootstrap from Mithril and network sync, with basic ledger
-# (SPOs, stake, pots, rewards)
+# Bootstrap from Mithril and network sync, with full ledger and
+# block validation
 
 # ============================================================================
 # Startup Configuration
@@ -35,16 +35,32 @@ node-addresses = [
 ]
 magic-number = 764824073
 
+[module.consensus]
+# List of validation result topics to listen on
+validators = [
+           "cardano.validation.tx",
+           "cardano.validation.vrf",
+           "cardano.validation.kes",
+           "cardano.validation.governance",
+           "cardano.validation.spo",
+           "cardano.validation.accounts",
+           "cardano.validation.utxo",
+           # TODO more
+]
+
 [module.block-unpacker]
-# Direct connection without consensus mediation
-subscribe-topic = "cardano.block.available"
 
 [module.tx-unpacker]
+# Subscriptions needed for validation
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
+protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
+
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-block-txs-topic = "cardano.block.txs"
+publish-tx-validation-topic = "cardano.validation.tx"
 network-name = "mainnet"
 
 [module.utxo-state]
@@ -52,21 +68,32 @@ address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
 
 [module.spo-state]
-block-subscribe-topic = "cardano.block.available"
 
 [module.stake-delta-filter]
 
 [module.epochs-state]
-block-subscribe-topic = "cardano.block.available"
 
 [module.parameters-state]
 enact-state-topic = "cardano.enact.state"
 
+[module.drep-state]
+
 [module.governance-state]
+# Listen for DRep and SPO distributions
+stake-drep-distribution-topic = "cardano.drep.distribution"
+stake-spo-distribution-topic = "cardano.spo.distribution"
 
 [module.accounts-state]
+# Optional subscription for when governance is active
+drep-state-topic = "cardano.drep.state"
+
 verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
 verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
+
+[module.block-vrf-validator]
+
+[module.block-kes-validator]
 
 [module.clock]
 

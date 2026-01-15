@@ -1,5 +1,6 @@
 # Top-level configuration for Acropolis omnibus process
-# Basic UTXO follower version from Mithril snapshot only
+# Bootstrap from Mithril and network sync, with full ledger including Conway
+# governance
 
 # ============================================================================
 # Startup Configuration
@@ -25,17 +26,55 @@ pause = "none"
 # ============================================================================
 # Core Module Configurations
 # ============================================================================
+[module.peer-network-interface]
+sync-point = "dynamic"
+node-addresses = [
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
+]
+magic-number = 764824073
 
 [module.block-unpacker]
 # Direct connection without consensus mediation
 subscribe-topic = "cardano.block.available"
 
 [module.tx-unpacker]
-# Publish only UTXO deltas
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
+publish-withdrawals-topic = "cardano.withdrawals"
+publish-certificates-topic = "cardano.certificates"
+publish-governance-topic = "cardano.governance"
+publish-block-txs-topic = "cardano.block.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
+address-delta-topic = "cardano.address.deltas"
+block-totals-topic = "cardano.block.txs"
+
+[module.spo-state]
+block-subscribe-topic = "cardano.block.available"
+
+[module.stake-delta-filter]
+
+[module.epochs-state]
+block-subscribe-topic = "cardano.block.available"
+
+[module.parameters-state]
+enact-state-topic = "cardano.enact.state"
+
+[module.drep-state]
+
+[module.governance-state]
+# Listen for DRep and SPO distributions
+stake-drep-distribution-topic = "cardano.drep.distribution"
+stake-spo-distribution-topic = "cardano.spo.distribution"
+
+[module.accounts-state]
+# Optional subscription for when governance is active
+drep-state-topic = "cardano.drep.state"
+
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
 
 [module.clock]
 
