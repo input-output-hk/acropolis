@@ -32,6 +32,7 @@ validation fails.  The inputs to the function - the *Script Context* - include:
 
 * The contents of the spending transaction (inputs, outputs, certificates etc.)
 * The 'purpose' (spending a UTxO, authorising a withdrawal etc.)
+* The 'cost model' (see below)
 * The datum of the output UTxO
 * The 'redeemer' data of the spending input
 
@@ -62,11 +63,13 @@ We introduce the following new modules for Phase 2 validation:
 
 * [Script Store](../../modules/script_store) - captures reference scripts from UTxOs
 * [Script Validator](../../modules/script_validator) - fetches the script (if required), builds the Script Context and passes them to the Script Runner.  This is the module that issues the final validation response for consensus.
-* [Script Runner (uPLC)](../../modules/script_runner_uplc) - the actual script interpreter, uPLC version
+* [Script Runner (uplc-turbo)](../../modules/script_runner_uplc_turbo) - the actual script interpreter, PRAGMA 'uplc-turbo' version
 
 The last two are split so we have the option of easily replacing the interpreter without
-needing to duplicate the script context logic.  Initially we intend to use the
-[uPLC interpreter](https://aiken-lang.org/uplc) from the Aiken project, but we want the option
+needing to duplicate the script context logic.  Initially we intend to use the Pragma/Amaru fork
+of the [uPLC interpreter](https://github.com/pragma-org/uplc) from the
+[Aiken project](https://aiken-lang.org), but we want the option to use the
+[original](https://github.com/aiken-lang/aiken/tree/main/crates/uplc) and/or
 to bundle the Haskell [Plutus Core interpreter](https://github.com/IntersectMBO/plutus) as
 an external microservice as well.
 
@@ -92,7 +95,7 @@ flowchart LR
   VRF(Block VRF Validator)
   SCRIPTS(Script Store)
   SCRIPTV(Script Validator)
-  SCRIPTR(Script Runner uPLC)
+  SCRIPTR(Script Runner uplc-turbo)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
   GEN -- cardano.sequence.bootstrapped --> KES
@@ -230,13 +233,11 @@ consensus.
 
 ### Script Runner
 
-The [Script Runner uPLC](../../modules/script_runner_uplc) is the raw script interpreter,
-initially using the [uPLC](https://aiken-lang.org/uplc) interpreter.  This is conceptually
-simple - it takes requests to run a script on `cardano.script.run`, which includes the script
-and all the data required to run it, runs it, and returns a success or error result.
-
-*Note: Amaru have made improvements to uPLC, we need to track whether they have been folded back
-upstream or if we need to use Amaru's fork*
+The [Script Runner uplc-turbo](../../modules/script_runner_uplc_turbo) is the raw script interpreter,
+initially using the Pragma/Amaru [uplc-turbo](https://github.com/pragma-org/uplc) interpreter.
+This is conceptually simple - it takes requests to run a script on `cardano.script.run`, which
+includes the script and all the data required to run it, runs it, and returns a success or error
+result.
 
 In the future we may want to use other interpreters, including the option of wrapping the
 Haskell Plutus Core interpreter in an external microservice.
