@@ -11,7 +11,12 @@ Cardano already has a well-established REST API to do this,
 
 The BlockFrost API has query endpoints both for current ledger state and also historical
 ledger state, so we need to add both new modules and functionality to existing ones to store
-the historical state as we progress through the chain.
+the historical state as we progress through the chain.  Note that you can be selective - if
+particular historical features aren't needed for your application, you can just leave those
+modules or or disable the feature, saving memory, disk and processing time.
+
+We also provide some custom APIs for things like SPDD and DRDD history, which BlockFrost
+doesn't provide.
 
 The new modules are:
 
@@ -227,9 +232,10 @@ requests into request-response messages on the Caryatid message bus.  So, for ex
 
 ### Blockfrost REST
 The actual BlockFrost REST endpoints are provided by the
-[Blockfrost REST](../../modules/rest_blockfrost) module. This module has handlers for a variety of `rest.get.xxx`
-requests, requests further queries from the ledger state modules (sometimes multiple, which
-it aggregates), and returns the corresponding REST response.
+[Blockfrost REST](../../modules/rest_blockfrost) module.
+This module has handlers for a variety of `rest.get.xxx` requests.  Requests are routed
+to their corresponding handler, which queries data from the ledger state modules
+(sometimes multiple, which it aggregates), and returns the corresponding REST response.
 
 ### Chain Store
 
@@ -255,7 +261,8 @@ BlockFrost `/addresses` endpoint.
 
 ### Assets State
 
-Up to now we have not tracked Cardano Native Assets (CNAs), because they aren't used internally in
+Up to now we have only tracked UTxOs for Cardano Native Assets (CNAs), not the minting/burning
+process, because they aren't used internally in
 a node's operations.  However, they are a major part of Cardano, and there is a BlockFrost API
 for them, so we need a new module, [Assets State](../../modules/assets_state) which tracks them.
 
@@ -270,15 +277,14 @@ so that it can fully handle `cardano.query.assets` from the BlockFrost `/assets`
 The new [SPDD State](../../modules/spdd_state) module takes the Stake
 Pool Delegation Distribution (SPDD) generated each epoch by the
 Accounts State and stores it for each epoch.  It then provides a
-`cardano.query.spdd` handler for the BlockFrost REST API to retrieve
-this, by epoch, and also a direct REST query `rest.get.spdd` which
-does the same thing.
+`cardano.query.spdd` handler for any future modules to retrieve this,
+and also a direct REST query `rest.get.spdd` for a `GET /spdd?epoch=208` request.
 
 ### DRDD State
 
 Similarly, the [DRDD State](../../modules/drdd_state) captures the DRep Delegation Distribution
-(DRDD) from Accounts State and stores it for each epoch.  It then provides `cardano.query.spdd`
-for the BlockFrost API, and a direct REST query `rest.get.drdd` as well.
+(DRDD) from Accounts State and stores it for each epoch.  It then provides `cardano.query.drdd`
+and a direct REST query `rest.get.drdd` (enabling `GET /drdd?epoch=600`) as well.
 
 ### Historical Accounts State
 
@@ -400,8 +406,8 @@ The existing [Governance State](../../modules/governance_state) provides a query
 `cardano.query.governance` to give access to the its store of proposals / governance actions.
 This enables the BlockFrost `/governance/proposals` and `/governance/proposal/<id>` endpoints.
 
-Governance State does not currently store the history of expired or ratified proposals.
-TODO: Should it?
+Governance State does not currently store the history of expired or ratified proposals.  A
+future Historical Governance State module may do so.
 
 ## Configuration
 Here is the

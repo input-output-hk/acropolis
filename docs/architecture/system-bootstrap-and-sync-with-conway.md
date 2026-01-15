@@ -86,7 +86,7 @@ flowchart LR
 
 ## Data flow
 The process bootstraps from Mithril, then syncs from the live chain and tracks ledger state
-exactly as [before](system-bootstrap-and-sync-basic-ledger.md).  We are just adding support
+exactly as [before](system-bootstrap-and-sync-with-basic-ledger.md).  We are just adding support
 for the Conway era governance here.
 
 ### DReps
@@ -98,7 +98,7 @@ delegations.
 
 DReps are tracked with a new [DRep State](../../modules/drep_state) module.  It subscribes to
 `cardano.tx.certificates` produced by the [Tx Unpacker](../../modules/tx_unpacker), to watch
-DRep registrations, updates and retirements and deregistrations (retirements).
+DRep registrations, updates and deregistrations (retirements).
 It keeps an internal store of these and issues a complete
 list of all active DReps and their details at the start of each epoch, on `cardano.drep.state`.
 
@@ -108,6 +108,9 @@ The `cardano.drep.state` message is picked up by the
 coming from the `cardano.tx.certificates` and builds a map of which DRep (if any) each
 stake address delegates to.  This enables it to derive the "DRep Delegation Distribution" (DRDD)
 which it publishes once per epoch on `cardano.drep.distribution`.
+
+It also watches `cardano.enact.state` (see below) to refund deposits on governance proposals,
+and to implement ratified treasury withdrawal actions.
 
 ### Governance State
 The [Governance State](../../modules/governance_state) module has much more heavy lifting to do
@@ -124,7 +127,8 @@ generated last time.
 
 As before, if any proposal is enacted during an epoch, it sends a `cardano.enact.state` message,
 which is used to update the Parameter State, as well as being available for any external
-observer who is interested in the governance process.
+observer who is interested in the governance process.  As mentioned above, this is also used
+by Account State to implement the accounting effects of governance actions.
 
 ## Configuration
 Here is the
