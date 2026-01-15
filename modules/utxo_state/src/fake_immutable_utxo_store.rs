@@ -61,4 +61,9 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(42)
     }
+
+    /// Get the total value of UTXOs in the store
+    async fn sum(&self) -> Result<Value> {
+        Ok(Value::default())
+    }
 }

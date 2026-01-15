@@ -1,7 +1,7 @@
 //! In-memory store for immutable UTXOs using standard HashMap
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier};
+use acropolis_common::{UTXOValue, UTxOIdentifier, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -48,5 +48,10 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize> {
         Ok(self.utxos.read().await.len())
+    }
+
+    /// Get the total value of UTXOs in the store
+    async fn sum(&self) -> Result<Value> {
+        Ok(self.utxos.read().await.values().map(|v| &v.value).sum())
     }
 }

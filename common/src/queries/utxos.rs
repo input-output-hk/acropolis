@@ -12,6 +12,7 @@ pub enum UTxOStateQuery {
     GetUTxOs {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
+    GetAllUTxOsSum,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

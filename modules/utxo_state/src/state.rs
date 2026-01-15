@@ -57,6 +57,9 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Get the total value of UTXOs (ADA and assets) in the store
+    async fn sum(&self) -> Result<Value>;
 }
 
 /// Ledger state storage
@@ -99,6 +102,14 @@ impl State {
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
         }
+    }
+
+    /// Get the total value of all utxos, with ADA and assets
+    pub async fn get_total_utxos_sum(&self) -> Result<Value> {
+        Ok(
+            self.volatile_utxos.values().map(|v| &v.value).sum::<Value>()
+                + self.immutable_utxos.sum().await?,
+        )
     }
 
     /// Get the total value of multiple utxos

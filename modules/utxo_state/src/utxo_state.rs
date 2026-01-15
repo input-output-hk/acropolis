@@ -36,12 +36,8 @@ mod dashmap_immutable_utxo_store;
 use dashmap_immutable_utxo_store::DashMapImmutableUTXOStore;
 mod sled_immutable_utxo_store;
 use sled_immutable_utxo_store::SledImmutableUTXOStore;
-mod sled_async_immutable_utxo_store;
-use sled_async_immutable_utxo_store::SledAsyncImmutableUTXOStore;
 mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
-mod fjall_async_immutable_utxo_store;
-use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
@@ -224,9 +220,7 @@ impl UTXOState {
             "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
             "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),
             "sled" => Arc::new(SledImmutableUTXOStore::new(config.clone())?),
-            "sled-async" => Arc::new(SledAsyncImmutableUTXOStore::new(config.clone())?),
             "fjall" => Arc::new(FjallImmutableUTXOStore::new(config.clone())?),
-            "fjall-async" => Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?),
             "fake" => Arc::new(FakeImmutableUTXOStore::new(config.clone())),
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
@@ -359,6 +353,12 @@ impl UTXOState {
                             )),
                         }
                     }
+                    UTxOStateQuery::GetAllUTxOsSum => match state.get_total_utxos_sum().await {
+                        Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
+                        Err(e) => {
+                            UTxOStateQueryResponse::Error(QueryError::internal_error(e.to_string()))
+                        }
+                    },
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,
