@@ -19,13 +19,12 @@ pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
         .collect()
 }
 
-/// Parse transaction consumes and produces, and return the parsed consumes, produces, total output lovelace, and errors
+/// Parse transaction consumes and produces, and return the parsed consumes, produces and errors
 pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
-) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, u128, Vec<String>) {
+) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, Vec<String>) {
     let parsed_consumes = map_transaction_inputs(&tx.consumes());
     let mut parsed_produces = Vec::new();
-    let mut total_output = 0;
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
@@ -43,7 +42,6 @@ pub fn map_transaction_consumes_produces(
                         datum: map_datum(&output.datum()),
                         reference_script: map_reference_script(&output.script_ref()),
                     });
-                    total_output += output.value().coin() as u128;
                 }
                 Err(e) => {
                     errors.push(format!("Output {index} has been ignored: {e}"));
@@ -55,7 +53,7 @@ pub fn map_transaction_consumes_produces(
         }
     }
 
-    (parsed_consumes, parsed_produces, total_output, errors)
+    (parsed_consumes, parsed_produces, errors)
 }
 
 pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
@@ -78,8 +76,10 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (consumes, produces, total_output, input_output_errors) =
-        map_transaction_consumes_produces(tx);
+    let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+
+    let fee = tx.fee().unwrap_or(0);
+    let is_valid = tx.is_valid();
 
     let mut errors = input_output_errors;
     let mut certs = Vec::new();
@@ -147,7 +147,8 @@ pub fn map_transaction(
     Transaction {
         consumes,
         produces,
-        total_output,
+        fee,
+        is_valid,
         certs,
         withdrawals,
         proposal_update: alonzo_babbage_update_proposal,

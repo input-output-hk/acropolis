@@ -60,7 +60,7 @@ impl State {
         } else {
             self.spdd_history
                 .get_by_index(epoch - 2)
-                .map(|state| state.values().map(|v| v.live).sum())
+                .map(|state| state.values().map(|v| v.active).sum())
         }
     }
 

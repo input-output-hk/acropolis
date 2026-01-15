@@ -330,7 +330,7 @@ impl ConwayVoting {
                         .inspect(|v| *vd += *v);
                 }
                 Voter::StakePoolKey(pool) => {
-                    spo_stake.get(pool).inspect(|ds| *vp += ds.live);
+                    spo_stake.get(pool).inspect(|ds| *vp += ds.active);
                 }
             }
         }

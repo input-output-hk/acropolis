@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use acropolis_common::{
     messages::{
-        AssetDeltasMessage, BlockTxsMessage, CardanoMessage, GovernanceProceduresMessage, Message,
+        AssetDeltasMessage, CardanoMessage, GovernanceProceduresMessage, Message,
         StateTransitionMessage, TxCertificatesMessage, UTXODeltasMessage, WithdrawalsMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
@@ -64,7 +64,6 @@ impl TxUnpacker {
         publish_withdrawals_topic: Option<String>,
         publish_certificates_topic: Option<String>,
         publish_governance_procedures_topic: Option<String>,
-        publish_block_txs_topic: Option<String>,
         publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
@@ -120,8 +119,6 @@ impl TxUnpacker {
                     let mut proposal_procedures = Vec::new();
                     let mut alonzo_babbage_update_proposals = Vec::new();
                     let mut total_output: u128 = 0;
-                    let mut total_fees: u64 = 0;
-                    let total_txs = txs_msg.txs.len() as u64;
                     let block_number = block.number as u32;
 
                     let span = info_span!("tx_unpacker.handle_txs", block = block.number);
@@ -136,20 +133,26 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
+                                    let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    let tx_total_output = mapped_tx.calculate_total_output();
+
                                     let Transaction {
                                         consumes: tx_consumes,
                                         produces: tx_produces,
-                                        total_output: tx_total_output,
+                                        fee:tx_fee,
+                                        is_valid,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
                                         proposal_update: tx_proposal_update,
                                         vkey_witnesses,
                                         native_scripts,
                                         error: tx_error,
-                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    } = mapped_tx;
                                     let mut props = None;
                                     let mut votes = None;
 
+                                    let certs_identifiers = tx_certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+                                    let total_withdrawals = tx_withdrawals.iter().map(|w| w.value).sum::<u64>();
                                     let mut vkey_needed = HashSet::new();
                                     let mut script_needed = HashSet::new();
                                     utils::get_vkey_script_needed(
@@ -164,11 +167,24 @@ impl TxUnpacker {
                                     let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
-                                    total_output += tx_total_output;
+                                    total_output += tx_total_output.coin() as u128;
+
+                                    // Mint or burn deltas
+                                    let mut mint_burn_deltas:NativeAssetsDelta =
+                                            Vec::new();
+
+                                    // Mint deltas
+                                    for policy_group in tx.mints().iter() {
+                                        if let Some((policy_id, deltas)) =
+                                            acropolis_codec::map_mint_burn(policy_group)
+                                        {
+                                            mint_burn_deltas.push((policy_id, deltas));
+                                        }
+                                    }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
+                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output_coin={}",
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output.coin());
                                     }
 
                                     if let Some(error) = tx_error {
@@ -179,10 +195,17 @@ impl TxUnpacker {
 
                                     if publish_utxo_deltas_topic.is_some() {
                                         // Group deltas by tx
+                                        let (value_minted, value_burnt) = utils::get_value_minted_burnt_from_deltas(&mint_burn_deltas);
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
                                             consumes: tx_consumes,
                                             produces: tx_produces,
+                                            fee: tx_fee,
+                                            is_valid,
+                                            total_withdrawals: Some(total_withdrawals),
+                                            certs_identifiers: Some(certs_identifiers),
+                                            value_minted: Some(value_minted),
+                                            value_burnt: Some(value_burnt),
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),
@@ -191,18 +214,6 @@ impl TxUnpacker {
                                     }
 
                                     if publish_asset_deltas_topic.is_some() {
-                                        let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> =
-                                            Vec::new();
-
-                                        // Mint deltas
-                                        for policy_group in tx.mints().iter() {
-                                            if let Some((policy_id, deltas)) =
-                                                acropolis_codec::map_mint_burn(policy_group)
-                                            {
-                                                tx_deltas.push((policy_id, deltas));
-                                            }
-                                        }
-
                                         if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL)
                                         {
                                             let mut metadata_raw = Vec::new();
@@ -216,8 +227,8 @@ impl TxUnpacker {
                                             }
                                         }
 
-                                        if !tx_deltas.is_empty() {
-                                            asset_deltas.push((tx_identifier, tx_deltas));
+                                        if !mint_burn_deltas.is_empty() {
+                                            asset_deltas.push((tx_identifier, mint_burn_deltas));
                                         }
                                     }
 
@@ -272,11 +283,6 @@ impl TxUnpacker {
                                                     Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
                                                 }
                                         }
-                                    }
-
-                                    // Capture the fees
-                                    if let Some(fee) = tx.fee() {
-                                        total_fees += fee;
                                     }
                                 }
 
@@ -343,19 +349,6 @@ impl TxUnpacker {
                         futures.push(context.message_bus.publish(topic, governance_msg.clone()));
                     }
 
-                    if let Some(ref topic) = publish_block_txs_topic {
-                        let msg = Message::Cardano((
-                            block.clone(),
-                            CardanoMessage::BlockInfoMessage(BlockTxsMessage {
-                                total_txs,
-                                total_output,
-                                total_fees,
-                            }),
-                        ));
-
-                        futures.push(context.message_bus.publish(topic, Arc::new(msg)));
-                    }
-
                     join_all(futures)
                         .await
                         .into_iter()
@@ -385,10 +378,6 @@ impl TxUnpacker {
                     }
 
                     if let Some(ref topic) = publish_governance_procedures_topic {
-                        futures.push(context.message_bus.publish(topic, message.clone()));
-                    }
-
-                    if let Some(ref topic) = publish_block_txs_topic {
                         futures.push(context.message_bus.publish(topic, message.clone()));
                     }
 
@@ -522,7 +511,6 @@ impl TxUnpacker {
                 publish_withdrawals_topic,
                 publish_certificates_topic,
                 publish_governance_procedures_topic,
-                publish_block_txs_topic,
                 publish_tx_validation_topic,
                 txs_sub,
                 bootstrapped_sub,

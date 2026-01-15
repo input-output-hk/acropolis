@@ -29,6 +29,7 @@ use tracing::{error, info, info_span, Instrument};
 
 mod epochs_history;
 mod historical_spo_state;
+mod registration_updates_publisher;
 mod retired_pools_history;
 mod spo_state_publisher;
 mod state;
@@ -37,8 +38,9 @@ mod store_config;
 mod test_utils;
 
 use crate::{
-    epochs_history::EpochsHistoryState, retired_pools_history::RetiredPoolsHistoryState,
-    spo_state_publisher::SPOStatePublisher,
+    epochs_history::EpochsHistoryState,
+    registration_updates_publisher::PoolRegistrationUpdatesPublisher,
+    retired_pools_history::RetiredPoolsHistoryState, spo_state_publisher::SPOStatePublisher,
 };
 use state::State;
 use store_config::StoreConfig;
@@ -64,6 +66,10 @@ const DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
     "stake-reward-deltas-subscribe-topic",
     "cardano.stake.reward.deltas",
 );
+const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
 const DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC: (&str, &str) =
     ("clock-tick-subscribe-topic", "clock.tick");
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -72,6 +78,11 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 // Publish Topics
 const DEFAULT_SPO_STATE_PUBLISH_TOPIC: (&str, &str) =
     ("publish-spo-state-topic", "cardano.spo.state");
+
+const DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC: (&str, &str) = (
+    "publish-pool-registration-updates-topic",
+    "cardano.pool.registration.updates",
+);
 
 const DEFAULT_VALIDATION_PUBLISH_TOPIC: (&str, &str) =
     ("publish-validation-topic", "cardano.validation.spo");
@@ -209,13 +220,18 @@ impl SPOState {
         mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut parameters_subscription: Box<dyn Subscription<Message>>,
         // publishers
         mut spo_state_publisher: SPOStatePublisher,
+        mut pool_registration_updates_publisher: PoolRegistrationUpdatesPublisher,
         validation_publish_topic: String,
     ) -> Result<()> {
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
+        } else {
+            // Consume initial protocol parameters (only needed for genesis bootstrap)
+            let _ = parameters_subscription.read().await?;
         }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
@@ -250,6 +266,9 @@ impl SPOState {
                     CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
                 )) => {
                     spo_state_publisher.publish_rollback(certs_message.clone()).await?;
+                    pool_registration_updates_publisher
+                        .publish_rollback(certs_message.clone())
+                        .await?;
                     false
                 }
 
@@ -305,26 +324,40 @@ impl SPOState {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
                         ctx.check_sync(block_info);
-                        let maybe_message = state
+                        let result = state
                             .handle_tx_certs(block_info, tx_certs_msg, &mut ctx.validation)
                             .inspect_err(|e| ctx.handling_error("TxCerts", e))
                             .ok();
 
-                        if let Some(Some(message)) = maybe_message {
-                            if let Message::Cardano((
-                                _,
-                                CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
-                            )) = message.as_ref()
-                            {
-                                let pool_ids: Vec<PoolId> =
-                                    retired_spos.iter().map(|(spo, _sa)| *spo).collect();
-                                retired_pools_history.handle_deregistrations(block_info, &pool_ids);
+                        if let Some((maybe_message, pool_registration_updates_message)) = result {
+                            if let Some(message) = maybe_message {
+                                if let Message::Cardano((
+                                    _,
+                                    CardanoMessage::SPOState(SPOStateMessage {
+                                        retired_spos, ..
+                                    }),
+                                )) = message.as_ref()
+                                {
+                                    let pool_ids: Vec<PoolId> =
+                                        retired_spos.iter().map(|(spo, _sa)| *spo).collect();
+                                    retired_pools_history
+                                        .handle_deregistrations(block_info, &pool_ids);
+                                }
+
+                                // publish spo message
+                                if let Err(e) = spo_state_publisher.publish(message).await {
+                                    ctx.validation
+                                        .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
+                                }
                             }
 
-                            // publish spo message
-                            if let Err(e) = spo_state_publisher.publish(message).await {
-                                ctx.validation
-                                    .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
+                            if let Err(e) = pool_registration_updates_publisher
+                                .publish(pool_registration_updates_message)
+                                .await
+                            {
+                                ctx.validation.push_anyhow(anyhow!(
+                                    "Error publishing Pool Registration Updates: {e:#}"
+                                ))
                             }
                         }
                     }
@@ -410,6 +443,24 @@ impl SPOState {
                             );
                         });
                     }
+                }
+
+                // Handle ProtocolParamsMessage
+
+                let (_, message) = parameters_subscription.read_ignoring_rollbacks().await?;
+                match message.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                        let span =
+                            info_span!("spo_state.handle_parameters", block = block_info.number);
+                        async {
+                            ctx.check_sync(block_info);
+                            state.handle_parameters(params_msg);
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
                 }
 
                 // Handle EpochActivityMessage
@@ -594,6 +645,11 @@ impl SPOState {
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_subscribe_topic}'");
 
+        let parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating protocol parameters subscriber on '{parameters_subscribe_topic}'");
+
         let clock_tick_subscribe_topic = config
             .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.1.to_string());
@@ -608,6 +664,11 @@ impl SPOState {
             .get_string(DEFAULT_SPO_STATE_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_SPO_STATE_PUBLISH_TOPIC.1.to_string());
         info!("Creating SPO state publisher on '{spo_state_publish_topic}'");
+
+        let pool_registration_updates_publish_topic = config
+            .get_string(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.1.to_string());
+        info!("Creating pool registration updates publisher on '{pool_registration_updates_publish_topic}'");
 
         let validation_publish_topic = config
             .get_string(DEFAULT_VALIDATION_PUBLISH_TOPIC.0)
@@ -928,8 +989,14 @@ impl SPOState {
             None
         };
 
+        let parameters_subscription = context.subscribe(&parameters_subscribe_topic).await?;
+
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
+        let pool_registration_updates_publisher = PoolRegistrationUpdatesPublisher::new(
+            context.clone(),
+            pool_registration_updates_publish_topic,
+        );
         let context_copy = context.clone();
 
         context.run(async move {
@@ -949,7 +1016,9 @@ impl SPOState {
                 stake_deltas_subscription,
                 spo_rewards_subscription,
                 stake_reward_deltas_subscription,
+                parameters_subscription,
                 spo_state_publisher,
+                pool_registration_updates_publisher,
                 validation_publish_topic,
             )
             .await

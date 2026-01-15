@@ -2,9 +2,6 @@
 # Epoch to bootstrap to
 epoch = 509
 
-# The Cardano network to connect to (e.g., "mainnet", "preprod", "preview")
-network = "mainnet"
-
 # Base directory for storing network data, snapshots, and configuration files.
 # Network-specific files will be stored in a subdirectory: <data-dir>/<network>/
 # Expected files: config.json (network config) and snapshots.json (snapshot metadata)

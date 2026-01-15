@@ -58,8 +58,8 @@ async function queryAcropolis(epoch: number) {
 
     const pools: { pool_id: string; stake: bigint }[] = [];
     for (const [pool_id, info] of Object.entries(data)) {
-        if (!info || typeof info !== "object" || !("live" in info)) continue;
-        pools.push({ pool_id, stake: BigInt((info as any).live) });
+        if (!info || typeof info !== "object" || !("active" in info)) continue;
+        pools.push({ pool_id, stake: BigInt((info as any).active) });
     }
     return pools;
 }
