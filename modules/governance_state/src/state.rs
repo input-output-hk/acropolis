@@ -168,7 +168,7 @@ impl State {
             .try_into()
             .map_err(|e| anyhow!("Commitee size: conversion usize -> u64 failed, {e}"))?;
 
-        let spo_stake = self.spo_stake.values().map(|ds| ds.live).sum();
+        let spo_stake = self.spo_stake.values().map(|ds| ds.active).sum();
 
         Ok(VotingRegistrationState::new(
             spo_stake,

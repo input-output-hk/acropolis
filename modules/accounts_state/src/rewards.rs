@@ -1,6 +1,7 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
+use acropolis_common::Era;
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
     SPORewards, StakeAddress,
@@ -25,8 +26,11 @@ pub struct RewardDetail {
     /// Reward amount
     pub amount: Lovelace,
 
-    // Pool that reward came from
+    /// Pool that reward came from
     pub pool: PoolId,
+
+    /// Whether the account is registered (if false, reward goes to treasury)
+    pub registered: bool,
 }
 
 /// Result of a rewards calculation
@@ -37,6 +41,9 @@ pub struct RewardsResult {
 
     /// Total rewards paid
     pub total_paid: u64,
+
+    /// Total rewards not paid due to unregistered accounts (goes to treasury)
+    pub total_unpaid: u64,
 
     /// Rewards to be paid
     pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
@@ -49,9 +56,11 @@ pub struct RewardsResult {
 /// The epoch is the one that has just ended - we assume the snapshot for this has already been
 /// taken.
 /// Registrations/deregistrations are net changes between 'staking' and 'performance' snapshots
-/// Note immutable - only state change allowed is to push a new snapshot
+/// Note immutable - the only state change allowed is to push a new snapshot
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_rewards(
     epoch: u64,
+    era: Era,
     performance: Arc<EpochSnapshot>,
     staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
@@ -142,31 +151,34 @@ pub fn calculate_rewards(
             }
         }
 
-        // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
-        // shared a reward account, only one of them would get paid.
-        // QUESTION: Which one?  Lowest hash seems to work in epoch 212
-        // TODO turn this off at Allegra start
-        if pay_to_pool_reward_account {
-            // Check all SPOs to see if they match this reward account
-            for (other_id, other_spo) in staking.spos.iter() {
-                if other_spo.reward_account == staking_spo.reward_account
-                    && other_id.cmp(operator_id) == Ordering::Less
-                // Lower ID (hash) wins
-                {
-                    // It must have been paid a reward - we assume that checking it produced
-                    // any blocks is enough here - if not we'll have to do this as a post-process
-                    if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0) > 0 {
-                        pay_to_pool_reward_account = false;
-                        warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                              operator_id,
-                              other_id,
-                              staking_spo.reward_account);
-                        break;
+        if era == Era::Shelley {
+            if pay_to_pool_reward_account {
+                // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
+                // shared a reward account, only one of them would get paid.
+                // QUESTION: Which one?  Lowest hash seems to work in epoch 212
+                // Check all SPOs to see if they match this reward account
+                for (other_id, other_spo) in staking.spos.iter() {
+                    if other_spo.reward_account == staking_spo.reward_account
+                        && other_id.cmp(operator_id) == Ordering::Less
+                    // Lower ID (hash) wins
+                    {
+                        // It must have been paid a reward - we assume that checking it produced
+                        // any blocks is enough here - if not we'll have to do this as a post-process
+                        if performance.spos.get(other_id).map(|s| s.blocks_produced).unwrap_or(0)
+                            > 0
+                        {
+                            pay_to_pool_reward_account = false;
+                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                                  operator_id,
+                                  other_id,
+                                  staking_spo.reward_account);
+                            break;
+                        }
                     }
                 }
+            } else {
+                info!("Reward account for SPO {} isn't registered", operator_id);
             }
-        } else {
-            info!("Reward account for SPO {} isn't registered", operator_id)
         }
 
         // Calculate rewards for this SPO
@@ -184,6 +196,7 @@ pub fn calculate_rewards(
             staking.clone(),
             pay_to_pool_reward_account,
             deregistrations,
+            era,
         );
 
         if !rewards.is_empty() {
@@ -192,20 +205,27 @@ pub fn calculate_rewards(
                 operator_rewards: 0,
             };
             for reward in &rewards {
-                match reward.rtype {
-                    RewardType::Leader => {
-                        num_pools_paid += 1;
-                        spo_rewards.operator_rewards += reward.amount;
-                        total_paid_to_pools += reward.amount;
+                if reward.registered {
+                    // Reward will be paid to the account
+                    match reward.rtype {
+                        RewardType::Leader => {
+                            num_pools_paid += 1;
+                            spo_rewards.operator_rewards += reward.amount;
+                            total_paid_to_pools += reward.amount;
+                        }
+                        RewardType::Member => {
+                            num_delegators_paid += 1;
+                            total_paid_to_delegators += reward.amount;
+                        }
+                        RewardType::PoolRefund => {}
+                        RewardType::ProposalRefund => {}
                     }
-                    RewardType::Member => {
-                        num_delegators_paid += 1;
-                        total_paid_to_delegators += reward.amount;
-                    }
-                    RewardType::PoolRefund => {}
+                    spo_rewards.total_rewards += reward.amount;
+                    result.total_paid += reward.amount;
+                } else {
+                    // Reward goes to treasury (unregistered account)
+                    result.total_unpaid += reward.amount;
                 }
-                spo_rewards.total_rewards += reward.amount;
-                result.total_paid += reward.amount;
             }
 
             result.rewards.insert(*operator_id, rewards);
@@ -218,8 +238,9 @@ pub fn calculate_rewards(
         total_paid_to_delegators,
         num_pools_paid,
         total_paid_to_pools,
-        total = result.total_paid,
-        "Rewards actually paid:"
+        total_paid = result.total_paid,
+        total_unpaid = result.total_unpaid,
+        "Rewards calculated:"
     );
 
     Ok(result)
@@ -241,7 +262,11 @@ fn calculate_spo_rewards(
     staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
+    era: Era,
 ) -> Vec<RewardDetail> {
+    // Pre-Allegra / Shelley had several checks that must be honored in rewards calculation
+    let is_shelley = era == Era::Shelley;
+
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {
@@ -337,6 +362,7 @@ fn calculate_spo_rewards(
         let to_delegators = (&pool_rewards - &fixed_cost) * (BigDecimal::one() - &margin);
         let mut total_paid: u64 = 0;
         let mut delegators_paid: usize = 0;
+        let owner_rewards: u64 = costs.to_u64().unwrap_or(0);
         if !to_delegators.is_zero() {
             let total_stake = BigDecimal::from(spo.total_stake);
             for (delegator_stake_address, stake) in &spo.delegators {
@@ -354,63 +380,93 @@ fn calculate_spo_rewards(
                 debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
                        delegator_stake_address);
 
-                // Pool owners don't get member rewards (seems unfair!)
-                if spo.pool_owners.contains(delegator_stake_address) {
+                let is_pool_owner = spo.pool_owners.contains(delegator_stake_address);
+                let is_reward_account = &spo.reward_account == delegator_stake_address;
+
+                // Pool owners get their share via leader rewards, not member rewards
+                if is_pool_owner {
                     debug!(
-                        "Skipping pool owner reward account {}, losing {to_pay}",
+                        "Skipping pool owner {}, losing {to_pay}",
                         delegator_stake_address
                     );
                     continue;
                 }
 
-                // Check pool's reward address
-                if &spo.reward_account == delegator_stake_address {
-                    debug!(
-                        "Skipping pool reward account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
-                }
+                // Pre-Allegra (particularly Shelley/Mary) specific skip rules
+                if is_shelley {
+                    // Check pool's reward address
+                    if is_reward_account {
+                        debug!(
+                            "Skipping pool reward account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
 
-                // Check if it was deregistered between staking and now
-                if deregistrations.contains(delegator_stake_address) {
-                    info!(
-                        "Recently deregistered member account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
+                    // Check if it was deregistered between staking and now
+                    if deregistrations.contains(delegator_stake_address) {
+                        info!(
+                            "Recently deregistered member account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
                 }
 
                 // Transfer from reserves to this account
+                // Note: Member rewards are paid to delegators regardless of whether the pool's
+                // reward account is registered. Only leader rewards are affected by pool reward
+                // account registration status.
                 rewards.push(RewardDetail {
                     account: delegator_stake_address.clone(),
                     rtype: RewardType::Member,
                     amount: to_pay,
                     pool: *operator_id,
+                    registered: true, // Member rewards are always paid to registered delegators
                 });
                 total_paid += to_pay;
                 delegators_paid += 1;
             }
         }
 
-        debug!(%fixed_cost, %margin_cost, leader_reward=%costs, %to_delegators, total_paid,
+        debug!(%fixed_cost, %margin_cost, leader_reward=%owner_rewards, %to_delegators, total_paid,
                delegators_paid, "Reward split:");
 
-        costs.to_u64().unwrap_or(0)
+        owner_rewards
     };
 
-    if pay_to_pool_reward_account {
+    // Always emit leader reward, but mark whether account is registered
+    // If not registered, the caller will send to treasury instead
+    if is_shelley {
+        if pay_to_pool_reward_account {
+            rewards.push(RewardDetail {
+                account: spo.reward_account.clone(),
+                rtype: RewardType::Leader,
+                amount: spo_benefit,
+                pool: *operator_id,
+                registered: true,
+            });
+        } else {
+            info!(
+                "SPO {}'s reward account {} not paid {}",
+                operator_id, spo.reward_account, spo_benefit,
+            );
+        }
+    } else {
         rewards.push(RewardDetail {
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
             pool: *operator_id,
+            registered: pay_to_pool_reward_account,
         });
-    } else {
-        info!(
-            "SPO {}'s reward account {} not paid {}",
-            operator_id, spo.reward_account, spo_benefit,
-        );
+
+        if !pay_to_pool_reward_account {
+            info!(
+                "SPO {}'s reward account {} not registered - {} will go to treasury",
+                operator_id, spo.reward_account, spo_benefit,
+            );
+        }
     }
 
     rewards

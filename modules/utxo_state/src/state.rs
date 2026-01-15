@@ -7,7 +7,8 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
+    UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -507,6 +508,8 @@ impl State {
         &mut self,
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
 
@@ -521,19 +524,11 @@ impl State {
         let mut utxos_needed = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.deltas.iter() {
-            let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
-            let mut script_hashes_needed =
-                tx_deltas.script_hashes_needed.clone().unwrap_or_default();
-            let vkey_hashes_provided = tx_deltas.vkey_hashes_provided.clone().unwrap_or_default();
-            let script_hashes_provided =
-                tx_deltas.script_hashes_provided.clone().unwrap_or_default();
             if block.era == Era::Shelley {
                 if let Err(e) = validations::validate_shelley_tx(
-                    &tx_deltas.consumes,
-                    &mut vkey_hashes_needed,
-                    &mut script_hashes_needed,
-                    &vkey_hashes_provided,
-                    &script_hashes_provided,
+                    tx_deltas,
+                    pool_registration_updates,
+                    stake_registration_updates,
                     &utxos_needed,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
@@ -657,6 +652,10 @@ mod tests {
                 produces: vec![output.clone()],
                 fee: 0,
                 is_valid: true,
+                total_withdrawals: None,
+                certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -1033,6 +1032,10 @@ mod tests {
                 produces: vec![output.clone()],
                 fee: 0,
                 is_valid: true,
+                total_withdrawals: None,
+                certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,
@@ -1055,6 +1058,10 @@ mod tests {
                 produces: vec![],
                 fee: 0,
                 is_valid: true,
+                total_withdrawals: None,
+                certs_identifiers: None,
+                value_minted: None,
+                value_burnt: None,
                 vkey_hashes_needed: None,
                 script_hashes_needed: None,
                 vkey_hashes_provided: None,

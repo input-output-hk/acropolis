@@ -4,6 +4,7 @@ pub mod address;
 pub mod calculations;
 pub mod caryatid;
 pub mod cbor;
+pub mod certificate;
 pub mod cip19;
 pub mod commands;
 pub mod configuration;
@@ -30,6 +31,7 @@ pub mod state_history;
 pub mod tx;
 pub mod types;
 pub mod upstream_cache;
+pub mod utxo;
 pub mod validation;
 
 // Flattened re-exports
@@ -38,3 +40,4 @@ pub use self::drep::*;
 pub use self::metadata::*;
 pub use self::tx::*;
 pub use self::types::*;
+pub use self::utxo::*;

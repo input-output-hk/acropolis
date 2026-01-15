@@ -32,6 +32,8 @@ mod spo_distribution_publisher;
 use spo_distribution_publisher::SPODistributionPublisher;
 mod spo_rewards_publisher;
 use spo_rewards_publisher::SPORewardsPublisher;
+mod registration_updates_publisher;
+use registration_updates_publisher::StakeRegistrationUpdatesPublisher;
 mod stake_reward_deltas_publisher;
 mod state;
 use stake_reward_deltas_publisher::StakeRewardDeltasPublisher;
@@ -53,12 +55,14 @@ const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
+const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
 
 /// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
@@ -150,6 +154,7 @@ impl AccountsState {
         mut spo_publisher: SPODistributionPublisher,
         mut spo_rewards_publisher: SPORewardsPublisher,
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
+        mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
         validation_outcomes_topic: String,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
@@ -157,6 +162,7 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
@@ -173,6 +179,7 @@ impl AccountsState {
             // !TODO this seems overly specific to our startup process
             let _ = stake_subscription.read().await?;
             let _ = parameters_subscription.read().await?;
+            let _ = governance_outcomes_subscription.read().await?;
 
             // Initialisation messages
             {
@@ -235,6 +242,9 @@ impl AccountsState {
                     spo_publisher.publish_rollback(certs_message.clone()).await?;
                     spo_rewards_publisher.publish_rollback(certs_message.clone()).await?;
                     stake_reward_deltas_publisher.publish_rollback(certs_message.clone()).await?;
+                    stake_registration_updates_publisher
+                        .publish_rollback(certs_message.clone())
+                        .await?;
                     false
                 }
                 _ => false,
@@ -388,7 +398,7 @@ impl AccountsState {
                         async {
                             Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg, verifier)
+                                .handle_epoch_activity(ea_msg, block_info.era, verifier)
                                 .await
                                 .inspect_err(|e| {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
@@ -415,6 +425,36 @@ impl AccountsState {
                     _ => error!("Unexpected message type: {message:?}"),
                 }
 
+                // Handle governance outcomes (enacted/expired proposals) at epoch boundary
+                let (_, message) =
+                    governance_outcomes_subscription.read_ignoring_rollbacks().await?;
+                match message.as_ref() {
+                    Message::Cardano((
+                        block_info,
+                        CardanoMessage::GovernanceOutcomes(outcomes_msg),
+                    )) => {
+                        let span = info_span!(
+                            "account_state.handle_governance_outcomes",
+                            block = block_info.number
+                        );
+                        async {
+                            Self::check_sync(&current_block, block_info);
+                            state
+                                .handle_governance_outcomes(outcomes_msg)
+                                .inspect_err(|e| {
+                                    vld.push_anyhow(anyhow!(
+                                        "GovernanceOutcomes handling error: {e:#}"
+                                    ))
+                                })
+                                .ok();
+                        }
+                        .instrument(span)
+                        .await;
+                    }
+
+                    _ => error!("Unexpected message type: {message:?}"),
+                }
+
                 // Clear the skip flag after first epoch transition
                 skip_first_epoch_rewards = false;
             }
@@ -425,12 +465,24 @@ impl AccountsState {
                     let span = info_span!("account_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, block_info);
-                        state
-                            .handle_tx_certificates(tx_certs_msg)
+                        let stake_registration_updates = state
+                            .handle_tx_certificates(tx_certs_msg, &mut vld)
                             .inspect_err(|e| {
                                 vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
                             })
                             .ok();
+
+                        // Publish stake registration updates
+                        if let Some(updates) = stake_registration_updates {
+                            if let Err(e) = stake_registration_updates_publisher
+                                .publish(block_info, updates)
+                                .await
+                            {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing stake registration updates: {e:#}"
+                                ));
+                            }
+                        }
                     }
                     .instrument(span)
                     .await;
@@ -549,6 +601,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
+        let governance_outcomes_topic = config
+            .get_string("governance-outcomes-topic")
+            .unwrap_or(DEFAULT_GOVERNANCE_OUTCOMES_TOPIC.to_string());
+        info!("Creating governance outcomes subscriber on '{governance_outcomes_topic}'");
+
         let parameters_topic = config
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
@@ -584,6 +641,13 @@ impl AccountsState {
             .get_string("publish-stake-reward-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_TOPIC.to_string());
         info!("Creating stake reward deltas publisher on '{stake_reward_deltas_topic}'");
+
+        let stake_registration_updates_topic = config
+            .get_string("publish-stake-registration-updates-topic")
+            .unwrap_or(DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC.to_string());
+        info!(
+            "Creating stake registration updates publisher on '{stake_registration_updates_topic}'"
+        );
 
         let validation_outcomes_topic = config
             .get_string("validation-outcomes-topic")
@@ -846,6 +910,10 @@ impl AccountsState {
         let spo_rewards_publisher = SPORewardsPublisher::new(context.clone(), spo_rewards_topic);
         let stake_reward_deltas_publisher =
             StakeRewardDeltasPublisher::new(context.clone(), stake_reward_deltas_topic);
+        let stake_registration_updates_publisher = StakeRegistrationUpdatesPublisher::new(
+            context.clone(),
+            stake_registration_updates_topic,
+        );
 
         // Subscribe
         let spos_subscription = context.subscribe(&spo_state_topic).await?;
@@ -854,6 +922,8 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let governance_outcomes_subscription =
+            context.subscribe(&governance_outcomes_topic).await?;
         let drep_state_subscription = match drep_state_topic {
             Some(ref topic) => Some(context.subscribe(topic).await?),
             None => None,
@@ -882,6 +952,7 @@ impl AccountsState {
                 spo_publisher,
                 spo_rewards_publisher,
                 stake_reward_deltas_publisher,
+                stake_registration_updates_publisher,
                 validation_outcomes_topic,
                 spos_subscription,
                 ea_subscription,
@@ -889,6 +960,7 @@ impl AccountsState {
                 withdrawals_subscription,
                 pot_deltas_subscription,
                 stake_subscription,
+                governance_outcomes_subscription,
                 drep_state_subscription,
                 parameters_subscription,
                 &verifier,

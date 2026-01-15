@@ -80,7 +80,7 @@ pub enum DRepChoice {
 }
 
 /// DRep Registration = reg_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct DRepRegistration {
     /// DRep credential
     pub credential: DRepCredential,
@@ -93,7 +93,7 @@ pub struct DRepRegistration {
 }
 
 /// DRep Deregistration = unreg_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct DRepDeregistration {
     /// DRep credential
     pub credential: DRepCredential,
@@ -103,7 +103,7 @@ pub struct DRepDeregistration {
 }
 
 /// DRep Update = update_drep_cert
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct DRepUpdate {
     /// DRep credential
     pub credential: DRepCredential,

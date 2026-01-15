@@ -1,7 +1,10 @@
 # Top-level configuration for Acropolis omnibus process
 
+[global.startup]
+network-name = "sanchonet"
+topic = "cardano.sequence.start"
+
 [module.genesis-bootstrapper]
-network-name = "sanchonet" # "sanchonet", "mainnet"
 
 #[module.mithril-snapshot-fetcher]
 #Turned off with SanchoNet
@@ -77,9 +80,6 @@ port = 4340
 [module.spy]
 # Enable for message spying
 #topic = "cardano.drep.state"
-
-[global.startup]
-topic = "cardano.sequence.start"
 
 [message-bus.external]
 class = "rabbit-mq"
