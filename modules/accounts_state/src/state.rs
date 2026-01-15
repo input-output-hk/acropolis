@@ -6,6 +6,7 @@ use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
+    certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
@@ -20,7 +21,8 @@ use acropolis_common::{
     SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
-use anyhow::Result;
+use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
+use anyhow::{anyhow, Result};
 use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -904,11 +906,17 @@ impl State {
     }
 
     /// Register a stake address, with a specified deposit if known
-    fn register_stake_address(&mut self, stake_address: &StakeAddress, deposit: Option<Lovelace>) {
+    /// Returns the outcome as StakeRegistrationOutcome
+    fn register_stake_address(
+        &mut self,
+        stake_address: &StakeAddress,
+        deposit: Option<Lovelace>,
+        vld: &mut ValidationOutcomes,
+    ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        if stake_addresses.register_stake_address(stake_address) {
+        let outcome = if stake_addresses.register_stake_address(stake_address) {
             // Account for the deposit
             let deposit = match deposit {
                 Some(deposit) => deposit,
@@ -923,25 +931,42 @@ impl State {
             };
 
             self.pots.deposits += deposit;
-        }
+            Some(StakeRegistrationOutcome::Registered(deposit))
+        } else {
+            // Already registered, validation error
+            vld.push_anyhow(anyhow!("Stake address {stake_address} already registered"));
+            None
+        };
 
         // Add to registration changes
         self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
             address: stake_address.clone(),
             kind: RegistrationChangeKind::Registered,
         });
+
+        outcome
     }
 
     /// Deregister a stake address, with specified refund if known
-    fn deregister_stake_address(&mut self, stake_address: &StakeAddress, refund: Option<Lovelace>) {
+    /// Returns the outcome as StakeRegistrationOutcome
+    fn deregister_stake_address(
+        &mut self,
+        stake_address: &StakeAddress,
+        refund: Option<Lovelace>,
+        vld: &mut ValidationOutcomes,
+    ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
 
         // Check if it existed
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         if stake_addresses.deregister_stake_address(stake_address) {
             // Account for the deposit, if registered before
-            let deposit = match refund {
-                Some(deposit) => deposit,
+            // TODO:
+            // Need to store deposit amount per stake address
+            // in accounts state
+            // not just using protocol parameter which can change over time
+            let refund_amount = match refund {
+                Some(refund) => refund,
                 None => {
                     // Get stake deposit amount from parameters, or default
                     self.protocol_parameters
@@ -952,13 +977,21 @@ impl State {
                 }
             };
 
-            self.pots.deposits -= deposit;
+            self.pots.deposits -= refund_amount;
 
             // Add to registration changes
             self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Deregistered,
             });
+
+            Some(StakeRegistrationOutcome::Deregistered(refund_amount))
+        } else {
+            // Already deregistered, validation error
+            vld.push_anyhow(anyhow!(
+                "Stake address {stake_address} already deregistered"
+            ));
+            None
         }
     }
 
@@ -992,16 +1025,38 @@ impl State {
     }
 
     /// Handle TxCertificates
-    pub fn handle_tx_certificates(&mut self, tx_certs_msg: &TxCertificatesMessage) -> Result<()> {
+    /// Returns the stake registration updates for publishing
+    pub fn handle_tx_certificates(
+        &mut self,
+        tx_certs_msg: &TxCertificatesMessage,
+        vld: &mut ValidationOutcomes,
+    ) -> Result<Vec<StakeRegistrationUpdate>> {
+        let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
+
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
+            let cert_identifier = TxCertificateIdentifier {
+                tx_identifier: tx_cert.tx_identifier,
+                cert_index: tx_cert.cert_index,
+            };
+
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    self.register_stake_address(reg, None);
+                    if let Some(outcome) = self.register_stake_address(reg, None, vld) {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                 }
 
                 TxCertificate::StakeDeregistration(dreg) => {
-                    self.deregister_stake_address(dreg, None);
+                    if let Some(outcome) = self.deregister_stake_address(dreg, None, vld) {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
@@ -1009,11 +1064,25 @@ impl State {
                 }
 
                 TxCertificate::Registration(reg) => {
-                    self.register_stake_address(&reg.stake_address, Some(reg.deposit));
+                    if let Some(outcome) =
+                        self.register_stake_address(&reg.stake_address, Some(reg.deposit), vld)
+                    {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                 }
 
                 TxCertificate::Deregistration(dreg) => {
-                    self.deregister_stake_address(&dreg.stake_address, Some(dreg.refund));
+                    if let Some(outcome) =
+                        self.deregister_stake_address(&dreg.stake_address, Some(dreg.refund), vld)
+                    {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                 }
 
                 TxCertificate::StakeDelegation(delegation) => {
@@ -1030,26 +1099,44 @@ impl State {
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
-                    self.register_stake_address(
+                    if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
-                    );
+                        vld,
+                    ) {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                 }
 
                 TxCertificate::StakeRegistrationAndVoteDelegation(delegation) => {
-                    self.register_stake_address(
+                    if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
-                    );
+                        vld,
+                    ) {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                     self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
-                    self.register_stake_address(
+                    if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
-                    );
+                        vld,
+                    ) {
+                        stake_registration_updates.push(StakeRegistrationUpdate {
+                            cert_identifier,
+                            outcome,
+                        });
+                    }
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
                     self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
@@ -1066,7 +1153,7 @@ impl State {
             };
         }
 
-        Ok(())
+        Ok(stake_registration_updates)
     }
 
     /// Handle withdrawals
@@ -1236,7 +1323,7 @@ mod tests {
         let mut vld = ValidationOutcomes::new();
 
         // Register first
-        state.register_stake_address(&stake_address, None);
+        state.register_stake_address(&stake_address, None, &mut vld);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1331,11 +1418,11 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None);
+        state.register_stake_address(&addr1, None, &mut vld);
         state.record_stake_delegation(&addr1, &spo1);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None);
+        state.register_stake_address(&addr2, None, &mut vld);
         state.record_stake_delegation(&addr2, &spo2);
 
         // Put some value in
@@ -1438,7 +1525,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None);
+        state.register_stake_address(&stake_address, None, &mut vld);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1489,7 +1576,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None);
+        state.register_stake_address(&stake_address, None, &mut vld);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -1657,7 +1744,7 @@ mod tests {
             },
         ];
 
-        state.handle_tx_certificates(&TxCertificatesMessage { certificates })?;
+        state.handle_tx_certificates(&TxCertificatesMessage { certificates }, &mut vld)?;
 
         let deltas = vec![
             StakeAddressDelta {

@@ -1,6 +1,9 @@
 //! Acropolis SPOState: State storage
 
 use crate::{historical_spo_state::HistoricalSPOState, store_config::StoreConfig};
+use acropolis_common::certificate::TxCertificateIdentifier;
+use acropolis_common::messages::{PoolRegistrationUpdatesMessage, ProtocolParamsMessage};
+use acropolis_common::protocol_params::ProtocolParams;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     crypto::keyhash_224,
@@ -15,10 +18,13 @@ use acropolis_common::{
     BlockInfo, PoolId, PoolMetadata, PoolRegistration, PoolRetirement, PoolUpdateEvent, Relay,
     StakeAddress, TxCertificate, TxHash, TxIdentifier, Voter, VotingProcedures,
 };
+use acropolis_common::{PoolRegistrationOutcome, PoolRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use imbl::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
+
+const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
@@ -34,6 +40,9 @@ pub struct State {
     pending_updates: HashMap<PoolId, PoolRegistration>,
 
     pending_deregistrations: HashMap<u64, Vec<PoolId>>,
+
+    /// Protocol parameters that apply during this epoch
+    protocol_parameters: Option<ProtocolParams>,
 
     // Total blocks minted till block number
     // Keyed by pool_id
@@ -56,6 +65,7 @@ impl State {
             spos: HashMap::new(),
             pending_updates: HashMap::new(),
             pending_deregistrations: HashMap::new(),
+            protocol_parameters: None,
             total_blocks_minted: HashMap::new(),
             historical_spos: if config.store_historical_state() {
                 Some(HashMap::new())
@@ -110,6 +120,7 @@ impl From<SPOState> for State {
             spos,
             pending_updates: value.updates.into(),
             pending_deregistrations,
+            protocol_parameters: None,
             total_blocks_minted: HashMap::new(),
             historical_spos: None,
             stake_addresses: None,
@@ -314,8 +325,8 @@ impl State {
         reg: &PoolRegistration,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) {
-        if self.spos.contains_key(&reg.operator) {
+    ) -> PoolRegistrationUpdate {
+        let pool_registration_update = if self.spos.contains_key(&reg.operator) {
             debug!(
                 epoch = self.epoch,
                 block = block.number,
@@ -324,6 +335,13 @@ impl State {
                 reg
             );
             self.pending_updates.insert(reg.operator, reg.clone());
+            PoolRegistrationUpdate {
+                cert_identifier: TxCertificateIdentifier {
+                    tx_identifier: *tx_identifier,
+                    cert_index: *cert_index,
+                },
+                outcome: PoolRegistrationOutcome::Updated,
+            }
         } else {
             debug!(
                 epoch = self.epoch,
@@ -333,7 +351,20 @@ impl State {
                 reg
             );
             self.spos.insert(reg.operator, reg.clone());
-        }
+            PoolRegistrationUpdate {
+                cert_identifier: TxCertificateIdentifier {
+                    tx_identifier: *tx_identifier,
+                    cert_index: *cert_index,
+                },
+                outcome: PoolRegistrationOutcome::Registered(
+                    self.protocol_parameters
+                        .as_ref()
+                        .and_then(|pp| pp.shelley.as_ref())
+                        .map(|sp| sp.protocol_params.pool_deposit)
+                        .unwrap_or(DEFAULT_POOL_DEPOSIT),
+                ),
+            }
+        };
 
         // Remove any existing queued deregistrations
         for (epoch, deregistrations) in &mut self.pending_deregistrations.iter_mut() {
@@ -358,6 +389,8 @@ impl State {
             historical_spo
                 .add_pool_updates(PoolUpdateEvent::register_event(*tx_identifier, *cert_index));
         }
+
+        pool_registration_update
     }
 
     fn handle_pool_retirement(
@@ -367,7 +400,8 @@ impl State {
         ret: &PoolRetirement,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) {
+    ) -> Option<PoolRegistrationUpdate> {
+        let mut pool_registration_update = None;
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
@@ -397,6 +431,13 @@ impl State {
                 }
             }
             self.pending_deregistrations.entry(ret.epoch).or_default().push(ret.operator);
+            pool_registration_update = Some(PoolRegistrationUpdate {
+                cert_identifier: TxCertificateIdentifier {
+                    tx_identifier: *tx_identifier,
+                    cert_index: *cert_index,
+                },
+                outcome: PoolRegistrationOutcome::RetirementQueued,
+            });
 
             // Note: not removing pending updates - the deregistation may happen many
             // epochs later than the update, and we apply updates before deregistrations
@@ -415,6 +456,8 @@ impl State {
                 ));
             }
         }
+
+        pool_registration_update
     }
 
     fn register_stake_address(&mut self, stake_address: &StakeAddress) {
@@ -518,7 +561,7 @@ impl State {
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
-    ) -> Result<Option<Arc<Message>>> {
+    ) -> Result<(Option<Arc<Message>>, Arc<Message>)> {
         let mut vld = ValidationOutcomes::new();
         let res = self.handle_tx_certs(block, tx_certs_msg, &mut vld)?;
         vld.as_result()?;
@@ -527,37 +570,43 @@ impl State {
 
     /// Handle TxCertificates with SPO registrations / de-registrations
     /// Returns an optional state message for end of epoch
+    /// and Pool certificates deltas
     pub fn handle_tx_certs(
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
         vld: &mut ValidationOutcomes,
-    ) -> Result<Option<Arc<Message>>> {
+    ) -> Result<(Option<Arc<Message>>, Arc<Message>)> {
         let mut maybe_message: Option<Arc<Message>> = None;
         if block.epoch > self.epoch {
             // handle new epoch
             maybe_message = Some(self.handle_new_epoch(block, vld));
         }
+
+        let mut pool_registration_updates: Vec<PoolRegistrationUpdate> = Vec::new();
+
         // Handle certificates
         for tx_cert in tx_certs_msg.certificates.iter() {
             match &tx_cert.cert {
                 // for spo_state
                 TxCertificate::PoolRegistration(reg) => {
-                    self.handle_pool_registration(
+                    pool_registration_updates.push(self.handle_pool_registration(
                         block,
                         reg,
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
-                    );
+                    ));
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    self.handle_pool_retirement(
+                    if let Some(delta) = self.handle_pool_retirement(
                         vld,
                         block,
                         ret,
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
-                    );
+                    ) {
+                        pool_registration_updates.push(delta);
+                    }
                 }
 
                 // for stake addresses
@@ -598,7 +647,14 @@ impl State {
                 _ => (),
             }
         }
-        Ok(maybe_message)
+
+        let pool_registration_updates_message = Arc::new(Message::Cardano((
+            block.clone(),
+            CardanoMessage::PoolRegistrationUpdates(PoolRegistrationUpdatesMessage {
+                updates: pool_registration_updates,
+            }),
+        )));
+        Ok((maybe_message, pool_registration_updates_message))
     }
 
     pub fn handle_governance(
@@ -686,6 +742,11 @@ impl State {
         Ok(vld)
     }
 
+    /// Handle ProtocolParamsMessage
+    pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) {
+        self.protocol_parameters = Some(params_msg.params.clone());
+    }
+
     pub fn dump(&self) -> SPOState {
         SPOState::from(self)
     }
@@ -748,7 +809,7 @@ mod tests {
         let mut state = State::default();
         let msg = new_certs_msg();
         let block = new_block(1);
-        let maybe_message = state.handle_tx_certs_no_errors(&block, &msg).unwrap();
+        let (maybe_message, _) = state.handle_tx_certs_no_errors(&block, &msg).unwrap();
         assert!(maybe_message.is_some());
     }
 
