@@ -5,7 +5,8 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+startup-mode = "genesis"
+sync-mode = "mithril"
 topic = "cardano.sequence.start"
 
 # ============================================================================
