@@ -481,9 +481,8 @@ mod tests {
             },
         };
 
-        match voting_state.votes_to_rationals(&hard_fork(), false, &votes) {
-            Ok(res) => bail!("Must return error: found Ok({res:?})"),
-            Err(_) => (),
+        if let Ok(res) = voting_state.votes_to_rationals(&hard_fork(), false, &votes) {
+            bail!("Must return error: found Ok({res:?})");
         }
 
         Ok(())
