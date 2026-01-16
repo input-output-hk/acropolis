@@ -38,7 +38,7 @@ http://127.0.0.1:4341/sse
 
 ## Available Tools
 
-The server exposes 60+ Blockfrost-compatible API endpoints as MCP tools, including:
+The server exposes all 63 Blockfrost-compatible API endpoints as MCP tools. Examples include:
 
 - `get_epoch_information` - Epoch info (use "latest" for current)
 - `get_epoch_parameters` - Protocol parameters for an epoch
@@ -48,7 +48,8 @@ The server exposes 60+ Blockfrost-compatible API endpoints as MCP tools, includi
 - `get_pool_information` - Stake pool details
 - `get_drep_info` - DRep information (Conway era)
 - `get_asset_information` - Native token details
-- And many more...
+
+For the complete list of available tools, use the `tools/list` MCP method or see the route definitions in `rest_blockfrost/src/routes.rs`.
 
 ## Testing
 
