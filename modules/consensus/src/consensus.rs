@@ -113,30 +113,33 @@ impl Consensus {
                             )
                             .await
                             {
-                                Ok(Ok(results)) => results.iter().fold(
-                                    true,
-                                    |all_ok, (topic, msg)| match msg.as_ref() {
-                                        Message::Cardano((
-                                            block_info,
-                                            CardanoMessage::BlockValidation(status),
-                                        )) => match status {
-                                            ValidationStatus::Go => all_ok,
-                                            ValidationStatus::NoGo(err) => {
-                                                error!(
+                                Ok(Ok(results)) => {
+                                    results.iter().fold(true, |all_ok, (topic, msg)| {
+                                        match msg.as_ref() {
+                                            Message::Cardano((
+                                                block_info,
+                                                CardanoMessage::BlockValidation(status),
+                                            )) => match status {
+                                                ValidationStatus::Go => all_ok,
+                                                ValidationStatus::NoGo(err) => {
+                                                    error!(
                                                     block = block_info.number,
                                                     ?err,
                                                     "Validation failure: {topic}, result {msg:?}"
                                                 );
+                                                    false
+                                                }
+                                            },
+
+                                            _ => {
+                                                error!(
+                                                    "Unexpected validation message type: {msg:?}"
+                                                );
                                                 false
                                             }
-                                        },
-
-                                        _ => {
-                                            error!("Unexpected validation message type: {msg:?}");
-                                            false
                                         }
-                                    },
-                                ),
+                                    })
+                                }
                                 Ok(Err(e)) => {
                                     error!("Failed to read validations: {e}");
                                     false
