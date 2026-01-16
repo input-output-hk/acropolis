@@ -1,19 +1,16 @@
 //! Acropolis consensus module for Caryatid
 //! Maintains a favoured chain based on offered options from multiple sources
 
-use std::collections::HashMap;
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateTransitionMessage},
     validation::ValidationStatus,
     BlockIntent,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Subscription};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use futures::future::try_join_all;
-use std::sync::Arc;
-use std::time::Duration;
-//use config::ConfigError::Message;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::timeout};
 use tracing::{error, info, info_span, Instrument};
 
@@ -94,53 +91,52 @@ impl Consensus {
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                            let completed_tasks = Arc::new(Mutex::new(
-                                HashMap::<String, Option<Arc<Message>>>::from_iter(
-                                    validator_topics.iter().map(|s| (s.clone(),None))
-                                )
-                            ));
+                            let completed_tasks = Arc::new(Mutex::new(HashMap::<
+                                String,
+                                Option<Arc<Message>>,
+                            >::from_iter(
+                                validator_topics.iter().map(|s| (s.clone(), None)),
+                            )));
 
                             // Read validation responses from all validators in parallel
                             // and check they are all positive, with a safety timeout
                             let all_say_go = match timeout(
                                 validation_timeout,
-                                try_join_all(validator_subscriptions.iter_mut().map(
-                                    |s| async {
-                                        let (topic, res) = s.read().await?;
-                                        completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
-                                        Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
-                                    }
-                                )),
+                                try_join_all(validator_subscriptions.iter_mut().map(|s| async {
+                                    let (topic, res) = s.read().await?;
+                                    completed_tasks
+                                        .lock()
+                                        .await
+                                        .insert(topic.clone(), Some(res.clone()));
+                                    Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
+                                })),
                             )
                             .await
                             {
-                                Ok(Ok(results)) => {
-                                    results.iter().fold(true, |all_ok, (topic,msg)| {
-                                        match msg.as_ref() {
-                                            Message::Cardano((
-                                                block_info,
-                                                CardanoMessage::BlockValidation(status),
-                                            )) => match status {
-                                                ValidationStatus::Go => all_ok,
-                                                ValidationStatus::NoGo(err) => {
-                                                    error!(
-                                                        block = block_info.number,
-                                                        ?err,
-                                                        "Validation failure: {topic}, result {msg:?}"
-                                                    );
-                                                    false
-                                                }
-                                            },
-
-                                            _ => {
+                                Ok(Ok(results)) => results.iter().fold(
+                                    true,
+                                    |all_ok, (topic, msg)| match msg.as_ref() {
+                                        Message::Cardano((
+                                            block_info,
+                                            CardanoMessage::BlockValidation(status),
+                                        )) => match status {
+                                            ValidationStatus::Go => all_ok,
+                                            ValidationStatus::NoGo(err) => {
                                                 error!(
-                                                    "Unexpected validation message type: {msg:?}"
+                                                    block = block_info.number,
+                                                    ?err,
+                                                    "Validation failure: {topic}, result {msg:?}"
                                                 );
                                                 false
                                             }
+                                        },
+
+                                        _ => {
+                                            error!("Unexpected validation message type: {msg:?}");
+                                            false
                                         }
-                                    })
-                                }
+                                    },
+                                ),
                                 Ok(Err(e)) => {
                                     error!("Failed to read validations: {e}");
                                     false
@@ -152,7 +148,10 @@ impl Consensus {
                             };
 
                             if !all_say_go {
-                                error!(block = block_info.number, "Validation rejected block, results available:");
+                                error!(
+                                    block = block_info.number,
+                                    "Validation rejected block, results available:"
+                                );
                                 let completed_tasks = completed_tasks.lock().await;
                                 for (topic, msg) in completed_tasks.iter() {
                                     error!("Topic {topic}, result {msg:?}");
