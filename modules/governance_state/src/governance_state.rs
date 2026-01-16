@@ -341,9 +341,7 @@ impl GovernanceState {
                         .await;
                     }
 
-                    {
-                        vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
-                    }
+                    vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
                 }
             }
             .instrument(span)
