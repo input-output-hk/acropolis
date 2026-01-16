@@ -32,14 +32,6 @@ mod test_utils;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
-const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "protocol-parameters-subscribe-topic",
-    "cardano.protocol.parameters",
-);
-const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "bootstrapped-subscribe-topic",
-    "cardano.sequence.bootstrapped",
-);
 
 const CIP25_METADATA_LABEL: u64 = 721;
 
@@ -67,15 +59,24 @@ impl TxUnpacker {
         publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
-        mut bootstrapped_sub: Box<dyn Subscription<Message>>,
-        mut protocol_params_sub: Box<dyn Subscription<Message>>,
+        bootstrapped_sub: Option<Box<dyn Subscription<Message>>>,
+        mut protocol_params_sub: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
-        let (_, bootstrapped_message) = bootstrapped_sub.read().await?;
-        let genesis = match bootstrapped_message.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
-                complete.values.clone()
+        let genesis = match bootstrapped_sub {
+            Some(mut sub) => {
+                let (_, bootstrapped_message) = sub.read().await?;
+                let genesis = match bootstrapped_message.as_ref() {
+                    Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                        complete.values.clone()
+                    }
+                    _ => panic!(
+                        "Unexpected message in genesis completion topic: {bootstrapped_message:?}"
+                    ),
+                };
+
+                Some(genesis)
             }
-            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+            None => None,
         };
 
         loop {
@@ -133,22 +134,26 @@ impl TxUnpacker {
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
+                                    let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    let tx_total_output = mapped_tx.calculate_total_output();
+
                                     let Transaction {
                                         consumes: tx_consumes,
                                         produces: tx_produces,
-                                        fee: tx_fee,
+                                        fee:tx_fee,
                                         is_valid,
-                                        total_output: tx_total_output,
                                         certs: tx_certs,
                                         withdrawals: tx_withdrawals,
                                         proposal_update: tx_proposal_update,
                                         vkey_witnesses,
                                         native_scripts,
                                         error: tx_error,
-                                    }= acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
+                                    } = mapped_tx;
                                     let mut props = None;
                                     let mut votes = None;
 
+                                    let certs_identifiers = tx_certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+                                    let total_withdrawals = tx_withdrawals.iter().map(|w| w.value).sum::<u64>();
                                     let mut vkey_needed = HashSet::new();
                                     let mut script_needed = HashSet::new();
                                     utils::get_vkey_script_needed(
@@ -163,11 +168,24 @@ impl TxUnpacker {
                                     let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
 
                                     // sum up total output lovelace for a block
-                                    total_output += tx_total_output;
+                                    total_output += tx_total_output.coin() as u128;
+
+                                    // Mint or burn deltas
+                                    let mut mint_burn_deltas:NativeAssetsDelta =
+                                            Vec::new();
+
+                                    // Mint deltas
+                                    for policy_group in tx.mints().iter() {
+                                        if let Some((policy_id, deltas)) =
+                                            acropolis_codec::map_mint_burn(policy_group)
+                                        {
+                                            mint_burn_deltas.push((policy_id, deltas));
+                                        }
+                                    }
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output={}",
-                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output);
+                                        debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output_coin={}",
+                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output.coin());
                                     }
 
                                     if let Some(error) = tx_error {
@@ -178,12 +196,17 @@ impl TxUnpacker {
 
                                     if publish_utxo_deltas_topic.is_some() {
                                         // Group deltas by tx
+                                        let (value_minted, value_burnt) = utils::get_value_minted_burnt_from_deltas(&mint_burn_deltas);
                                         utxo_deltas.push(TxUTxODeltas {
                                             tx_identifier,
                                             consumes: tx_consumes,
                                             produces: tx_produces,
                                             fee: tx_fee,
                                             is_valid,
+                                            total_withdrawals: Some(total_withdrawals),
+                                            certs_identifiers: Some(certs_identifiers),
+                                            value_minted: Some(value_minted),
+                                            value_burnt: Some(value_burnt),
                                             vkey_hashes_needed: Some(vkey_needed),
                                             script_hashes_needed: Some(script_needed),
                                             vkey_hashes_provided: Some(vkey_hashes_provided),
@@ -192,18 +215,6 @@ impl TxUnpacker {
                                     }
 
                                     if publish_asset_deltas_topic.is_some() {
-                                        let mut tx_deltas: Vec<(PolicyId, Vec<NativeAssetDelta>)> =
-                                            Vec::new();
-
-                                        // Mint deltas
-                                        for policy_group in tx.mints().iter() {
-                                            if let Some((policy_id, deltas)) =
-                                                acropolis_codec::map_mint_burn(policy_group)
-                                            {
-                                                tx_deltas.push((policy_id, deltas));
-                                            }
-                                        }
-
                                         if let Some(metadata) = tx.metadata().find(CIP25_METADATA_LABEL)
                                         {
                                             let mut metadata_raw = Vec::new();
@@ -217,8 +228,8 @@ impl TxUnpacker {
                                             }
                                         }
 
-                                        if !tx_deltas.is_empty() {
-                                            asset_deltas.push((tx_identifier, tx_deltas));
+                                        if !mint_burn_deltas.is_empty() {
+                                            asset_deltas.push((tx_identifier, mint_burn_deltas));
                                         }
                                     }
 
@@ -382,39 +393,44 @@ impl TxUnpacker {
             }
 
             if new_epoch {
-                let (_, protocol_parameters_msg) = protocol_params_sub.read().await?;
-                if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
-                    protocol_parameters_msg.as_ref()
-                {
-                    Self::check_sync(&current_block, block_info);
-                    let span = info_span!(
-                        "tx_unpacker.handle_protocol_params",
-                        block = block_info.number
-                    );
-                    span.in_scope(|| {
-                        state.handle_protocol_params(params);
-                    });
+                if let Some(ref mut sub) = protocol_params_sub {
+                    let (_, protocol_parameters_msg) = sub.read().await?;
+                    if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
+                        protocol_parameters_msg.as_ref()
+                    {
+                        Self::check_sync(&current_block, block_info);
+                        let span = info_span!(
+                            "tx_unpacker.handle_protocol_params",
+                            block = block_info.number
+                        );
+                        span.in_scope(|| {
+                            state.handle_protocol_params(params);
+                        });
+                    }
                 }
             }
 
             if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                    message.as_ref()
-                {
-                    let span = info_span!("tx_unpacker.validate", block = block.number);
-                    async {
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
-                            validation_outcomes.push(*e);
-                        }
+                if let Some(ref genesis) = genesis {
+                    if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                        message.as_ref()
+                    {
+                        let span = info_span!("tx_unpacker.validate", block = block.number);
+                        async {
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs)
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(&context, publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                            validation_outcomes
+                                .publish(&context, publish_tx_validation_topic, block)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
                 }
             }
 
@@ -461,25 +477,33 @@ impl TxUnpacker {
 
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
 
-        // Subscribers
+        // Main transaction subscriber
         let transactions_subscribe_topic = config
             .get_string(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
-
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{bootstrapped_subscribe_topic}'");
-
-        let protocol_params_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{protocol_params_subscribe_topic}'");
-
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
-        let bootstrapped_sub = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let protocol_params_sub = context.subscribe(&protocol_params_subscribe_topic).await?;
+
+        // Optional subscription for parameters (only needed if we are validating)
+        let protocol_params_subscribe_topic =
+            config.get_string("protocol-parameters-subscribe-topic").ok();
+        let protocol_params_sub = match protocol_params_subscribe_topic {
+            Some(topic) => {
+                info!("Creating subscriber on '{topic}'");
+                Some(context.subscribe(&topic).await?)
+            }
+            None => None,
+        };
+
+        // Optional subscription for bootstrap (only needed if we are validating)
+        let bootstrapped_subscribe_topic = config.get_string("bootstrapped-subscribe-topic").ok();
+        let bootstrapped_sub = match bootstrapped_subscribe_topic {
+            Some(topic) => {
+                info!("Creating subscriber on '{topic}'");
+                Some(context.subscribe(&topic).await?)
+            }
+            None => None,
+        };
 
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();

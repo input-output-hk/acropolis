@@ -27,7 +27,7 @@ mod volatile_addresses;
 
 // Subscription topics
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.delta");
+    ("address-deltas-subscribe-topic", "cardano.address.deltas");
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 

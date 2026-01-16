@@ -300,17 +300,16 @@ impl StakeAddressMap {
         sas_data
             .par_iter() // Rayon multi-threaded iterator
             .for_each(|(spo, (utxo_value, rewards))| {
+                let total_stake = *utxo_value + *rewards;
                 spo_stakes
                     .entry(*spo)
                     .and_modify(|v| {
-                        v.active += *utxo_value;
+                        v.active += total_stake;
                         v.active_delegators_count += 1;
-                        v.live += *utxo_value + *rewards;
                     })
                     .or_insert(DelegatedStake {
-                        active: *utxo_value,
+                        active: total_stake,
                         active_delegators_count: 1,
-                        live: *utxo_value + *rewards,
                     });
             });
 
@@ -454,6 +453,34 @@ impl StakeAddressMap {
         for sas in self.inner.values_mut() {
             if sas.delegated_spo.as_ref() == Some(spo) {
                 sas.delegated_spo = None;
+            }
+        }
+    }
+
+    /// Deregister a DRep - clears all delegations to this DRep
+    ///
+    /// TODO: This currently iterates ALL stake addresses to find delegations (O(n)).
+    /// The Haskell ledger maintains a reverse index (`drepDelegs`) on each DRepState
+    /// that tracks which credentials delegated TO that DRep, enabling O(k) clearing
+    /// where k = number of delegators. We could consider adding similar reverse tracking for
+    /// better performance.
+    /// See: https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
+    /// `clearDRepDelegations` function.
+    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
+        for sas in self.inner.values_mut() {
+            if let Some(ref drep) = sas.delegated_drep {
+                let matches = match drep {
+                    DRepChoice::Key(hash) => {
+                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
+                    }
+                    DRepChoice::Script(hash) => {
+                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
+                    }
+                    _ => false,
+                };
+                if matches {
+                    sas.delegated_drep = None;
+                }
             }
         }
     }
@@ -1100,8 +1127,7 @@ mod tests {
             let spdd = stake_addresses.generate_spdd();
 
             let pool_stake = spdd.get(&SPO_HASH).unwrap();
-            assert_eq!(pool_stake.active, 3000); // utxo only
-            assert_eq!(pool_stake.live, 3150); // utxo + rewards
+            assert_eq!(pool_stake.active, 3150);
             assert_eq!(pool_stake.active_delegators_count, 2);
         }
 

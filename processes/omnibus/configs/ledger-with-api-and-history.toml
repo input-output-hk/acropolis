@@ -1,12 +1,14 @@
 # Top-level configuration for Acropolis omnibus process
+# Bootstrap from Mithril and network sync, full ledger with BlockFrost API
+# and history storage
 
 # ============================================================================
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network-name = "mainnet"
-startup-mode = "genesis"   # Options: "genesis" | "snapshot"
-sync-mode = "mithril"      # Options: "mithril" | "upstream"
+network = "mainnet"
+startup-mode = "genesis"
+sync-mode = "mithril"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -24,10 +26,6 @@ pause = "none"
 # Stop constraint likewise
 stop = "none"
 
-[module.snapshot-bootstrapper]
-epoch = 507
-data-dir = "../../modules/snapshot_bootstrapper/data"
-
 # ============================================================================
 # Core Module Configurations
 # ============================================================================
@@ -39,100 +37,64 @@ node-addresses = [
     "backbone.mainnet.emurgornd.com:3001",
 ]
 
-[module.consensus]
-# List of validation result topics to listen on
-validators = [
-# Add these once they are actually being sent
-#           "cardano.validation.vrf",
-#           "cardano.validation.kes",
-#           "cardano.validation.utxo",
-#           "cardano.validation.spo"
-]
-
 [module.block-unpacker]
-
-[module.rest-blockfrost]
+# Direct connection without consensus mediation
+subscribe-topic = "cardano.block.available"
 
 [module.tx-unpacker]
-# Subscriptions needed for validation
-bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
-protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
-
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-publish-tx-validation-topic = "cardano.validation.tx"
+publish-block-txs-topic = "cardano.block.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
-store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
-pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
-stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 
 [module.spo-state]
+block-subscribe-topic = "cardano.block.available"
+
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
-store-epochs-history = false
+store-epochs-history = true
 # Enable /pools/retired
-store-retired-pools = false
+store-retired-pools = true
 # Enables /pools/{pool_id} endpoint
-store-registration = false
+store-registration = true
 # # Enables /pools/{pool_id}/updates endpoint
-store-updates = false
+store-updates = true
 # Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
-store-delegators = false
+store-delegators = true
 # Enables /pools/{pool_id}/votes endpoint
-store-votes = false
+store-votes = true
 # Store blocks, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
-store-blocks = false
+store-blocks = true
 # Store stake_addresses
-store-stake-addresses = false
+store-stake-addresses = true
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = false
+store-spdd = true
 
-[module.historical-accounts-state]
-# Clear state on start up (default true)
-clear-on-start = true
-# Enables /accounts/{stake_address}/rewards endpoint
-store-rewards-history = false
-# Enables /accounts/{stake_address}/history endpoint
-store-active-stake-history = false
-# Enables /accounts/{stake_address}/registrations endpoint
-store-registration-history = false
-# Enables /accounts/{stake_address}/delegations endpoint
-store-delegation-history = false
-# Enables /accounts/{stake_address}/mirs endpoint
-store-mir-history = false
-# Enables /accounts/{stake_address}/withdrawals endpoint
-store-withdrawal-history = false
-# Enables /accounts/{stake_address}/addresses endpoint
-store-addresses = false
-# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
-store-tx-count = false
-
-[module.historical-epochs-state]
 # Clear state on start up (default true)
 clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
-store-info = false
+store-info = true
 # Enables /governance/dreps/{drep_id}/delegators endpoint
-store-delegators = false
+store-delegators = true
 # Enables /governance/dreps/{drep_id}/metadata endpoint
-store-metadata = false
+store-metadata = true
 # Enables /governance/dreps/{drep_id}/updates endpoint
-store-updates = false
+store-updates = true
 # Enables /governance/dreps/{drep_id}/votes endpoint
-store-votes = false
+store-votes = true
 
 [module.drdd-state]
-store-drdd = false
+store-drdd = true
 
 [module.governance-state]
 # Listen for DRep and SPO distributions
@@ -142,20 +104,21 @@ stake-spo-distribution-topic = "cardano.spo.distribution"
 [module.parameters-state]
 # Listen for governance actions
 enact-state-topic = "cardano.enact.state"
-store-history = false
+store-history = true
 
 [module.stake-delta-filter]
 cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
+block-subscribe-topic = "cardano.block.available"
 
 [module.accounts-state]
 # Optional subscription for when governance is active
 drep-state-topic = "cardano.drep.state"
 
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
-spdd-retention-epochs = 0
+spdd-retention-epochs = 1000
 spdd-db-path = "./fjall-spdd"
 spdd-clear-on-start = true
 # Verify against captured CSV
@@ -165,18 +128,18 @@ verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
-store-assets = false
+store-assets = true
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
-store-info = false
+store-info = true
 # Enables /assets/{asset}/history endpoint
-store-history = false
+store-history = true
 # Enables /assets/{asset}/transactions endpoint
 #   Usage: "none", "all", or most recent: "1", "20", etc.
 store-transactions = "none"
 # Enables /assets/{asset}/addresses endpoint
-store-addresses = false
+store-addresses = true
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
-index-by-policy = false
+index-by-policy = true
 
 [module.chain-store]
 # Clear state on start up (default true)
@@ -187,35 +150,46 @@ clear-on-start = true
 clear-on-start = true
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
-store-info = false
+store-info = true
 # Enables /addresses/{address}/totals endpoint
-store-totals = false
+store-totals = true
 # Enables /addresses/{address}/transactions endpoint
-store-transactions = false
+store-transactions = true
 
-[module.block-vrf-validator]
+[module.historical-accounts-state]
+# Clear state on start up (default true)
+clear-on-start = true
+# Enables /accounts/{stake_address}/rewards endpoint
+store-rewards-history = true
+# Enables /accounts/{stake_address}/history endpoint
+store-active-stake-history = true
+# Enables /accounts/{stake_address}/registrations endpoint
+store-registration-history = true
+# Enables /accounts/{stake_address}/delegations endpoint
+store-delegation-history = true
+# Enables /accounts/{stake_address}/mirs endpoint
+store-mir-history = true
+# Enables /accounts/{stake_address}/withdrawals endpoint
+store-withdrawal-history = true
+# Enables /accounts/{stake_address}/addresses endpoint
+store-addresses = true
+# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
+store-tx-count = true
 
-[module.block-kes-validator]
+[module.historical-epochs-state]
+blocks-subscribe-topic = "cardano.block.available"
 
-[module.clock]
+[module.rest-blockfrost]
 
 [module.rest-server]
 address = "0.0.0.0"
 port = 4340
 
-# Enable for message spying
-#[module.spy]
-#topic = "cardano.#"
+[module.clock]
 
 # ============================================================================
 # Message Bus Configuration
 # ============================================================================
-# Enable if external routing required
-#[message-bus.external]
-#class = "rabbit-mq"
-#url = "amqp://127.0.0.1:5672/%2f"
-#exchange = "caryatid"
-
 [message-bus.internal]
 class = "in-memory"
 
