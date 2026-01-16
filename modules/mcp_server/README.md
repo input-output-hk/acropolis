@@ -1,58 +1,63 @@
 # Acropolis MCP Server
 
-This module provides a Model Context Protocol (MCP) server that exposes Blockfrost-compatible API endpoints as MCP resources.
+This module provides a Model Context Protocol (MCP) server that exposes Blockfrost-compatible API endpoints as MCP tools.
 
 ## Overview
 
-The MCP server integrates with the existing Blockfrost REST handlers in acropolis, reusing the existing query logic and simply reformatting responses for MCP clients like Claude Desktop.
+The MCP server integrates with the existing Blockfrost REST handlers in acropolis, reusing the existing query logic and simply reformatting responses for MCP clients like Claude Desktop and VS Code.
 
 ## Architecture
 
-- **Resources**: MCP resources map to Blockfrost API endpoints
+- **Tools**: MCP tools map to Blockfrost API endpoints (60+ endpoints available)
 - **Handler Reuse**: Calls existing Blockfrost handlers from `rest_blockfrost` module
-- **Protocol**: Implements MCP over stdio using the `rmcp` crate
-
-## Supported Resources
-
-Currently implemented MCP resources:
-
-1. `blockfrost://network/info` - Current network information
-2. `blockfrost://epochs/{epoch_number}` - Epoch information (use "latest" for current)
-3. `blockfrost://epochs/{epoch_number}/parameters` - Protocol parameters
-4. `blockfrost://blocks/{hash_or_number}` - Block information
+- **Transport**: HTTP with Server-Sent Events (SSE) on configurable port (default: 4341)
 
 ## Configuration
 
 Add to your acropolis config file:
 
 ```toml
-[mcp]
+[module.mcp-server]
 enabled = true
-epochs_query_topic = "query.epochs"
-historical_epochs_query_topic = "query.historical-epochs"
-parameters_query_topic = "query.parameters"
-blocks_query_topic = "query.blocks"
+address = "127.0.0.1"
+port = 4341
 ```
+
+## Usage with VS Code
+
+The MCP server integrates with VS Code's Copilot via the `.vscode/mcp.json` configuration. When Acropolis is running with MCP enabled, Copilot can query blockchain data directly.
 
 ## Usage with Claude Desktop
 
-Add to Claude Desktop configuration:
+Claude Desktop requires an stdio transport adapter. Create a simple connection script or use the HTTP endpoint directly if your MCP client supports HTTP/SSE transport.
 
-```json
-{
-  "mcpServers": {
-    "acropolis": {
-      "command": "/path/to/acropolis",
-      "args": ["--mcp-mode"],
-      "env": {}
-    }
-  }
-}
+For HTTP/SSE clients, connect to:
+```
+http://127.0.0.1:4341/sse
 ```
 
-## Future Work
+## Available Tools
 
-- Add more Blockfrost endpoints as MCP resources
-- Implement MCP tools for write operations (transaction submission)
-- Add resource subscriptions for real-time updates
-- Add prompt templates for common queries
+The server exposes 60+ Blockfrost-compatible API endpoints as MCP tools, including:
+
+- `get_epoch_information` - Epoch info (use "latest" for current)
+- `get_epoch_parameters` - Protocol parameters for an epoch
+- `get_block_information` - Block details by hash or number
+- `get_account_information` - Stake account details
+- `get_address_extended` - Address information
+- `get_pool_information` - Stake pool details
+- `get_drep_info` - DRep information (Conway era)
+- `get_asset_information` - Native token details
+- And many more...
+
+## Testing
+
+Use the MCP Inspector to test the server:
+```bash
+npx @anthropics/mcp-inspector
+```
+
+Or run the test scripts:
+```bash
+python3 scripts/test_mcp_standalone.py
+```
