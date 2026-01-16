@@ -310,7 +310,7 @@ impl GovernanceState {
                     let mut state = state.lock().await;
                     if let Some(gov_outcomes) = vld.handle(
                         "process outcome",
-                        state.process_new_epoch(&blk_g).map(|x| Some(x)),
+                        state.process_new_epoch(&blk_g).map(Some),
                     ) {
                         vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
                     }
