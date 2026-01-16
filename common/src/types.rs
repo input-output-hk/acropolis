@@ -891,8 +891,8 @@ pub struct UTXOValue {
     /// Datum
     pub datum: Option<Datum>,
 
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 impl UTXOValue {
@@ -950,8 +950,8 @@ pub struct TxOutput {
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
 
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 impl TxOutput {
@@ -960,7 +960,7 @@ impl TxOutput {
             address: self.address.clone(),
             value: self.value.clone(),
             datum: self.datum.clone(),
-            reference_script: self.reference_script.clone(),
+            reference_script_hash: self.reference_script_hash,
         }
     }
 }

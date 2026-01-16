@@ -2282,7 +2282,7 @@ mod tests {
                         assets: NativeAssets::default(),
                     },
                     datum: None,
-                    reference_script: None,
+                    reference_script_hash: None,
                 },
             })
             .unwrap();
