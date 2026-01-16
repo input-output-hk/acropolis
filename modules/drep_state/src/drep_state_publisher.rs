@@ -1,7 +1,7 @@
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
     messages::{CardanoMessage, DRepStateMessage, Message},
-    BlockInfo, Credential,
+    BlockInfo, DRepCredential,
 };
 use caryatid_sdk::Context;
 use std::sync::Arc;
@@ -19,7 +19,8 @@ impl DRepStatePublisher {
     pub async fn publish_drep_state(
         &mut self,
         block: &BlockInfo,
-        dreps: Vec<(Credential, u64)>,
+        dreps: Vec<(DRepCredential, u64)>,
+        inactive_dreps: Vec<DRepCredential>,
     ) -> anyhow::Result<()> {
         self.0
             .publish(Arc::new(Message::Cardano((
@@ -27,6 +28,7 @@ impl DRepStatePublisher {
                 CardanoMessage::DRepState(DRepStateMessage {
                     epoch: block.epoch,
                     dreps,
+                    inactive_dreps,
                 }),
             ))))
             .await

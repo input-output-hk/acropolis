@@ -167,6 +167,7 @@ impl DRepState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
+                let mut conway_d_rep_activity: Option<u32> = None;
                 // Read params subscription if store-info is enabled to obtain DRep expiration param. Update expirations on epoch transition
                 if let Some(sub) = params_subscription.as_mut() {
                     let (_, message) = sub.read_ignoring_rollbacks().await?;
@@ -177,6 +178,7 @@ impl DRepState {
                         )) => {
                             Self::check_sync(&current_block, block_info, "params");
                             if let Some(conway) = &params.params.conway {
+                                conway_d_rep_activity = Some(conway.d_rep_activity);
                                 state
                                     .update_drep_expirations(
                                         block_info.epoch,
@@ -192,8 +194,12 @@ impl DRepState {
 
                 // Publish DRep state at the end of the epoch
                 if let Some(ref block) = current_block {
+                    // Inactivity is derived from conway `d_rep_activity` protocol parameter.
                     let dreps = state.active_drep_list();
-                    drep_state_publisher.publish_drep_state(block, dreps).await?;
+                    let inactive_dreps = conway_d_rep_activity
+                        .map(|drep_activity| state.inactive_drep_list(block.epoch, drep_activity))
+                        .unwrap_or_default();
+                    drep_state_publisher.publish_drep_state(block, dreps, inactive_dreps).await?;
                 }
             }
 
@@ -242,7 +248,7 @@ impl DRepState {
                         async {
                             Self::check_sync(&current_block, block_info, "gov");
                             state
-                                .process_votes(&gov_msg.voting_procedures)
+                                .process_votes(&gov_msg.voting_procedures, block_info.epoch)
                                 .inspect_err(|e| error!("Votes handling error: {e:#}"))
                                 .ok();
                         }
