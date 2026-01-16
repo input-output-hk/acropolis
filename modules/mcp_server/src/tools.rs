@@ -64,7 +64,12 @@ fn build_input_schema(route: &RouteDefinition) -> Arc<JsonObject> {
         "required": required
     });
 
-    Arc::new(schema.as_object().unwrap().clone())
+    Arc::new(
+        schema
+            .as_object()
+            .expect("JSON schema construction should always produce an object")
+            .clone(),
+    )
 }
 
 /// Build URI from route template and provided arguments
