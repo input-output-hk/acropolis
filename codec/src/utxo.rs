@@ -89,6 +89,22 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
     }
 }
 
+pub fn map_reference_script_hash(script: &Option<conway::MintedScriptRef>) -> Option<ScriptHash> {
+    match script {
+        Some(conway::PseudoScript::NativeScript(_)) => None,
+        Some(conway::PseudoScript::PlutusV1Script(script)) => {
+            hash_script_ref(Some(ReferenceScript::PlutusV1(script.as_ref().to_vec())))
+        }
+        Some(conway::PseudoScript::PlutusV2Script(script)) => {
+            hash_script_ref(Some(ReferenceScript::PlutusV2(script.as_ref().to_vec())))
+        }
+        Some(conway::PseudoScript::PlutusV3Script(script)) => {
+            hash_script_ref(Some(ReferenceScript::PlutusV3(script.as_ref().to_vec())))
+        }
+        None => None,
+    }
+}
+
 pub fn map_mint_burn(
     policy_group: &MultiEraPolicyAssets<'_>,
 ) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {
