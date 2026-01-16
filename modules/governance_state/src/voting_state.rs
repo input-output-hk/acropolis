@@ -208,6 +208,7 @@ impl VotingRegistrationState {
 
     fn safe_rational(nom: u64, denom: u64) -> Result<RationalNumber> {
         if nom > denom {
+            // Also includes variant with denom=0
             bail!("Impossible votes proportion {nom}/{denom}: greater than 1")
         }
 
@@ -264,7 +265,7 @@ impl VotingRegistrationState {
         // SPO vote thresholds
         // TODO: always abstain, no confidence spo's (present in Haskell code, for bootstrap)
         let spo_ratio =
-            RationalNumber::new(votes.pool.yes, self.registered_spos - votes.pool.abstain);
+            Self::safe_rational(votes.pool.yes, self.registered_spos - votes.pool.abstain)?;
 
         Ok(VoteResult::<RationalNumber>::new(
             committee_ratio,
@@ -314,19 +315,8 @@ mod tests {
         NewConstitutionAction, StakeAddress,
     };
 
-    #[test]
-    fn test_compare_votes_hardfork() -> Result<()> {
-        // Epoch 536 vote, gov_action1pvv5wmjqhwa4u85vu9f4ydmzu2mgt8n7et967ph2urhx53r70xusqnmm525
-        // State of epoch
-        let voting_state = VotingRegistrationState {
-            registered_spos: 21484437730592053,
-            registered_dreps: 2834375537437426,
-            no_confidence_dreps: 139218917329422,
-            abstain_dreps: 1777395232971539,
-            committee_size: 7,
-        };
-
-        let hard_fork = ProposalProcedure {
+    fn hard_fork() -> ProposalProcedure {
+        ProposalProcedure {
             deposit: 0,
             reward_account: StakeAddress::default(),
             gov_action_id: Default::default(),
@@ -341,6 +331,19 @@ mod tests {
                 data_hash: vec![],
                 url: "".to_string(),
             },
+        }
+    }
+
+    #[test]
+    fn test_compare_votes_hardfork() -> Result<()> {
+        // Epoch 536 vote, gov_action1pvv5wmjqhwa4u85vu9f4ydmzu2mgt8n7et967ph2urhx53r70xusqnmm525
+        // State of epoch
+        let voting_state = VotingRegistrationState {
+            registered_spos: 21484437730592053,
+            registered_dreps: 2834375537437426,
+            no_confidence_dreps: 139218917329422,
+            abstain_dreps: 1777395232971539,
+            committee_size: 7,
         };
 
         let vr = VoteResult::<VoteCount> {
@@ -363,6 +366,7 @@ mod tests {
             RationalNumber::new(51, 100),
         );
 
+        let hard_fork = hard_fork();
         println!(
             "Rational votes: {:?}",
             voting_state.votes_to_rationals(&hard_fork, true, &vr)
@@ -434,6 +438,52 @@ mod tests {
         println!("Thresholds: {:?}", th);
 
         assert!(voting_state.compare_votes(&constitution, false, &vr, &th)?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn zero_votes() -> Result<()> {
+        let voting_state = VotingRegistrationState {
+            registered_spos: 0,
+            registered_dreps: 0,
+            no_confidence_dreps: 0,
+            abstain_dreps: 0,
+            committee_size: 7,
+        };
+
+        let votes = VoteResult::<VoteCount> {
+            committee: VoteCount::zero(),
+            drep: VoteCount::zero(),
+            pool: VoteCount {
+                yes: 0,
+                no: 0,
+                abstain: 0,
+            },
+        };
+
+        let res = voting_state.votes_to_rationals(&hard_fork(), false, &votes)?;
+        println!(
+            "{:?}, {}",
+            res.committee,
+            res.committee >= RationalNumber::ONE
+        );
+        println!("{:?}, {}", res.drep, res.drep >= RationalNumber::ONE);
+        println!("{:?}, {}", res.pool, res.pool >= RationalNumber::ONE);
+
+        let votes = VoteResult::<VoteCount> {
+            committee: VoteCount::zero(),
+            drep: VoteCount::zero(),
+            pool: VoteCount {
+                yes: 1,
+                no: 0,
+                abstain: 0,
+            },
+        };
+
+        if let Ok(res) = voting_state.votes_to_rationals(&hard_fork(), false, &votes) {
+            bail!("Must return error: found Ok({res:?})");
+        }
 
         Ok(())
     }
