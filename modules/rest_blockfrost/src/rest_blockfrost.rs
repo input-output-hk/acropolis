@@ -13,8 +13,9 @@ use config::Config;
 use tracing::info;
 
 mod cost_models;
-mod handlers;
-mod handlers_config;
+pub mod handlers;
+pub mod handlers_config;
+pub mod routes;
 mod types;
 mod utils;
 use handlers::{

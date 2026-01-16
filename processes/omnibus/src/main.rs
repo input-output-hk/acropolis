@@ -24,6 +24,7 @@ use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_governance_state::GovernanceState;
 use acropolis_module_historical_accounts_state::HistoricalAccountsState;
 use acropolis_module_historical_epochs_state::HistoricalEpochsState;
+use acropolis_module_mcp_server::MCPServer;
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use acropolis_module_parameters_state::ParametersState;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
@@ -127,6 +128,7 @@ pub async fn main() -> Result<()> {
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
     FakeBlockInjector::register(&mut process);
+    MCPServer::register(&mut process);
 
     Clock::<Message>::register(&mut process);
     RESTServer::<Message>::register(&mut process);

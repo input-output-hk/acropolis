@@ -35,6 +35,7 @@ acropolis_module_block_vrf_validator = { path = "../../modules/block_vrf_validat
 acropolis_module_block_kes_validator = { path = "../../modules/block_kes_validator" }
 acropolis_module_snapshot_bootstrapper = { path = "../../modules/snapshot_bootstrapper" }
 acropolis_module_fake_block_injector = { path = "../../modules/fake_block_injector" }
+acropolis_module_mcp_server = { path = "../../modules/mcp_server" }
 
 caryatid_process = { workspace = true }
 caryatid_module_clock = { workspace = true }
