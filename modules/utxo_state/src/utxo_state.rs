@@ -8,6 +8,7 @@ use acropolis_common::{
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     validation::ValidationOutcomes,
+    BlockInfo,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -27,6 +28,8 @@ mod test_utils;
 mod address_delta_publisher;
 mod volatile_index;
 use address_delta_publisher::AddressDeltaPublisher;
+mod block_totals_publisher;
+use block_totals_publisher::BlockTotalsPublisher;
 mod in_memory_immutable_utxo_store;
 use in_memory_immutable_utxo_store::InMemoryImmutableUTXOStore;
 mod dashmap_immutable_utxo_store;
@@ -46,6 +49,7 @@ mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
+
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
@@ -66,12 +70,58 @@ impl UTXOState {
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
     ) -> Result<()> {
+        let mut genesis_utxo_consumed = false;
         loop {
+            let mut current_block_info: Option<BlockInfo> = None;
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
+            if let Message::Cardano((block_info, CardanoMessage::UTXODeltas(_))) = message.as_ref()
+            {
+                current_block_info = Some(block_info.clone());
+            }
+
+            // Read from pool registration updates subscription if available
+            let mut pool_registration_updates = vec![];
+            if genesis_utxo_consumed {
+                if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
+                    let Ok((_, message)) = subscription.read().await else {
+                        error!("Failed to read pool registration updates subscription error");
+                        continue;
+                    };
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::PoolRegistrationUpdates(updates_msg),
+                    )) = message.as_ref()
+                    {
+                        Self::check_sync(&current_block_info, block_info);
+                        pool_registration_updates = updates_msg.updates.clone();
+                    }
+                }
+            }
+
+            // Read from stake registration updates subscription if available
+            let mut stake_registration_updates = vec![];
+            if genesis_utxo_consumed {
+                if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
+                    let Ok((_, message)) = subscription.read().await else {
+                        error!("Failed to read stake registration updates subscription error");
+                        continue;
+                    };
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::StakeRegistrationUpdates(updates_msg),
+                    )) = message.as_ref()
+                    {
+                        Self::check_sync(&current_block_info, block_info);
+                        stake_registration_updates = updates_msg.updates.clone();
+                    }
+                }
+            }
 
             // Validate UTxODeltas
             // before applying them
@@ -81,7 +131,15 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
                         let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state.validate(block, deltas_msg).await {
+                        if let Err(e) = state
+                            .validate(
+                                block,
+                                deltas_msg,
+                                &pool_registration_updates,
+                                &stake_registration_updates,
+                            )
+                            .await
+                        {
                             validation_outcomes.push(*e);
                         }
 
@@ -104,6 +162,10 @@ impl UTXOState {
                     }
                     .instrument(span)
                     .await;
+
+                    if !genesis_utxo_consumed {
+                        genesis_utxo_consumed = true;
+                    }
                 }
 
                 Message::Cardano((
@@ -130,6 +192,17 @@ impl UTXOState {
             .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
+
+        let pool_registration_updates_subscribe_topic =
+            config.get_string("pool-registration-updates-subscribe-topic").ok();
+        if let Some(ref topic) = pool_registration_updates_subscribe_topic {
+            info!("Creating pool registration updates subscriber on '{topic}'");
+        }
+        let stake_registration_updates_subscribe_topic =
+            config.get_string("stake-registration-updates-subscribe-topic").ok();
+        if let Some(ref topic) = stake_registration_updates_subscribe_topic {
+            info!("Creating stake registration updates subscriber on '{topic}'");
+        }
 
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -161,13 +234,29 @@ impl UTXOState {
         let mut state = State::new(store);
 
         // Create address delta publisher and pass it observations
-        let publisher = AddressDeltaPublisher::new(context.clone(), config);
-        state.register_address_delta_observer(Arc::new(publisher));
+        let deltas_publisher = AddressDeltaPublisher::new(context.clone(), config.clone());
+        state.register_address_delta_observer(Arc::new(deltas_publisher));
+
+        // Create block totals publisher and pass it observations
+        let totals_publisher = BlockTotalsPublisher::new(context.clone(), config);
+        state.register_block_totals_observer(Arc::new(totals_publisher));
 
         let state = Arc::new(Mutex::new(state));
 
         // Subscribers
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
+        let pool_registration_updates_subscription =
+            if let Some(topic) = pool_registration_updates_subscribe_topic {
+                Some(context.subscribe(&topic).await?)
+            } else {
+                None
+            };
+        let stake_registration_updates_subscription =
+            if let Some(topic) = stake_registration_updates_subscribe_topic {
+                Some(context.subscribe(&topic).await?)
+            } else {
+                None
+            };
 
         let state_run = state.clone();
         let context_run = context.clone();
@@ -176,6 +265,8 @@ impl UTXOState {
                 context_run,
                 state_run,
                 utxo_deltas_subscription,
+                pool_registration_updates_subscription,
+                stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
             )
             .await
@@ -303,5 +394,18 @@ impl UTXOState {
         });
 
         Ok(())
+    }
+
+    /// Check for synchronisation
+    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
+        if let Some(ref block) = expected {
+            if block.number != actual.number {
+                error!(
+                    expected = block.number,
+                    actual = actual.number,
+                    "Messages out of sync"
+                );
+            }
+        }
     }
 }

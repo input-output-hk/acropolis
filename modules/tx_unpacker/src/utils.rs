@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use tracing::error;
 
 use acropolis_common::{
-    protocol_params::ProtocolParams, AlonzoBabbageUpdateProposal, KeyHash, ScriptHash,
-    TxCertificateWithPos, Withdrawal,
+    protocol_params::ProtocolParams, AlonzoBabbageUpdateProposal, KeyHash, NativeAsset,
+    NativeAssetsDelta, ScriptHash, TxCertificateWithPos, Value, Withdrawal,
 };
 
 /// Get VKey Witnesses needed for transaction
@@ -55,4 +55,39 @@ pub fn get_vkey_script_needed(
             error!("Genesis delegates not found in protocol parameters");
         }
     }
+}
+
+pub fn get_value_minted_burnt_from_deltas(deltas: &NativeAssetsDelta) -> (Value, Value) {
+    let mut value_minted = Value::default();
+    let mut value_burnt = Value::default();
+
+    for (policy_id, asset_deltas) in deltas.iter() {
+        for asset_delta in asset_deltas.iter() {
+            if asset_delta.amount > 0 {
+                value_minted += &Value::new(
+                    0,
+                    vec![(
+                        *policy_id,
+                        vec![NativeAsset {
+                            name: asset_delta.name,
+                            amount: asset_delta.amount.unsigned_abs(),
+                        }],
+                    )],
+                );
+            } else if asset_delta.amount < 0 {
+                value_burnt += &Value::new(
+                    0,
+                    vec![(
+                        *policy_id,
+                        vec![NativeAsset {
+                            name: asset_delta.name,
+                            amount: asset_delta.amount.unsigned_abs(),
+                        }],
+                    )],
+                );
+            }
+        }
+    }
+
+    (value_minted, value_burnt)
 }

@@ -25,7 +25,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::AccountState;
-use crate::Pots;
+use crate::{Pots, TxUTxODeltas};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -130,6 +130,18 @@ pub struct StakeAddressDeltasMessage {
 pub struct StakeRewardDeltasMessage {
     /// Stake Reward Deltas
     pub deltas: Vec<StakeRewardDelta>,
+}
+
+/// Stake registration updates message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StakeRegistrationUpdatesMessage {
+    pub updates: Vec<StakeRegistrationUpdate>,
+}
+
+/// Pool registration updates message
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoolRegistrationUpdatesMessage {
+    pub updates: Vec<PoolRegistrationUpdate>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -334,6 +346,10 @@ pub enum CardanoMessage {
     SPORewards(SPORewardsMessage),                       // SPO rewards distribution (SPRD)
     StakeAddressDeltas(StakeAddressDeltasMessage),       // Stake part of address deltas
     StakeRewardDeltas(StakeRewardDeltasMessage),         // Stake Reward Deltas
+
+    // Certificates deltas
+    StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
+    PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

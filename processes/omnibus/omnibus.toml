@@ -4,7 +4,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network = "mainnet"
+network-name = "mainnet"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
@@ -54,18 +54,24 @@ validators = [
 [module.rest-blockfrost]
 
 [module.tx-unpacker]
+# Subscriptions needed for validation
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
+protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
+
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
-publish-block-txs-topic = "cardano.block.txs"
 publish-tx-validation-topic = "cardano.validation.tx"
 network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
-address-delta-topic = "cardano.address.delta"
+address-delta-topic = "cardano.address.deltas"
+block-totals-topic = "cardano.block.txs"
+pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
+stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes

@@ -21,8 +21,14 @@ pub enum ConfigError {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub struct StartupConfig {
+    pub network_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct BootstrapConfig {
-    pub network: String,
+    pub startup: StartupConfig,
     pub data_dir: PathBuf,
     pub epoch: u64, // The target epoch, straight from TOML
     pub snapshot_topic: String,
@@ -45,7 +51,7 @@ impl BootstrapConfig {
     }
 
     pub fn network_dir(&self) -> PathBuf {
-        self.data_dir.join(&self.network)
+        self.data_dir.join(&self.startup.network_name)
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, ConfigError> {
