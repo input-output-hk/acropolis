@@ -29,21 +29,7 @@ pub async fn handle_resource(
     config: Arc<Config>,
     uri: &str,
 ) -> Result<Value> {
-    // Match the URI against our routes
-    let (route, params) =
-        routes::match_uri(uri).ok_or_else(|| anyhow::anyhow!("Unknown resource URI: {uri}"))?;
-
-    let handlers_config = Arc::new(HandlersConfig::from(config.clone()));
-
-    // Dispatch to the appropriate handler based on the route
-    let rest_response = dispatch_handler(context, params, HashMap::new(), handlers_config, route)
-        .await
-        .map_err(|e| anyhow::anyhow!("Handler error: {e}"))?;
-
-    let json_value: Value = serde_json::from_str(&rest_response.body)
-        .map_err(|e| anyhow::anyhow!("Failed to parse JSON response: {e}"))?;
-
-    Ok(json_value)
+    handle_resource_with_query(context, config, uri, HashMap::new()).await
 }
 
 /// Generic resource handler with query parameters

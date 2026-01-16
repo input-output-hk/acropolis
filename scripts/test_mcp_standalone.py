@@ -97,7 +97,8 @@ def test_mcp_server():
     }
     
     try:
-        resp2 = session.post(MCP_URL, json=init_notif, headers=HEADERS, stream=True, timeout=10)
+        # Notification doesn't require response handling
+        session.post(MCP_URL, json=init_notif, headers=HEADERS, stream=True, timeout=10)
         # Notification may not return data, that's OK
         print("    OK (notification sent)")
     except Exception as e:
