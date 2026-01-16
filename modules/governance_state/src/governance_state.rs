@@ -308,10 +308,9 @@ impl GovernanceState {
                     // New governance from new epoch means that we must prepare all governance
                     // outcome for the previous epoch.
                     let mut state = state.lock().await;
-                    if let Some(gov_outcomes) = vld.handle(
-                        "process outcome",
-                        state.process_new_epoch(&blk_g).map(Some),
-                    ) {
+                    if let Some(gov_outcomes) =
+                        vld.handle("process outcome", state.process_new_epoch(&blk_g).map(Some))
+                    {
                         vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
                     }
                 }
