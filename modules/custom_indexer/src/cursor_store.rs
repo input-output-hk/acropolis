@@ -6,7 +6,7 @@ use std::{
 use acropolis_common::Point;
 use anyhow::Result;
 use caryatid_sdk::async_trait;
-use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -69,16 +69,15 @@ impl CursorStore for InMemoryCursorStore {
 const CURSOR_PREFIX: &str = "cursor/";
 
 pub struct FjallCursorStore {
-    partition: Partition,
+    keyspace: Keyspace,
 }
 
 impl FjallCursorStore {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let cfg = Config::new(path);
-        let keyspace = Keyspace::open(cfg)?;
-        let partition = keyspace.open_partition("cursor", PartitionCreateOptions::default())?;
+        let database = Database::builder(path).open()?;
+        let keyspace = database.keyspace("cursor", KeyspaceCreateOptions::default)?;
 
-        Ok(Self { partition })
+        Ok(Self { keyspace })
     }
 
     fn key_for(name: &str) -> String {
@@ -90,10 +89,8 @@ impl FjallCursorStore {
         s.strip_prefix(CURSOR_PREFIX).map(|n| n.to_string())
     }
 
-    fn prefix_iter(
-        &self,
-    ) -> impl Iterator<Item = fjall::Result<(fjall::Slice, fjall::Slice)>> + '_ {
-        self.partition.prefix(CURSOR_PREFIX)
+    fn prefix_iter(&self) -> impl Iterator<Item = fjall::Guard> + '_ {
+        self.keyspace.prefix(CURSOR_PREFIX)
     }
 }
 
@@ -102,7 +99,7 @@ impl CursorStore for FjallCursorStore {
     async fn load(&self) -> Result<HashMap<String, CursorEntry>> {
         let mut out = HashMap::new();
         for next in self.prefix_iter() {
-            let (key_bytes, val_bytes) = match next {
+            let (key_bytes, val_bytes) = match next.into_inner() {
                 Ok(r) => r,
                 Err(e) => {
                     warn!("CursorStore: failed to read row: {:#}", e);
@@ -149,7 +146,7 @@ impl CursorStore for FjallCursorStore {
                 }
             };
 
-            if let Err(e) = self.partition.insert(&key, val) {
+            if let Err(e) = self.keyspace.insert(&key, val) {
                 warn!(
                     "CursorStore: failed to write cursor for '{}': {:#}",
                     name, e

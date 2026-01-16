@@ -5,7 +5,7 @@ use acropolis_common::{UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
-use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use std::fs;
 use std::path::Path;
 use std::sync::{
@@ -15,15 +15,15 @@ use std::sync::{
 use tracing::info;
 
 pub struct FjallImmutableUTXOStore {
+    database: Database,
     keyspace: Keyspace,
-    partition: Partition,
     write_counter: AtomicUsize,
     flush_every: AtomicUsize,
 }
 
 const DEFAULT_FLUSH_EVERY: i64 = 1000;
 const DEFAULT_DATABASE_PATH: &str = "fjall-immutable-utxos";
-const PARTITION_NAME: &str = "utxos";
+const KEYSPACE_NAME: &str = "utxos";
 
 impl FjallImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
@@ -37,17 +37,14 @@ impl FjallImmutableUTXOStore {
             fs::remove_dir_all(path)?;
         }
 
-        let mut fjall_config = fjall::Config::new(path);
-        fjall_config = fjall_config.manual_journal_persist(true); // We're in control of flushing
-        let keyspace = fjall_config.open()?;
-        let partition =
-            keyspace.open_partition(PARTITION_NAME, PartitionCreateOptions::default())?;
+        let database = Database::builder(path).manual_journal_persist(true).open()?;
+        let keyspace = database.keyspace(KEYSPACE_NAME, KeyspaceCreateOptions::default)?;
 
         let flush_every = config.get_int("flush-every").unwrap_or(DEFAULT_FLUSH_EVERY);
 
         Ok(Self {
+            database,
             keyspace,
-            partition,
             write_counter: AtomicUsize::new(0),
             flush_every: AtomicUsize::new(flush_every as usize),
         })
@@ -68,9 +65,9 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
         let value_bytes = serde_cbor::to_vec(&value)?;
         let should_flush = self.should_flush();
 
-        self.partition.insert(key_bytes, value_bytes)?;
+        self.keyspace.insert(key_bytes, value_bytes)?;
         if should_flush {
-            self.keyspace.persist(PersistMode::Buffer)?;
+            self.database.persist(PersistMode::Buffer)?;
         }
 
         Ok(())
@@ -80,22 +77,22 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
         let key_bytes = key.to_bytes();
         let should_flush = self.should_flush();
 
-        self.partition.remove(key_bytes)?;
+        self.keyspace.remove(key_bytes)?;
         if should_flush {
-            self.keyspace.persist(PersistMode::Buffer)?;
+            self.database.persist(PersistMode::Buffer)?;
         }
         Ok(())
     }
 
     async fn lookup_utxo(&self, key: &UTxOIdentifier) -> Result<Option<UTXOValue>> {
         let key_bytes = key.to_bytes();
-        Ok(match self.partition.get(key_bytes)? {
+        Ok(match self.keyspace.get(key_bytes)? {
             Some(ivec) => Some(serde_cbor::from_slice(&ivec)?),
             None => None,
         })
     }
 
     async fn len(&self) -> Result<usize> {
-        Ok(self.partition.approximate_len())
+        Ok(self.keyspace.approximate_len())
     }
 }

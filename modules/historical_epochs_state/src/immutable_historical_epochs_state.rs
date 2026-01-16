@@ -2,14 +2,14 @@ use std::{collections::VecDeque, path::Path};
 
 use acropolis_common::messages::EpochActivityMessage;
 use anyhow::Result;
-use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use minicbor::{decode, to_vec};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 pub struct ImmutableHistoricalEpochsState {
-    epochs_history: Partition,
-    keyspace: Keyspace,
+    epochs_history: Keyspace,
+    database: Database,
     pub pending: Mutex<VecDeque<EpochActivityMessage>>,
     pub max_pending: usize,
 }
@@ -21,20 +21,17 @@ impl ImmutableHistoricalEpochsState {
             std::fs::remove_dir_all(path)?;
         }
 
-        let cfg = fjall::Config::new(path)
-            // 4MB write buffer since EpochActivityMessage is not that big
-            .max_write_buffer_size(4 * 1024 * 1024)
+        let database = Database::builder(path)
             // Enable manual control of flushing
             // We store EpochActivityMessage only every 5 days (need manual Flush)
-            .manual_journal_persist(true);
-        let keyspace = Keyspace::open(cfg)?;
+            .manual_journal_persist(true)
+            .open()?;
 
-        let epochs_history =
-            keyspace.open_partition("epochs_history", PartitionCreateOptions::default())?;
+        let epochs_history = database.keyspace("epochs_history", KeyspaceCreateOptions::default)?;
 
         Ok(Self {
             epochs_history,
-            keyspace,
+            database,
             pending: Mutex::new(VecDeque::new()),
             max_pending: 5,
         })
@@ -61,7 +58,7 @@ impl ImmutableHistoricalEpochsState {
             std::mem::take(&mut *pending)
         };
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         let mut persisted_epochs: u32 = 0;
 
         for ea in drained_epochs {
@@ -75,7 +72,7 @@ impl ImmutableHistoricalEpochsState {
             return Err(e.into());
         }
 
-        if let Err(e) = self.keyspace.persist(PersistMode::Buffer) {
+        if let Err(e) = self.database.persist(PersistMode::Buffer) {
             error!("persist failed for epoch {saving_epoch}: {e}");
             return Err(e.into());
         }
@@ -104,7 +101,7 @@ impl ImmutableHistoricalEpochsState {
         let end_key = Self::make_epoch_key(*range.end());
 
         for result in self.epochs_history.range(start_key..=end_key) {
-            let (_, slice) = result?;
+            let slice = result.value()?;
             let decoded: EpochActivityMessage = decode(&slice)?;
             epochs.push(decoded);
         }
