@@ -14,7 +14,6 @@ Note: This is a basic test. For full integration testing, use the MCP Inspector:
 """
 
 import json
-import sys
 
 def send_jsonrpc(request: dict) -> dict:
     """Send a JSON-RPC request and get the response."""
