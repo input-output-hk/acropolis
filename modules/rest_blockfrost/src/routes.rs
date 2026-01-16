@@ -691,8 +691,8 @@ pub fn find_route_by_mcp_uri(uri_template: &str) -> Option<&'static RouteDefinit
 
 /// Get all routes for a specific category (accounts, blocks, epochs, etc.)
 pub fn get_routes_by_category(category: &str) -> Vec<&'static RouteDefinition> {
-    let prefix = format!("rest.get.{}.", category);
-    let exact = format!("rest.get.{}", category);
+    let prefix = format!("rest.get.{category}.");
+    let exact = format!("rest.get.{category}");
     ROUTES
         .iter()
         .filter(|r| r.topic_pattern.starts_with(&prefix) || r.topic_pattern == exact)

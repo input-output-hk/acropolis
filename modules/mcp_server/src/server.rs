@@ -41,7 +41,7 @@ impl AcropolisMCPServer {
 
     /// Start the MCP server on HTTP with Streamable HTTP transport
     pub async fn run(self, address: &str, port: u16) -> Result<()> {
-        let bind_addr = format!("{}:{}", address, port);
+        let bind_addr = format!("{address}:{port}");
         info!("Starting Acropolis MCP server on http://{}/mcp", bind_addr);
 
         // Create the streamable HTTP service
@@ -138,7 +138,7 @@ impl ServerHandler for AcropolisMCPServer {
             .map_err(|e| {
                 ErrorData::new(
                     ErrorCode::INTERNAL_ERROR,
-                    format!("Failed to handle resource: {}", e),
+                    format!("Failed to handle resource: {e}"),
                     None,
                 )
             })?;
@@ -151,7 +151,7 @@ impl ServerHandler for AcropolisMCPServer {
                 text: serde_json::to_string_pretty(&json_result).map_err(|e| {
                     ErrorData::new(
                         ErrorCode::INTERNAL_ERROR,
-                        format!("Failed to serialize JSON: {}", e),
+                        format!("Failed to serialize JSON: {e}"),
                         None,
                     )
                 })?,
@@ -190,7 +190,7 @@ impl ServerHandler for AcropolisMCPServer {
         .map_err(|e| {
             ErrorData::new(
                 ErrorCode::INTERNAL_ERROR,
-                format!("Tool call failed: {}", e),
+                format!("Tool call failed: {e}"),
                 None,
             )
         })

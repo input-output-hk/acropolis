@@ -23,8 +23,8 @@ use crate::resources::handle_resource_with_query;
 fn route_to_tool_name(route: &RouteDefinition) -> String {
     // Convert "Account Information" -> "get_account_information"
     // Convert "Epoch Info" -> "get_epoch_info"
-    let name = route.name.to_lowercase().replace(' ', "_").replace('-', "_");
-    format!("get_{}", name)
+    let name = route.name.to_lowercase().replace([' ', '-'], "_");
+    format!("get_{name}")
 }
 
 /// Build the JSON Schema for a tool's input parameters based on route param_names
@@ -75,9 +75,9 @@ fn build_uri_from_args(route: &RouteDefinition, args: &JsonObject) -> Result<Str
         let value = args
             .get(param)
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: {}", param))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required parameter: {param}"))?;
 
-        uri = uri.replace(&format!("{{{}}}", param), value);
+        uri = uri.replace(&format!("{{{param}}}"), value);
     }
 
     Ok(uri)
@@ -127,7 +127,7 @@ pub async fn handle_tool_call(
 ) -> Result<CallToolResult> {
     // Find the route for this tool
     let route = find_route_by_tool_name(tool_name)
-        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tool_name))?;
+        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {tool_name}"))?;
 
     let args = arguments.unwrap_or_default();
 
@@ -148,5 +148,5 @@ pub async fn handle_tool_call(
     Ok(CallToolResult::success(vec![rmcp::model::Content::json(
         json_result,
     )
-    .map_err(|e| anyhow::anyhow!("JSON error: {}", e))?]))
+    .map_err(|e| anyhow::anyhow!("JSON error: {e}"))?]))
 }
