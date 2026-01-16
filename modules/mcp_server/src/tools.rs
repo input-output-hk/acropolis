@@ -23,11 +23,7 @@ use crate::resources::handle_resource_with_query;
 fn route_to_tool_name(route: &RouteDefinition) -> String {
     // Convert "Account Information" -> "get_account_information"
     // Convert "Epoch Info" -> "get_epoch_info"
-    let name = route
-        .name
-        .to_lowercase()
-        .replace(' ', "_")
-        .replace('-', "_");
+    let name = route.name.to_lowercase().replace(' ', "_").replace('-', "_");
     format!("get_{}", name)
 }
 
@@ -91,22 +87,20 @@ fn build_uri_from_args(route: &RouteDefinition, args: &JsonObject) -> Result<Str
 pub fn get_all_tools() -> Vec<Tool> {
     ROUTES
         .iter()
-        .map(|route| {
-            Tool {
-                name: route_to_tool_name(route).into(),
-                title: Some(route.name.to_string()),
-                description: Some(route.description.into()),
-                input_schema: build_input_schema(route),
-                output_schema: None,
-                annotations: Some(
-                    ToolAnnotations::new()
-                        .read_only(true)
-                        .destructive(false)
-                        .idempotent(true)
-                        .open_world(false),
-                ),
-                icons: None,
-            }
+        .map(|route| Tool {
+            name: route_to_tool_name(route).into(),
+            title: Some(route.name.to_string()),
+            description: Some(route.description.into()),
+            input_schema: build_input_schema(route),
+            output_schema: None,
+            annotations: Some(
+                ToolAnnotations::new()
+                    .read_only(true)
+                    .destructive(false)
+                    .idempotent(true)
+                    .open_world(false),
+            ),
+            icons: None,
         })
         .collect()
 }
@@ -121,9 +115,7 @@ pub fn list_tools_result() -> ListToolsResult {
 
 /// Find a route by tool name
 fn find_route_by_tool_name(tool_name: &str) -> Option<&'static RouteDefinition> {
-    ROUTES
-        .iter()
-        .find(|route| route_to_tool_name(route) == tool_name)
+    ROUTES.iter().find(|route| route_to_tool_name(route) == tool_name)
 }
 
 /// Handle a tool call by dispatching to the appropriate Blockfrost handler
@@ -153,7 +145,8 @@ pub async fn handle_tool_call(
     let json_result = handle_resource_with_query(context, config, &uri, query_params).await?;
 
     // Return as tool result
-    Ok(CallToolResult::success(vec![
-        rmcp::model::Content::json(json_result).map_err(|e| anyhow::anyhow!("JSON error: {}", e))?
-    ]))
+    Ok(CallToolResult::success(vec![rmcp::model::Content::json(
+        json_result,
+    )
+    .map_err(|e| anyhow::anyhow!("JSON error: {}", e))?]))
 }
