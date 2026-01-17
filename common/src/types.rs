@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::certificate::TxCertificateIdentifier;
-use crate::crypto::keyhash_224;
+use crate::crypto::{keyhash_224, keyhash_224_tagged};
 use crate::drep::{Anchor, DRepVotingThresholds};
 // Re-export certificate types for backward compatibility
 pub use crate::certificate::{
@@ -521,6 +521,17 @@ pub enum ReferenceScript {
     PlutusV1(Vec<u8>),
     PlutusV2(Vec<u8>),
     PlutusV3(Vec<u8>),
+}
+
+impl ReferenceScript {
+    pub fn compute_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ReferenceScript::Native(_) => None,
+            ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
+            ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
+            ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

@@ -1,13 +1,9 @@
 use std::collections::HashSet;
 
 use crate::{
-    certificate::TxCertificateIdentifier, KeyHash, Lovelace, PoolRegistrationUpdate,
-    ReferenceScript, ScriptHash, StakeRegistrationUpdate, TxIdentifier, TxOutput, UTxOIdentifier,
-    Value,
+    certificate::TxCertificateIdentifier, KeyHash, Lovelace, PoolRegistrationUpdate, ScriptHash,
+    StakeRegistrationUpdate, TxIdentifier, TxOutput, UTxOIdentifier, Value,
 };
-
-use blake2::digest::{Update, VariableOutput};
-use blake2::Blake2bVar;
 
 // Individual transaction UTxO deltas
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -109,24 +105,5 @@ impl TxUTxODeltas {
             total_produced += &output.value;
         }
         total_produced
-    }
-}
-
-pub fn hash_script_ref(script_opt: Option<ReferenceScript>) -> Option<ScriptHash> {
-    match script_opt {
-        Some(
-            ReferenceScript::PlutusV1(b)
-            | ReferenceScript::PlutusV2(b)
-            | ReferenceScript::PlutusV3(b),
-        ) => {
-            let mut hasher = Blake2bVar::new(28).ok()?;
-            hasher.update(&b);
-
-            let mut out = [0u8; 28];
-            hasher.finalize_variable(&mut out).ok()?;
-
-            Some(ScriptHash::new(out))
-        }
-        _ => None,
     }
 }

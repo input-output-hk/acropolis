@@ -30,9 +30,9 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    hash_script_ref, Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets,
-    NativeScript, PolicyId, ReferenceScript, ScriptHash, ShelleyAddress, StakeAddress,
-    StakeCredential, TxHash, UTXOValue, UTxOIdentifier, Value,
+    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, NativeScript, PolicyId,
+    ReferenceScript, ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue,
+    UTxOIdentifier, Value,
 };
 
 // =============================================================================
@@ -211,7 +211,8 @@ impl SnapshotUTXOValue {
         let mut address: Option<Address> = None;
         let mut value: Option<Value> = None;
         let mut datum: Option<Datum> = None;
-        let mut reference_script_hash: Option<ScriptHash> = None;
+        // TODO: pass reference scripts to script_state
+        let mut reference_script: Option<ReferenceScript> = None;
 
         let entries = map_len.unwrap_or(4);
         for _ in 0..entries {
@@ -234,7 +235,7 @@ impl SnapshotUTXOValue {
                 0 => address = Some(d.decode::<SnapshotAddress>()?.0),
                 1 => value = Some(d.decode::<SnapshotValue>()?.0),
                 2 => datum = decode_datum_option(d)?,
-                3 => reference_script_hash = hash_script_ref(decode_script_ref(d)?),
+                3 => reference_script = decode_script_ref(d)?,
                 _ => {
                     d.skip().ok();
                 }
@@ -246,7 +247,7 @@ impl SnapshotUTXOValue {
                 address,
                 value,
                 datum,
-                reference_script_hash,
+                reference_script_hash: reference_script.and_then(|s| s.compute_hash()),
             })),
             _ => Err(minicbor::decode::Error::message(
                 "map-based TxOut missing required fields",
