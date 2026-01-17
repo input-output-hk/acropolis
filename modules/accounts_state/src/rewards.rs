@@ -151,6 +151,17 @@ pub fn calculate_rewards(
             }
         }
 
+        // Check if the reward account deregistered between the snapshot and stability window.
+        // In Cardano, addrsRew is captured at the stability window, so accounts that deregister
+        // after the snapshot but before the stability window should NOT receive leader rewards.
+        if pay_to_pool_reward_account && deregistrations.contains(&staking_spo.reward_account) {
+            info!(
+                "SPO {}'s reward account {} deregistered before stability window - not paying",
+                operator_id, staking_spo.reward_account
+            );
+            pay_to_pool_reward_account = false;
+        }
+
         if era == Era::Shelley {
             if pay_to_pool_reward_account {
                 // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
@@ -266,6 +277,11 @@ fn calculate_spo_rewards(
 ) -> Vec<RewardDetail> {
     // Pre-Allegra / Shelley had several checks that must be honored in rewards calculation
     let is_shelley = era == Era::Shelley;
+
+    // Pre-Babbage (Shelley through Alonzo): unregistered leader rewards stay in reserves
+    // Babbage+: all leader rewards delivered regardless of registration (per Errata 17.2)
+    // This matches Cardano's hardforkBabbageForgoRewardPrefilter which checks pvMajor > 6
+    let is_pre_babbage = era < Era::Babbage;
 
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -392,25 +408,27 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Pre-Allegra (particularly Shelley/Mary) specific skip rules
-                if is_shelley {
-                    // Check pool's reward address
-                    if is_reward_account {
-                        debug!(
-                            "Skipping pool reward account {}, losing {to_pay}",
-                            delegator_stake_address
-                        );
-                        continue;
-                    }
+                // Shelley-specific: Skip pool's reward address from member rewards
+                // This was a Shelley bug where the pool's reward address could get
+                // member rewards if it delegated to itself
+                if is_shelley && is_reward_account {
+                    debug!(
+                        "Skipping pool reward account {}, losing {to_pay}",
+                        delegator_stake_address
+                    );
+                    continue;
+                }
 
-                    // Check if it was deregistered between staking and now
-                    if deregistrations.contains(delegator_stake_address) {
-                        info!(
-                            "Recently deregistered member account {}, losing {to_pay}",
-                            delegator_stake_address
-                        );
-                        continue;
-                    }
+                // Pre-Babbage: Skip recently deregistered member accounts
+                // In Cardano, addrsRew is captured at the stability window, so accounts
+                // that deregister after the staking snapshot but before stability window
+                // should NOT receive member rewards. This applies to ALL pre-Babbage eras.
+                if is_pre_babbage && deregistrations.contains(delegator_stake_address) {
+                    info!(
+                        "Recently deregistered member account {}, losing {to_pay}",
+                        delegator_stake_address
+                    );
+                    continue;
                 }
 
                 // Transfer from reserves to this account
@@ -435,9 +453,10 @@ fn calculate_spo_rewards(
         owner_rewards
     };
 
-    // Always emit leader reward, but mark whether account is registered
-    // If not registered, the caller will send to treasury instead
-    if is_shelley {
+    // Leader reward handling depends on era:
+    // - Pre-Babbage (Shelley through Alonzo): only emit if account is registered, else stays in reserves
+    // - Babbage+: always emit, registration status doesn't matter (per Errata 17.2)
+    if is_pre_babbage {
         if pay_to_pool_reward_account {
             rewards.push(RewardDetail {
                 account: spo.reward_account.clone(),
@@ -447,26 +466,21 @@ fn calculate_spo_rewards(
                 registered: true,
             });
         } else {
+            // Don't push - unregistered leader rewards stay in reserves in pre-Babbage eras
             info!(
-                "SPO {}'s reward account {} not paid {}",
+                "SPO {}'s reward account {} not registered - {} stays in reserves",
                 operator_id, spo.reward_account, spo_benefit,
             );
         }
     } else {
+        // Babbage+: always deliver leader rewards regardless of registration status
         rewards.push(RewardDetail {
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
             pool: *operator_id,
-            registered: pay_to_pool_reward_account,
+            registered: true, // Always considered registered in Babbage+
         });
-
-        if !pay_to_pool_reward_account {
-            info!(
-                "SPO {}'s reward account {} not registered - {} will go to treasury",
-                operator_id, spo.reward_account, spo_benefit,
-            );
-        }
     }
 
     rewards
