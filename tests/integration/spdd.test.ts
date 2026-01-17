@@ -108,42 +108,73 @@ async function validateEpoch(db: Client, epoch: number) {
         `Epoch ${epoch}: ✅ ${matched} match, ⚠️ ${mismatched.length} mismatch, ❌ ${missing.length} missing, 🌀 ${extra.length} extra (total ${total})`
     );
 
-    if (missing.length || mismatched.length || extra.length) {
-        if (missing.length) console.log(`   Missing pools: ${missing.join(", ")}`);
-        if (extra.length) console.log(`   Extra pools (in SPDD only): ${extra.join(", ")}`);
-        if (mismatched.length) {
-            const smallest = mismatched.reduce((best, curr) => {
-                const bestDiff = best.db >= best.spdd ? best.db - best.spdd : best.spdd - best.db;
-                const currDiff = curr.db >= curr.spdd ? curr.db - curr.spdd : curr.spdd - curr.db;
-                return currDiff < bestDiff ? curr : best;
-            });
+    if (missing.length || mismatched.length || extra.length || dbTotal !== apiTotal) {
+        // Calculate aggregate statistics
+        let totalDiff = 0n;
+        let spddHigherCount = 0;
+        let dbHigherCount = 0;
+        let spddHigherTotal = 0n;
+        let dbHigherTotal = 0n;
 
-            const diff =
-                smallest.db >= smallest.spdd
-                    ? smallest.db - smallest.spdd
-                    : smallest.spdd - smallest.db;
-
-            console.log(`   Mismatched pool with smallest difference:`);
-            console.log(
-                `   - ${smallest.id} (db: ${smallest.db}, spdd: ${smallest.spdd}, diff: ${diff})`
-            );
-
-            const smallestTotal = mismatched.reduce((best, curr) => {
-                const bestTotal = best.db + best.spdd;
-                const currTotal = curr.db + curr.spdd;
-                return currTotal < bestTotal ? curr : best;
-            });
-
-            const diff2 =
-                smallestTotal.db >= smallestTotal.spdd
-                    ? smallestTotal.db - smallestTotal.spdd
-                    : smallestTotal.spdd - smallestTotal.db;
-
-            console.log(`   Mismatched pool with smallest total stake:`);
-            console.log(
-                `   - ${smallestTotal.id} (db: ${smallestTotal.db}, spdd: ${smallestTotal.spdd}, diff: ${diff2})`
-            );
+        for (const m of mismatched) {
+            const diff = m.spdd - m.db;
+            totalDiff += diff;
+            if (diff > 0n) {
+                spddHigherCount++;
+                spddHigherTotal += diff;
+            } else {
+                dbHigherCount++;
+                dbHigherTotal += -diff;
+            }
         }
+
+        console.log(`\n   === Diagnostic Summary ===`);
+        console.log(`   Total pools in DB: ${dbPools.length}, in SPDD: ${spddPools.length}`);
+        console.log(`   Total stake difference (SPDD - DB): ${apiTotal - dbTotal} lovelace`);
+
+        if (mismatched.length) {
+            console.log(`\n   Mismatch breakdown:`);
+            console.log(`   - SPDD higher than DB: ${spddHigherCount} pools, total +${spddHigherTotal} lovelace`);
+            console.log(`   - DB higher than SPDD: ${dbHigherCount} pools, total -${dbHigherTotal} lovelace`);
+            console.log(`   - Net difference from mismatches: ${totalDiff} lovelace`);
+
+            // Sort mismatched by absolute difference descending
+            const sortedByDiff = [...mismatched].sort((a, b) => {
+                const aDiff = a.spdd >= a.db ? a.spdd - a.db : a.db - a.spdd;
+                const bDiff = b.spdd >= b.db ? b.spdd - b.db : b.db - b.spdd;
+                return Number(bDiff - aDiff);
+            });
+
+            console.log(`\n   Top 5 pools with largest differences:`);
+            for (const m of sortedByDiff.slice(0, 5)) {
+                const diff = m.spdd - m.db;
+                const sign = diff >= 0n ? "+" : "";
+                console.log(`   - ${m.id}: DB=${m.db}, SPDD=${m.spdd}, diff=${sign}${diff}`);
+            }
+
+            console.log(`\n   Top 5 pools with smallest differences:`);
+            for (const m of sortedByDiff.slice(-5).reverse()) {
+                const diff = m.spdd - m.db;
+                const sign = diff >= 0n ? "+" : "";
+                console.log(`   - ${m.id}: DB=${m.db}, SPDD=${m.spdd}, diff=${sign}${diff}`);
+            }
+
+            // Check if all differences are in the same direction
+            if (spddHigherCount === mismatched.length) {
+                console.log(`\n   ⚠️  ALL mismatches have SPDD > DB (possible rounding UP issue)`);
+            } else if (dbHigherCount === mismatched.length) {
+                console.log(`\n   ⚠️  ALL mismatches have DB > SPDD (possible rounding DOWN issue)`);
+            }
+        }
+
+        if (missing.length) {
+            console.log(`\n   Missing pools (in DB but not SPDD): ${missing.slice(0, 10).join(", ")}${missing.length > 10 ? ` ... and ${missing.length - 10} more` : ""}`);
+        }
+        if (extra.length) {
+            console.log(`\n   Extra pools (in SPDD but not DB): ${extra.slice(0, 10).join(", ")}${extra.length > 10 ? ` ... and ${extra.length - 10} more` : ""}`);
+        }
+
+        console.log(`\n   === End Diagnostic ===\n`);
         await pause();
     }
 
