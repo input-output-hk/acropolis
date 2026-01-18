@@ -344,6 +344,25 @@ impl State {
             );
         }
 
+        // AVVM cancellation at Shelley→Allegra boundary (epoch 236 on mainnet)
+        // At the Allegra hard fork, Byron-era AVVM (Ada Voucher Vending Machine) addresses
+        // are cancelled and their value returned to reserves. This is handled by
+        // `returnRedeemAddrsToReserves` in the Cardano ledger Haskell code.
+        // See: cardano-ledger/eras/allegra/impl/src/Cardano/Ledger/Allegra/Translation.hs
+        // The exact amount is 299,052,044,652,388 lovelace (~299M ADA).
+        // TODO: This is mainnet-specific - need to handle other networks
+        if epoch == 236 {
+            const AVVM_RETURNED_TO_RESERVES: u64 = 299_052_044_652_388;
+            let old_reserves = self.pots.reserves;
+            self.pots.reserves += AVVM_RETURNED_TO_RESERVES;
+            info!(
+                new = self.pots.reserves,
+                old = old_reserves,
+                avvm_returned = AVVM_RETURNED_TO_RESERVES,
+                "AVVM cancellation at Allegra hard fork - returned to reserves"
+            );
+        }
+
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
@@ -463,6 +482,9 @@ impl State {
             }
 
             // Calculate reward payouts for previous epoch
+            // Use performance_era (the era of the epoch that just ended), not current era
+            // This ensures epoch 235 (Shelley) rewards use Shelley rules even when
+            // calculated from epoch 236 (Allegra)
             calculate_rewards(
                 epoch - 1,
                 era,
@@ -837,7 +859,7 @@ impl State {
         // - Pools retiring this epoch (self.retiring_spos)
         // - Pools that were in previous snapshots (they may have retired in a prior epoch
         //   but still produced blocks because slot leader schedules use older snapshots)
-        let spo_blocks: HashMap<PoolId, usize> = if era == Era::Shelley {
+        let spo_blocks: HashMap<PoolId, usize> = if era < Era::Babbage {
             ea_msg
                 .spo_blocks
                 .iter()

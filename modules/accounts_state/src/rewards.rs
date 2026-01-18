@@ -162,9 +162,9 @@ pub fn calculate_rewards(
             pay_to_pool_reward_account = false;
         }
 
-        if era == Era::Shelley {
+        if era < Era::Babbage {
             if pay_to_pool_reward_account {
-                // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
+                // There was a bug in the original node from Shelley until Babbahe where if multiple SPOs
                 // shared a reward account, only one of them would get paid.
                 // QUESTION: Which one?  Lowest hash seems to work in epoch 212
                 // Check all SPOs to see if they match this reward account
@@ -275,9 +275,6 @@ fn calculate_spo_rewards(
     deregistrations: &HashSet<StakeAddress>,
     era: Era,
 ) -> Vec<RewardDetail> {
-    // Pre-Allegra / Shelley had several checks that must be honored in rewards calculation
-    let is_shelley = era == Era::Shelley;
-
     // Pre-Babbage (Shelley through Alonzo): unregistered leader rewards stay in reserves
     // Babbage+: all leader rewards delivered regardless of registration (per Errata 17.2)
     // This matches Cardano's hardforkBabbageForgoRewardPrefilter which checks pvMajor > 6
@@ -411,7 +408,7 @@ fn calculate_spo_rewards(
                 // Shelley-specific: Skip pool's reward address from member rewards
                 // This was a Shelley bug where the pool's reward address could get
                 // member rewards if it delegated to itself
-                if is_shelley && is_reward_account {
+                if is_pre_babbage && is_reward_account {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address
