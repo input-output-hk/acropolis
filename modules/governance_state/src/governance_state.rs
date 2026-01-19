@@ -1,9 +1,9 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::configuration::StartupMode;
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
+    configuration::StartupMode,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
