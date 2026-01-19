@@ -4,7 +4,7 @@
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
     configuration::StartupMode,
-    declare_cardano_rdr,
+    declare_cardano_reader,
     messages::{
         CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
         SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
@@ -35,7 +35,7 @@ use drep_state_publisher::DRepStatePublisher;
 use crate::state::DRepStorageConfig;
 
 // Subscription topics
-declare_cardano_rdr!(
+declare_cardano_reader!(
     CertReader,
     "certificates-subscribe-topic",
     "cardano.certificates",
@@ -43,7 +43,7 @@ declare_cardano_rdr!(
     TxCertificatesMessage
 );
 
-declare_cardano_rdr!(
+declare_cardano_reader!(
     ParamReader,
     "parameters-subscribe-topic",
     "cardano.protocol.parameters",
@@ -51,7 +51,7 @@ declare_cardano_rdr!(
     ProtocolParamsMessage
 );
 
-declare_cardano_rdr!(
+declare_cardano_reader!(
     GovReader,
     "governance-subscribe-topic",
     "cardano.governance",
@@ -160,7 +160,7 @@ impl DRepState {
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
         if let Some(params) = &mut subs.params {
-            params.read().await?;
+            params.read_skip_rollbacks().await?;
             info!("Consumed initial genesis params from params_subscription");
         }
 
@@ -174,30 +174,33 @@ impl DRepState {
 
             let mut ctx = ValidationContext::new(&context, &validation_topic);
 
-            let (certs_message, new_epoch) = match &ctx.consume_sync(subs.certs.read_rb().await)? {
-                RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
-                    if blk_inf.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(blk_inf.number);
+            let (certs_message, new_epoch) =
+                match &ctx.consume_sync(subs.certs.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
+                        if blk_inf.status == BlockStatus::RolledBack {
+                            state = history.lock().await.get_rolled_back_state(blk_inf.number);
+                        }
+                        let new_epoch =
+                            (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
+                        (Some(msg.clone()), new_epoch)
                     }
-                    let new_epoch =
-                        (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
-                    (Some(msg.clone()), new_epoch)
-                }
-                RollbackWrapper::Rollback(msg) => {
-                    ctx.handle(
-                        "rollback",
-                        drep_state_publisher.publish_rollback(msg.clone()).await,
-                    );
-                    (None, None)
-                }
-            };
+                    RollbackWrapper::Rollback(msg) => {
+                        ctx.handle(
+                            "rollback",
+                            drep_state_publisher.publish_rollback(msg.clone()).await,
+                        );
+                        (None, None)
+                    }
+                };
 
             // Read from epoch-boundary messages only when it's a new epoch
             if let Some(new_epoch) = new_epoch {
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
                 if let Some(params) = &mut subs.params {
-                    if let Some((_, msg)) = ctx.consume("params", params.read().await) {
+                    if let Some((_, msg)) =
+                        ctx.consume("params", params.read_skip_rollbacks().await)
+                    {
                         if let Some(cw) = &msg.params.conway {
                             ctx.handle(
                                 "params",
@@ -232,7 +235,9 @@ impl DRepState {
             }
 
             if let Some(gov_sub) = subs.gov.as_mut() {
-                if let Some((blk_inf, gov)) = ctx.consume("gov", gov_sub.read().await) {
+                if let Some((blk_inf, gov)) =
+                    ctx.consume("gov", gov_sub.read_skip_rollbacks().await)
+                {
                     let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
                     async {
                         ctx.merge("gov", state.process_votes(&gov.voting_procedures));

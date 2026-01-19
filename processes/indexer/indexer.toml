@@ -1,7 +1,7 @@
 # Top-level configuration for Acropolis indexer process
 
 [global.startup]
-network = "mainnet"
+network-name = "mainnet"
 startup-mode = "snapshot"
 sync-mode = "upstream"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"

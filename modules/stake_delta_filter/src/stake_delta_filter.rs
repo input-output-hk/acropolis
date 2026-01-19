@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 const DEFAULT_ADDRESS_DELTA_TOPIC: (&str, &str) =
-    ("subscription-address-delta-topic", "cardano.address.delta");
+    ("subscription-address-delta-topic", "cardano.address.deltas");
 const DEFAULT_CERTIFICATES_TOPIC: (&str, &str) =
     ("subscription-certificates-topic", "cardano.certificates");
 const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str, &str) =

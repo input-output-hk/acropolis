@@ -73,38 +73,32 @@ impl RollbackAwarePublisher<Message> {
     }
 }
 
-#[macro_export]
-macro_rules! declare_cardano_reader {
-    ($name:ident, $msg_constructor:ident, $msg_type:ty) => {
-        async fn $name(s: &mut Box<dyn Subscription<Message>>) -> Result<(BlockInfo, $msg_type)> {
-            match s.read_ignoring_rollbacks().await?.1.as_ref() {
-                Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => {
-                    Ok((blk.clone(), body.clone()))
-                }
-                msg => Err(anyhow!(
-                    "Unexpected message {msg:?} for {} topic",
-                    stringify!($msg_constructor)
-                )),
-            }
-        }
-    };
-}
-
 #[derive(Debug)]
 pub enum RollbackWrapper<T> {
     Rollback(Arc<Message>),
     Normal((Arc<BlockInfo>, Arc<T>)),
 }
 
+/// Declares locally tailored cardano reader struct, providing a lightweight wrapper around
+/// Subscribers from topics.
+/// Main intention is get rid of boilerplate code:
+/// (a) topic declaration, config param reading, reader initialization
+/// (b) reading from the topic and retriving data, attached to Cardano::`msg_constructor`
+/// constructor; all other constructors are ignored, rollbacks are processed according to
+/// function.
 #[macro_export]
-macro_rules! declare_cardano_rdr {
+macro_rules! declare_cardano_reader {
     ($reader_name:ident, $param:expr, $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
         pub struct $reader_name {
             sub: Box<dyn Subscription<Message>>,
         }
 
         impl $reader_name {
+            /// Created and initalizes reader, taking topic parameters from config
             pub async fn new(ctx: &Context<Message>, cfg: &Arc<Config>) -> Result<Self> {
+                if $def_topic.is_empty() {
+                    bail!("No default topic for '{}'", $param);
+                }
                 let topic_name = cfg.get($param).unwrap_or($def_topic);
 
                 info!("Creating subscriber on '{topic_name}' for '{}'", $param);
@@ -113,6 +107,9 @@ macro_rules! declare_cardano_rdr {
                 })
             }
 
+            /// Creates and initializes Option<$reader_name>, taking topic parameters from config,
+            /// if `do_create` parameter is true, initializes the reader.
+            /// if `do_create` parameter is false, initialization is skipped.
             pub async fn new_opt(
                 do_create: bool,
                 ctx: &Context<Message>,
@@ -125,7 +122,38 @@ macro_rules! declare_cardano_rdr {
                 }
             }
 
-            pub async fn read_rb(&mut self) -> Result<RollbackWrapper<$msg_type>> {
+            /// Creates and initializes Option<$reader_name>, taking topic parameters from config.
+            /// If the topic is not specified, default topic name is not used instead, and
+            /// None is returned.
+            pub async fn new_without_default(
+                ctx: &Context<Message>,
+                cfg: &Arc<Config>,
+            ) -> Result<Option<Self>> {
+                match cfg.get::<&str>($param) {
+                    Ok(topic_name) => {
+                        if !$def_topic.is_empty() {
+                            bail!(
+                                "Default topic for '{}' is '{}', cannot use new_without_default",
+                                $param,
+                                $def_topic
+                            );
+                        }
+                        info!("Creating subscriber on '{topic_name}' for '{}'", $param);
+                        Ok(Some(Self {
+                            sub: ctx.subscribe(&topic_name).await?,
+                        }))
+                    }
+                    Err(_) => {
+                        info!(
+                            "Skipping subscriber creation for '{}', no topic in config",
+                            $param
+                        );
+                        Ok(None)
+                    }
+                }
+            }
+
+            pub async fn read_with_rollbacks(&mut self) -> Result<RollbackWrapper<$msg_type>> {
                 let res = self.sub.read().await?.1;
                 match res.as_ref() {
                     Message::Cardano((blk, CardanoMessage::$msg_constructor(body))) => Ok(
@@ -139,9 +167,11 @@ macro_rules! declare_cardano_rdr {
                 }
             }
 
-            pub async fn read(&mut self) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
+            pub async fn read_skip_rollbacks(
+                &mut self,
+            ) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
                 loop {
-                    match self.read_rb().await? {
+                    match self.read_with_rollbacks().await? {
                         RollbackWrapper::Normal(blk) => return Ok(blk),
                         RollbackWrapper::Rollback(_) => continue,
                     }
@@ -176,7 +206,7 @@ impl ValidationContext {
         self.current_block.clone()
     }
 
-    fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
+    pub fn handle_error(&mut self, handler: &str, error: &anyhow::Error) {
         self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
     }
 
@@ -185,7 +215,7 @@ impl ValidationContext {
     /// annotated with `handler` string.
     pub fn merge(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
         match outcome {
-            Err(e) => self.handling_error(handler, &e),
+            Err(e) => self.handle_error(handler, &e),
             Ok(mut outcome) => self.validation.merge(&mut outcome),
         }
     }
@@ -201,7 +231,7 @@ impl ValidationContext {
         match result {
             Ok(outcome) => outcome,
             Err(e) => {
-                self.handling_error(handler, &e);
+                self.handle_error(handler, &e);
                 T::default()
             }
         }

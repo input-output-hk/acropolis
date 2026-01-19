@@ -62,7 +62,7 @@ impl SnapshotBootstrapper {
         let cfg = BootstrapConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");
-        info!("  Network: {}", cfg.network);
+        info!("  Network: {}", cfg.startup.network_name);
         info!("  Data directory: {}", cfg.data_dir.display());
         info!("  Publishing on '{}'", cfg.snapshot_topic);
         info!(
@@ -127,7 +127,7 @@ impl SnapshotBootstrapper {
             bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
         );
         parser
-            .parse(&mut publisher, cfg.network.into())
+            .parse(&mut publisher, cfg.startup.network_name.into())
             .map_err(|e| BootstrapError::Parse(e.to_string()))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 

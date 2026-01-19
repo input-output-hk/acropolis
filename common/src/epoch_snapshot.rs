@@ -4,7 +4,7 @@ use crate::{
     StakeCredential,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 /// SPO data captured in a stake snapshot
@@ -91,12 +91,18 @@ impl EpochSnapshot {
         };
 
         // Add all SPOs - some may only have stake, some may only produce blocks (their
-        // stake has been removed); we need both in rewards
-        for (spo_id, spo) in spos {
-            // See how many blocks produced
+        // stake has been removed); we need both in rewards. Iterate over the union of
+        // registered SPOs and block-producing pools to ensure retired pools that produced
+        // blocks are included for rewards calculation.
+        let all_pool_ids: HashSet<&PoolId> = spos.keys().chain(spo_block_counts.keys()).collect();
+
+        for spo_id in all_pool_ids {
+            let spo = spos.get(spo_id);
             let blocks_produced = spo_block_counts.get(spo_id).copied().unwrap_or(0);
 
-            // Check if the reward account from two epochs ago is still registered
+            // Check if the reward account from two epochs ago is still registered.
+            // This implements the Shelley-era rule that SPO leader rewards are only paid
+            // if the reward account was registered at the time of the staking snapshot.
             let two_previous_reward_account_is_registered =
                 match two_previous_snapshot.spos.get(spo_id) {
                     Some(old_spo) => stake_addresses
@@ -113,9 +119,8 @@ impl EpochSnapshot {
                 two_previous_reward_account_is_registered
             );
 
-            // Add the new one
-            snapshot.spos.insert(
-                *spo_id,
+            // Build snapshot entry - full data if registered, minimal if only block producer
+            let snapshot_spo = if let Some(spo) = spo {
                 SnapshotSPO {
                     delegators: vec![],
                     total_stake: 0,
@@ -126,8 +131,21 @@ impl EpochSnapshot {
                     pool_owners: spo.pool_owners.clone(),
                     reward_account: spo.reward_account.clone(),
                     two_previous_reward_account_is_registered,
-                },
-            );
+                }
+            } else {
+                // Retired pool that produced blocks - minimal entry for block counting
+                debug!(
+                    epoch,
+                    "Adding retired SPO {} with {} blocks to snapshot", spo_id, blocks_produced
+                );
+                SnapshotSPO {
+                    blocks_produced,
+                    two_previous_reward_account_is_registered,
+                    ..Default::default()
+                }
+            };
+
+            snapshot.spos.insert(*spo_id, snapshot_spo);
         }
 
         // Scan all stake addresses and post to their delegated SPO's list
@@ -151,6 +169,35 @@ impl EpochSnapshot {
                     }
                 }
                 total_stake += active_stake;
+            }
+        }
+
+        // Add retired pools that produced blocks (for block counting in rewards)
+        // These are added AFTER stake distribution so they don't receive delegator stake.
+        for (spo_id, &blocks_produced) in spo_block_counts {
+            if blocks_produced > 0 && !snapshot.spos.contains_key(spo_id) {
+                // Check if the reward account from two epochs ago is still registered
+                let two_previous_reward_account_is_registered =
+                    two_previous_snapshot.spos.get(spo_id).is_some_and(|old_spo| {
+                        stake_addresses
+                            .get(&old_spo.reward_account)
+                            .map(|sas| sas.registered)
+                            .unwrap_or(false)
+                    });
+
+                debug!(
+                    epoch,
+                    "Adding retired SPO {} with {} blocks to snapshot", spo_id, blocks_produced
+                );
+
+                snapshot.spos.insert(
+                    *spo_id,
+                    SnapshotSPO {
+                        blocks_produced,
+                        two_previous_reward_account_is_registered,
+                        ..Default::default()
+                    },
+                );
             }
         }
 
@@ -268,19 +315,16 @@ impl EpochSnapshot {
 /// Container for the three snapshots used in rewards calculation (mark, set, go)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SnapshotsContainer {
-    /// Mark snapshot (epoch - 2)
+    /// Mark snapshot (current epoch)
     pub mark: EpochSnapshot,
 
     /// Set snapshot (epoch - 1)
     pub set: EpochSnapshot,
-
-    /// Go snapshot (current epoch)
-    pub go: EpochSnapshot,
 }
 
 impl Display for SnapshotsContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Mark: {}, Set: {}, Go: {}", self.mark, self.set, self.go)
+        writeln!(f, "Mark: {}, Set: {}", self.mark, self.set)
     }
 }
 

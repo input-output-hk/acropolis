@@ -109,7 +109,6 @@ pub struct SnapshotPublisher {
     dreps_len: usize,
     proposals: Vec<GovernanceProposal>,
     epoch_context: EpochContext,
-    snapshot_fee: u64,
 }
 
 impl SnapshotPublisher {
@@ -134,7 +133,6 @@ impl SnapshotPublisher {
             dreps_len: 0,
             proposals: Vec::new(),
             epoch_context,
-            snapshot_fee: 0,
         }
     }
 
@@ -215,7 +213,7 @@ impl SnapshotPublisher {
             total_blocks: data.total_blocks_current as usize,
             total_txs: 0,
             total_outputs: 0,
-            total_fees: self.snapshot_fee,
+            total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
             praos_params: Some(PraosParams::mainnet()),
@@ -528,9 +526,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.values().map(|spo| spo.delegators.len()).sum();
         let set_stake: u64 = snapshots.set.spos.values().map(|spo| spo.total_stake).sum();
 
-        let go_delegators: usize = snapshots.go.spos.values().map(|spo| spo.delegators.len()).sum();
-        let go_stake: u64 = snapshots.go.spos.values().map(|spo| spo.total_stake).sum();
-
         info!("Snapshots Data:");
         info!(
             "  Mark snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
@@ -545,13 +540,6 @@ impl SnapshotsCallback for SnapshotPublisher {
             snapshots.set.spos.len(),
             set_delegators,
             set_stake / 1_000_000
-        );
-        info!(
-            "  Go snapshot (epoch {}): {} SPOs, {} delegators, {} ADA",
-            snapshots.go.epoch,
-            snapshots.go.spos.len(),
-            go_delegators,
-            go_stake / 1_000_000
         );
 
         Ok(())

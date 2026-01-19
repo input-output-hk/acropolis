@@ -6,7 +6,8 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-method = "mithril"  # Options: "mithril" | "snapshot"
+startup-mode = "genesis"
+sync-mode = "mithril"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -26,7 +27,7 @@ pause = "none"
 # Core Module Configurations
 # ============================================================================
 [module.peer-network-interface]
-sync-point = "snapshot"
+sync-point = "dynamic"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
@@ -47,7 +48,8 @@ publish-block-txs-topic = "cardano.block.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
-address-delta-topic = "cardano.address.delta"
+address-delta-topic = "cardano.address.deltas"
+block-totals-topic = "cardano.block.txs"
 
 [module.spo-state]
 block-subscribe-topic = "cardano.block.available"

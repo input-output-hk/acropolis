@@ -31,7 +31,7 @@ const DEFAULT_ASSET_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.delta");
+    ("address-deltas-subscribe-topic", "cardano.address.deltas");
 
 // Configuration defaults
 const DEFAULT_STORE_ASSETS: (&str, bool) = ("store-assets", false);

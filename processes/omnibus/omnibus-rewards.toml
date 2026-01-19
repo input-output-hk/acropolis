@@ -47,7 +47,7 @@ network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
-address-delta-topic = "cardano.address.delta"
+address-delta-topic = "cardano.address.deltas"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes

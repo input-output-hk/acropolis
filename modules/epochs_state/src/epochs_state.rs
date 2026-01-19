@@ -4,7 +4,7 @@
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
     configuration::StartupMode,
-    declare_cardano_rdr,
+    declare_cardano_reader,
     messages::{
         BlockTxsMessage, CardanoMessage, EpochBootstrapMessage, GenesisCompleteMessage, Message,
         ProtocolParamsMessage, RawBlockMessage, SnapshotMessage, SnapshotStateMessage, StateQuery,
@@ -35,28 +35,28 @@ use crate::{
 };
 use state::State;
 
-declare_cardano_rdr!(
+declare_cardano_reader!(
     BootstrapReader,
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
     GenesisComplete,
     GenesisCompleteMessage
 );
-declare_cardano_rdr!(
+declare_cardano_reader!(
     BlockReader,
     "block-subscribe-topic",
     "cardano.block.proposed",
     BlockAvailable,
     RawBlockMessage
 );
-declare_cardano_rdr!(
+declare_cardano_reader!(
     TxsReader,
     "block-txs-subscribe-topic",
     "cardano.block.txs",
     BlockInfoMessage,
     BlockTxsMessage
 );
-declare_cardano_rdr!(
+declare_cardano_reader!(
     ParamsReader,
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
@@ -151,15 +151,15 @@ impl EpochsState {
         validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let (_, genesis) = bootstrap_reader.read().await?;
+        let (_, genesis) = bootstrap_reader.read_skip_rollbacks().await?;
 
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis.values).await?;
 
-        // Consume initial protocol parameters (only needed for genesis bootstrap)
+        // Consume initial protocol parameters and txs (only needed for genesis bootstrap)
         if !is_snapshot_mode {
-            let _ = params_reader.read().await?;
-            //let _ = protocol_parameters_subscription.read().await?;
+            let _ = params_reader.read_skip_rollbacks().await?;
+            let _ = txs_reader.read_skip_rollbacks().await?;
         }
 
         loop {
@@ -168,7 +168,7 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            match ctx.consume_sync(block_reader.read_rb().await)? {
+            match ctx.consume_sync(block_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, blk_msg)) => {
                     if blk_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_info.number);
@@ -177,7 +177,10 @@ impl EpochsState {
 
                     if is_new_epoch {
                         if let Some((_, params)) =
-                            ctx.consume("protocol params", params_reader.read().await)
+                            ctx.consume(
+                                "protocol params",
+                                params_reader.read_skip_rollbacks().await
+                            )
                         {
                             state.handle_protocol_parameters(&params);
                         }
@@ -221,7 +224,11 @@ impl EpochsState {
                     let span = info_span!("epochs_state.handle_mint", block = blk_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            state.handle_mint(&blk_info, header.issuer_vkey());
+                            state.handle_mint(
+                                &blk_info,
+                                header.issuer_vkey(),
+                                header.as_byron().is_some(),
+                            );
                         }
                     });
                 }
@@ -234,7 +241,7 @@ impl EpochsState {
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            if let Some((blk_info, msg)) = ctx.consume("block_txs", txs_reader.read().await) {
+            if let Some((blk_info, msg)) = ctx.consume("block_txs", txs_reader.read_skip_rollbacks().await) {
                 let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                 span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
             }
