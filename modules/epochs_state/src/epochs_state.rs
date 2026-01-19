@@ -176,11 +176,8 @@ impl EpochsState {
                     let is_new_epoch = blk_info.new_epoch && blk_info.epoch > 0;
 
                     if is_new_epoch {
-                        if let Some((_, params)) =
-                            ctx.consume(
-                                "protocol params",
-                                params_reader.read_skip_rollbacks().await
-                            )
+                        if let Some((_, params)) = ctx
+                            .consume("protocol params", params_reader.read_skip_rollbacks().await)
                         {
                             state.handle_protocol_parameters(&params);
                         }
@@ -241,7 +238,9 @@ impl EpochsState {
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            if let Some((blk_info, msg)) = ctx.consume("block_txs", txs_reader.read_skip_rollbacks().await) {
+            if let Some((blk_info, msg)) =
+                ctx.consume("block_txs", txs_reader.read_skip_rollbacks().await)
+            {
                 let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
                 span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
             }
