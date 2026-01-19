@@ -1,21 +1,17 @@
-use crate::voting_state::VotingRegistrationState;
-use acropolis_common::messages::GovernanceBootstrapMessage;
-use acropolis_common::protocol_params::ConwayParams;
-use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
     AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
     ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote,
     VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure,
+    messages::GovernanceBootstrapMessage,
+    protocol_params::ConwayParams,
+    validation::{GovernanceValidationError, ValidationError, ValidationOutcomes},
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::ops::Range;
-use tracing::{debug, error, info};
+use std::{collections::{HashMap, HashSet}, fs::OpenOptions, io::Write, ops::Range, sync::Arc};
+use tracing::{debug, error, info, warn};
+use crate::{GovernanceStateConfig, voting_state::VotingRegistrationState};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionStatus {
@@ -52,13 +48,13 @@ pub struct ConwayVoting {
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
-    verification_output_file: Option<String>,
+    cfg: Arc<GovernanceStateConfig>,
     action_proposal_count: usize,
     votes_count: usize,
 }
 
 impl ConwayVoting {
-    pub fn new(verification_output_file: Option<String>) -> Self {
+    pub fn new(cfg: Arc<GovernanceStateConfig>) -> Self {
         Self {
             conway: None,
             bootstrap: None,
@@ -67,7 +63,7 @@ impl ConwayVoting {
             action_status: Default::default(),
             action_proposal_count: 0,
             votes_count: 0,
-            verification_output_file,
+            cfg,
         }
     }
 
@@ -230,19 +226,30 @@ impl ConwayVoting {
             .ok_or_else(|| anyhow!("action {} not found", action_id))?;
         let conway_params = self.get_conway_params()?;
         let threshold = voting_state.get_action_thresholds(proposal, conway_params);
-
         let votes = self.get_actual_votes(new_epoch, action_id, drep_stake, spo_stake)?;
-        let bootstrap = self.is_bootstrap()?;
-        let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
-        let previous_ok = match proposal.gov_action.get_previous_action_id() {
-            Some(act) => self.action_status.get(&act).map(|x| x.is_accepted()).unwrap_or(false),
-            None => true,
+
+        let accepted = if let Some(accept_epoch) = self.cfg.manual_governance.get(action_id) {
+            let accepted = *accept_epoch == new_epoch;
+            warn!(
+                "Manual governance override for action {}, to be accepted at epoch {}, result {}",
+                action_id, new_epoch, accepted
+            );
+            accepted
+        }
+        else {
+            let bootstrap = self.is_bootstrap()?;
+            let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
+            let previous_ok = match proposal.gov_action.get_previous_action_id() {
+                Some(act) => self.action_status.get(&act).map(|x| x.is_accepted()).unwrap_or(false),
+                None => true,
+            };
+            let accepted = previous_ok && voted;
+            info!(
+                "Proposal {action_id}: new epoch {new_epoch}, votes {votes}, \
+                thresholds {threshold}, prevous_ok {previous_ok}, voted {voted}, result {accepted}"
+            );
+            accepted
         };
-        let accepted = previous_ok && voted;
-        info!(
-            "Proposal {action_id}: new epoch {new_epoch}, votes {votes}, thresholds {threshold}, prevous_ok {previous_ok}, \
-             voted {voted}, result {accepted}"
-        );
 
         Ok(VotingOutcome {
             procedure: proposal.clone(),
@@ -421,7 +428,7 @@ impl ConwayVoting {
     /// Function dumps information about completed (expired, ratified, enacted) governance
     /// actions in format, close to that of `gov_action_proposal` from `sqldb`.
     pub fn print_outcome_to_verify(&self, outcome: &[GovernanceOutcome]) -> Result<()> {
-        let out_file_name = match &self.verification_output_file {
+        let out_file_name = match &self.cfg.verification_output_file {
             Some(o) => o,
             None => return Ok(()),
         };
@@ -643,7 +650,7 @@ mod tests {
     /// Simple test for general mechanics of action_status processing.
     #[test]
     fn test_outcomes_action_status() -> Result<()> {
-        let mut voting = ConwayVoting::new(None);
+        let mut voting = ConwayVoting::new(Arc::new(GovernanceStateConfig::default()));
         let oc1 = create_governance_outcome(1, true);
         voting.action_status.insert(
             oc1.voting.procedure.gov_action_id.clone(),
