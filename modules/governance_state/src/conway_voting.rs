@@ -1,17 +1,23 @@
+use crate::{voting_state::VotingRegistrationState, GovernanceStateConfig};
 use acropolis_common::{
+    messages::GovernanceBootstrapMessage,
+    protocol_params::ConwayParams,
+    validation::{GovernanceValidationError, ValidationError, ValidationOutcomes},
     AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
     GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
     ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote,
     VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure,
-    messages::GovernanceBootstrapMessage,
-    protocol_params::ConwayParams,
-    validation::{GovernanceValidationError, ValidationError, ValidationOutcomes},
 };
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::{collections::{HashMap, HashSet}, fs::OpenOptions, io::Write, ops::Range, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::OpenOptions,
+    io::Write,
+    ops::Range,
+    sync::Arc,
+};
 use tracing::{debug, error, info, warn};
-use crate::{GovernanceStateConfig, voting_state::VotingRegistrationState};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionStatus {
@@ -235,8 +241,7 @@ impl ConwayVoting {
                 action_id, new_epoch, accepted
             );
             accepted
-        }
-        else {
+        } else {
             let bootstrap = self.is_bootstrap()?;
             let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
             let previous_ok = match proposal.gov_action.get_previous_action_id() {

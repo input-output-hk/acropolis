@@ -2,14 +2,21 @@
 //! Accepts certificate events and derives the Governance State in memory
 
 use acropolis_common::{
-    caryatid::SubscriptionExt, configuration::StartupMode, declare_cardano_reader, messages::{
+    caryatid::SubscriptionExt,
+    configuration::StartupMode,
+    declare_cardano_reader,
+    messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
         ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse, StateTransitionMessage,
-    }, queries::errors::QueryError, queries::governance::{
+    },
+    queries::errors::QueryError,
+    queries::governance::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
-    }, validation::ValidationOutcomes, BlockInfo, GovActionId
+    },
+    validation::ValidationOutcomes,
+    BlockInfo, GovActionId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -85,12 +92,10 @@ impl GovernanceStateConfig {
     ) -> Result<HashMap<GovActionId, u64>> {
         let mut res = HashMap::<GovActionId, u64>::new();
         if let Ok(table) = config.get_table(key) {
-            for (id_str,epoch) in table {
+            for (id_str, epoch) in table {
                 let gov_id = GovActionId::from_bech32(&id_str)?;
                 let epoch = epoch.into_uint().map_err(|e| {
-                    anyhow!(
-                        "Invalid epoch number for manual governance action {id_str}: {e}"
-                    )
+                    anyhow!("Invalid epoch number for manual governance action {id_str}: {e}")
                 })?;
                 res.insert(gov_id, epoch);
             }
@@ -184,10 +189,7 @@ impl GovernanceState {
         mut spo_s: Option<Box<dyn Subscription<Message>>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let state = Arc::new(Mutex::new(State::new(
-            context.clone(),
-            config.clone(),
-        )));
+        let state = Arc::new(Mutex::new(State::new(context.clone(), config.clone())));
 
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {

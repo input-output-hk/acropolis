@@ -1,6 +1,9 @@
 //! Acropolis Governance State: State storage
 
-use crate::{alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting, GovernanceStateConfig, VotingRegistrationState};
+use crate::{
+    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting, GovernanceStateConfig,
+    VotingRegistrationState,
+};
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
@@ -35,10 +38,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        context: Arc<Context<Message>>,
-        config: Arc<GovernanceStateConfig>,
-    ) -> Self {
+    pub fn new(context: Arc<Context<Message>>, config: Arc<GovernanceStateConfig>) -> Self {
         Self {
             publisher: RollbackAwarePublisher::new(context, config.enact_state_topic.clone()),
 
