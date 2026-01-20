@@ -45,6 +45,11 @@ pub struct RewardsResult {
     /// Total rewards not paid due to unregistered accounts (goes to treasury)
     pub total_unpaid: u64,
 
+    /// Total leader rewards that stayed in reserves (pre-Allegra unregistered leader accounts)
+    /// In pre-Allegra eras, when an SPO's reward account is unregistered, the leader rewards
+    /// stay in reserves rather than being paid out or going to treasury.
+    pub total_stayed_in_reserves: u64,
+
     /// Rewards to be paid
     pub rewards: BTreeMap<PoolId, Vec<RewardDetail>>,
 
@@ -162,9 +167,9 @@ pub fn calculate_rewards(
             pay_to_pool_reward_account = false;
         }
 
-        if era < Era::Babbage {
+        if era < Era::Allegra {
             if pay_to_pool_reward_account {
-                // There was a bug in the original node from Shelley until Babbahe where if multiple SPOs
+                // There was a bug in the original node from Shelley until Allegra where if multiple SPOs
                 // shared a reward account, only one of them would get paid.
                 // QUESTION: Which one?  Lowest hash seems to work in epoch 212
                 // Check all SPOs to see if they match this reward account
@@ -193,7 +198,7 @@ pub fn calculate_rewards(
         }
 
         // Calculate rewards for this SPO
-        let rewards = calculate_spo_rewards(
+        let spo_result = calculate_spo_rewards(
             operator_id,
             staking_spo,
             blocks_produced as u64,
@@ -210,12 +215,15 @@ pub fn calculate_rewards(
             era,
         );
 
-        if !rewards.is_empty() {
+        // Track leader rewards that stayed in reserves (pre-Allegra unregistered accounts)
+        result.total_stayed_in_reserves += spo_result.stayed_in_reserves;
+
+        if !spo_result.rewards.is_empty() {
             let mut spo_rewards = SPORewards {
                 total_rewards: 0,
                 operator_rewards: 0,
             };
-            for reward in &rewards {
+            for reward in &spo_result.rewards {
                 if reward.registered {
                     // Reward will be paid to the account
                     match reward.rtype {
@@ -239,7 +247,7 @@ pub fn calculate_rewards(
                 }
             }
 
-            result.rewards.insert(*operator_id, rewards);
+            result.rewards.insert(*operator_id, spo_result.rewards);
             result.spo_rewards.push((*operator_id, spo_rewards));
         }
     }
@@ -251,10 +259,19 @@ pub fn calculate_rewards(
         total_paid_to_pools,
         total_paid = result.total_paid,
         total_unpaid = result.total_unpaid,
+        total_stayed_in_reserves = result.total_stayed_in_reserves,
         "Rewards calculated:"
     );
 
     Ok(result)
+}
+
+/// Result from calculating SPO rewards
+struct SpoRewardsResult {
+    /// Rewards to be paid
+    rewards: Vec<RewardDetail>,
+    /// Amount that stayed in reserves (pre-Allegra unregistered leader rewards)
+    stayed_in_reserves: u64,
 }
 
 /// Calculate rewards for an individual SPO
@@ -274,11 +291,11 @@ fn calculate_spo_rewards(
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
     era: Era,
-) -> Vec<RewardDetail> {
-    // Pre-Babbage (Shelley through Alonzo): unregistered leader rewards stay in reserves
-    // Babbage+: all leader rewards delivered regardless of registration (per Errata 17.2)
-    // This matches Cardano's hardforkBabbageForgoRewardPrefilter which checks pvMajor > 6
-    let is_pre_babbage = era < Era::Babbage;
+) -> SpoRewardsResult {
+    // Pre-Allegra (Shelley through Alonzo): unregistered leader rewards stay in reserves
+    // Allegra+: all leader rewards delivered regardless of registration (per Errata 17.2)
+    // This matches Cardano's hardforkAllegraForgoRewardPrefilter which checks pvMajor > 6
+    let is_pre_allegra = era < Era::Allegra;
 
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -286,7 +303,10 @@ fn calculate_spo_rewards(
         warn!("SPO {} has no stake - skipping", operator_id);
 
         // No stake, no rewards or earnings
-        return vec![];
+        return SpoRewardsResult {
+            rewards: vec![],
+            stayed_in_reserves: 0,
+        };
     }
 
     // Get the stake actually delegated by the owners accounts to this SPO
@@ -299,7 +319,10 @@ fn calculate_spo_rewards(
             "SPO {} has owner stake {} less than pledge {} - skipping",
             operator_id, pool_owner_stake, spo.pledge
         );
-        return vec![];
+        return SpoRewardsResult {
+            rewards: vec![],
+            stayed_in_reserves: 0,
+        };
     }
 
     let pool_pledge = BigDecimal::from(&spo.pledge);
@@ -408,7 +431,7 @@ fn calculate_spo_rewards(
                 // Shelley-specific: Skip pool's reward address from member rewards
                 // This was a Shelley bug where the pool's reward address could get
                 // member rewards if it delegated to itself
-                if is_pre_babbage && is_reward_account {
+                if is_pre_allegra && is_reward_account {
                     debug!(
                         "Skipping pool reward account {}, losing {to_pay}",
                         delegator_stake_address
@@ -416,11 +439,11 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                // Pre-Babbage: Skip recently deregistered member accounts
+                // Pre-Allegra: Skip recently deregistered member accounts
                 // In Cardano, addrsRew is captured at the stability window, so accounts
                 // that deregister after the staking snapshot but before stability window
-                // should NOT receive member rewards. This applies to ALL pre-Babbage eras.
-                if is_pre_babbage && deregistrations.contains(delegator_stake_address) {
+                // should NOT receive member rewards. This applies to ALL pre-Allegra eras.
+                if is_pre_allegra && deregistrations.contains(delegator_stake_address) {
                     info!(
                         "Recently deregistered member account {}, losing {to_pay}",
                         delegator_stake_address
@@ -451,9 +474,10 @@ fn calculate_spo_rewards(
     };
 
     // Leader reward handling depends on era:
-    // - Pre-Babbage (Shelley through Alonzo): only emit if account is registered, else stays in reserves
-    // - Babbage+: always emit, registration status doesn't matter (per Errata 17.2)
-    if is_pre_babbage {
+    // - Pre-Allegra (Shelley through Alonzo): only emit if account is registered, else stays in reserves
+    // - Allegra+: always emit, registration status doesn't matter (per Errata 17.2)
+    let mut stayed_in_reserves = 0u64;
+    if is_pre_allegra {
         if pay_to_pool_reward_account {
             rewards.push(RewardDetail {
                 account: spo.reward_account.clone(),
@@ -463,22 +487,27 @@ fn calculate_spo_rewards(
                 registered: true,
             });
         } else {
-            // Don't push - unregistered leader rewards stay in reserves in pre-Babbage eras
+            // Don't push - unregistered leader rewards stay in reserves in pre-Allegra eras
+            // Track the amount so we can re-credit reserves later
+            stayed_in_reserves = spo_benefit;
             info!(
                 "SPO {}'s reward account {} not registered - {} stays in reserves",
                 operator_id, spo.reward_account, spo_benefit,
             );
         }
     } else {
-        // Babbage+: always deliver leader rewards regardless of registration status
+        // Allegra+: always deliver leader rewards regardless of registration status
         rewards.push(RewardDetail {
             account: spo.reward_account.clone(),
             rtype: RewardType::Leader,
             amount: spo_benefit,
             pool: *operator_id,
-            registered: true, // Always considered registered in Babbage+
+            registered: true, // Always considered registered in Allegra+
         });
     }
 
-    rewards
+    SpoRewardsResult {
+        rewards,
+        stayed_in_reserves,
+    }
 }

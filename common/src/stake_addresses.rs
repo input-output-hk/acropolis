@@ -288,11 +288,17 @@ impl StakeAddressMap {
         // Total stake across all addresses in parallel, first collecting into a vector
         // because imbl::OrdMap doesn't work in Rayon
         // Collect the SPO keys and UTXO, reward values
+        // Only include registered stake addresses with active delegations
         let sas_data: Vec<(PoolId, (u64, u64))> = self
             .inner
             .values()
             .filter_map(|sas| {
-                sas.delegated_spo.as_ref().map(|spo| (*spo, (sas.utxo_value, sas.rewards)))
+                // Must be registered to count towards active stake
+                if sas.registered {
+                    sas.delegated_spo.as_ref().map(|spo| (*spo, (sas.utxo_value, sas.rewards)))
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -319,12 +325,18 @@ impl StakeAddressMap {
 
     /// Dump current Stake Pool Delegation Distribution State
     /// <PoolId -> (Stake Key, Active Stakes Amount)>
+    /// Only includes registered stake addresses with active delegations
     pub fn dump_spdd_state(&self) -> HashMap<PoolId, Vec<(StakeAddress, u64)>> {
         let entries: Vec<_> = self
             .inner
             .par_iter()
             .filter_map(|(key, sas)| {
-                sas.delegated_spo.as_ref().map(|spo| (*spo, (key.clone(), sas.utxo_value)))
+                // Must be registered to count towards active stake
+                if sas.registered {
+                    sas.delegated_spo.as_ref().map(|spo| (*spo, (key.clone(), sas.utxo_value)))
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -337,6 +349,7 @@ impl StakeAddressMap {
 
     /// Derive the DRep Delegation Distribution (DRDD) - the total amount
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
+    /// Only includes registered stake addresses.
     pub fn generate_drdd(
         &self,
         dreps: &[(DRepCredential, Lovelace)],
@@ -348,6 +361,10 @@ impl StakeAddressMap {
             .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
             .collect::<BTreeMap<_, _>>();
         self.inner.values().collect::<Vec<_>>().par_iter().for_each(|state| {
+            // Must be registered to count towards voting power
+            if !state.registered {
+                return;
+            }
             let Some(drep) = state.delegated_drep.clone() else {
                 return;
             };

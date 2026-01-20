@@ -312,6 +312,20 @@ impl State {
         Ok(())
     }
 
+    /// Apply AVVM cancellation at the Allegra hard fork boundary.
+    /// This adds the value of cancelled AVVM UTxOs to reserves.
+    /// Called from accounts_state.rs when entering epoch 236.
+    pub fn apply_avvm_cancellation(&mut self, avvm_cancelled: u64) {
+        let old_reserves = self.pots.reserves;
+        self.pots.reserves += avvm_cancelled;
+        info!(
+            new = self.pots.reserves,
+            old = old_reserves,
+            avvm_returned = avvm_cancelled,
+            "AVVM cancellation at Allegra hard fork - returned to reserves"
+        );
+    }
+
     /// Process entry into a new epoch
     ///   epoch: Number of epoch we are entering
     ///   total_fees: Total fees taken in previous epoch
@@ -344,24 +358,8 @@ impl State {
             );
         }
 
-        // AVVM cancellation at Shelley→Allegra boundary (epoch 236 on mainnet)
-        // At the Allegra hard fork, Byron-era AVVM (Ada Voucher Vending Machine) addresses
-        // are cancelled and their value returned to reserves. This is handled by
-        // `returnRedeemAddrsToReserves` in the Cardano ledger Haskell code.
-        // See: cardano-ledger/eras/allegra/impl/src/Cardano/Ledger/Allegra/Translation.hs
-        // The exact amount is 299,052,044,652,388 lovelace (~299M ADA).
-        // TODO: This is mainnet-specific - need to handle other networks
-        if epoch == 236 {
-            const AVVM_RETURNED_TO_RESERVES: u64 = 299_052_044_652_388;
-            let old_reserves = self.pots.reserves;
-            self.pots.reserves += AVVM_RETURNED_TO_RESERVES;
-            info!(
-                new = self.pots.reserves,
-                old = old_reserves,
-                avvm_returned = AVVM_RETURNED_TO_RESERVES,
-                "AVVM cancellation at Allegra hard fork - returned to reserves"
-            );
-        }
+        // Note: AVVM cancellation at epoch 236 is now handled externally via apply_avvm_cancellation()
+        // which is called from accounts_state.rs after querying the UTxO state module
 
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
@@ -482,9 +480,6 @@ impl State {
             }
 
             // Calculate reward payouts for previous epoch
-            // Use performance_era (the era of the epoch that just ended), not current era
-            // This ensures epoch 235 (Shelley) rewards use Shelley rules even when
-            // calculated from epoch 236 (Allegra)
             calculate_rewards(
                 epoch - 1,
                 era,
@@ -735,6 +730,18 @@ impl State {
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
     /// epoch
+    ///
+    /// IMPORTANT: We always rotate parameters at epoch boundaries, even if unchanged.
+    /// This is because rewards calculation uses `previous_protocol_parameters` which must
+    /// contain the params that were ACTIVE during the epoch being rewarded.
+    ///
+    /// Example: When entering epoch 235 to calculate epoch 234 rewards:
+    /// - `previous_protocol_parameters` must be epoch 234's params (used for rewards calc)
+    /// - `protocol_parameters` becomes epoch 235's params
+    ///
+    /// If params don't change between epochs (e.g., k=500 in both 234 and 235), we still
+    /// need to rotate so that `previous_protocol_parameters` reflects epoch 234's params,
+    /// not stale params from when they last changed (e.g., epoch 233's k=150).
     pub fn handle_parameters(&mut self, params_msg: &ProtocolParamsMessage) -> Result<()> {
         let different = match &self.protocol_parameters {
             Some(old_params) => old_params != &params_msg.params,
@@ -743,9 +750,9 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            self.previous_protocol_parameters = self.protocol_parameters.clone();
-            self.protocol_parameters = Some(params_msg.params.clone());
         }
+        self.previous_protocol_parameters = self.protocol_parameters.clone();
+        self.protocol_parameters = Some(params_msg.params.clone());
 
         Ok(())
     }
@@ -788,10 +795,13 @@ impl State {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
                 let mut filtered_rewards_result = rewards_result.clone();
+                let mut actually_paid_to_accounts: u64 = 0;
+                let mut redirected_to_treasury: u64 = 0;
                 for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
                         if stake_addresses.is_registered(&reward.account) {
                             stake_addresses.add_to_reward(&reward.account, reward.amount);
+                            actually_paid_to_accounts += reward.amount;
                             reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
@@ -804,6 +814,7 @@ impl State {
                                 reward.account, reward.amount
                             );
                             self.pots.treasury += reward.amount;
+                            redirected_to_treasury += reward.amount;
 
                             // Remove from filtered version for comparison and result
                             if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
@@ -832,9 +843,19 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust the reserves - subtract total paid and unpaid
-                // (unpaid rewards are added to treasury in the payment loop above)
-                self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
+                // Adjust the reserves - subtract what actually left reserves:
+                // - Rewards paid to accounts
+                // - Rewards redirected to treasury (because account deregistered at payment time)
+                // Note: rewards_result.total_stayed_in_reserves is NOT deducted because those
+                // rewards (pre-Babbage unregistered leader accounts) never leave reserves.
+                self.pots.reserves -= actually_paid_to_accounts + redirected_to_treasury;
+
+                info!(
+                    actually_paid_to_accounts,
+                    redirected_to_treasury,
+                    total_stayed_in_reserves = rewards_result.total_stayed_in_reserves,
+                    "Rewards distribution:"
+                );
             }
         };
 

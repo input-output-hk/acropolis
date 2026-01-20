@@ -14,10 +14,11 @@ use acropolis_common::{
             PoolDelegators, DEFAULT_ACCOUNTS_QUERY_TOPIC,
         },
         errors::QueryError,
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -156,6 +157,7 @@ impl AccountsState {
         mut stake_reward_deltas_publisher: StakeRewardDeltasPublisher,
         mut stake_registration_updates_publisher: StakeRegistrationUpdatesPublisher,
         validation_outcomes_topic: String,
+        utxo_query_topic: String,
         mut spos_subscription: Box<dyn Subscription<Message>>,
         mut ea_subscription: Box<dyn Subscription<Message>>,
         mut certs_subscription: Box<dyn Subscription<Message>>,
@@ -212,6 +214,9 @@ impl AccountsState {
         // Track if this is the first epoch after snapshot bootstrap
         // We skip rewards calculation on the first epoch since pot deltas were already applied
         let mut skip_first_epoch_rewards = is_snapshot_mode;
+
+        // Track whether AVVM cancellation has been applied (happens once at Allegra boundary)
+        let mut avvm_cancelled = false;
 
         // Main loop of synchronised messages
         loop {
@@ -385,6 +390,50 @@ impl AccountsState {
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                // AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet)
+                // This only happens once when we enter the Allegra era
+                if let Some(ref block_info) = current_block {
+                    if !avvm_cancelled && block_info.era == Era::Allegra && block_info.new_epoch {
+                        let span = info_span!(
+                            "account_state.avvm_cancellation",
+                            block = block_info.number
+                        );
+                        async {
+                            info!("Allegra boundary detected - querying UTxO state to cancel AVVM UTxOs");
+                            // Query UTxO state to cancel all unredeemed AVVM UTxOs
+                            // Pass block_info so UTxO state can generate AddressDeltas
+                            let query = Message::StateQuery(StateQuery::UTxOs(
+                                UTxOStateQuery::CancelRedeemUtxos {
+                                    block_info: block_info.clone(),
+                                },
+                            ));
+                            match context.request(&utxo_query_topic, Arc::new(query)).await {
+                                Ok(response) => {
+                                    if let Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                                        UTxOStateQueryResponse::RedeemUtxosCancelled { count, total_value },
+                                    )) = response.as_ref()
+                                    {
+                                        info!(
+                                            count,
+                                            total_value,
+                                            "AVVM UTxOs cancelled - applying to reserves"
+                                        );
+                                        state.apply_avvm_cancellation(*total_value);
+                                        avvm_cancelled = true;
+                                    } else {
+                                        error!("Unexpected response from UTxO state: {:?}", response);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to query UTxO state for AVVM cancellation: {e}");
+                                }
+                            }
+                        }
+                        .instrument(span)
+                        .await;
+                    }
                 }
 
                 // Handle epoch activity
@@ -673,6 +722,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_ACCOUNTS_QUERY_TOPIC.1.to_string());
         info!("Creating query handler on '{}'", accounts_query_topic);
 
+        let utxo_query_topic = config
+            .get_string(DEFAULT_UTXOS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_UTXOS_QUERY_TOPIC.1.to_string());
+        info!("UTxO state query topic: '{}'", utxo_query_topic);
+
         // Create verifier and read comparison data according to config
         let mut verifier = Verifier::new();
 
@@ -954,6 +1008,7 @@ impl AccountsState {
                 stake_reward_deltas_publisher,
                 stake_registration_updates_publisher,
                 validation_outcomes_topic,
+                utxo_query_topic,
                 spos_subscription,
                 ea_subscription,
                 certs_subscription,
