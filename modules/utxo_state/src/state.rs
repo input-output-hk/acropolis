@@ -303,7 +303,7 @@ impl State {
             address: output.address.clone(),
             value: output.value.clone(),
             datum: output.datum.clone(),
-            reference_script: output.reference_script.clone(),
+            reference_script_hash: output.reference_script_hash,
         };
 
         // Add to volatile or immutable maps
@@ -612,7 +612,7 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        PolicyId, ReferenceScript, TxHash, TxUTxODeltas, Value,
+        PolicyId, ScriptHash, TxHash, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -663,7 +663,6 @@ mod tests {
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
         let datum_data = vec![1, 2, 3, 4, 5];
-        let reference_script_bytes = vec![0xde, 0xad, 0xbe, 0xef];
 
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
@@ -685,7 +684,7 @@ mod tests {
                 )],
             ),
             datum: Some(Datum::Inline(datum_data.clone())),
-            reference_script: Some(ReferenceScript::PlutusV1(reference_script_bytes.clone())),
+            reference_script_hash: Some(ScriptHash::default()),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -738,8 +737,9 @@ mod tests {
                     Some(Datum::Inline(ref data)) if data == &datum_data
                 ));
                 assert!(matches!(
-                    value.reference_script,
-                    Some(ReferenceScript::PlutusV1(ref bytes)) if bytes == &reference_script_bytes));
+                    value.reference_script_hash,
+                    Some(h) if h == ScriptHash::default()
+                ));
             }
 
             _ => panic!("UTXO not found"),
@@ -769,7 +769,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -808,7 +808,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -849,7 +849,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -899,7 +899,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -947,7 +947,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -1066,7 +1066,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);

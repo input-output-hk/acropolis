@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::certificate::TxCertificateIdentifier;
-use crate::crypto::keyhash_224;
+use crate::crypto::{keyhash_224, keyhash_224_tagged};
 use crate::drep::{Anchor, DRepVotingThresholds};
 // Re-export certificate types for backward compatibility
 pub use crate::certificate::{
@@ -523,6 +523,17 @@ pub enum ReferenceScript {
     PlutusV3(Vec<u8>),
 }
 
+impl ReferenceScript {
+    pub fn compute_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ReferenceScript::Native(_) => None,
+            ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
+            ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
+            ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum NativeScript {
     ScriptPubkey(AddrKeyhash),
@@ -891,8 +902,8 @@ pub struct UTXOValue {
     /// Datum
     pub datum: Option<Datum>,
 
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 impl UTXOValue {
@@ -950,8 +961,8 @@ pub struct TxOutput {
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
 
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 impl TxOutput {
@@ -960,7 +971,7 @@ impl TxOutput {
             address: self.address.clone(),
             value: self.value.clone(),
             datum: self.datum.clone(),
-            reference_script: self.reference_script.clone(),
+            reference_script_hash: self.reference_script_hash,
         }
     }
 }

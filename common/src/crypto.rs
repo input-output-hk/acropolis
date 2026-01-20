@@ -20,3 +20,13 @@ pub fn keyhash_224(key: &[u8]) -> Hash<28> {
     context.update_mut(key);
     Hash::new(context.finalize())
 }
+
+/// Get a Blake2b-224 hash of a key with a tag
+///
+/// Returns a 28-byte hash.
+pub fn keyhash_224_tagged(tag: u8, bytes: &[u8]) -> Hash<28> {
+    let mut context = Blake2b::<224>::new();
+    context.update_mut(&[tag]);
+    context.update_mut(bytes);
+    Hash::new(context.finalize())
+}
