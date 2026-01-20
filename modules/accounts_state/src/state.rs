@@ -564,7 +564,7 @@ impl State {
 
         // Is the rewards task blocked on us reaching the 4 * k block?
         if let Some(tx) = &self.start_rewards_tx {
-            if block.epoch_slot >= STABILITY_WINDOW_SLOT {
+            if block.epoch_slot > STABILITY_WINDOW_SLOT {
                 info!(
                     "Starting rewards calculation at block {}, epoch slot {}",
                     block.number, block.epoch_slot
@@ -843,19 +843,9 @@ impl State {
                 // save SPO rewards
                 spo_rewards = filtered_rewards_result.spo_rewards.clone();
 
-                // Adjust the reserves - subtract what actually left reserves:
-                // - Rewards paid to accounts
-                // - Rewards redirected to treasury (because account deregistered at payment time)
-                // Note: rewards_result.total_stayed_in_reserves is NOT deducted because those
-                // rewards (pre-Babbage unregistered leader accounts) never leave reserves.
-                self.pots.reserves -= actually_paid_to_accounts + redirected_to_treasury;
-
-                info!(
-                    actually_paid_to_accounts,
-                    redirected_to_treasury,
-                    total_stayed_in_reserves = rewards_result.total_stayed_in_reserves,
-                    "Rewards distribution:"
-                );
+                // Adjust the reserves - subtract total paid and unpaid
+                // (unpaid rewards are added to treasury in the payment loop above)
+                self.pots.reserves -= rewards_result.total_paid + rewards_result.total_unpaid;
             }
         };
 
