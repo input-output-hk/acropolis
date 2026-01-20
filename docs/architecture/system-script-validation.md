@@ -212,8 +212,8 @@ The [UTXO State](../../modules/utxo_state) module will now store the scripts it 
 transaction outputs, indexed by their hash.  This allows it to look up a reference script
 quoted in the 'redeemer' part of an input.
 
-It already has the rest of the information it needs to construct the script context - it has
-the relevant parts of the transaction in the UTXODelta message from the Tx Unpacker, and can
+It already has the rest of the information it needs to construct the script context - it can get
+the relevant parts of the transaction from the UTXODelta message from the Tx Unpacker, and can
 look up the datum of the UTxO being spent in its own UTxO store.  It also needs the current cost
 model which it gets from protocol parameters on `cardano.protocol.parameters`.
 
