@@ -341,7 +341,7 @@ impl UTXOState {
                     )));
                 };
 
-                let state = state_mutex.lock().await;
+                let mut state = state_mutex.lock().await;
                 let response = match query {
                     UTxOStateQuery::GetUTxOsSum { utxo_identifiers } => {
                         match state.get_utxos_sum(utxo_identifiers).await {
@@ -354,6 +354,21 @@ impl UTXOState {
                     UTxOStateQuery::GetUTxOs { utxo_identifiers } => {
                         match state.get_utxo_entries(utxo_identifiers).await {
                             Ok(values) => UTxOStateQueryResponse::UTxOs(values),
+                            Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
+                                e.to_string(),
+                            )),
+                        }
+                    }
+                    UTxOStateQuery::CancelRedeemUtxos { block_info } => {
+                        match state.cancel_redeem_utxos(block_info).await {
+                            Ok((count, total_value)) => {
+                                info!(
+                                    count,
+                                    total_value,
+                                    "Cancelled AVVM/redeem UTxOs via query"
+                                );
+                                UTxOStateQueryResponse::RedeemUtxosCancelled { count, total_value }
+                            }
                             Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
                                 e.to_string(),
                             )),

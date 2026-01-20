@@ -49,4 +49,34 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(self.utxos.read().await.len())
     }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        let mut utxos = self.utxos.write().await;
+        let mut cancelled = Vec::new();
+
+        // Find all redeem addresses
+        let keys_to_remove: Vec<_> = utxos
+            .iter()
+            .filter(|(_, utxo)| utxo.address.is_redeem())
+            .map(|(key, _)| key.clone())
+            .collect();
+
+        // Remove them and collect the cancelled UTxOs
+        for key in keys_to_remove {
+            if let Some(utxo) = utxos.remove(&key) {
+                cancelled.push((key, utxo));
+            }
+        }
+
+        let total_cancelled: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+        info!(
+            count = cancelled.len(),
+            total_cancelled,
+            "Cancelled AVVM/redeem UTxOs"
+        );
+
+        Ok(cancelled)
+    }
 }

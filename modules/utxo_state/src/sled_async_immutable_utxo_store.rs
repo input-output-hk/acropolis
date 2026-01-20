@@ -84,4 +84,42 @@ impl ImmutableUTXOStore for SledAsyncImmutableUTXOStore {
         let db = self.db.clone();
         task::spawn_blocking(move || Ok(db.len())).await?
     }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        let db = self.db.clone();
+
+        task::spawn_blocking(move || {
+            let mut cancelled = Vec::new();
+
+            // Iterate over all UTxOs and collect redeem addresses
+            for entry in db.iter() {
+                let (key_bytes, value_bytes) = entry?;
+                let utxo: UTXOValue = serde_cbor::from_slice(&value_bytes)?;
+                if utxo.address.is_redeem() {
+                    let key = UTxOIdentifier::from_bytes(&key_bytes)?;
+                    cancelled.push((key, utxo));
+                }
+            }
+
+            // Remove them
+            for (key, _) in &cancelled {
+                db.remove(key.to_bytes())?;
+            }
+
+            // Flush
+            db.flush()?;
+
+            let total_cancelled: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+            info!(
+                count = cancelled.len(),
+                total_cancelled,
+                "Cancelled AVVM/redeem UTxOs"
+            );
+
+            Ok(cancelled)
+        })
+        .await?
+    }
 }

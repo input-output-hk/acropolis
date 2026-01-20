@@ -57,6 +57,11 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>>;
 }
 
 /// Ledger state storage
@@ -164,6 +169,46 @@ impl State {
             (immutable + (v_created - v_spent)).try_into().expect("total UTxO count went negative");
 
         total
+    }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses and generate AddressDeltas.
+    /// Returns (count of cancelled UTxOs, total lovelace value of cancelled UTxOs).
+    /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
+    ///
+    /// Note: This only handles immutable UTxOs. Volatile UTxOs with redeem addresses
+    /// would be extremely rare (recently-spent AVVM addresses just before epoch 236),
+    /// and the volatile index structure doesn't support individual removals.
+    pub async fn cancel_redeem_utxos(&mut self, block: &BlockInfo) -> Result<(usize, u64)> {
+        // Cancel from immutable store and get the cancelled UTxOs
+        let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
+
+        let count = cancelled.len();
+        let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+
+        // Generate AddressDeltas for the cancelled UTxOs (as if they were spent)
+        if let Some(observer) = &self.address_delta_observer {
+            observer.start_block(block).await;
+
+            // Create a synthetic TxIdentifier for AVVM cancellation
+            // Using block 0 / tx 0 to indicate this is a system operation, not a real tx
+            let tx_id = acropolis_common::TxIdentifier::new(0, 0);
+
+            for (utxo_id, utxo) in &cancelled {
+                let delta = AddressDelta {
+                    address: utxo.address.clone(),
+                    tx_identifier: tx_id.clone(),
+                    spent_utxos: vec![utxo_id.clone()],
+                    created_utxos: Vec::new(),
+                    sent: utxo.value.clone(),
+                    received: Value::new(0, Vec::new()),
+                };
+                observer.observe_delta(&delta).await;
+            }
+
+            observer.finalise_block(block).await;
+        }
+
+        Ok((count, total_value))
     }
 
     /// Observe a block for statistics and handle rollbacks
