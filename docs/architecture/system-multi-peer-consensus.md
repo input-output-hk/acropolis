@@ -29,15 +29,15 @@ flowchart LR
   CS(Chain Store)
   CLOUD@{ shape: cloud, label: "Ledger Validation"}
 
-  PNI -- cardano.peer.offer --> CON
-  CON -- cardano.peer.fetch --> PNI
+  PNI -- cardano.block.offer --> CON
+  CON -- cardano.block.fetch --> PNI
   PNI -- cardano.block.available --> CON
   PNI -- cardano.block.uavailable --> CON
-  CON -- cardano.block.fetch --> CS
+  CON -- cardano.block.reject --> PNI
+
+  CON -- cardano.block.store --> CS
   CON -- cardano.block.delete --> CS
-  CS -- cardano.block.fetched --> CON
-  PNI -- cardano.peer.lost --> CON
-  CON -- cardano.peer.drop --> PNI
+
   CON -- cardano.block.proposed --> CLOUD
   CLOUD -- cardano.validation.* --> CON
 
@@ -57,81 +57,75 @@ on the basis of the quality of the chain being offered. We need to give this con
 Consensus.
 
 To do this we insert consensus into the decision about which blocks to fetch.  The Peer
-Network Interface will indicate that a block is being offered by a peer on `cardano.peer.offer`,
-quoting the peer ID, block number and hash.  This allows Consensus to associate the offer with
-a particular chain fork (there will likely be multiple peers offering the same fork).
+Network Interface will indicate that a block is being offered by a peer on `cardano.block.offer`,
+quoting the block number, hash and previous block hash.  This allows Consensus to associate the
+offer with a particular chain fork.
 
 Consensus may then request that a block is fetched with
-`cardano.peer.fetch` quoting a list of potential peer IDs that have
-offered it, block number and hash.  The Peer Network Interface will
+`cardano.block.fetch` quoting the block number and hash.  The Peer Network Interface will
 then fetch it from one of the peers, chosen either round-robin or on performance metrics,
 and send a `cardano.block.available` when it receives it, as it does already.  If no peer
 can provide it, it sends a `cardano.block.unavailable` instead.
 
-If the block provided turns out to be bad, Consensus may tell the Peer Network Interface to
-drop the peer connection with a `cardano.peer.drop` message, quoting the peer ID.  Conversely,
-if the Peer Network Interface loses or drops the connection to a peer, it can issue a
-`cardano.peer.lost` message informing Consensus of this.
-
-Note the peer IDs can be anything that makes sense to identify the peer in the Peer Network
-Interface - they are opaque externally.
+If the block provided turns out to be bad, Consensus may tell the Peer Network Interface with
+a `cardano.block.reject` message, which allows it to sanction peers that provided it.  To do this
+it needs a many-to-many map of block hashes to peers: multiple peers can provide the same block
+and a single peer (of course) provides multiple blocks.
 
 TODO: Automatic P2P discovery, "ledger peers" (from SPO state?)
 
 ### Consensus
 The [Consensus](../../modules/consensus) module will need to maintain a tree of chain forks
-being offered, with links to and from the peers offering them.  On receipt of a `cardano.peer.offer`
-it can look up in the tree which fork it applies to, and look at the block number to see if it
-is an extension of the existing chain or a rollback creating a new fork.
+being offered.  It doesn't need to know which peers offered them, that knowledge is kept within
+Peer Network Interface.  On receipt of a `cardano.block.offer`
+it can look up in the tree, which fork it applies to, based on the previous block hash,
+and look at the block number to see if it is an extension of the existing chain or a rollback
+creating a new fork.
 
-It's likely it will be offered the same block from multiple peers, so it should keep its own map
-of blocks fetched (limited by 'k' depth), and request to fetch it with a `cardano.peer.fetch`
-message if it doesn't already have it.  It should then get a `cardano.block.available` from the
+Consensus will keep its own cache of blocks fetched (limited by 'k' depth), and request to fetch it
+with a `cardano.block.fetch` message if it extends the currently favoured chain (see below)
+and it doesn't already have it.  It should then get a `cardano.block.available` from the
 Peer Network Interface, containing the block data.  If it gets a `cardano.block.unavailable` it will
 prune the chain tree to remove it.
 
-On receipt of the block, it sends it to the Chain Store with a `cardano.block.store` message.  It
-then has two options:
+It sends it for validation with
+`cardano.block.proposed` as we saw in the [Phase 1 Validation](system-ledger-validation.md) system.
+If successful, it will be added to the chain tree, and sent to the Chain Store with a
+`cardano.block.store` message for long term storage.  If it fails, it won't, and we will tell the
+Peer Network Interface as above.
 
-1. If the new block is on the favoured chain (see below) it sends it for validation with
-   `cardano.block.proposed` as we saw in the [Phase 1 Validation](system-ledger-validation.md)
-   system.
-   If successful, it will be added to the chain tree.  If it fails, it won't, and we may trigger
-   sanctions against the peers that offered it.
-
-2. If the new block is on another chain, we don't validate it yet, but add it marked as unvalidated
-   to the relevant chain in the tree.
+If the new block is on another fork, we don't fetch, validate or store it
+yet, but add it marked as unvalidated to the relevant chain in the tree.
 
 Each time a new block is offered, Consensus runs the Ouroboros chain selection rules to determine
 the longest / densest chain (density is used when fast syncing - TBD).  This may result in the
 favoured chain switching.  When this happens Consensus will signal a rollback and then reissue
-blocks on the new favoured chain from the common branching point with the old one onwards.
+blocks on the new favoured chain from the common branching point with the old one onwards, from
+its in-memory block store, or fetching any it doesn't have (in most cases it won't have them,
+unless the chain has flip-flopped).
 
-To do this, it needs to retrieve the blocks from the Chain Store.  It requests them with a
-`cardano.block.fetch` message, and the Chain Store responds with a `cardano.block.fetched`
-message (note these are not request-response, we don't want to hold up Consensus while it
-happens).  On receipt, Consensus then sends them out to the Block Unpacker.  If the blocks
+The blocks of the new chain will be sent out to the Block Unpacker.  If the blocks
 haven't already been validated, it will request validation;  if they have, there is no need.
 
 If the blocks being replayed fail validation, that chain needs to be truncated, which will
-probably (but not necessarily) mean it is no longer the favoured one.  The peers that provided it
-may be sanctioned accordingly - in the limit, by telling the Peer Network Interface to drop them
-with one or more `cardano.peer.drop` messages.
+probably (but not necessarily) mean it is no longer the favoured one.  As before we will tell
+the Peer Network Interface which may sanction the peers that provide it.
+
+After a chain switch, the blocks on the previously favoured chain need
+to be deleted from the Chain Store with a `cardano.block.delete`
+message.
 
 Once the branch point of an unfavoured chain is more than 'k' blocks old, it can never be
-selected, so Consensus can prune its tree and tell the Chain Store to delete the candidate blocks
-with a `cardano.block.delete` message.
+selected, so Consensus can prune its tree.
 
 ### Chain Store
 
 The [Chain Store](../../modules/chain_store) already provides persistent block storage for
-the historical REST APIs.  Now we are extending that to serve as the recovery store for chain
-switches as described above.
+the historical REST APIs.
 
 The Chain Store will no longer accept every block on `cardano.block.available` but will wait for
 Consensus to ask it to store one with `cardano.block.store`.  As noted above, it will also
-provide a retrieval function with `cardano.block.fetch` and `cardano.block.fetched`, and cleanup
-with `cardano.block.delete`.
+provide cleanup with `cardano.block.delete`.
 
 ## Configuration
 TODO
