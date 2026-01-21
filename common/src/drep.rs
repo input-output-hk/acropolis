@@ -79,6 +79,23 @@ pub enum DRepChoice {
     NoConfidence,
 }
 
+impl DRepChoice {
+    pub fn to_credential(drep: &DRepChoice) -> Option<DRepCredential> {
+        match drep {
+            DRepChoice::Key(hash) => Some(DRepCredential::AddrKeyHash(*hash)),
+            DRepChoice::Script(hash) => Some(DRepCredential::ScriptHash(*hash)),
+            DRepChoice::Abstain | DRepChoice::NoConfidence => None,
+        }
+    }
+
+    pub fn from_credential(drep: &DRepCredential) -> DRepChoice {
+        match drep {
+            Credential::AddrKeyHash(hash) => DRepChoice::Key(*hash),
+            Credential::ScriptHash(hash) => DRepChoice::Script(*hash),
+        }
+    }
+}
+
 /// DRep Registration = reg_drep_cert
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct DRepRegistration {

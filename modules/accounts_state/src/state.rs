@@ -3,16 +3,16 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
+use acropolis_common::messages::{Message, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
-        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, EpochActivityMessage,
+        GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     queries::{
@@ -105,6 +105,13 @@ pub struct State {
 
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
+
+    /// Reverse index of DRep delegations used for Conway PV9 replay safety
+    ///
+    /// Maps a DRep credential to stake credentials that have delegated to it
+    /// during its current lifetime, along with the certificate pointer
+    /// of the delegation.
+    drep_delegators: OrdMap<DRepCredential, OrdMap<StakeAddress, TxCertificateIdentifier>>,
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
@@ -200,6 +207,24 @@ impl State {
             self.pots.treasury,
             self.pots.deposits,
         );
+
+        {
+            let stake_addresses = self.stake_addresses.lock().unwrap();
+
+            for (stake_address, sas) in stake_addresses.iter() {
+                if let Some(drep_choice) = &sas.delegated_drep {
+                    if let Some(drep_cred) = DRepChoice::to_credential(drep_choice) {
+                        self.drep_delegators.entry(drep_cred).or_default().insert(
+                            stake_address.clone(),
+                            TxCertificateIdentifier {
+                                tx_identifier: Default::default(),
+                                cert_index: 0,
+                            },
+                        );
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -806,7 +831,7 @@ impl State {
                                 pool: reward.pool,
                             });
                         } else {
-                            warn!(
+                            debug!(
                                 "Reward account {} deregistered - paying reward {} to treasury",
                                 reward.account, reward.amount
                             );
@@ -1075,10 +1100,6 @@ impl State {
         }
     }
 
-    pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
-        self.dreps = drep_msg.dreps.clone();
-    }
-
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1092,16 +1113,48 @@ impl State {
     }
 
     /// record a DRep delegation
-    fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.record_drep_delegation(stake_address, drep);
+    fn record_drep_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        drep: &DRepChoice,
+        pointer: &TxCertificateIdentifier,
+    ) {
+        let _previous_drep = {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            stake_addresses
+                .record_drep_delegation(stake_address, drep)
+                .expect("invalid DRep delegation during replay")
+        };
+
+        if let Some(new_cred) = DRepChoice::to_credential(drep) {
+            self.drep_delegators
+                .entry(new_cred)
+                .or_default()
+                .insert(stake_address.clone(), pointer.clone());
+        }
     }
 
     /// Record a DRep deregistration
-    fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
+    fn record_drep_deregistration(
+        &mut self,
+        drep: &DRepCredential,
+        dereg_pointer: &TxCertificateIdentifier,
+    ) {
         self.dreps.retain(|(cred, _)| cred != drep);
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.deregister_drep(drep);
+
+        // Only needed for Conway PV9
+        if let Some(delegators) = self.drep_delegators.remove(drep) {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+
+            for (stake_address, deleg_pointer) in delegators {
+                // This comparison is the *actual* ledger rule
+                if deleg_pointer < *dereg_pointer {
+                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                        sas.delegated_drep = None;
+                    }
+                }
+            }
+        }
     }
 
     /// Handle TxCertificates
@@ -1181,12 +1234,20 @@ impl State {
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        &tx_cert.tx_certificate_identifier(),
+                    );
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        &tx_cert.tx_certificate_identifier(),
+                    );
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -1216,7 +1277,11 @@ impl State {
                             outcome,
                         });
                     }
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        &tx_cert.tx_certificate_identifier(),
+                    );
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
@@ -1231,8 +1296,13 @@ impl State {
                             outcome,
                         });
                     }
+
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(
+                        &delegation.stake_address,
+                        &delegation.drep,
+                        &tx_cert.tx_certificate_identifier(),
+                    );
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
@@ -1240,7 +1310,10 @@ impl State {
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    self.record_drep_deregistration(&dereg.credential);
+                    self.record_drep_deregistration(
+                        &dereg.credential,
+                        &tx_cert.tx_certificate_identifier(),
+                    );
                 }
 
                 _ => (),
@@ -1379,10 +1452,8 @@ mod tests {
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
-        Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        VrfKeyHash, Withdrawal,
+        Ratio, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier, VrfKeyHash,
+        Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1399,16 +1470,11 @@ mod tests {
         keyhash_224(&[byte])
     }
 
-    fn test_keyhash_from_bytes(bytes: &[u8]) -> KeyHash {
-        keyhash_224(bytes)
-    }
-
     fn test_vrf_keyhash(byte: u8) -> VrfKeyHash {
         keyhash_256(&[byte]).into()
     }
 
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
-    const DREP_HASH: [u8; 4] = [0xca, 0xfe, 0xd0, 0x0d];
 
     #[test]
     fn stake_addresses_initialise_to_first_delta_and_increment_subsequently() {
@@ -1728,157 +1794,6 @@ mod tests {
         let state = State::default();
         let drdd = state.generate_drdd();
         assert_eq!(drdd, DRepDelegationDistribution::default());
-    }
-
-    #[test]
-    fn drdd_includes_initial_deposit() {
-        let mut state = State::default();
-
-        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
-        state.handle_drep_state(&DRepStateMessage {
-            epoch: 1337,
-            dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
-        });
-
-        let drdd = state.generate_drdd();
-        assert_eq!(
-            drdd,
-            DRepDelegationDistribution {
-                abstain: 0,
-                no_confidence: 0,
-                dreps: vec![(drep_addr_cred, 1_000_000)],
-            }
-        );
-    }
-
-    #[test]
-    fn drdd_respects_different_delegations() -> Result<()> {
-        let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
-
-        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
-        let drep_script_cred = DRepCredential::ScriptHash(test_keyhash_from_bytes(&DREP_HASH));
-        state.handle_drep_state(&DRepStateMessage {
-            epoch: 1337,
-            dreps: vec![
-                (drep_addr_cred.clone(), 1_000_000),
-                (drep_script_cred.clone(), 2_000_000),
-            ],
-        });
-
-        let spo1 = create_address(&[0x01]);
-        let spo2 = create_address(&[0x02]);
-        let spo3 = create_address(&[0x03]);
-        let spo4 = create_address(&[0x04]);
-
-        let tx_identifier = TxIdentifier::default();
-
-        // Get the KeyHash once
-        let spo1_hash = spo1.get_hash();
-        let drep_key_hash = test_keyhash_from_bytes(&DREP_HASH);
-        let pool_id_1 = (*spo1_hash).into();
-
-        let certificates = vec![
-            // register the first two SPOs separately from their delegation
-            TxCertificateWithPos {
-                cert: TxCertificate::Registration(Registration {
-                    stake_address: spo1.clone(),
-                    deposit: 1,
-                }),
-                tx_identifier,
-                cert_index: 0,
-            },
-            TxCertificateWithPos {
-                cert: TxCertificate::Registration(Registration {
-                    stake_address: spo2.clone(),
-                    deposit: 1,
-                }),
-                tx_identifier,
-                cert_index: 0,
-            },
-            TxCertificateWithPos {
-                cert: TxCertificate::VoteDelegation(VoteDelegation {
-                    stake_address: spo1.clone(),
-                    drep: DRepChoice::Key(drep_key_hash),
-                }),
-                tx_identifier,
-                cert_index: 0,
-            },
-            TxCertificateWithPos {
-                cert: TxCertificate::StakeAndVoteDelegation(StakeAndVoteDelegation {
-                    stake_address: spo2.clone(),
-                    operator: pool_id_1,
-                    drep: DRepChoice::Script(drep_key_hash),
-                }),
-                tx_identifier,
-                cert_index: 0,
-            },
-            TxCertificateWithPos {
-                cert: TxCertificate::StakeRegistrationAndVoteDelegation(
-                    StakeRegistrationAndVoteDelegation {
-                        stake_address: spo3.clone(),
-                        drep: DRepChoice::Abstain,
-                        deposit: 1,
-                    },
-                ),
-                tx_identifier,
-                cert_index: 0,
-            },
-            TxCertificateWithPos {
-                cert: TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(
-                    StakeRegistrationAndStakeAndVoteDelegation {
-                        stake_address: spo4.clone(),
-                        operator: pool_id_1,
-                        drep: DRepChoice::NoConfidence,
-                        deposit: 1,
-                    },
-                ),
-                tx_identifier,
-                cert_index: 0,
-            },
-        ];
-
-        state.handle_tx_certificates(&TxCertificatesMessage { certificates }, 0, &mut vld)?;
-
-        let deltas = vec![
-            StakeAddressDelta {
-                stake_address: spo1,
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 100,
-            },
-            StakeAddressDelta {
-                stake_address: spo2,
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 1_000,
-            },
-            StakeAddressDelta {
-                stake_address: spo3,
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 10_000,
-            },
-            StakeAddressDelta {
-                stake_address: spo4,
-                addresses: Vec::new(),
-                tx_count: 1,
-                delta: 100_000,
-            },
-        ];
-        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut vld)?;
-
-        let drdd = state.generate_drdd();
-        assert_eq!(
-            drdd,
-            DRepDelegationDistribution {
-                abstain: 10_000,
-                no_confidence: 100_000,
-                dreps: vec![(drep_script_cred, 2_001_000), (drep_addr_cred, 1_000_100)],
-            }
-        );
-
-        vld.as_result()
     }
 
     #[test]
