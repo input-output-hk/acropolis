@@ -151,7 +151,7 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
                         state
-                            .handle(block, deltas_msg)
+                            .handle_utxo_deltas(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -353,11 +353,9 @@ impl UTXOState {
                             )),
                         }
                     }
-                    UTxOStateQuery::GetAllUTxOsSum => match state.get_total_utxos_sum().await {
-                        Ok(balance) => UTxOStateQueryResponse::UTxOsSum(balance),
-                        Err(e) => {
-                            UTxOStateQueryResponse::Error(QueryError::internal_error(e.to_string()))
-                        }
+                    UTxOStateQuery::GetAllUTxOsSumAtEpochStart => {
+                        let total = state.get_total_utxos_sum_at_epoch_start();
+                        UTxOStateQueryResponse::UTxOsSum(total)
                     },
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(

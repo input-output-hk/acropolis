@@ -87,6 +87,9 @@ pub struct State {
 
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
+
+    /// Sum of UTXOs at last epoch boundary
+    utxos_sum_at_epoch_start: Value,
 }
 
 impl State {
@@ -101,15 +104,21 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
+            utxos_sum_at_epoch_start: Value::default(),
         }
     }
 
-    /// Get the total value of all utxos, with ADA and assets
-    pub async fn get_total_utxos_sum(&self) -> Result<Value> {
+    /// Get the current total value of all utxos, with ADA and assets
+    async fn get_total_utxos_sum(&self) -> Result<Value> {
         Ok(
             self.volatile_utxos.values().map(|v| &v.value).sum::<Value>()
                 + self.immutable_utxos.sum().await?,
         )
+    }
+
+    /// Get the total value of all utxos (with ADA and assets) at the last epoch boundary
+    pub fn get_total_utxos_sum_at_epoch_start(&self) -> Value {
+        self.utxos_sum_at_epoch_start.clone()
     }
 
     /// Get the total value of multiple utxos
@@ -352,8 +361,9 @@ impl State {
         Ok(())
     }
 
-    /// Handle a message
-    pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
+    /// Handle a UTXODeltas message
+    pub async fn handle_utxo_deltas(&mut self, block: &BlockInfo,
+                                    deltas: &UTXODeltasMessage) -> Result<()> {
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -364,6 +374,14 @@ impl State {
 
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
+
+        // If we're entering a new epoch, capture the total UTXO value
+        // (used to resync reserves on entry to Shelley in AccountsState)
+        if block.new_epoch {
+            self.utxos_sum_at_epoch_start = self.get_total_utxos_sum().await?;
+            info!(epoch = block.epoch,
+                  total_utxos = self.utxos_sum_at_epoch_start.lovelace, "New epoch");
+        }
 
         // Process the deltas
         for tx in &deltas.deltas {
@@ -674,7 +692,7 @@ mod tests {
             }],
         };
 
-        state.handle(&block, &deltas).await.unwrap();
+        state.handle_utxo_deltas(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -1054,7 +1072,7 @@ mod tests {
             }],
         };
 
-        state.handle(&block1, &deltas1).await.unwrap();
+        state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -1080,7 +1098,7 @@ mod tests {
             }],
         };
 
-        state.handle(&block2, &deltas2).await.unwrap();
+        state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
