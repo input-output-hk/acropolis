@@ -88,8 +88,8 @@ pub struct State {
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
 
-    /// Sum of UTXOs at last epoch boundary
-    utxos_sum_at_epoch_start: Value,
+    /// Sum of UTXOs at Shelley epoch boundary
+    utxos_sum_at_shelley_start: Option<Value>,
 }
 
 impl State {
@@ -104,7 +104,7 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
-            utxos_sum_at_epoch_start: Value::default(),
+            utxos_sum_at_shelley_start: None,
         }
     }
 
@@ -116,9 +116,9 @@ impl State {
         )
     }
 
-    /// Get the total value of all utxos (with ADA and assets) at the last epoch boundary
-    pub fn get_total_utxos_sum_at_epoch_start(&self) -> Value {
-        self.utxos_sum_at_epoch_start.clone()
+    /// Get the total value of all utxos (with ADA and assets) at the Shelley epoch boundary
+    pub fn get_total_utxos_sum_at_shelley_start(&self) -> Option<Value> {
+        self.utxos_sum_at_shelley_start.clone()
     }
 
     /// Get the total value of multiple utxos
@@ -380,13 +380,13 @@ impl State {
 
         // If we're entering a new epoch, capture the total UTXO value
         // (used to resync reserves on entry to Shelley in AccountsState)
-        if block.new_epoch {
-            self.utxos_sum_at_epoch_start = self.get_total_utxos_sum().await?;
-            debug!(
-                epoch = block.epoch,
-                total_utxos = self.utxos_sum_at_epoch_start.lovelace,
-                "New epoch"
-            );
+        // Do this only on the first epoch of Shelley
+        if block.new_epoch && block.era == Era::Shelley && self.utxos_sum_at_shelley_start.is_none()
+        {
+            let total_utxos = self.get_total_utxos_sum().await?;
+            info!(epoch = block.epoch, total_utxos.lovelace, "Shelley start");
+
+            self.utxos_sum_at_shelley_start = Some(total_utxos);
         }
 
         // Process the deltas

@@ -12,7 +12,7 @@ pub enum UTxOStateQuery {
     GetUTxOs {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
-    GetAllUTxOsSumAtEpochStart,
+    GetAllUTxOsSumAtShelleyStart,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

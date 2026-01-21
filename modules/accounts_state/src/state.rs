@@ -360,7 +360,7 @@ impl State {
         if !self.fixed_shelley_reserves {
             info!("Entering Shelley boundary - need to fix up reserves");
 
-            let total_utxos = self.get_total_utxos(context).await?;
+            let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
             info!("Total UTXO value: {total_utxos}");
 
             let reserves = shelley_params.max_lovelace_supply - total_utxos;
@@ -505,10 +505,13 @@ impl State {
     /// Get the total UTXO value from UTXO State at epoch start
     /// Note UTXOState may well have seen transactions in the new epoch before we
     /// get to process this, so it captures the total at the epoch boundary
-    async fn get_total_utxos(&self, context: Arc<Context<Message>>) -> Result<u64> {
+    async fn get_total_utxos_at_shelley_start(
+        &self,
+        context: Arc<Context<Message>>,
+    ) -> Result<u64> {
         let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
         let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
-            UTxOStateQuery::GetAllUTxOsSumAtEpochStart,
+            UTxOStateQuery::GetAllUTxOsSumAtShelleyStart,
         )));
         let response = context.message_bus.request(&utxos_query_topic, msg).await?;
         let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());

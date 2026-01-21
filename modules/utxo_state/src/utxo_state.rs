@@ -353,9 +353,13 @@ impl UTXOState {
                             )),
                         }
                     }
-                    UTxOStateQuery::GetAllUTxOsSumAtEpochStart => {
-                        let total = state.get_total_utxos_sum_at_epoch_start();
-                        UTxOStateQueryResponse::UTxOsSum(total)
+                    UTxOStateQuery::GetAllUTxOsSumAtShelleyStart => {
+                        match state.get_total_utxos_sum_at_shelley_start() {
+                            Some(total) => UTxOStateQueryResponse::UTxOsSum(total),
+                            None => UTxOStateQueryResponse::Error(QueryError::internal_error(
+                                "Haven't passed Shelley start yet",
+                            )),
+                        }
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
