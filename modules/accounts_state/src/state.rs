@@ -109,6 +109,9 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
+
+    /// Have we fixed Shelley reserves yet?
+    fixed_shelley_reserves: bool,
 }
 
 impl State {
@@ -154,6 +157,9 @@ impl State {
             "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
+
+        // Assume we've fixed the reserves at Shelley boundary so we don't overwrite it
+        self.fixed_shelley_reserves = true;
 
         // Load mark/set/go snapshots
         let snapshots = bootstrap_msg.bootstrap_snapshots;
@@ -349,9 +355,10 @@ impl State {
         }
         .clone();
 
-        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
-        if epoch == 208 {
-
+        // First time into Shelley, fix reserves to max_supply - total_utxos
+        // We need to do this because tracking fees - which increase reserves - during Byron
+        // is painful, requiring lookup of UTXO value for every input
+        if !self.fixed_shelley_reserves {
             info!("Entering Shelley boundary - need to fix up reserves");
 
             let total_utxos = self.get_total_utxos(context).await?;
@@ -359,17 +366,8 @@ impl State {
 
             let reserves = shelley_params.max_lovelace_supply - total_utxos;
             info!("Reserves remaining: {reserves}");
-
-            // TODO this is mainnet specific and should be removed
-            let expected_mainnet_reserves = 13_888_022_852_926_644;
-            warn!(
-                calculated = reserves,
-                expected = expected_mainnet_reserves,
-                diff = reserves - expected_mainnet_reserves,
-                "Fixed reserves"
-            );
-
             self.pots.reserves = reserves;
+            self.fixed_shelley_reserves = true;
         }
 
         info!(

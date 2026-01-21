@@ -379,8 +379,8 @@ impl State {
         // (used to resync reserves on entry to Shelley in AccountsState)
         if block.new_epoch {
             self.utxos_sum_at_epoch_start = self.get_total_utxos_sum().await?;
-            info!(epoch = block.epoch,
-                  total_utxos = self.utxos_sum_at_epoch_start.lovelace, "New epoch");
+            debug!(epoch = block.epoch,
+                   total_utxos = self.utxos_sum_at_epoch_start.lovelace, "New epoch");
         }
 
         // Process the deltas
