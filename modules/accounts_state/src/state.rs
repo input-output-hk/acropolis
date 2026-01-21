@@ -10,10 +10,16 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, Message,
+        PotDeltasMessage, ProtocolParamsMessage,
+        SPOStateMessage, StakeAddressDeltasMessage, StateQuery, StateQueryResponse,
+        TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
+    queries::{
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+        get_query_topic,
+    },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
@@ -23,6 +29,7 @@ use acropolis_common::{
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
+use caryatid_sdk::Context;
 use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -316,31 +323,15 @@ impl State {
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    fn enter_epoch(
+    async fn enter_epoch(
         &mut self,
+        context: Arc<Context<Message>>,
         epoch: u64,
         era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
-        // 13,887,515,255 - as we enter 208 (Shelley)
-        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
-        // and the reserves value, if we can't properly calculate it
-        if epoch == 208 {
-            // Fix reserves to that given in the CF Java implementation:
-            // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
-            let old_reserves = self.pots.reserves;
-            self.pots.reserves = 13_888_022_852_926_644;
-            warn!(
-                new = self.pots.reserves,
-                old = old_reserves,
-                diff = self.pots.reserves - old_reserves,
-                "Fixed reserves"
-            );
-        }
-
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
@@ -357,6 +348,29 @@ impl State {
             },
         }
         .clone();
+
+        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
+        if epoch == 208 {
+
+            info!("Entering Shelley boundary - need to fix up reserves");
+
+            let total_utxos = self.get_total_utxos(context).await?;
+            info!("Total UTXO value: {total_utxos}");
+
+            let reserves = shelley_params.max_lovelace_supply - total_utxos;
+            info!("Reserves remaining: {reserves}");
+
+            // TODO this is mainnet specific and should be removed
+            let expected_mainnet_reserves = 13_888_022_852_926_644;
+            warn!(
+                calculated = reserves,
+                expected = expected_mainnet_reserves,
+                diff = reserves - expected_mainnet_reserves,
+                "Fixed reserves"
+            );
+
+            self.pots.reserves = reserves;
+        }
 
         info!(
             epoch,
@@ -489,6 +503,27 @@ impl State {
             .collect();
 
         Ok(reward_deltas)
+    }
+
+    /// Get the total UTXO value from UTXO State
+    async fn get_total_utxos(&self, context: Arc<Context<Message>>) -> Result<u64> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetAllUTxOsSum,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        let total = match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::UTxOsSum(value),
+            )) => value,
+            _ => {
+                return Err(anyhow!("Unexpected utxo-state response"));
+            }
+        };
+
+        Ok(total.lovelace)
     }
 
     /// Apply a registration change set to registration/deregistration lists
@@ -795,6 +830,7 @@ impl State {
     /// This returns stake reward deltas (Refund for pools retiring at epoch N) for publishing to the StakeRewardDeltas topic
     pub async fn handle_epoch_activity(
         &mut self,
+        context: Arc<Context<Message>>,
         ea_msg: &EpochActivityMessage,
         era: Era,
         verifier: &Verifier,
@@ -815,12 +851,13 @@ impl State {
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(self.enter_epoch(
+            context,
             ea_msg.epoch + 1,
             era,
             ea_msg.total_fees,
             spo_blocks,
             verifier,
-        )?);
+        ).await?);
 
         Ok(reward_deltas)
     }
