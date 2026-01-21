@@ -4,7 +4,13 @@
 #![allow(dead_code)]
 
 use crate::{
-    Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId, KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash, ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash, hash::Hash, messages::{CardanoMessage::BlockValidation, Message}, protocol_params::{Nonce, ProtocolVersion}, rational_number::RationalNumber
+    hash::Hash,
+    messages::{CardanoMessage::BlockValidation, Message},
+    protocol_params::{Nonce, ProtocolVersion},
+    rational_number::RationalNumber,
+    Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
+    KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -278,32 +284,24 @@ pub enum UTxOWValidationError {
     /// ----------------------------------------------
     /// **Cause:** Missing Redeemer
     #[error("Missing Redeemers: redeemer_pointer={redeemer_pointer:?}")]
-    MissingRedeemers {
-        redeemer_pointer: RedeemerPointer,
-    },
+    MissingRedeemers { redeemer_pointer: RedeemerPointer },
 
     /// **Cause:** Extra Redeemer
     #[error("Extra Redeemers: redeemer_pointer={redeemer_pointer:?}")]
-    ExtraRedeemers {
-        redeemer_pointer: RedeemerPointer,
-    },
+    ExtraRedeemers { redeemer_pointer: RedeemerPointer },
 
     /// **Cause:** MissingRequiredDatums
     #[error("Missing required datums: datum_hash={datum_hash:?}")]
-    MissingRequiredDatums {
-        datum_hash: DatumHash,
-    },
+    MissingRequiredDatums { datum_hash: DatumHash },
 
     /// **Cause:** Extra Datum
     #[error("Not allowed supplemental datums: datum_hash={datum_hash}")]
-    NotAllowedSupplementalDatums {
-        datum_hash: DatumHash,
-    },
+    NotAllowedSupplementalDatums { datum_hash: DatumHash },
 
     /// **Cause:** Script integrity hash mismatch
     #[error(
-        "Script integrity hash mismatch: expected={}, actual={}, reason={}", 
-        hex::encode(expected.unwrap_or_default()), 
+        "Script integrity hash mismatch: expected={}, actual={}, reason={}",
+        hex::encode(expected.unwrap_or_default()),
         hex::encode(actual.unwrap_or_default()),
         reason
     )]
@@ -317,9 +315,7 @@ pub enum UTxOWValidationError {
     /// To spend a UTxO locked at Plutus scripts
     /// datum must be provided
     #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
-    UnspendableUTxONoDatumHash {
-        utxo_identifier: UTxOIdentifier,
-    },
+    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
 }
 
 /// Reference
