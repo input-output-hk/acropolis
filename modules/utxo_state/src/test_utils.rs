@@ -76,16 +76,16 @@ macro_rules! include_context {
 
 #[macro_export]
 macro_rules! validation_fixture {
-    ($hash:literal) => {
+    ($era:literal, $hash:literal) => {
         (
-            $crate::include_context!(concat!($hash, "/context.json")),
-            $crate::include_cbor!(concat!($hash, "/tx.cbor")),
+            $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
+            $crate::include_cbor!(concat!($era, "/", $hash, "/tx.cbor")),
         )
     };
-    ($hash:literal, $variant:literal) => {
+    ($era:literal, $hash:literal, $variant:literal) => {
         (
-            $crate::include_context!(concat!($hash, "/", "/context.json")),
-            $crate::include_cbor!(concat!($hash, "/", $variant, ".cbor")),
+            $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
+            $crate::include_cbor!(concat!($era, "/", $hash, "/", $variant, ".cbor")),
         )
     };
 }

@@ -26,17 +26,9 @@ pub fn validate_bad_inputs_utxo(
 }
 
 pub fn validate_value_not_conserved(
-    inputs: &[UTxOIdentifier],
-    total_consumed_except_inputs: Value,
+    total_consumed: Value,
     total_produced: Value,
-    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
-    let mut total_consumed = total_consumed_except_inputs;
-    for input in inputs {
-        total_consumed +=
-            utxos_needed.get(input).map(|utxo| &utxo.value).unwrap_or(&Value::default());
-    }
-
     if total_consumed != total_produced {
         return Err(Box::new(UTxOValidationError::ValueNotConservedUTxO {
             consumed: total_consumed,
@@ -48,18 +40,13 @@ pub fn validate_value_not_conserved(
 
 pub fn validate(
     inputs: &[UTxOIdentifier],
-    total_consumed_except_inputs: Value,
+    total_consumed: Value,
     total_produced: Value,
-    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
-    validate_bad_inputs_utxo(inputs, utxos_needed)?;
+    validate_bad_inputs_utxo(inputs, utxos)?;
 
-    validate_value_not_conserved(
-        inputs,
-        total_consumed_except_inputs,
-        total_produced,
-        utxos_needed,
-    )?;
+    validate_value_not_conserved(total_consumed, total_produced)?;
 
     Ok(())
 }
@@ -73,11 +60,18 @@ mod tests {
     use std::str::FromStr;
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
+    ) =>
         matches Ok(());
         "valid transaction 1"
     )]
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "bad_inputs_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
+        "bad_inputs_utxo"
+    ) =>
         matches Err(UTxOValidationError::BadInputsUTxO { bad_input, bad_input_index })
         if bad_input == UTxOIdentifier::new(
             TxHash::from_str("e7075bff082ee708dfe49a366717dd4c6d51e9b3a7e5a070dcee253affda0999").unwrap(), 1)

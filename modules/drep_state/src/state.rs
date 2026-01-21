@@ -237,14 +237,14 @@ impl State {
 
     pub fn process_votes(
         &mut self,
-        voting_procedures: &[(TxHash, VotingProcedures)],
+        total_voting_procedures: &[(TxHash, VotingProcedures)],
     ) -> Result<()> {
         let Some(hist_map) = self.historical_dreps.as_mut() else {
             return Ok(());
         };
 
         let cfg = self.config;
-        for (tx_hash, voting_procedures) in voting_procedures {
+        for (tx_hash, voting_procedures) in total_voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
                     Voter::DRepKey(k) => DRepCredential::AddrKeyHash(k.into_inner()),

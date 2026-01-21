@@ -65,7 +65,7 @@ pub fn map_value(pallas_value: &MultiEraValue) -> Value {
 
 pub fn map_datum(datum: &Option<conway::MintedDatumOption>) -> Option<Datum> {
     match datum {
-        Some(conway::MintedDatumOption::Hash(h)) => Some(Datum::Hash(h.to_vec())),
+        Some(conway::MintedDatumOption::Hash(h)) => Some(Datum::Hash(DatumHash::from(**h))),
         Some(conway::MintedDatumOption::Data(d)) => Some(Datum::Inline(d.raw_cbor().to_vec())),
         None => None,
     }

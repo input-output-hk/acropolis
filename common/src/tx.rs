@@ -1,27 +1,361 @@
+use std::collections::HashMap;
+
 use crate::{
-    validation::Phase1ValidationError, AlonzoBabbageUpdateProposal, NativeScript,
-    TxCertificateWithPos, TxOutput, UTxOIdentifier, VKeyWitness, Value, Withdrawal,
+    validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, KeyHash,
+    Lovelace, NativeAsset, NativeAssetsDelta, NativeScript, PoolRegistrationUpdate,
+    ProposalProcedure, Redeemer, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
+    TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value,
+    VotingProcedures, Withdrawal,
 };
 
+/// Transaction output (UTXO)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxOutput {
+    /// Identifier for this UTxO
+    pub utxo_identifier: UTxOIdentifier,
+
+    /// Address data
+    pub address: Address,
+
+    /// Output value (Lovelace + native assets)
+    pub value: Value,
+
+    /// Datum (Inline or Hash)
+    pub datum: Option<Datum>,
+
+    /// Reference script
+    pub reference_script: Option<ReferenceScript>,
+}
+
+impl TxOutput {
+    pub fn utxo_value(&self) -> UTXOValue {
+        UTXOValue {
+            address: self.address.clone(),
+            value: self.value.clone(),
+            datum: self.datum.clone(),
+            reference_script: self.reference_script.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Transaction {
+    pub id: TxIdentifier,
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
     pub fee: u64,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
+    pub mint_burn_deltas: NativeAssetsDelta,
+    pub required_signers: Vec<KeyHash>,
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
+    pub voting_procedures: Option<VotingProcedures>,
+    pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: Vec<VKeyWitness>,
     pub native_scripts: Vec<NativeScript>,
+    pub redeemers: Vec<Redeemer>,
     pub error: Option<Phase1ValidationError>,
 }
 
 impl Transaction {
-    pub fn calculate_total_output(&self) -> Value {
+    pub fn calculate_tx_output(&self) -> Value {
         let mut total_output = Value::default();
         for output in &self.produces {
             total_output += &output.value;
         }
         total_output
+    }
+
+    pub fn convert_to_utxo_deltas(self, do_validation: bool) -> TxUTxODeltas {
+        let Self {
+            id,
+            consumes,
+            produces,
+            fee,
+            is_valid,
+            certs,
+            withdrawals,
+            mint_burn_deltas,
+            required_signers,
+            proposal_update,
+            voting_procedures,
+            proposal_procedures,
+            vkey_witnesses,
+            native_scripts,
+            redeemers,
+            ..
+        } = self;
+        let mut utxo_deltas = TxUTxODeltas {
+            tx_identifier: id,
+            consumes,
+            produces,
+            fee,
+            is_valid,
+            withdrawals: None,
+            certs: None,
+            mint_burn_deltas: None,
+            required_signers: None,
+            proposal_update: None,
+            voting_procedures: None,
+            proposal_procedures: None,
+            vkey_witnesses: None,
+            native_scripts: None,
+            redeemers: None,
+        };
+
+        if do_validation {
+            utxo_deltas.certs = Some(certs);
+            utxo_deltas.withdrawals = Some(withdrawals);
+            utxo_deltas.mint_burn_deltas = Some(mint_burn_deltas);
+            utxo_deltas.required_signers = Some(required_signers);
+            utxo_deltas.proposal_update = proposal_update;
+            utxo_deltas.voting_procedures = voting_procedures;
+            utxo_deltas.proposal_procedures = proposal_procedures;
+            utxo_deltas.vkey_witnesses = Some(vkey_witnesses);
+            utxo_deltas.native_scripts = Some(native_scripts);
+            utxo_deltas.redeemers = Some(redeemers);
+        }
+
+        utxo_deltas
+    }
+}
+
+// Individual transaction info
+// Some of the fields are optional
+// when validation is not required
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TxUTxODeltas {
+    // Transaction identifier
+    pub tx_identifier: TxIdentifier,
+
+    // Spent and Created UTxOs
+    pub consumes: Vec<UTxOIdentifier>,
+    pub produces: Vec<TxOutput>,
+
+    // Transaction fee
+    pub fee: u64,
+
+    // Tx validity flag
+    pub is_valid: bool,
+
+    // State needed for validation
+
+    // Certificates
+    // NOTE:
+    // These certificates will be resolved against
+    // StakeRegistrationUpdates and PoolRegistrationUpdates message
+    // from accounts_state and spo_state
+    // in utxo_state while validating the transaction
+    pub certs: Option<Vec<TxCertificateWithPos>>,
+
+    // Withdrawls
+    pub withdrawals: Option<Vec<Withdrawal>>,
+
+    // Value Minted and Burnt
+    pub mint_burn_deltas: Option<NativeAssetsDelta>,
+
+    // Required signers
+    pub required_signers: Option<Vec<KeyHash>>,
+
+    // Proposal update (for Alonzo and Babbage)
+    pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
+
+    // Voting procedures (for Conway)
+    pub voting_procedures: Option<VotingProcedures>,
+
+    // Proposal procedures (for Conway)
+    pub proposal_procedures: Option<Vec<ProposalProcedure>>,
+
+    // VKey Witnesses
+    pub vkey_witnesses: Option<Vec<VKeyWitness>>,
+
+    // Native scripts
+    pub native_scripts: Option<Vec<NativeScript>>,
+
+    // Redeemers
+    pub redeemers: Option<Vec<Redeemer>>,
+}
+
+impl TxUTxODeltas {
+    /// This function returns VKey hashes provided
+    /// from Vkey witnesses
+    pub fn get_vkey_hashes_provided(&self) -> Vec<KeyHash> {
+        let Some(vkey_witnesses) = self.vkey_witnesses.as_ref() else {
+            return vec![];
+        };
+        vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>()
+    }
+
+    /// This function returns Script hashes provided
+    /// from Native scripts
+    /// This returns Vec instead of HashSet to
+    /// validate ExtraneousScriptWitnessesUTXOW
+    /// TODO:
+    /// Consider plutus scripts also
+    pub fn get_script_hashes_provided(&self) -> Vec<ScriptHash> {
+        let Some(native_scripts) = self.native_scripts.as_ref() else {
+            return vec![];
+        };
+        native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>()
+    }
+
+    /// This functions returns the total consumed value of the transaction
+    /// Consumed = Inputs + Refund + Withrawals + Value Minted
+    pub fn calculate_total_consumed(
+        &self,
+        stake_registration_updates: &[StakeRegistrationUpdate],
+        utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    ) -> Value {
+        let total_refund = self.calculate_total_refund(stake_registration_updates);
+        let total_withdrawals = self.calculate_total_withdrawals();
+        let mut total_consumed = Value::new(total_refund + total_withdrawals, vec![]);
+
+        // Add Inputs UTxO values
+        for input in self.consumes.iter() {
+            if let Some(utxo) = utxos.get(input) {
+                total_consumed += &utxo.value;
+            }
+        }
+
+        // Add Value Minted
+        total_consumed += &self.get_minted_value();
+
+        total_consumed
+    }
+
+    /// This functions returns the total produced value of the transaction
+    /// Produced = Outputs + Fee + Deposits + Value Burnt
+    pub fn calculate_total_produced(
+        &self,
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Value {
+        let total_deposit =
+            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
+        let mut total_produced = Value::new(total_deposit + self.fee, vec![]);
+
+        // Add Outputs UTxO values
+        for output in &self.produces {
+            total_produced += &output.value;
+        }
+
+        // Add Value Burnt
+        total_produced += &self.get_burnt_value();
+
+        total_produced
+    }
+
+    pub fn calculate_total_refund(
+        &self,
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Lovelace {
+        let mut total_refund: Lovelace = 0;
+        let Some(certs) = self.certs.as_ref() else {
+            return 0;
+        };
+
+        let certs_identifiers =
+            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+
+        for cert_identifier in certs_identifiers.iter() {
+            total_refund += stake_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.refund())
+                .unwrap_or(0);
+        }
+        total_refund
+    }
+
+    pub fn calculate_total_withdrawals(&self) -> Lovelace {
+        let mut total_withdrawals: Lovelace = 0;
+        let Some(withdrawals) = self.withdrawals.as_ref() else {
+            return 0;
+        };
+        for withdrawal in withdrawals.iter() {
+            total_withdrawals += withdrawal.value;
+        }
+        total_withdrawals
+    }
+
+    pub fn calculate_total_deposit(
+        &self,
+        pool_registration_updates: &[PoolRegistrationUpdate],
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Lovelace {
+        let mut total_deposit: Lovelace = 0;
+        let Some(certs) = self.certs.as_ref() else {
+            return 0;
+        };
+
+        let certs_identifiers =
+            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+
+        for cert_identifier in certs_identifiers.iter() {
+            total_deposit += pool_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.deposit())
+                .unwrap_or(0);
+            total_deposit += stake_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .map(|delta| delta.outcome.deposit())
+                .unwrap_or(0);
+        }
+        total_deposit
+    }
+
+    pub fn get_minted_value(&self) -> Value {
+        let mut value_minted = Value::default();
+        let Some(deltas) = self.mint_burn_deltas.as_ref() else {
+            return value_minted;
+        };
+
+        for (policy_id, asset_deltas) in deltas.iter() {
+            for asset_delta in asset_deltas.iter() {
+                if asset_delta.amount > 0 {
+                    value_minted += &Value::new(
+                        0,
+                        vec![(
+                            *policy_id,
+                            vec![NativeAsset {
+                                name: asset_delta.name,
+                                amount: asset_delta.amount.unsigned_abs(),
+                            }],
+                        )],
+                    );
+                }
+            }
+        }
+
+        value_minted
+    }
+
+    pub fn get_burnt_value(&self) -> Value {
+        let mut value_burnt = Value::default();
+        let Some(deltas) = self.mint_burn_deltas.as_ref() else {
+            return value_burnt;
+        };
+
+        for (policy_id, asset_deltas) in deltas.iter() {
+            for asset_delta in asset_deltas.iter() {
+                if asset_delta.amount < 0 {
+                    value_burnt += &Value::new(
+                        0,
+                        vec![(
+                            *policy_id,
+                            vec![NativeAsset {
+                                name: asset_delta.name,
+                                amount: asset_delta.amount.unsigned_abs(),
+                            }],
+                        )],
+                    );
+                }
+            }
+        }
+
+        value_burnt
     }
 }

@@ -178,14 +178,7 @@ impl GenesisBootstrapper {
                             produces: vec![tx_output],
                             fee: 0,
                             is_valid: true,
-                            total_withdrawals: None,
-                            certs_identifiers: None,
-                            value_minted: None,
-                            value_burnt: None,
-                            vkey_hashes_needed: None,
-                            script_hashes_needed: None,
-                            vkey_hashes_provided: None,
-                            script_hashes_provided: None,
+                            ..TxUTxODeltas::default()
                         });
                         total_allocated += amount;
                     }
