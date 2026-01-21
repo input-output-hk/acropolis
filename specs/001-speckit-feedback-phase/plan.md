@@ -51,10 +51,7 @@ specs/001-speckit-feedback-phase/
 ```text
 .github/
 ├── agents/
-│   ├── speckit.feedback.agent.md    # NEW: Feedback agent definition
-│   ├── speckit.specify.agent.md     # MODIFY: Add lessons database integration
-│   ├── speckit.plan.agent.md        # MODIFY: Add lessons database integration
-│   └── speckit.implement.agent.md   # MODIFY: Add lessons database integration
+│   └── speckit.feedback.agent.md    # NEW: Feedback agent definition
 └── prompts/
     └── speckit.feedback.prompt.md   # NEW: Feedback prompt registration
 
@@ -66,10 +63,12 @@ specs/001-speckit-feedback-phase/
 docs/
 └── feedback/
     ├── lessons.md                   # NEW: Central lessons database
+    ├── AGENTS.md                    # NEW: Agent instructions for Copilot (reads lessons.md)
+    ├── CLAUDE.md                    # NEW: Agent instructions for Claude Code (identical to AGENTS.md)
     └── pr-<number>-lessons.md       # NEW: Per-PR lessons files (generated)
 ```
 
-**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `docs/feedback/` for discoverability. Existing agents (specify, plan, implement) modified to read lessons database.
+**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `docs/feedback/` for discoverability. Agent instruction files (`AGENTS.md` + `CLAUDE.md`) co-located with lessons database enable cross-platform integration without modifying existing agents.
 
 ## Complexity Tracking
 
@@ -89,28 +88,45 @@ docs/
 | `.github/prompts/speckit.feedback.prompt.md` | Prompt registration (minimal, points to agent) |
 | `.specify/scripts/bash/fetch-pr-feedback.sh` | Helper script to fetch PR data via `gh` CLI |
 | `docs/feedback/lessons.md` | Initial empty lessons database with header template |
+| `docs/feedback/AGENTS.md` | Agent instructions for GitHub Copilot to read lessons database |
+| `docs/feedback/CLAUDE.md` | Agent instructions for Claude Code to read lessons database (identical to AGENTS.md) |
 
-## Files to Modify
+## Cross-Platform Agent Integration (FR-011)
 
-| File | Modification |
-|------|--------------|
-| `.github/agents/speckit.specify.agent.md` | Add step to read `docs/feedback/lessons.md` and incorporate relevant lessons when generating specifications (avoid past specification mistakes) |
-| `.github/agents/speckit.plan.agent.md` | Add step to read `docs/feedback/lessons.md` and incorporate relevant lessons when creating implementation plans (apply known patterns/anti-patterns) |
-| `.github/agents/speckit.implement.agent.md` | Add step to read `docs/feedback/lessons.md` and incorporate relevant lessons when writing code (follow established code quality lessons) |
+Instead of modifying existing agent files, we use co-located instruction files that AI assistants automatically discover:
 
-### Integration Pattern for Existing Agents
+| File | AI Assistant | Discovery Mechanism |
+|------|--------------|---------------------|
+| `docs/feedback/AGENTS.md` | GitHub Copilot | "nearest AGENTS.md in directory tree" |
+| `docs/feedback/CLAUDE.md` | Claude Code | "CLAUDE.md from child directories" |
 
-Each modified agent should add the following step early in its execution flow:
+### Agent Instruction Content (identical in both files)
 
 ```markdown
-## Lessons Integration
+# Lessons Learned Integration
 
-1. Check if `docs/feedback/lessons.md` exists
-2. If exists, read and parse the lessons database
-3. Filter lessons relevant to the current task:
-   - For specify: filter by categories [architecture, documentation, other]
-   - For plan: filter by categories [architecture, testing, performance]
-   - For implement: filter by categories [code-quality, security, testing, performance]
-4. Include filtered lessons as context for the agent's decision-making
-5. Reference applied lessons in output where appropriate
+When working in this repository, incorporate lessons learned from past PR reviews.
+
+## Instructions
+
+1. Read `docs/feedback/lessons.md` if it exists
+2. Filter lessons by relevance to current task:
+   - For specifications: prioritize architecture, documentation lessons
+   - For plans: prioritize architecture, testing, performance lessons
+   - For implementation: prioritize code-quality, security, testing lessons
+3. Apply relevant lessons to avoid repeating past mistakes
+4. Reference applied lessons in output where appropriate
+
+## Purpose
+
+This database contains accumulated insights from PR reviews. Using it helps:
+- Avoid repeating past mistakes
+- Apply proven patterns
+- Maintain code quality standards
 ```
+
+**Benefits of this approach:**
+- ✅ No modifications to existing speckit agent files
+- ✅ Preserves repo-root CLAUDE.md for general rules
+- ✅ Clean isolation - feedback instructions live with feedback data
+- ✅ Cross-platform: works with both Copilot and Claude Code natively

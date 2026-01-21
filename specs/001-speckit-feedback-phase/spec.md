@@ -19,6 +19,7 @@
 ### Session 2026-01-21
 
 - Q: Should agent modification be an explicit functional requirement? → A: Yes, add FR-011 for existing phase integration
+- Q: Can FR-011 be implemented without modifying existing agents? → A: Yes, use AGENTS.md + CLAUDE.md in docs/feedback/ for cross-platform compatibility (Copilot + Claude Code)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -96,7 +97,7 @@ As a developer, I want to manually add lessons learned even without a PR context
 - **FR-008**: System MUST support manual lesson entry via command arguments when no PR context exists.
 - **FR-009**: System MUST preserve existing lessons when updating the database (append-only, no destructive updates).
 - **FR-010**: System MUST report a summary of captured lessons to the user upon completion.
-- **FR-011**: Existing speckit phases (specify, plan, implement) MUST be modified to read `docs/feedback/lessons.md` and incorporate relevant lessons as context when generating their outputs.
+- **FR-011**: Existing speckit phases (specify, plan, implement) MUST be able to read `docs/feedback/lessons.md` and incorporate relevant lessons as context when generating their outputs. This MUST be achieved via agent instruction files (`AGENTS.md` and `CLAUDE.md`) co-located with the lessons database, NOT by modifying existing agent files.
 
 ### Key Entities
 
