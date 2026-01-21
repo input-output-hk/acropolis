@@ -795,13 +795,10 @@ impl State {
                 // Pay the rewards
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
                 let mut filtered_rewards_result = rewards_result.clone();
-                let mut actually_paid_to_accounts: u64 = 0;
-                let mut redirected_to_treasury: u64 = 0;
                 for (spo, rewards) in rewards_result.rewards {
                     for reward in rewards {
                         if stake_addresses.is_registered(&reward.account) {
                             stake_addresses.add_to_reward(&reward.account, reward.amount);
-                            actually_paid_to_accounts += reward.amount;
                             reward_deltas.push(StakeRewardDelta {
                                 stake_address: reward.account.clone(),
                                 delta: reward.amount,
@@ -814,7 +811,6 @@ impl State {
                                 reward.account, reward.amount
                             );
                             self.pots.treasury += reward.amount;
-                            redirected_to_treasury += reward.amount;
 
                             // Remove from filtered version for comparison and result
                             if let Some(rewards) = filtered_rewards_result.rewards.get_mut(&spo) {
