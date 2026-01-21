@@ -26,7 +26,6 @@ ledger and validation infrastructure is just shown as a cloud.
 flowchart LR
   PNI(Peer Network Interface)
   CON(Consensus)
-  CS(Chain Store)
   CLOUD@{ shape: cloud, label: "Ledger Validation"}
 
   PNI -- cardano.block.offer --> CON
@@ -35,15 +34,11 @@ flowchart LR
   PNI -- cardano.block.unavailable --> CON
   CON -- cardano.block.rejected --> PNI
 
-  CON -- cardano.block.store --> CS
-  CON -- cardano.block.delete --> CS
-
   CON -- cardano.block.proposed --> CLOUD
   CLOUD -- cardano.validation.* --> CON
 
   click PNI "https://github.com/input-output-hk/acropolis/tree/main/modules/peer_network_interface/"
   click CON "https://github.com/input-output-hk/acropolis/tree/main/modules/consensus/"
-  click CS "https://github.com/input-output-hk/acropolis/tree/main/modules/chain_store/"
 ```
 
 ## New functionality
@@ -93,8 +88,7 @@ it will prune the chain tree to remove it.
 
 It sends it for validation with `cardano.block.proposed` as we saw in
 the [Phase 1 Validation](system-ledger-validation.md) system.  If
-successful, it will be added to the chain tree and sent to the Chain
-Store with a `cardano.block.store` message for long term storage.  If
+successful, it will be added to the chain tree.  If
 it fails, it won't, and we will tell PNI it was rejected with
 `cardano.block.rejected`.
 
@@ -119,17 +113,10 @@ probably (but not necessarily) mean it is no longer the favoured one.  As before
 the Peer Network Interface which may sanction the peers that provided it.
 
 Once the branch point of an unfavoured chain is more than 'k' blocks old, it can never be
-selected, so Consensus can prune its tree and delete any associated blocks from the
-Chain Store with `cardano.block.delete`.
+selected, so Consensus can prune its tree.
 
-### Chain Store
-
-The [Chain Store](../../modules/chain_store) already provides persistent block storage for
-the historical REST APIs.
-
-The Chain Store will no longer accept every block on `cardano.block.available` but will wait for
-Consensus to ask it to store one with `cardano.block.store`.  As noted above, it will also
-provide cleanup with `cardano.block.delete`.
+Note that the Chain Store (not shown) will now listen on `cardano.block.proposed`, optimistically
+storing proposed blocks and deleting them again if it sees a rollback.
 
 ## Configuration
 TODO
