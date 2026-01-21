@@ -356,7 +356,7 @@ impl UTXOState {
                     UTxOStateQuery::GetAllUTxOsSumAtEpochStart => {
                         let total = state.get_total_utxos_sum_at_epoch_start();
                         UTxOStateQueryResponse::UTxOsSum(total)
-                    },
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,

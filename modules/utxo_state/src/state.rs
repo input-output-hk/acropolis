@@ -362,8 +362,11 @@ impl State {
     }
 
     /// Handle a UTXODeltas message
-    pub async fn handle_utxo_deltas(&mut self, block: &BlockInfo,
-                                    deltas: &UTXODeltasMessage) -> Result<()> {
+    pub async fn handle_utxo_deltas(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<()> {
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -379,8 +382,11 @@ impl State {
         // (used to resync reserves on entry to Shelley in AccountsState)
         if block.new_epoch {
             self.utxos_sum_at_epoch_start = self.get_total_utxos_sum().await?;
-            debug!(epoch = block.epoch,
-                   total_utxos = self.utxos_sum_at_epoch_start.lovelace, "New epoch");
+            debug!(
+                epoch = block.epoch,
+                total_utxos = self.utxos_sum_at_epoch_start.lovelace,
+                "New epoch"
+            );
         }
 
         // Process the deltas

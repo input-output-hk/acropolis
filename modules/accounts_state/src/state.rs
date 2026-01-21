@@ -10,15 +10,14 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, Message,
-        PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, StakeAddressDeltasMessage, StateQuery, StateQueryResponse,
-        TxCertificatesMessage, WithdrawalsMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     queries::{
-        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
         get_query_topic,
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
@@ -850,14 +849,17 @@ impl State {
         };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
-            context,
-            ea_msg.epoch + 1,
-            era,
-            ea_msg.total_fees,
-            spo_blocks,
-            verifier,
-        ).await?);
+        reward_deltas.extend(
+            self.enter_epoch(
+                context,
+                ea_msg.epoch + 1,
+                era,
+                ea_msg.total_fees,
+                spo_blocks,
+                verifier,
+            )
+            .await?,
+        );
 
         Ok(reward_deltas)
     }
