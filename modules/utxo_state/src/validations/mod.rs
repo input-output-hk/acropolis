@@ -31,7 +31,7 @@ pub fn validate_tx(
 
     let inputs = &tx_deltas.consumes;
 
-    shelley::utxo::validate(inputs, total_consumed, total_produced, &utxos)
+    shelley::utxo::validate(inputs, total_consumed, total_produced, utxos)
         .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;
 
     shelley::utxow::validate(

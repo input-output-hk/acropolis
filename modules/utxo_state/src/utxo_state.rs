@@ -71,6 +71,7 @@ pub struct UTXOState;
 
 impl UTXOState {
     /// Main run function
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,

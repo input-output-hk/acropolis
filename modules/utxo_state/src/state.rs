@@ -1050,14 +1050,13 @@ mod tests {
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
-        let mut deltas = Vec::new();
-        deltas.push(TxUTxODeltas {
+        let deltas = vec![TxUTxODeltas {
             consumes: vec![],
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
             ..TxUTxODeltas::default()
-        });
+        }];
         let deltas1 = UTXODeltasMessage { deltas };
 
         state.handle(&block1, &deltas1).await.unwrap();
@@ -1068,14 +1067,13 @@ mod tests {
         let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
-        let mut deltas = Vec::new();
-        deltas.push(TxUTxODeltas {
+        let deltas = vec![TxUTxODeltas {
             consumes: vec![input],
             produces: vec![],
             fee: 0,
             is_valid: true,
             ..TxUTxODeltas::default()
-        });
+        }];
         let deltas2 = UTXODeltasMessage { deltas };
 
         state.handle(&block2, &deltas2).await.unwrap();
