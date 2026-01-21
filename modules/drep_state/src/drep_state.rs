@@ -12,11 +12,12 @@ use acropolis_common::{
         DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, TxHash,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
@@ -128,11 +129,22 @@ impl DRepState {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, storage_config).await?;
 
-        if storage_config.store_info {
-            if let Some(sub) = params_subscription.as_mut() {
-                let _ = sub.read().await?;
-                info!("Consumed initial genesis params from params_subscription");
+        // Cache the latest Conway params needed for DRep expiries calculations.
+        let mut conway_d_rep_activity: Option<u32> = None;
+        let mut conway_gov_action_lifetime: Option<u32> = None;
+
+        if let Some(sub) = params_subscription.as_mut() {
+            let (_, message) = sub.read().await?;
+            if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref()
+            {
+                if let Some(conway) = &params.params.conway {
+                    // It is not guaranteed that the snapshot starts at epoch boundary
+                    // therefore params need to be read with the genesis params.
+                    conway_d_rep_activity = Some(conway.d_rep_activity);
+                    conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
+                }
             }
+            info!("Consumed initial genesis params from params_subscription");
         }
 
         // Main loop of synchronised messages
@@ -143,6 +155,7 @@ impl DRepState {
                 h.get_or_init_with(|| State::new(storage_config))
             };
             let mut current_block: Option<BlockInfo> = None;
+            let mut txs_with_certificates: HashSet<TxHash> = HashSet::new();
 
             // Certificates are the synchroniser
             let (_, certs_message) = certs_subscription.read().await?;
@@ -167,7 +180,9 @@ impl DRepState {
 
             // Read from epoch-boundary messages only when it's a new epoch
             if new_epoch {
-                let mut conway_d_rep_activity: Option<u32> = None;
+                if let Some(ref block) = current_block {
+                    state.update_num_dormant_epochs(block.epoch);
+                }
                 // Read params subscription if store-info is enabled to obtain DRep expiration param. Update expirations on epoch transition
                 if let Some(sub) = params_subscription.as_mut() {
                     let (_, message) = sub.read_ignoring_rollbacks().await?;
@@ -179,11 +194,9 @@ impl DRepState {
                             Self::check_sync(&current_block, block_info, "params");
                             if let Some(conway) = &params.params.conway {
                                 conway_d_rep_activity = Some(conway.d_rep_activity);
+                                conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
                                 state
-                                    .update_drep_expirations(
-                                        block_info.epoch,
-                                        conway.d_rep_activity,
-                                    )
+                                    .update_drep_expirations(block_info.epoch)
                                     .inspect_err(|e| error!("Param update error: {e:#}"))
                                     .ok();
                             }
@@ -194,11 +207,9 @@ impl DRepState {
 
                 // Publish DRep state at the end of the epoch
                 if let Some(ref block) = current_block {
-                    // Inactivity is derived from conway `d_rep_activity` protocol parameter.
+                    // Inactivity is derived from `drep_expiry` computed from Conway activity events.
                     let dreps = state.active_drep_list();
-                    let inactive_dreps = conway_d_rep_activity
-                        .map(|drep_activity| state.inactive_drep_list(block.epoch, drep_activity))
-                        .unwrap_or_default();
+                    let inactive_dreps = state.inactive_drep_list(block.epoch);
                     drep_state_publisher.publish_drep_state(block, dreps, inactive_dreps).await?;
                 }
             }
@@ -212,11 +223,15 @@ impl DRepState {
                     let span = info_span!("drep_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, block_info, "certs");
+                        // Cache txs hashes with certificates for DRep expiries calculations
+                        txs_with_certificates
+                            .extend(tx_certs_msg.certificates.iter().map(|c| c.tx_hash));
                         state
                             .process_certificates(
                                 context.clone(),
                                 &tx_certs_msg.certificates,
                                 block_info.epoch,
+                                conway_d_rep_activity,
                             )
                             .await
                             .inspect_err(|e| error!("Certificates handling error: {e:#}"))
@@ -247,8 +262,33 @@ impl DRepState {
                         let span = info_span!("drep_state.handle_votes", block = block_info.number);
                         async {
                             Self::check_sync(&current_block, block_info, "gov");
+                            // Track proposals for dormant-epoch counting, so that
+                            // they can be checked if they are active at the N+1 epoch boundary
+                            if let Some(lifetime) = conway_gov_action_lifetime {
+                                state.record_proposals(
+                                    &gov_msg.proposal_procedures,
+                                    block_info.epoch,
+                                    lifetime,
+                                );
+                            }
+
+                            // When a tx has proposals and no certificates, and the dormant
+                            // counter is non-zero, bump all DRep expiries and reset the dormant epoch counter.
+                            if state.num_dormant_epochs > 0
+                                && gov_msg.proposal_procedures.iter().any(|proposal| {
+                                    !txs_with_certificates
+                                        .contains(&proposal.gov_action_id.transaction_id)
+                                })
+                            {
+                                state.apply_dormant_expiry(block_info.epoch);
+                            }
+
                             state
-                                .process_votes(&gov_msg.voting_procedures, block_info.epoch)
+                                .process_votes(
+                                    &gov_msg.voting_procedures,
+                                    block_info.epoch,
+                                    conway_d_rep_activity,
+                                )
                                 .inspect_err(|e| error!("Votes handling error: {e:#}"))
                                 .ok();
                         }
@@ -566,11 +606,7 @@ impl DRepState {
             None
         };
 
-        let params_sub = if storage_config.store_info {
-            Some(context.subscribe(&parameters_subscribe_topic).await?)
-        } else {
-            None
-        };
+        let params_sub = Some(context.subscribe(&parameters_subscribe_topic).await?);
 
         // Start run task
         context.run(async move {

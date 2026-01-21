@@ -7,6 +7,7 @@ use crate::types::{
     Credential, KeyHash, Lovelace, PoolId, PoolMetadata, Ratio, Relay, ScriptHash, StakeCredential,
     TxIdentifier, VrfKeyHash,
 };
+use crate::TxHash;
 use serde_with::{hex::Hex, serde_as};
 use std::collections::HashSet;
 use std::fmt;
@@ -372,6 +373,7 @@ impl TxCertificate {
 pub struct TxCertificateWithPos {
     pub cert: TxCertificate,
     pub tx_identifier: TxIdentifier,
+    pub tx_hash: TxHash,
     pub cert_index: u64,
 }
 

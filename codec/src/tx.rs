@@ -86,8 +86,10 @@ pub fn map_transaction(
     let mut withdrawals = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
 
+    let tx_hash = TxHash::from(*tx.hash());
+
     for (cert_index, cert) in tx.certs().iter().enumerate() {
-        match map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
+        match map_certificate(cert, tx_identifier, tx_hash, cert_index, network_id.clone()) {
             Ok(c) => certs.push(c),
             Err(e) => errors.push(format!("Certificate {cert_index} has been ignored: {e}")),
         }

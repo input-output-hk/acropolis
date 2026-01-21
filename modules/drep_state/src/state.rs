@@ -7,8 +7,8 @@ use acropolis_common::{
         get_query_topic,
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
-    Anchor, DRepChoice, DRepCredential, DRepRecord, Lovelace, StakeAddress, TxCertificate,
-    TxCertificateWithPos, TxHash, Voter, VotingProcedures,
+    Anchor, DRepChoice, DRepCredential, DRepRecord, GovActionId, Lovelace, ProposalProcedure,
+    StakeAddress, TxCertificate, TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
@@ -80,8 +80,16 @@ impl DRepStorageConfig {
 pub struct State {
     pub config: DRepStorageConfig,
     pub dreps: HashMap<DRepCredential, DRepRecord>,
-    /// Last epoch where DReps were considered "active".
-    pub last_activity_epoch: HashMap<DRepCredential, u64>,
+
+    /// Per-DRep expiry epoch.
+    pub drep_expiry: HashMap<DRepCredential, u64>,
+
+    /// Dormant epoch counter.
+    pub num_dormant_epochs: u64,
+
+    /// Government proposals currently alive (i.e. not expired) with their expiry epoch.
+    pub proposals_expires_after: HashMap<GovActionId, u64>,
+
     pub historical_dreps: Option<HashMap<DRepCredential, HistoricalDRepState>>,
 }
 
@@ -90,13 +98,61 @@ impl State {
         Self {
             config,
             dreps: HashMap::new(),
-            last_activity_epoch: HashMap::new(),
+            drep_expiry: HashMap::new(),
+            num_dormant_epochs: 0,
+            proposals_expires_after: HashMap::new(),
             historical_dreps: if config.any_enabled() {
                 Some(HashMap::new())
             } else {
                 None
             },
         }
+    }
+
+    pub fn apply_dormant_expiry(&mut self, current_epoch: u64) {
+        if self.num_dormant_epochs == 0 {
+            return;
+        }
+
+        for expiry in self.drep_expiry.values_mut() {
+            let actual_expiry = expiry.saturating_add(self.num_dormant_epochs);
+            if actual_expiry >= current_epoch {
+                *expiry = actual_expiry;
+            }
+        }
+
+        self.num_dormant_epochs = 0;
+    }
+
+    /// Records proposals observed in a block with their expiry epoch.
+    pub fn record_proposals(
+        &mut self,
+        proposals: &[ProposalProcedure],
+        current_epoch: u64,
+        gov_action_lifetime: u32,
+    ) {
+        let expires_after = current_epoch.saturating_add(gov_action_lifetime as u64);
+        for proposal in proposals {
+            self.proposals_expires_after
+                .entry(proposal.gov_action_id.clone())
+                .or_insert(expires_after);
+        }
+    }
+
+    /// At epoch boundary, if there are no proposals active (i.e. no proposal with
+    /// `expires_after >= current_epoch`), increment `num_dormant_epochs`.
+    pub fn update_num_dormant_epochs(&mut self, current_epoch: u64) {
+        // Drop expired proposals first.
+        self.proposals_expires_after.retain(|_, expires_after| *expires_after >= current_epoch);
+
+        if self.proposals_expires_after.is_empty() {
+            self.num_dormant_epochs = self.num_dormant_epochs.saturating_add(1);
+        }
+    }
+
+    fn compute_drep_expiry(current_epoch: u64, drep_activity: u32, num_dormant_epochs: u64) -> u64 {
+        // drepExpiry = (currentEpoch+drepActivity) − numDormantEpochs
+        current_epoch.saturating_add(drep_activity as u64).saturating_sub(num_dormant_epochs)
     }
 
     #[allow(dead_code)]
@@ -211,6 +267,7 @@ impl State {
         context: Arc<Context<Message>>,
         tx_certs: &Vec<TxCertificateWithPos>,
         epoch: u64,
+        drep_activity: Option<u32>,
     ) -> Result<()> {
         let mut batched_delegators = Vec::new();
         let store_delegators = self.config.store_delegators;
@@ -223,7 +280,7 @@ impl State {
                 }
             }
 
-            if let Err(e) = self.process_one_cert(tx_cert, epoch) {
+            if let Err(e) = self.process_one_cert(tx_cert, epoch, drep_activity) {
                 error!("Error processing tx_cert: {e}");
             }
         }
@@ -242,11 +299,16 @@ impl State {
         &mut self,
         voting_procedures: &[(TxHash, VotingProcedures)],
         epoch: u64,
+        drep_activity: Option<u32>,
     ) -> Result<()> {
         let cfg = self.config;
         let mut hist_map = self.historical_dreps.as_mut();
 
-        // Always update `last_activity_epoch` for DReps. Update historical only if enabled.
+        let drep_activity = drep_activity.ok_or_else(|| {
+            anyhow!("Missing Conway parameter d_rep_activity (required to compute drepExpiry)")
+        })?;
+
+        // Update `drep_expiry` for DReps that vote. Update historical only if enabled.
         for (tx_hash, voting_procedures) in voting_procedures {
             for (voter, single_votes) in &voting_procedures.votes {
                 let drep_cred = match voter {
@@ -255,7 +317,9 @@ impl State {
                     _ => continue,
                 };
 
-                self.last_activity_epoch.insert(drep_cred.clone(), epoch);
+                let expiry =
+                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
+                self.drep_expiry.insert(drep_cred.clone(), expiry);
 
                 if let Some(ref mut hist_map) = hist_map {
                     let entry = hist_map
@@ -284,13 +348,7 @@ impl State {
         Ok(())
     }
 
-    pub fn update_drep_expirations(
-        &mut self,
-        current_epoch: u64,
-        expired_epoch_param: u32,
-    ) -> Result<()> {
-        let expired_offset = expired_epoch_param as u64;
-
+    pub fn update_drep_expirations(&mut self, current_epoch: u64) -> Result<()> {
         // If historical storage isn’t enabled, nothing to do.
         let Some(historical_dreps) = self.historical_dreps.as_mut() else {
             return Ok(());
@@ -298,12 +356,14 @@ impl State {
 
         for (cred, drep_record) in historical_dreps.iter_mut() {
             if let Some(info) = drep_record.info.as_mut() {
-                let last_active = self.last_activity_epoch.get(cred).copied().or(info.active_epoch);
-                if let (Some(last_active), false) = (last_active, info.expired) {
-                    if last_active + expired_offset <= current_epoch {
-                        info.expired = true;
-                    }
-                }
+                // Historical "expired" reflects the current derived status from drep_expiry.
+                // If we do not have an expiry tracked, treat as expired.
+                info.expired = self
+                    .drep_expiry
+                    .get(cred)
+                    .copied()
+                    .map(|expiry| expiry < current_epoch)
+                    .unwrap_or(true);
             }
         }
 
@@ -318,26 +378,35 @@ impl State {
         distribution
     }
 
-    pub fn inactive_drep_list(
-        &self,
-        current_epoch: u64,
-        d_rep_activity: u32,
-    ) -> Vec<DRepCredential> {
-        let expired_offset = d_rep_activity as u64;
+    pub fn inactive_drep_list(&self, current_epoch: u64) -> Vec<DRepCredential> {
         let mut inactives = Vec::new();
         for cred in self.dreps.keys() {
-            if let Some(last) = self.last_activity_epoch.get(cred).copied() {
-                if last + expired_offset <= current_epoch {
-                    inactives.push(cred.clone());
-                }
+            let expired = self
+                .drep_expiry
+                .get(cred)
+                .copied()
+                .map(|expiry| expiry < current_epoch)
+                .unwrap_or(true);
+            if expired {
+                inactives.push(cred.clone());
             }
         }
         inactives
     }
 
-    fn process_one_cert(&mut self, tx_cert: &TxCertificateWithPos, epoch: u64) -> Result<bool> {
+    fn process_one_cert(
+        &mut self,
+        tx_cert: &TxCertificateWithPos,
+        epoch: u64,
+        drep_activity: Option<u32>,
+    ) -> Result<bool> {
         match &tx_cert.cert {
             TxCertificate::DRepRegistration(reg) => {
+                let drep_activity = drep_activity.ok_or_else(|| {
+                    anyhow!(
+                        "Missing Conway parameter d_rep_activity (required to compute drepExpiry)"
+                    )
+                })?;
                 let new = match self.dreps.get_mut(&reg.credential) {
                     Some(drep) => {
                         if reg.deposit != 0 {
@@ -359,8 +428,10 @@ impl State {
                     }
                 };
 
-                // New cert resets epoch for dreps inactivity.
-                self.last_activity_epoch.insert(reg.credential.clone(), epoch);
+                // Registration initializes expiry.
+                let expiry =
+                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
+                self.drep_expiry.insert(reg.credential.clone(), expiry);
 
                 if self.historical_dreps.is_some() {
                     if let Err(err) = self.update_historical(&reg.credential, true, |entry| {
@@ -400,7 +471,7 @@ impl State {
                     ));
                 }
 
-                self.last_activity_epoch.remove(&reg.credential);
+                self.drep_expiry.remove(&reg.credential);
 
                 // Update history if enabled
                 if self.historical_dreps.is_some() {
@@ -428,14 +499,21 @@ impl State {
             }
 
             TxCertificate::DRepUpdate(reg) => {
+                let drep_activity = drep_activity.ok_or_else(|| {
+                    anyhow!(
+                        "Missing Conway parameter d_rep_activity (required to compute drepExpiry)"
+                    )
+                })?;
                 // Update live state
                 let drep = self.dreps.get_mut(&reg.credential).ok_or_else(|| {
                     anyhow!("DRep update {:?}: credential not found", reg.credential)
                 })?;
                 drep.anchor = reg.anchor.clone();
 
-                // DRep update resets epoch for dreps inactivity.
-                self.last_activity_epoch.insert(reg.credential.clone(), epoch);
+                // DRep update counts as activity: update expiry.
+                let expiry =
+                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
+                self.drep_expiry.insert(reg.credential.clone(), expiry);
 
                 // Update history if enabled
                 if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
@@ -587,7 +665,7 @@ impl State {
         for (cred, record) in &drep_msg.dreps {
             self.dreps.insert(cred.clone(), record.clone());
             // Snapshot does not include activity, assume active at snapshot epoch.
-            self.last_activity_epoch.insert(cred.clone(), drep_msg.epoch);
+            self.drep_expiry.insert(cred.clone(), drep_msg.epoch);
             // update historical state if enabled
             if let Some(hist_map) = self.historical_dreps.as_mut() {
                 let cfg = self.config;
@@ -618,9 +696,12 @@ fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
 mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
-        Anchor, Credential, DRepDeregistration, DRepRegistration, DRepUpdate, TxCertificate,
-        TxCertificateWithPos, TxIdentifier,
+        Anchor, Credential, DRepDeregistration, DRepKeyHash, DRepRegistration, DRepUpdate,
+        GovActionId, GovernanceAction, NetworkId, ProposalProcedure, SingleVoterVotes,
+        StakeAddress, TxCertificate, TxCertificateWithPos, TxHash, TxIdentifier, Vote, Voter,
+        VotingProcedure, VotingProcedures,
     };
+    use std::collections::HashMap;
 
     const CRED_1: [u8; 28] = [
         123, 222, 247, 170, 243, 201, 37, 233, 124, 164, 45, 54, 241, 25, 176, 70, 154, 18, 204,
@@ -641,10 +722,11 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 0,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
             deposit: 500000000,
@@ -666,11 +748,12 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 0,
         };
 
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
 
         let bad_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -679,9 +762,10 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&bad_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&bad_tx_cert, 1, Some(20)).is_err());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -704,10 +788,11 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -719,10 +804,11 @@ mod tests {
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
 
-        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1).unwrap());
+        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1, Some(20)).unwrap());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -745,10 +831,11 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -760,9 +847,10 @@ mod tests {
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&update_anchor_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&update_anchor_tx_cert, 1, Some(20)).is_err());
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -785,10 +873,11 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -796,9 +885,10 @@ mod tests {
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&unregister_tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&unregister_tx_cert, 1, Some(20)).unwrap());
         assert_eq!(state.get_count(), 0);
         assert!(state.get_drep(&tx_cred).is_none());
     }
@@ -822,20 +912,21 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 0,
         };
-        assert!(state.process_one_cert(&register_cert, 10).unwrap());
+        assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());
         assert_eq!(
-            state.last_activity_epoch.get(&tx_cred).copied(),
-            Some(10),
-            "registration should set last_activity_epoch"
+            state.drep_expiry.get(&tx_cred).copied(),
+            Some(30),
+            "registration should set drep_expiry using drep_activity"
         );
 
-        // Expire at epoch 30
-        state.update_drep_expirations(30, 20).unwrap();
+        // Expire at epoch 31 (expiry=30 is still active at epoch 30)
+        state.update_drep_expirations(31).unwrap();
         let historical = state.historical_dreps.as_ref().unwrap();
         let drep_info = historical.get(&tx_cred).unwrap().info.as_ref().unwrap();
-        assert!(drep_info.expired, "DRep should be expired at epoch 30");
+        assert!(drep_info.expired, "DRep should be expired at epoch 31");
 
         // Update at epoch 31 => should reset activity and clear expired
         let update_cert = TxCertificateWithPos {
@@ -844,13 +935,14 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 0,
         };
-        state.process_one_cert(&update_cert, 31).unwrap();
+        state.process_one_cert(&update_cert, 31, Some(20)).unwrap();
         assert_eq!(
-            state.last_activity_epoch.get(&tx_cred).copied(),
-            Some(31),
-            "DRepUpdate should reset last_activity_epoch"
+            state.drep_expiry.get(&tx_cred).copied(),
+            Some(51),
+            "DRepUpdate should reset drep_expiry using drep_activity"
         );
 
         let historical = state.historical_dreps.as_ref().unwrap();
@@ -866,8 +958,8 @@ mod tests {
         );
 
         // Next epoch boundary shouldn't re-expire immediately
-        state.update_drep_expirations(32, 20).unwrap();
-        let inactive = state.inactive_drep_list(32, 20);
+        state.update_drep_expirations(32).unwrap();
+        let inactive = state.inactive_drep_list(32);
         assert!(
             !inactive.contains(&tx_cred),
             "DRep should not be considered inactive at epoch 32 after updating at epoch 31"
@@ -890,10 +982,11 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
-        assert!(state.process_one_cert(&tx_cert, 1).unwrap());
+        assert!(state.process_one_cert(&tx_cert, 1, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -901,10 +994,111 @@ mod tests {
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&unregister_tx_cert, 1).is_err());
+        assert!(state.process_one_cert(&unregister_tx_cert, 1, Some(20)).is_err());
         assert_eq!(state.get_count(), 1);
         assert_eq!(state.get_drep(&tx_cred).unwrap().deposit, 500000000);
+    }
+
+    #[test]
+    fn test_process_votes_refreshes_drep_expiry() {
+        let drep_key = CRED_1.into();
+        let drep_cred = Credential::AddrKeyHash(drep_key);
+
+        let mut state = State::new(DRepStorageConfig::default());
+
+        // Register at epoch 10 with d_rep_activity = 20 should expiry = 30 (no dormancy).
+        let register_cert = TxCertificateWithPos {
+            cert: TxCertificate::DRepRegistration(DRepRegistration {
+                credential: drep_cred.clone(),
+                deposit: 500000000,
+                anchor: None,
+            }),
+            tx_identifier: TxIdentifier::default(),
+            tx_hash: TxHash::default(),
+            cert_index: 0,
+        };
+        assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());
+        assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(30));
+
+        // Simulate dormancy accumulation. Votes should compute expiry with subtraction.
+        state.num_dormant_epochs = 2;
+
+        let gov_action_id = GovActionId {
+            transaction_id: TxHash::default(),
+            action_index: 0,
+        };
+
+        let mut single = SingleVoterVotes::default();
+        single.voting_procedures.insert(
+            gov_action_id,
+            VotingProcedure {
+                vote: Vote::Yes,
+                anchor: None,
+                vote_index: 0,
+            },
+        );
+
+        let mut votes = VotingProcedures {
+            votes: HashMap::new(),
+        };
+        votes.votes.insert(Voter::DRepKey(DRepKeyHash::from(drep_key)), single);
+
+        // At epoch 15: (15 + 20) - 2 = 33
+        state.process_votes(&[(TxHash::default(), votes)], 15, Some(20)).unwrap();
+        assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(33));
+    }
+
+    #[test]
+    fn test_update_num_dormant_epochs_tracks_active_proposals() {
+        let mut state = State::new(DRepStorageConfig::default());
+
+        let reward_account =
+            StakeAddress::new(Credential::AddrKeyHash(CRED_2.into()), NetworkId::Mainnet);
+        let proposal = ProposalProcedure {
+            deposit: 0,
+            reward_account,
+            gov_action_id: GovActionId {
+                transaction_id: TxHash::default(),
+                action_index: 0,
+            },
+            gov_action: GovernanceAction::Information,
+            anchor: Anchor {
+                url: "https://poop.bike".into(),
+                data_hash: vec![],
+            },
+        };
+
+        // gov_action_lifetime = 2, expires_after = 12 for a proposal recorded at epoch 10.
+        state.record_proposals(&[proposal], 10, 2);
+
+        // At epoch 11 the proposal is still active, counter unchanged.
+        state.update_num_dormant_epochs(11);
+        assert_eq!(state.num_dormant_epochs, 0);
+
+        // At epoch 13 the proposal has expired, counter increments.
+        state.update_num_dormant_epochs(13);
+        assert_eq!(state.num_dormant_epochs, 1);
+    }
+
+    #[test]
+    fn test_apply_dormant_expiry_updates_and_resets_counter() {
+        let mut state = State::new(DRepStorageConfig::default());
+        let drep_cred = Credential::AddrKeyHash(CRED_1.into());
+
+        state.drep_expiry.insert(drep_cred.clone(), 30);
+        state.num_dormant_epochs = 2;
+        state.apply_dormant_expiry(20);
+        assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(32));
+        assert_eq!(state.num_dormant_epochs, 0);
+
+        // Already-expired DReps should not be "revived" by the bump.
+        state.drep_expiry.insert(drep_cred.clone(), 10);
+        state.num_dormant_epochs = 2;
+        state.apply_dormant_expiry(15);
+        assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(10));
+        assert_eq!(state.num_dormant_epochs, 0);
     }
 }

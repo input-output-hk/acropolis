@@ -1292,8 +1292,8 @@ mod tests {
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
         Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
         StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        VrfKeyHash, Withdrawal,
+        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxHash, TxIdentifier,
+        VoteDelegation, VrfKeyHash, Withdrawal,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1699,6 +1699,7 @@ mod tests {
                     deposit: 1,
                 }),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
             TxCertificateWithPos {
@@ -1707,6 +1708,7 @@ mod tests {
                     deposit: 1,
                 }),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
             TxCertificateWithPos {
@@ -1715,6 +1717,7 @@ mod tests {
                     drep: DRepChoice::Key(drep_key_hash),
                 }),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
             TxCertificateWithPos {
@@ -1724,6 +1727,7 @@ mod tests {
                     drep: DRepChoice::Script(drep_key_hash),
                 }),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
             TxCertificateWithPos {
@@ -1735,6 +1739,7 @@ mod tests {
                     },
                 ),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
             TxCertificateWithPos {
@@ -1747,6 +1752,7 @@ mod tests {
                     },
                 ),
                 tx_identifier,
+                tx_hash: TxHash::default(),
                 cert_index: 0,
             },
         ];
