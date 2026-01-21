@@ -28,8 +28,9 @@ flowchart LR
   CON(Consensus)
   CLOUD@{ shape: cloud, label: "Ledger Validation"}
 
-  PNI -- cardano.block.offer --> CON
+  PNI -- cardano.block.offered --> CON
   CON -- cardano.block.wanted --> PNI
+  PNI -- cardano.block.rescinded --> CON
   PNI -- cardano.block.available --> CON
   PNI -- cardano.block.unavailable --> CON
   CON -- cardano.block.rejected --> PNI
@@ -52,7 +53,7 @@ on the basis of the quality of the chain being offered. We need to give this con
 Consensus.
 
 To do this we insert Consensus into the decision about which blocks to fetch.  The Peer
-Network Interface will indicate that a block is being offered by a peer on `cardano.block.offer`,
+Network Interface will indicate that a block is being offered by a peer on `cardano.block.offered`,
 quoting the block number, hash and previous block hash.  This allows Consensus to associate the
 offer with a particular chain fork.
 
@@ -61,6 +62,9 @@ Consensus may then request that a block is fetched with
 then fetch it from one of the peers, chosen either round-robin or on performance metrics,
 and send a `cardano.block.available` when it receives it, as it does already.  If no peer
 can provide it, it sends a `cardano.block.unavailable` instead.
+
+It may be that all peers that previously offered a block roll it back, leaving the block as
+an orphan.  In this case PNI can send out a `cardano.block.rescinded`.
 
 If the block provided turns out to be bad, Consensus may tell the Peer Network Interface with
 a `cardano.block.rejected` message, which allows PNI to sanction peers that provided it.  To do this
@@ -73,7 +77,7 @@ TODO: Automatic P2P discovery, "ledger peers" (from SPO state?)
 The [Consensus](../../modules/consensus) module will need to maintain
 a tree of chain forks being offered.  It doesn't need to know which
 peers offered them; that knowledge is kept within Peer Network
-Interface.  On receipt of a `cardano.block.offer` it can look the
+Interface.  On receipt of a `cardano.block.offered` it can look the
 block up in the tree to find which fork it applies to, based on the
 previous block hash, and look at the block number to see if it is an
 extension of the existing chain or a rollback creating a new fork.
@@ -92,8 +96,11 @@ successful, it will be added to the chain tree.  If
 it fails, it won't, and we will tell PNI it was rejected with
 `cardano.block.rejected`.
 
+Consensus will also prune its chain tree if it gets a `cardano.block.rescinded`
+indicating a block is no longer offered by any peers.
+
 If the new block is on another, unfavoured, fork, we don't fetch,
-validate or store it yet, but add it marked as unvalidated to the
+or validate it yet, but add it marked as unvalidated to the
 relevant chain in the tree.
 
 Each time a new block is offered, Consensus runs the Ouroboros chain
