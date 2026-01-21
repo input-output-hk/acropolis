@@ -39,7 +39,6 @@ flowchart LR
 ```
 
 ## Data flow
-
 The process follows exactly the same sequence as [before](system-simple-mithril-utxo.md) initially:
 
 * [Genesis Bootstrapper](../../modules/genesis_bootstrapper) reads and sends the Genesis UTXOs
@@ -52,7 +51,7 @@ To this we have added a [Peer Network Interface](../../modules/peer_network_inte
 just slots into the existing graph.
 
 When the Mithril Snapshot Fetcher has come to the end of the block data
-in the snapshot, it sends a `cardano.sequence.bootstrapped` message indicating how far it got (it
+in the snapshot, it sends a `cardano.snapshot.complete` message indicating how far it got (it
 was already doing this but no-one was listening, so we didn't mention it before).
 
 This is then picked up by the Peer Network Interface, which is
@@ -67,10 +66,13 @@ sequence, which the hand-off process ensures.  This is the benefit of the pub-su
 architecture!
 
 ## Configuration
-
 Here is the [configuration](../../processes/omnibus/configs/simple-mithril-and-sync-utxo.toml)
 for this setup. You can run it in the `processes/omnibus` directory with:
 
 ```shell
 $ cargo run --release -- --config configs/simple-mithril-and-sync-utxo.toml
 ```
+
+## Next steps
+To continue, we will add more complete
+[ledger state tracking](system-bootstrap-and-sync-with-basic-ledger.md).

@@ -7,6 +7,12 @@ to become a full Cardano node.
 
 - [Modularity](modularity.md) - Why and how Acropolis is split into loosely-coupled modules
 - Building a node from the ground up:
-  - [Simple Mithril UTXOs](system-simple-mithril-utxo.md) - The most basic UTXO follower from a Mithril snapshot
-  - [Mithril and Sync UTXOs](system-simple-mithril-and-sync-utxo.md) - Adding a live network sync
+  - [Simple UTXO follower from Mithril](system-simple-mithril-utxo.md) - The most basic UTXO follower from a Mithril snapshot
+  - [Simple UTXO follower from Mithril and live sync](system-simple-mithril-and-sync-utxo.md) - Adding a live network sync
   - [Basic ledger](system-bootstrap-and-sync-with-basic-ledger.md) - Adding basic (Shelley-era) ledger state
+  - [Conway ledger](system-bootstrap-and-sync-with-conway.md) - Adding Conway / CIP-1694 governance
+  - [BlockFrost API](system-ledger-with-api-and-history.md) - Adding a BlockFrost REST API and history storage
+  - [Phase 1 Validation](system-ledger-validation.md) - Validating incoming blocks and transactions, Phase 1
+  - [Phase 2 Validation](system-script-validation.md) - Full validation of transactions and scripts
+  - [Multi-peer Consensus](system-multi-peer-consensus.md) - Real Ouroboros consensus rules and peer management
+

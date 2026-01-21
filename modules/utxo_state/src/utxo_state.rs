@@ -2,6 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
+    configuration::StartupMode,
     messages::{
         CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage, StateQuery,
         StateQueryResponse, StateTransitionMessage,
@@ -78,8 +79,20 @@ impl UTXOState {
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut genesis_utxo_consumed = false;
+
+        if is_snapshot_mode {
+            if let Some(sub) = pool_registration_updates_subscription.as_mut() {
+                let _ = sub.read().await?;
+            }
+
+            if let Some(sub) = stake_registration_updates_subscription.as_mut() {
+                let _ = sub.read().await?;
+            }
+        }
+
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
@@ -257,6 +270,8 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
@@ -310,6 +325,7 @@ impl UTXOState {
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

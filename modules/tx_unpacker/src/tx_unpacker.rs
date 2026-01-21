@@ -32,14 +32,6 @@ mod test_utils;
 
 const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
-const DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "protocol-parameters-subscribe-topic",
-    "cardano.protocol.parameters",
-);
-const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "bootstrapped-subscribe-topic",
-    "cardano.sequence.bootstrapped",
-);
 
 const CIP25_METADATA_LABEL: u64 = 721;
 
@@ -67,15 +59,24 @@ impl TxUnpacker {
         publish_tx_validation_topic: Option<String>,
         // subscribers
         mut txs_sub: Box<dyn Subscription<Message>>,
-        mut bootstrapped_sub: Box<dyn Subscription<Message>>,
-        mut protocol_params_sub: Box<dyn Subscription<Message>>,
+        bootstrapped_sub: Option<Box<dyn Subscription<Message>>>,
+        mut protocol_params_sub: Option<Box<dyn Subscription<Message>>>,
     ) -> Result<()> {
-        let (_, bootstrapped_message) = bootstrapped_sub.read().await?;
-        let genesis = match bootstrapped_message.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
-                complete.values.clone()
+        let genesis = match bootstrapped_sub {
+            Some(mut sub) => {
+                let (_, bootstrapped_message) = sub.read().await?;
+                let genesis = match bootstrapped_message.as_ref() {
+                    Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                        complete.values.clone()
+                    }
+                    _ => panic!(
+                        "Unexpected message in genesis completion topic: {bootstrapped_message:?}"
+                    ),
+                };
+
+                Some(genesis)
             }
-            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+            None => None,
         };
 
         loop {
@@ -310,39 +311,44 @@ impl TxUnpacker {
             }
 
             if new_epoch {
-                let (_, protocol_parameters_msg) = protocol_params_sub.read().await?;
-                if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
-                    protocol_parameters_msg.as_ref()
-                {
-                    Self::check_sync(&current_block, block_info);
-                    let span = info_span!(
-                        "tx_unpacker.handle_protocol_params",
-                        block = block_info.number
-                    );
-                    span.in_scope(|| {
-                        state.handle_protocol_params(params);
-                    });
+                if let Some(ref mut sub) = protocol_params_sub {
+                    let (_, protocol_parameters_msg) = sub.read().await?;
+                    if let Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) =
+                        protocol_parameters_msg.as_ref()
+                    {
+                        Self::check_sync(&current_block, block_info);
+                        let span = info_span!(
+                            "tx_unpacker.handle_protocol_params",
+                            block = block_info.number
+                        );
+                        span.in_scope(|| {
+                            state.handle_protocol_params(params);
+                        });
+                    }
                 }
             }
 
             if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                    message.as_ref()
-                {
-                    let span = info_span!("tx_unpacker.validate", block = block.number);
-                    async {
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs) {
-                            validation_outcomes.push(*e);
-                        }
+                if let Some(ref genesis) = genesis {
+                    if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                        message.as_ref()
+                    {
+                        let span = info_span!("tx_unpacker.validate", block = block.number);
+                        async {
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs)
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(&context, publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                            validation_outcomes
+                                .publish(&context, publish_tx_validation_topic, block)
+                                .await
+                                .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
                 }
             }
 
@@ -389,25 +395,33 @@ impl TxUnpacker {
 
         let publish_tx_validation_topic = config.get_string("publish-tx-validation-topic").ok();
 
-        // Subscribers
+        // Main transaction subscriber
         let transactions_subscribe_topic = config
             .get_string(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{transactions_subscribe_topic}'");
-
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{bootstrapped_subscribe_topic}'");
-
-        let protocol_params_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{protocol_params_subscribe_topic}'");
-
         let txs_sub = context.subscribe(&transactions_subscribe_topic).await?;
-        let bootstrapped_sub = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let protocol_params_sub = context.subscribe(&protocol_params_subscribe_topic).await?;
+
+        // Optional subscription for parameters (only needed if we are validating)
+        let protocol_params_subscribe_topic =
+            config.get_string("protocol-parameters-subscribe-topic").ok();
+        let protocol_params_sub = match protocol_params_subscribe_topic {
+            Some(topic) => {
+                info!("Creating subscriber on '{topic}'");
+                Some(context.subscribe(&topic).await?)
+            }
+            None => None,
+        };
+
+        // Optional subscription for bootstrap (only needed if we are validating)
+        let bootstrapped_subscribe_topic = config.get_string("bootstrapped-subscribe-topic").ok();
+        let bootstrapped_sub = match bootstrapped_subscribe_topic {
+            Some(topic) => {
+                info!("Creating subscriber on '{topic}'");
+                Some(context.subscribe(&topic).await?)
+            }
+            None => None,
+        };
 
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();

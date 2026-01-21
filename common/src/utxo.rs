@@ -1,5 +1,5 @@
 use crate::{
-    Address, Datum, ReferenceScript, ShelleyAddressDelegationPart, StakeCredential, TxHash, Value,
+    Address, Datum, ScriptHash, ShelleyAddressDelegationPart, StakeCredential, TxHash, Value,
 };
 
 // Full UTXO identifier as used in the outside world, with TX hash and output index
@@ -64,8 +64,8 @@ pub struct UTXOValue {
     /// Datum
     pub datum: Option<Datum>,
 
-    /// Reference script
-    pub reference_script: Option<ReferenceScript>,
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 impl UTXOValue {

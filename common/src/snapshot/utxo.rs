@@ -199,7 +199,7 @@ impl SnapshotUTXOValue {
             address: address.0,
             value: value.0,
             datum,
-            reference_script: None,
+            reference_script_hash: None,
         }))
     }
 
@@ -211,6 +211,7 @@ impl SnapshotUTXOValue {
         let mut address: Option<Address> = None;
         let mut value: Option<Value> = None;
         let mut datum: Option<Datum> = None;
+        // TODO: pass reference scripts to script_state
         let mut reference_script: Option<ReferenceScript> = None;
 
         let entries = map_len.unwrap_or(4);
@@ -246,7 +247,7 @@ impl SnapshotUTXOValue {
                 address,
                 value,
                 datum,
-                reference_script,
+                reference_script_hash: reference_script.and_then(|s| s.compute_hash()),
             })),
             _ => Err(minicbor::decode::Error::message(
                 "map-based TxOut missing required fields",
@@ -581,7 +582,7 @@ mod tests {
                 assets: NativeAssets::default(),
             },
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         }
     }
 
@@ -691,7 +692,7 @@ mod tests {
         let utxo_value = result.unwrap().0;
         assert_eq!(utxo_value.value.lovelace, 2_000_000);
         assert!(utxo_value.datum.is_none());
-        assert!(utxo_value.reference_script.is_none());
+        assert!(utxo_value.reference_script_hash.is_none());
     }
 
     #[test]

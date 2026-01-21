@@ -8,7 +8,9 @@ use crate::{
     immutable_address_store::ImmutableAddressStore,
     state::{AddressStorageConfig, State},
 };
-use acropolis_common::{caryatid::SubscriptionExt, queries::errors::QueryError};
+use acropolis_common::{
+    caryatid::SubscriptionExt, configuration::StartupMode, queries::errors::QueryError,
+};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
@@ -27,7 +29,7 @@ mod volatile_addresses;
 
 // Subscription topics
 const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.delta");
+    ("address-deltas-subscribe-topic", "cardano.address.deltas");
 const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("parameters-subscribe-topic", "cardano.protocol.parameters");
 
@@ -51,9 +53,12 @@ impl AddressState {
         state_mutex: Arc<Mutex<State>>,
         mut address_deltas_subscription: Box<dyn Subscription<Message>>,
         mut params_subscription: Box<dyn Subscription<Message>>,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
-        let _ = params_subscription.read().await?;
-        info!("Consumed initial genesis params from params_subscription");
+        if !is_snapshot_mode {
+            let _ = params_subscription.read().await?;
+            info!("Consumed initial genesis params from params_subscription");
+        }
 
         // Background task to persist epochs sequentialy
         const MAX_PENDING_PERSISTS: usize = 1;
@@ -291,9 +296,11 @@ impl AddressState {
             let address_deltas_sub = context.subscribe(&address_deltas_subscribe_topic).await?;
             let params_sub = context.subscribe(&params_subscribe_topic).await?;
 
+            let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+
             // Start run task
             context.run(async move {
-                Self::run(state_run, address_deltas_sub, params_sub)
+                Self::run(state_run, address_deltas_sub, params_sub, is_snapshot_mode)
                     .await
                     .unwrap_or_else(|e| error!("Failed: {e}"));
             });

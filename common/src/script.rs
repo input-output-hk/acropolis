@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    crypto::keyhash_224, hash::Hash, AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta,
-    ProposalProcedure, ScriptHash, ShelleyAddressPaymentPart, StakeCredential,
-    TxCertificateWithPos, UTXOValue, UTxOIdentifier, VotingProcedures, Withdrawal,
+    crypto::{keyhash_224, keyhash_224_tagged},
+    hash::Hash,
+    AddrKeyhash, ExUnits, KeyHash, NativeAssetsDelta, ProposalProcedure, ScriptHash,
+    ShelleyAddressPaymentPart, StakeCredential, TxCertificateWithPos, UTXOValue, UTxOIdentifier,
+    VotingProcedures, Withdrawal,
 };
 
 pub type ScriptIntegrityHash = Hash<32>;
@@ -16,6 +18,17 @@ pub enum ReferenceScript {
     PlutusV1(Vec<u8>),
     PlutusV2(Vec<u8>),
     PlutusV3(Vec<u8>),
+}
+
+impl ReferenceScript {
+    pub fn compute_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ReferenceScript::Native(_) => None,
+            ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
+            ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
+            ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

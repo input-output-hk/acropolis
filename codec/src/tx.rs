@@ -1,9 +1,9 @@
 use crate::{
     address::map_address,
     certs::map_certificate,
-    map_all_governance_voting_procedures, map_alonzo_update, map_babbage_update,
-    map_governance_proposals_procedure, map_mint_burn, map_redeemer,
-    utxo::{map_datum, map_reference_script, map_value},
+    map_all_governance_voting_procedures, map_alonzo_update, map_babbage_update, map_datum,
+    map_governance_proposals_procedure, map_mint_burn, map_redeemer, map_reference_script_hash,
+    map_value,
     witness::{map_native_scripts, map_vkey_witnesses},
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
@@ -53,7 +53,7 @@ pub fn map_transaction_consumes_produces(
                         address,
                         value: map_value(&output.value()),
                         datum: map_datum(&output.datum()),
-                        reference_script: map_reference_script(&output.script_ref()),
+                        reference_script_hash: map_reference_script_hash(&output.script_ref()),
                     });
                 }
                 Err(e) => {

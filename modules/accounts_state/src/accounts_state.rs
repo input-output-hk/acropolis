@@ -54,13 +54,13 @@ const DEFAULT_TX_CERTIFICATES_TOPIC: &str = "cardano.certificates";
 const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
+const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_SPO_DISTRIBUTION_TOPIC: &str = "cardano.spo.distribution";
 const DEFAULT_SPO_REWARDS_TOPIC: &str = "cardano.spo.rewards";
-const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_STAKE_REWARD_DELTAS_TOPIC: &str = "cardano.stake.reward.deltas";
 const DEFAULT_STAKE_REGISTRATION_UPDATES_TOPIC: &str = "cardano.stake.registration.updates";
 const DEFAULT_VALIDATION_OUTCOMES_TOPIC: &str = "cardano.validation.accounts";
