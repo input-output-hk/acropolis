@@ -16,6 +16,10 @@
 - Q: What format for lessons database? → A: Markdown with YAML frontmatter per lesson block
 - Q: What sources to extract feedback from? → A: Review comments + PR description (not commit messages)
 
+### Session 2026-01-21
+
+- Q: Should agent modification be an explicit functional requirement? → A: Yes, add FR-011 for existing phase integration
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Capture PR Feedback After Merge (Priority: P1)
@@ -92,6 +96,7 @@ As a developer, I want to manually add lessons learned even without a PR context
 - **FR-008**: System MUST support manual lesson entry via command arguments when no PR context exists.
 - **FR-009**: System MUST preserve existing lessons when updating the database (append-only, no destructive updates).
 - **FR-010**: System MUST report a summary of captured lessons to the user upon completion.
+- **FR-011**: Existing speckit phases (specify, plan, implement) MUST be modified to read `docs/feedback/lessons.md` and incorporate relevant lessons as context when generating their outputs.
 
 ### Key Entities
 
