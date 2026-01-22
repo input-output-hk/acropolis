@@ -298,13 +298,6 @@ impl AccountsState {
                         vld.push_anyhow(anyhow!("Error publishing SPO stake distribution: {e:#}"))
                     }
 
-                    let drdd = state.generate_drdd();
-                    if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
-                        vld.push_anyhow(anyhow!(
-                            "Error publishing drep voting stake distribution: {e:#}"
-                        ))
-                    }
-
                     // store spdd history if enabled
                     let spdd_store_guard = match spdd_store.as_ref() {
                         Some(s) => Some(s.lock().await),
@@ -387,6 +380,13 @@ impl AccountsState {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
                                 })
                                 .ok();
+
+                            let drdd = state.generate_drdd();
+                            if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing drep voting stake distribution: {e:#}"
+                                ))
+                            }
                             if let Some(refund_deltas) = after_epoch_result {
                                 // publish stake reward deltas
                                 stake_reward_deltas.extend(refund_deltas);
