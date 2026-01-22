@@ -1,28 +1,14 @@
 ---
-title: Lessons Learned Database
-description: Accumulated lessons from PR reviews and manual entries
-last_updated: 2026-01-21
-total_lessons: 4
+pr_number: 606
+pr_title: "Script and consensus architecture rework"
+pr_url: "https://github.com/input-output-hk/acropolis/pull/606"
+extracted_date: 2026-01-21
+lesson_count: 4
 ---
 
-# Lessons Learned
+# Lessons from PR #606: Script and consensus architecture rework
 
-This file contains accumulated lessons from PR reviews and manual entries.
-Future speckit phases should read this file to avoid repeating past mistakes.
-
-## Categories
-
-- **code-quality**: Code style, idioms, best practices
-- **architecture**: System design, patterns, structure
-- **testing**: Test strategies, coverage, edge cases
-- **documentation**: Comments, READMEs, API docs
-- **security**: Auth, input validation, secrets
-- **performance**: Optimization, efficiency
-- **other**: Miscellaneous lessons
-
----
-
-<!-- Lessons are appended below this line -->
+## Lessons Extracted
 
 ---
 lesson_id: L001
@@ -31,7 +17,7 @@ tags: [consensus, messaging, rollback]
 source: pr
 source_ref: "PR #606"
 date: 2026-01-21
-frequency: 2
+frequency: 1
 ---
 
 When designing message flows, consider rollback scenarios from the start. Add explicit "rescind" or "withdraw" messages to handle cases where all peers roll back to before a particular block. This prevents orphaned state in consensus trees.
@@ -77,3 +63,5 @@ frequency: 1
 ---
 
 Use consistent grammatical voice for message naming. Prefer passive voice for state-change events (e.g., `.offered`, `.rescinded`) to clearly indicate something has happened rather than an imperative action.
+
+---
