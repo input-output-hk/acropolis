@@ -60,7 +60,7 @@ impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
             .utxos
             .iter()
             .filter(|entry| entry.value().address.is_redeem())
-            .map(|entry| entry.key().clone())
+            .map(|entry| *entry.key())
             .collect();
 
         // Remove them and collect the cancelled UTxOs

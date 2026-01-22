@@ -196,8 +196,8 @@ impl State {
             for (utxo_id, utxo) in &cancelled {
                 let delta = AddressDelta {
                     address: utxo.address.clone(),
-                    tx_identifier: tx_id.clone(),
-                    spent_utxos: vec![utxo_id.clone()],
+                    tx_identifier: tx_id,
+                    spent_utxos: vec![*utxo_id],
                     created_utxos: Vec::new(),
                     sent: utxo.value.clone(),
                     received: Value::new(0, Vec::new()),

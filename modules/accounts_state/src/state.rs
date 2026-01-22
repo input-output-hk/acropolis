@@ -4,17 +4,15 @@ use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::queries::get_query_topic;
-use acropolis_common::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC};
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
-        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
+        AccountsBootstrapMessage, AvvmCancellationMessage, DRepDelegationDistribution,
+        DRepStateMessage, EpochActivityMessage, GovernanceOutcomesMessage, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
@@ -26,7 +24,6 @@ use acropolis_common::{
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
-use caryatid_sdk::Context;
 use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -113,9 +110,6 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
-
-    /// Whether AVVM UTxOs have been cancelled (happens once at Allegra hard fork boundary)
-    avvm_cancelled: bool,
 }
 
 impl State {
@@ -323,46 +317,19 @@ impl State {
         Ok(())
     }
 
-    /// Apply AVVM cancellation at the Allegra hard fork boundary.
+    /// Handle AVVM cancellation at the Allegra hard fork boundary.
     /// This adds the value of cancelled AVVM UTxOs to reserves.
-    fn apply_avvm_cancellation(&mut self, avvm_cancelled: u64) {
+    /// Called when receiving an AvvmCancellation message from utxo_state.
+    pub fn handle_avvm_cancellation(&mut self, msg: &AvvmCancellationMessage) {
         let old_reserves = self.pots.reserves;
-        self.pots.reserves += avvm_cancelled;
+        self.pots.reserves += msg.cancelled_value;
         info!(
             new = self.pots.reserves,
             old = old_reserves,
-            avvm_returned = avvm_cancelled,
+            avvm_returned = msg.cancelled_value,
+            avvm_count = msg.cancelled_count,
             "AVVM cancellation at Allegra hard fork - returned to reserves"
         );
-    }
-
-    /// Cancel AVVM UTxOs at the Allegra hard fork boundary by querying the UTxO state module.
-    /// This is called from `enter_epoch` when entering the Allegra era.
-    async fn cancel_avvm_utxos(
-        &mut self,
-        context: Arc<Context<Message>>,
-        block_info: &BlockInfo,
-    ) -> Result<()> {
-        info!("Allegra boundary detected - querying UTxO state to cancel AVVM UTxOs");
-
-        let utxo_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
-        let query = Message::StateQuery(StateQuery::UTxOs(UTxOStateQuery::CancelRedeemUtxos {
-            block_info: block_info.clone(),
-        }));
-
-        let response = context.message_bus.request(&utxo_query_topic, Arc::new(query)).await?;
-        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
-
-        if let Message::StateQueryResponse(StateQueryResponse::UTxOs(
-            UTxOStateQueryResponse::RedeemUtxosCancelled { count, total_value },
-        )) = message
-        {
-            info!(count, total_value, "AVVM UTxOs cancelled - applying to reserves");
-            self.apply_avvm_cancellation(total_value);
-            Ok(())
-        } else {
-            Err(anyhow!("Unexpected response from UTxO state: {:?}", message))
-        }
     }
 
     /// Process entry into a new epoch
@@ -371,28 +338,15 @@ impl State {
     ///   total_blocks: Total blocks minted (both SPO and OBFT)
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     ///   verifier: Verifier against Haskell node output
-    ///   context: Caryatid context for making async queries
-    ///   block_info: Current block info (used for AVVM cancellation)
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     async fn enter_epoch(
         &mut self,
         epoch: u64,
-        era: Era,
+        _era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
-        context: Arc<Context<Message>>,
-        block_info: &BlockInfo,
     ) -> Result<Vec<StakeRewardDelta>> {
-        // AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet)
-        // This only happens once when we enter the Allegra era.
-        if !self.avvm_cancelled && era == Era::Allegra {
-            match self.cancel_avvm_utxos(context.clone(), block_info).await {
-                Ok(()) => self.avvm_cancelled = true,
-                Err(e) => error!("Failed to cancel AVVM UTxOs: {e}"),
-            }
-        }
-
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
         // TODO this will only work in Mainnet - need to know when Shelley starts across networks
@@ -913,7 +867,6 @@ impl State {
         ea_msg: &EpochActivityMessage,
         block_info: &BlockInfo,
         verifier: &Verifier,
-        context: Arc<Context<Message>>,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -947,8 +900,6 @@ impl State {
                 ea_msg.total_fees,
                 spo_blocks,
                 verifier,
-                context,
-                block_info,
             )
             .await?,
         );

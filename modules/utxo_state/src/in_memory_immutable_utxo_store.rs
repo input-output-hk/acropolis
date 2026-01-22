@@ -60,7 +60,7 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
         let keys_to_remove: Vec<_> = utxos
             .iter()
             .filter(|(_, utxo)| utxo.address.is_redeem())
-            .map(|(key, _)| key.clone())
+            .map(|(key, _)| *key)
             .collect();
 
         // Remove them and collect the cancelled UTxOs
