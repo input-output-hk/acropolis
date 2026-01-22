@@ -97,9 +97,6 @@ pub struct State {
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
-    /// Current epoch slot (updated by notify_block for use in registration change tracking)
-    current_epoch_slot: u64,
-
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
 
@@ -344,25 +341,6 @@ impl State {
             );
         }
 
-        // AVVM cancellation at Shelley→Allegra boundary (epoch 236 on mainnet)
-        // At the Allegra hard fork, Byron-era AVVM (Ada Voucher Vending Machine) addresses
-        // are cancelled and their value returned to reserves. This is handled by
-        // `returnRedeemAddrsToReserves` in the Cardano ledger Haskell code.
-        // See: cardano-ledger/eras/allegra/impl/src/Cardano/Ledger/Allegra/Translation.hs
-        // The exact amount is 299,052,044,652,388 lovelace (~299M ADA).
-        // TODO: This is mainnet-specific - need to handle other networks
-        if epoch == 236 {
-            const AVVM_RETURNED_TO_RESERVES: u64 = 299_052_044_652_388;
-            let old_reserves = self.pots.reserves;
-            self.pots.reserves += AVVM_RETURNED_TO_RESERVES;
-            info!(
-                new = self.pots.reserves,
-                old = old_reserves,
-                avvm_returned = AVVM_RETURNED_TO_RESERVES,
-                "AVVM cancellation at Allegra hard fork - returned to reserves"
-            );
-        }
-
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
@@ -564,9 +542,6 @@ impl State {
 
     /// Notify of a new block
     pub fn notify_block(&mut self, block: &BlockInfo) {
-        // Track current epoch slot for registration change timing
-        self.current_epoch_slot = block.epoch_slot;
-
         // Is the rewards task blocked on us reaching the 4 * k block?
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= STABILITY_WINDOW_SLOT {
