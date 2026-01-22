@@ -507,6 +507,8 @@ pub struct AccountsBootstrapMessage {
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
+
+    pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
 
 /// Deltas to apply to pots at epoch boundary during snapshot bootstrap

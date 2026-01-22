@@ -196,6 +196,9 @@ impl State {
         update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
         update_value_with_delta(&mut self.pots.deposits, deltas.delta_deposits)?;
 
+        // Apply DRep delegations (Used to reproduce PV9 deregistration bug)
+        self.drep_delegators = bootstrap_msg.drep_delegations.into();
+
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
              pots(reserves={}, treasury={}, deposits={})",
@@ -207,21 +210,6 @@ impl State {
             self.pots.treasury,
             self.pots.deposits,
         );
-
-        {
-            let stake_addresses = self.stake_addresses.lock().unwrap();
-
-            for (stake_address, sas) in stake_addresses.iter() {
-                if let Some(drep_choice) = &sas.delegated_drep {
-                    if let Some(drep_cred) = DRepChoice::to_credential(drep_choice) {
-                        self.drep_delegators
-                            .entry(drep_cred)
-                            .or_default()
-                            .insert(stake_address.clone());
-                    }
-                }
-            }
-        }
 
         Ok(())
     }
