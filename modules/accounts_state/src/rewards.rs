@@ -1,7 +1,6 @@
 //! Acropolis AccountsState: rewards calculations
 
 use acropolis_common::epoch_snapshot::{EpochSnapshot, SnapshotSPO};
-use acropolis_common::Era;
 use acropolis_common::{
     protocol_params::ShelleyParams, rational_number::RationalNumber, Lovelace, PoolId, RewardType,
     SPORewards, StakeAddress,
@@ -13,6 +12,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
+
+/// Last epoch of the Shelley era on mainnet (epoch 235)
+/// Used for Shelley-specific reward calculation bugs (late registration, shared reward accounts)
+const LAST_SHELLEY_EPOCH: u64 = 235;
+
+/// First epoch of the Babbage era on mainnet (epoch 365)
+/// Used for pre-Babbage reward rules (filterRewards bug, unregistered leader rewards)
+const FIRST_BABBAGE_EPOCH: u64 = 365;
 
 /// Reward Detail
 #[derive(Debug, Clone)]
@@ -60,7 +67,6 @@ pub struct RewardsResult {
 #[allow(clippy::too_many_arguments)]
 pub fn calculate_rewards(
     epoch: u64,
-    era: Era,
     performance: Arc<EpochSnapshot>,
     staking: Arc<EpochSnapshot>,
     params: &ShelleyParams,
@@ -68,6 +74,9 @@ pub fn calculate_rewards(
     registrations: &HashSet<StakeAddress>,
     deregistrations: &HashSet<StakeAddress>,
 ) -> Result<RewardsResult> {
+    // Determine which reward rules apply based on the epoch being rewarded
+    let is_shelley_rewards = epoch <= LAST_SHELLEY_EPOCH;
+    let is_pre_babbage = epoch < FIRST_BABBAGE_EPOCH;
     let mut result = RewardsResult {
         epoch,
         ..Default::default()
@@ -133,8 +142,8 @@ pub fn calculate_rewards(
         );
 
         // Also, to handle the early Shelley timing bug, we allow it if it was registered
-        // during the current epoch
-        if era == Era::Shelley && !pay_to_pool_reward_account {
+        // during the current epoch. Fixed in Allegra (hardforkAllegraAggregatedRewards).
+        if is_shelley_rewards && !pay_to_pool_reward_account {
             debug!(
                 "Checking old reward account {} for late registration",
                 staking_spo.reward_account
@@ -162,11 +171,11 @@ pub fn calculate_rewards(
             pay_to_pool_reward_account = false;
         }
 
-        if era == Era::Shelley {
+        // Shelley-only bug: if multiple SPOs shared a reward account, only one got paid.
+        // Fixed in Allegra (hardforkAllegraAggregatedRewards allows aggregation of all rewards).
+        if is_shelley_rewards {
             if pay_to_pool_reward_account {
-                // There was a bug in the original node from Shelley until Babbahe where if multiple SPOs
-                // shared a reward account, only one of them would get paid.
-                // QUESTION: Which one?  Lowest hash seems to work in epoch 212
+                // QUESTION: Which one wins? Lowest hash seems to work in epoch 212
                 // Check all SPOs to see if they match this reward account
                 for (other_id, other_spo) in staking.spos.iter() {
                     if other_spo.reward_account == staking_spo.reward_account
@@ -179,7 +188,7 @@ pub fn calculate_rewards(
                             > 0
                         {
                             pay_to_pool_reward_account = false;
-                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                            warn!("Shelley filterRewards bug: Dropping leader reward to {} in favour of {} on shared account {}",
                                   operator_id,
                                   other_id,
                                   staking_spo.reward_account);
@@ -207,7 +216,7 @@ pub fn calculate_rewards(
             staking.clone(),
             pay_to_pool_reward_account,
             deregistrations,
-            era,
+            is_pre_babbage,
         );
 
         if !rewards.is_empty() {
@@ -273,9 +282,8 @@ fn calculate_spo_rewards(
     staking: Arc<EpochSnapshot>,
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
-    era: Era,
+    is_pre_babbage: bool,
 ) -> Vec<RewardDetail> {
-    let is_pre_babbage = era < Era::Babbage;
 
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
