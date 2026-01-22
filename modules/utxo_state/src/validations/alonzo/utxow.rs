@@ -5,6 +5,13 @@ use acropolis_common::{
 };
 use std::collections::{HashMap, HashSet};
 
+pub fn validate_datums(
+    inputs: &[UTxOIdentifier],
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+) -> Result<(), Box<UTxOWValidationError>> {
+    Ok(())
+}
+
 pub fn validate_redeemers(
     inputs: &[UTxOIdentifier],
     redeemers: &[Redeemer],
@@ -13,6 +20,7 @@ pub fn validate_redeemers(
     Ok(())
 }
 
+/// There are new Alonzo UTxOW rules
 /// 1. MissingRedeemers
 /// 2. ExtraRedeemers
 /// 3. MissingRequiredDatums

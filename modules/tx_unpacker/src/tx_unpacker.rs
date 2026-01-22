@@ -195,7 +195,7 @@ impl TxUnpacker {
                                     }
 
                                     if publish_utxo_deltas_topic.is_some() {
-                                        let deltas = mapped_tx.convert_to_utxo_deltas(block.intent.do_validation());
+                                        let deltas = mapped_tx.convert_to_utxo_deltas(true);
                                         utxo_deltas.push(deltas);
                                     }
                                 }
