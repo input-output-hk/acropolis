@@ -188,7 +188,7 @@ pub fn calculate_rewards(
                             > 0
                         {
                             pay_to_pool_reward_account = false;
-                            warn!("Shelley filterRewards bug: Dropping leader reward to {} in favour of {} on shared account {}",
+                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
                                   operator_id,
                                   other_id,
                                   staking_spo.reward_account);
@@ -410,20 +410,30 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                if is_pre_babbage && is_reward_account {
-                    debug!(
-                        "Skipping pool reward account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
-                }
+                // Skip pool's reward address from member rewards
+                // This was a Shelley bug where the pool's reward address could get
+                // member rewards if it delegated to itself
+                if is_pre_babbage {
+                    // Check pool's reward address
+                    if is_reward_account {
+                        debug!(
+                            "Skipping pool reward account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
 
-                if is_pre_babbage && deregistrations.contains(delegator_stake_address) {
-                    info!(
-                        "Recently deregistered member account {}, losing {to_pay}",
-                        delegator_stake_address
-                    );
-                    continue;
+                    // Skip recently deregistered member accounts
+                    // In Cardano, addrsRew is captured at the stability window, so accounts
+                    // that deregister after the staking snapshot but before the stability window
+                    // should NOT receive member rewards. This applies to ALL pre-Babbage eras AFAIK.
+                    if deregistrations.contains(delegator_stake_address) {
+                        info!(
+                            "Recently deregistered member account {}, losing {to_pay}",
+                            delegator_stake_address
+                        );
+                        continue;
+                    }
                 }
 
                 // Transfer from reserves to this account
@@ -459,7 +469,6 @@ fn calculate_spo_rewards(
                 registered: true,
             });
         } else {
-            // Don't push - unregistered leader rewards stay in reserves in pre-Babbage eras
             info!(
                 "SPO {}'s reward account {} not registered - {} stays in reserves",
                 operator_id, spo.reward_account, spo_benefit,

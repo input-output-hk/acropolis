@@ -102,9 +102,6 @@ pub struct State {
     /// Addresses registration changes in current epoch
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
-    /// Current epoch slot (updated by notify_block for use in registration change tracking)
-    current_epoch_slot: u64,
-
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
 
@@ -569,9 +566,6 @@ impl State {
 
     /// Notify of a new block
     pub fn notify_block(&mut self, block: &BlockInfo) {
-        // Track current epoch slot for registration change timing
-        self.current_epoch_slot = block.epoch_slot;
-
         // Is the rewards task blocked on us reaching the 4 * k block?
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= STABILITY_WINDOW_SLOT {

@@ -59,19 +59,21 @@ There is also a great deeper dive into scripts on the
 
 ## New modules
 
-We introduce the following new modules for Phase 2 validation:
+We introduce a single module for Phase 2 validation:
 
-* [Script Store](../../modules/script_store) - captures reference scripts from UTxOs
-* [Script Validator](../../modules/script_validator) - fetches the script (if required), builds the Script Context and passes them to the Script Runner.  This is the module that issues the final validation response for consensus.
 * [Script Runner (uplc-turbo)](../../modules/script_runner_uplc_turbo) - the actual script interpreter, PRAGMA 'uplc-turbo' version
 
-The last two are split so we have the option of easily replacing the interpreter without
+The 'script runner' is split out so we have the option of easily replacing the interpreter without
 needing to duplicate the script context logic.  Initially we intend to use the Pragma/Amaru fork
 of the [uPLC interpreter](https://github.com/pragma-org/uplc) from the
 [Aiken project](https://aiken-lang.org), but we want the option to use the
 [original](https://github.com/aiken-lang/aiken/tree/main/crates/uplc) and/or
 to bundle the Haskell [Plutus Core interpreter](https://github.com/IntersectMBO/plutus) as
 an external microservice as well.
+
+The majority of the work is done by new functionality in the [UTXO State](../../modules/utxo_state),
+which stores scripts from UTxOs so they can be referenced later on and constructs the script
+context to send to the Script Runner.
 
 ## Module graph
 
@@ -93,8 +95,6 @@ flowchart LR
   CON(Consensus)
   KES(Block KES Validator)
   VRF(Block VRF Validator)
-  SCRIPTS(Script Store)
-  SCRIPTV(Script Validator)
   SCRIPTR(Script Runner uplc-turbo)
 
   GEN -- cardano.sequence.bootstrapped --> MSF
@@ -135,7 +135,7 @@ flowchart LR
   PARAM PARAM_DREP@-- cardano.protocol.parameters --> DREP
   PARAM PARAM_KES@-- cardano.protocol.parameters --> KES
   PARAM PARAM_VRF@-- cardano.protocol.parameters --> VRF
-  PARAM PARAM_SCRIPTV@ -- cardano.protocol.parameters --> SCRIPTV
+  PARAM PARAM_UTXO@ -- cardano.protocol.parameters --> UTXO
   GOV   GOV_PARAM@ -- cardano.enact.state --> PARAM
   GOV -- cardano.validation.governance --> CON
   ES   ES_AC@-- cardano.epoch.activity --> AC
@@ -143,10 +143,8 @@ flowchart LR
   DREP DREP_AC@-- cardano.drep.state --> AC
   KES -- cardano.validation.kes --> CON
   VRF -- cardano.validation.vrf --> CON
-  SCRIPTV SCRIPTV_SCRIPTS@-- cardano.script.lookup --> SCRIPTS
-  SCRIPTV SCRIPTV_SCRIPTR@-- cardano.script.run --> SCRIPTR
-  SCRIPTV SCRIPTV_UTXO@-- cardano.utxo.lookup --> UTXO
-  SCRIPTV -- cardano.validation.script --> CON
+  UTXO UTXO_SCRIPTR@-- cardano.script.run --> SCRIPTR
+  UTXO -- cardano.validation.script --> CON
 
   click GEN "https://github.com/input-output-hk/acropolis/tree/main/modules/genesis_bootstrapper/"
   click MSF "https://github.com/input-output-hk/acropolis/tree/main/modules/mithril_snapshot_fetcher/"
@@ -164,13 +162,9 @@ flowchart LR
   click CON "https://github.com/input-output-hk/acropolis/tree/main/modules/consensus/"
   click VRF "https://github.com/input-output-hk/acropolis/tree/main/modules/block_vrf_validator/"
   click KES "https://github.com/input-output-hk/acropolis/tree/main/modules/block_kes_validator/"
-  click SCRIPTS "https://github.com/input-output-hk/acropolis/tree/main/modules/script_store/"
-  click SCRIPTV "https://github.com/input-output-hk/acropolis/tree/main/modules/script_validator/"
-  click SCRIPTR "https://github.com/input-output-hk/acropolis/tree/main/modules/script_runner_uplc/"
+  click SCRIPTR "https://github.com/input-output-hk/acropolis/tree/main/modules/script_runner_uplc_turbo/"
 
   classDef NEW fill:#efe
-  class SCRIPTS NEW
-  class SCRIPTV NEW
   class SCRIPTR NEW
 
   classDef EPOCH stroke:#008
@@ -189,47 +183,15 @@ flowchart LR
   class PARAM_DREP EPOCH
   class PARAM_KES EPOCH
   class PARAM_VRF EPOCH
-  class PARAM_SCRIPTV EPOCH
+  class PARAM_UTXO EPOCH
 
   classDef REQ stroke:#800
-  class SCRIPTV_SCRIPTS REQ
-  class SCRIPTV_SCRIPTR REQ
-  class SCRIPTV_UTXO REQ
+  class UTXO_SCRIPTR REQ
 ```
 
 ## New modules
 
-We have now introduced the following new modules:
-
-### Script Store
-
-The [Script Store](../../modules/script_store) is a relatively simple module which captures
-reference scripts in transaction UTxOs (`cardano.utxo.scripts`), hashes them,
-and makes them available to be fetched by the Script Validator (`cardano.script.lookup`)
-when referenced by hash in later transactions.
-
-### Script Validator
-
-The new [Script Validator](../../modules/script_validator) is the glue of the script validation
-system.  It takes raw transactions (`cardano.txs`) from the Block Unpacker and unpacks them
-into everything required for the Script Context.  In this it duplicates what the Tx Unpacker does,
-but the outcome is an in-memory Script Context structure rather than a huge number of messages.
-Another option would be to subscribe to all the messages from the Tx Unpacker but this is probably
-less efficient than redoing the (fairly simple) CBOR decoding.
-
-*TODO: Validate this assumption*
-
-If one or more inputs in a transaction specify a reference script, it will look up the script
-by asking the Script Store with `cardano.script.lookup`.  It also needs the current cost model
-which it gets from protocol parameters on `cardano.protocol.parameters`.
-
-To get the datum of the UTxO being spent, it will need to look it up from the UTXO State with a
-`cardano.utxo.lookup` request.
-
-Armed with all this information, it can then ask the Script Runner to run the script, passing
-all the parameters in a `cardano.script.run` request.  The result is success or an error code,
-which the Script Validator can turn into a `cardano.validation.script` validation result for
-consensus.
+We have introduced one new module:
 
 ### Script Runner
 
@@ -241,6 +203,24 @@ result.
 
 In the future we may want to use other interpreters, including the option of wrapping the
 Haskell Plutus Core interpreter in an external microservice.
+
+## Extensions to existing modules
+
+### UTXO State
+
+The [UTXO State](../../modules/utxo_state) module will now store the scripts it sees in
+transaction outputs, indexed by their hash.  This allows it to look up a reference script
+quoted in the 'redeemer' part of an input.
+
+It already has the rest of the information it needs to construct the script context - it can get
+the relevant parts of the transaction from the UTXODelta message from the Tx Unpacker, and can
+look up the datum of the UTxO being spent in its own UTxO store.  It also needs the current cost
+model which it gets from protocol parameters on `cardano.protocol.parameters`.
+
+Armed with all this information, it can then ask the Script Runner to run the script, passing
+all the parameters in a `cardano.script.run` request.  The result is success or an error code,
+which the UTXO State can turn into a `cardano.validation.script` validation result for
+consensus.
 
 ## Configuration
 TODO
