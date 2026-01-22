@@ -237,8 +237,8 @@ impl ConwayVoting {
         let accepted = if let Some(accept_epoch) = self.cfg.manual_governance.get(action_id) {
             let accepted = *accept_epoch == new_epoch;
             warn!(
-                "Manual governance override for action {}, to be accepted at epoch {}, result {}",
-                action_id, new_epoch, accepted
+                "Manual governance override for action {}: to be accepted at epoch {}, this epoch result {}",
+                action_id, accept_epoch, accepted
             );
             accepted
         } else {

@@ -139,13 +139,19 @@ store-drdd = false
 stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
 manual-governance-params = {
-    # Specify real epoch when the action is ratified.
-    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlp730y0dn"=576,
-    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlpz4s2af8"=576,
+    # Specify epoch border when the action is expected to be ratified.
+    # For epoch border E/E+1 value E+1 is to be specified.
+    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlp730y0dn"=575,
+    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlpz4s2af8"=575,
+    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlpcdq823y"=577,
+    "gov_action1g7sw0f8e8qa34lppj2erksvzf4j6e9udwaq6efslc8apdqeazygsq2spyyt"=580,
 
     # Specify 0 if action is to be rejected.
-    "gov_action13tfag48nf94rtjcdq7c06vhkslmxxw9h6c88sl7q5g5nnewcsvlpcdq823y"=0,
-    "gov_action1g7sw0f8e8qa34lppj2erksvzf4j6e9udwaq6efslc8apdqeazygsq2spyyt"=0,
+    "gov_action1jr84r96lnsvu9yd6c0jhxe9gj5r7vnd2pgkntc6klplxdpyzz4tqqc9uldx"=0,
+    "gov_action1u4jrcvlkppjzuv5j9z5ksacwtvv77h6glu0knpcjut8gvjjfu0cqqt3alsy"=0,
+    "gov_action1n9hdlcmshrj3hee4g8n4fxdgrprpxp0r03l6psd3j0evtpck0nrsqm57age"=0,
+    "gov_action16tdkp3fs0j6303e4utgp8rftdug0ckezr4sslgv8wxdaeq40ngpsq5sr06h"=0,
+    "gov_action1ezp0r9rgf4njx93p9uq7l3kjs9m739jm0ntf26vplcmucec4jc0qqxjlfrc"=0
 }
 
 [module.parameters-state]

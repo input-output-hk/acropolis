@@ -264,7 +264,7 @@ impl VotingRegistrationState {
         // SPO vote thresholds
         // TODO: always abstain, no confidence spo's (present in Haskell code, for bootstrap)
         let spo_ratio =
-            RationalNumber::new(votes.pool.yes, self.registered_spos - votes.pool.abstain);
+            Self::safe_rational(votes.pool.yes, self.registered_spos - votes.pool.abstain)?;
 
         Ok(VoteResult::<RationalNumber>::new(
             committee_ratio,

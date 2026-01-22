@@ -82,8 +82,8 @@ for s in acropolis:
         if ty == "InfoAction":
             ty = "Information"
         if ty != sl[8]: print (sl[0], "types do not match: `",ty,"` `",sl[8],"`\n")
-        if re != strip_some(sl[11]): print (sl[0], "ratifications do not match: `",re,"` `",sl[11],"`\n")
-        if en != strip_some(sl[12]): print (sl[0], "enactments do not match: `",en,"` `",sl[12],"`\n")
-        if ex != strip_some(sl[14]): print (sl[0], "expirations do not match: `",ex,"` `",sl[14],"`\n")
+        if re != strip_some(sl[11]): print (idx,sl[0], "ratifications do not match: `",re,"` `",sl[11],"`\n")
+        if en != strip_some(sl[12]): print (idx,sl[0], "enactments do not match: `",en,"` `",sl[12],"`\n")
+        if ex != strip_some(sl[14]): print (idx,sl[0], "expirations do not match: `",ex,"` `",sl[14],"`\n")
 
 print("Total found records: ",found,"\n")
