@@ -111,7 +111,7 @@ pub struct State {
     /// Maps a DRep credential to stake credentials that have delegated to it
     /// during its current lifetime, along with the certificate pointer
     /// of the delegation.
-    drep_delegators: OrdMap<DRepCredential, OrdMap<StakeAddress, TxCertificateIdentifier>>,
+    drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
@@ -214,13 +214,10 @@ impl State {
             for (stake_address, sas) in stake_addresses.iter() {
                 if let Some(drep_choice) = &sas.delegated_drep {
                     if let Some(drep_cred) = DRepChoice::to_credential(drep_choice) {
-                        self.drep_delegators.entry(drep_cred).or_default().insert(
-                            stake_address.clone(),
-                            TxCertificateIdentifier {
-                                tx_identifier: Default::default(),
-                                cert_index: 0,
-                            },
-                        );
+                        self.drep_delegators
+                            .entry(drep_cred)
+                            .or_default()
+                            .insert(stake_address.clone());
                     }
                 }
             }
@@ -1113,12 +1110,7 @@ impl State {
     }
 
     /// record a DRep delegation
-    fn record_drep_delegation(
-        &mut self,
-        stake_address: &StakeAddress,
-        drep: &DRepChoice,
-        pointer: &TxCertificateIdentifier,
-    ) {
+    fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
         let _previous_drep = {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             stake_addresses
@@ -1127,31 +1119,22 @@ impl State {
         };
 
         if let Some(new_cred) = DRepChoice::to_credential(drep) {
-            self.drep_delegators
-                .entry(new_cred)
-                .or_default()
-                .insert(stake_address.clone(), pointer.clone());
+            self.drep_delegators.entry(new_cred).or_default().insert(stake_address.clone());
         }
     }
 
     /// Record a DRep deregistration
-    fn record_drep_deregistration(
-        &mut self,
-        drep: &DRepCredential,
-        dereg_pointer: &TxCertificateIdentifier,
-    ) {
+    fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
         self.dreps.retain(|(cred, _)| cred != drep);
 
         // Only needed for Conway PV9
         if let Some(delegators) = self.drep_delegators.remove(drep) {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
 
-            for (stake_address, deleg_pointer) in delegators {
+            for stake_address in delegators {
                 // This comparison is the *actual* ledger rule
-                if deleg_pointer < *dereg_pointer {
-                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
-                        sas.delegated_drep = None;
-                    }
+                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                    sas.delegated_drep = None;
                 }
             }
         }
@@ -1234,20 +1217,12 @@ impl State {
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(
-                        &delegation.stake_address,
-                        &delegation.drep,
-                        &tx_cert.tx_certificate_identifier(),
-                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(
-                        &delegation.stake_address,
-                        &delegation.drep,
-                        &tx_cert.tx_certificate_identifier(),
-                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -1277,11 +1252,7 @@ impl State {
                             outcome,
                         });
                     }
-                    self.record_drep_delegation(
-                        &delegation.stake_address,
-                        &delegation.drep,
-                        &tx_cert.tx_certificate_identifier(),
-                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
@@ -1298,11 +1269,7 @@ impl State {
                     }
 
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(
-                        &delegation.stake_address,
-                        &delegation.drep,
-                        &tx_cert.tx_certificate_identifier(),
-                    );
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
@@ -1310,10 +1277,7 @@ impl State {
                 }
 
                 TxCertificate::DRepDeregistration(dereg) => {
-                    self.record_drep_deregistration(
-                        &dereg.credential,
-                        &tx_cert.tx_certificate_identifier(),
-                    );
+                    self.record_drep_deregistration(&dereg.credential);
                 }
 
                 _ => (),
