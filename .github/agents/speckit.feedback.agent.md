@@ -36,6 +36,7 @@ Analyze the `$ARGUMENTS` input to determine the operation mode:
 Parse these optional flags:
 - `--pr <number>`: Specific PR to extract feedback from
 - `--category <category>`: Category for manual lesson (code-quality, architecture, testing, documentation, security, performance, other)
+- `--no-commit`: Skip the auto-commit/PR step and leave files for manual commit
 
 ### Step 2: Ensure Directory Structure
 
@@ -161,6 +162,47 @@ Output a summary to the user:
    Category: <category>
 
 📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
+```
+
+### Step 6: Commit and Merge to Main (unless --no-commit)
+
+Check if `--no-commit` flag was provided:
+
+**With `--no-commit` flag**:
+- Skip the commit/merge step entirely
+- Report: `📁 Files saved locally (--no-commit specified). Commit manually when ready.`
+
+**Default behavior** (no `--no-commit` flag):
+
+After updating the lesson files, guide the user to commit and run the helper script:
+
+1. First, commit the lesson changes to the current branch:
+   ```bash
+   git add docs/feedback/
+   git commit -m "chore(feedback): capture lessons from PR #<number>"
+   ```
+
+2. Then run the commit-lessons script:
+   ```bash
+   .specify/scripts/bash/commit-lessons.sh <pr_number>
+   ```
+
+The script will:
+- Create a fresh branch from `origin/main`
+- Copy the lesson files from your current branch
+- Push and create a PR with auto-merge enabled
+- Leave you on the new lessons branch
+
+**Important**: The script requires a clean working tree. All changes must be committed before running it.
+
+**Expected Output** (from the script):
+```
+🚀 Created PR to merge lessons into main
+📋 PR: https://github.com/org/repo/pull/123
+✅ Auto-merge enabled (will merge when checks pass)
+
+📍 You are now on branch: chore/feedback-pr-<number>
+💡 To return to your work: git checkout <original-branch>
 ```
 
 ## Lesson Entry Format
