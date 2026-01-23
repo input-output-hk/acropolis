@@ -41,7 +41,10 @@ impl From<TestContextJson> for TestContext {
                             address: Address::from_string(&v.address).unwrap(),
                             value: v.value.clone(),
                             datum: v.datum.clone(),
-                            reference_script: v.reference_script.clone(),
+                            reference_script_hash: v
+                                .reference_script
+                                .clone()
+                                .and_then(|s| s.compute_hash()),
                         },
                     )
                 })
