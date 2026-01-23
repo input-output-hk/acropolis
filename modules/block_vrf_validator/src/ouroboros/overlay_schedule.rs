@@ -9,7 +9,7 @@ use acropolis_common::{
     rational_number::RationalNumber, GenesisDelegate, GenesisDelegates, GenesisKeyhash,
 };
 use anyhow::Result;
-use num_traits::ToPrimitive;
+use num_traits::Zero;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OBftSlot {
@@ -17,6 +17,18 @@ pub enum OBftSlot {
     NonActiveSlot,
     /// Active overlay slot reserved for specific genesis key
     ActiveSlot(GenesisKeyhash, GenesisDelegate),
+}
+
+/// step function: ceiling of (x * d)
+/// NOTE:
+/// This function assumes decentralisation_param is a valid rational number.
+fn step(epoch_slot: u64, decentralisation_param: &RationalNumber) -> u64 {
+    let numerator = *decentralisation_param.numer();
+    let denominator = *decentralisation_param.denom();
+
+    let product = epoch_slot * numerator;
+
+    product.div_ceil(denominator)
 }
 
 /// Determine if the given slot is reserved for the overlay schedule.
@@ -33,14 +45,13 @@ pub enum OBftSlot {
 /// since this block is produced by genesis key (without "lottery")
 /// https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/TPraos.hs#L334
 pub fn is_overlay_slot(epoch_slot: u64, decentralisation_param: &RationalNumber) -> Result<bool> {
-    let d = decentralisation_param
-        .to_f64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert decentralisation parameter to f64"))?;
+    if decentralisation_param.denom().is_zero() {
+        return Err(anyhow::anyhow!("decentralisation_param denominator is 0"));
+    }
 
-    // step function: ceiling of (x * d)
-    let step = |x: f64| (x * d).ceil() as i64;
-
-    Ok(step(epoch_slot as f64) < step((epoch_slot as f64) + 1.0))
+    let step1 = step(epoch_slot, decentralisation_param);
+    let step2 = step(epoch_slot + 1, decentralisation_param);
+    Ok(step1 < step2)
 }
 
 /// Classify a slot in the overlay schedule, determining which genesis node
@@ -60,22 +71,18 @@ pub fn classify_overlay_slot(
     decentralisation_param: &RationalNumber,
     active_slots_coeff: &RationalNumber,
 ) -> Result<OBftSlot> {
-    let d = decentralisation_param
-        .to_f64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert decentralisation parameter to f64"))?;
-    let position = (epoch_slot as f64 * d).ceil() as i64;
+    if decentralisation_param.denom().is_zero() {
+        return Err(anyhow::anyhow!("decentralisation_param denominator is 0"));
+    }
+
+    let position = step(epoch_slot, decentralisation_param);
 
     // Calculate active slot coefficient inverse
-    let asc_inv = active_slots_coeff
-        .recip()
-        .to_f64()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert active slots coefficient to f64"))?
-        .floor() as i64;
-
-    let is_active = position % asc_inv == 0;
+    let asc_inv = active_slots_coeff.recip().to_integer();
+    let is_active = position.is_multiple_of(asc_inv);
 
     if is_active {
-        let genesis_idx = ((position / asc_inv) % genesis_delegs.as_ref().len() as i64) as usize;
+        let genesis_idx = ((position / asc_inv) % genesis_delegs.as_ref().len() as u64) as usize;
 
         // Get the element at index from the set
         let (key_hash, gen_deleg) = genesis_delegs.as_ref().iter().nth(genesis_idx).unwrap();

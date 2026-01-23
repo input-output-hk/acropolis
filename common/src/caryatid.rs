@@ -80,12 +80,11 @@ pub enum RollbackWrapper<T> {
 }
 
 /// Declares locally tailored cardano reader struct, providing a lightweight wrapper around
-/// Subscribers from topics.
-/// Main intention is get rid of boilerplate code:
-/// (a) topic declaration, config param reading, reader initialization
-/// (b) reading from the topic and retriving data, attached to Cardano::`msg_constructor`
-/// constructor; all other constructors are ignored, rollbacks are processed according to
-/// function.
+/// Subscribers from topics. The Main intention is to get rid of boilerplate code, and simplify:
+/// (a) topic configuration, config parameters reading and reader initialization;
+/// (b) data reading from the topic subscriber. The data are taken from the enum constructor
+/// by the functions, provided in the struct being declared, so that the user does not need to
+/// manually specify pattern matching code.
 #[macro_export]
 macro_rules! declare_cardano_reader {
     ($reader_name:ident, $param:expr, $def_topic:expr, $msg_constructor:ident, $msg_type:ty) => {
@@ -153,6 +152,9 @@ macro_rules! declare_cardano_reader {
                 }
             }
 
+            /// Reads message, returning rollback messages as well.
+            /// Unexpected message (not applicable to the topic and not a rollback)
+            /// results in error.
             pub async fn read_with_rollbacks(&mut self) -> Result<RollbackWrapper<$msg_type>> {
                 let res = self.sub.read().await?.1;
                 match res.as_ref() {
@@ -167,6 +169,10 @@ macro_rules! declare_cardano_reader {
                 }
             }
 
+            /// Reads message and takes it out of the enum constructor, rollbacks are skipped
+            /// (the function does not return until topic message is read).
+            /// Other unexpected messages (not applicable to the topic and not a rollback)
+            /// results in error.
             pub async fn read_skip_rollbacks(
                 &mut self,
             ) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
