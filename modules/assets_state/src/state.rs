@@ -858,7 +858,7 @@ mod tests {
                 )],
             },
             datum: datum.map(Datum::Inline),
-            reference_script: None,
+            reference_script_hash: None,
         }
     }
 
