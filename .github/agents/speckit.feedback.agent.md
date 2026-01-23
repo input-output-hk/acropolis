@@ -185,23 +185,40 @@ Output a summary to the user:
 
 ### Step 6: Commit Changes (if --commit flag) or Prompt
 
+**IMPORTANT**: This step runs for ALL modes (PR extraction, manual entry) whenever there are changes to `docs/feedback/`. Always check for uncommitted changes and proceed with commit if `--commit` flag is present.
+
 Since feedback is captured before the PR is merged, the lessons files can be committed directly to the current feature branch.
 
 **If `--commit` flag is present**:
 
-Run the following git commands (get current branch name first):
+First, check if there are any uncommitted changes to docs/feedback/:
+```bash
+git status --short docs/feedback/
+```
+
+If there are changes, run the following git commands (get current branch name first):
 
 ```bash
 git add docs/feedback/
-git commit -m "chore(feedback): capture lessons from PR #<number>"
+git commit -m "chore(feedback): <describe changes - PR lessons or manual entry>"
 git push origin <current-branch>
 ```
 
-**Output**:
+Use appropriate commit message:
+- PR extraction: `"chore(feedback): capture lessons from PR #<number>"`
+- Manual entry: `"chore(feedback): add manual lesson L<id>"`
+- Mixed: `"chore(feedback): update lessons database"`
+
+If no changes are pending, skip the commit and report:
+```
+ℹ️ No uncommitted changes to docs/feedback/ - nothing to commit.
+```
+
+**Output** (when changes committed):
 ```
 ✅ Changes committed and pushed!
    git add docs/feedback/
-   git commit -m "chore(feedback): capture lessons from PR #<number>"
+   git commit -m "chore(feedback): ..."
    git push origin <current-branch>
 
 Your lessons are now part of the PR - ready to merge!
