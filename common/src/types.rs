@@ -904,6 +904,10 @@ pub struct RegistrationChange {
 
     /// Change type
     pub kind: RegistrationChangeKind,
+
+    /// Epoch slot when this change occurred (for Shelley-era filtering)
+    #[serde(default)]
+    pub epoch_slot: u64,
 }
 
 /// Rational number = numerator / denominator
