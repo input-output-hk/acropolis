@@ -128,8 +128,12 @@ A per-PR file containing lessons extracted from a specific pull request.
 
 ## Example File: Lesson Entry
 
+Each lesson in the central database uses a markdown heading with a fenced YAML metadata block:
+
+```markdown
+### L042
+
 ```yaml
----
 lesson_id: L042
 category: code-quality
 tags: [rust, error-handling, panic]
@@ -137,10 +141,12 @@ source: pr
 source_ref: "PR #123"
 date: 2026-01-20
 frequency: 3
----
+```
 
 Prefer `expect("descriptive message")` over `unwrap()` to provide context when a panic occurs. This improves debugging by showing what operation failed and why it was unexpected.
 ```
+
+**Note**: This format avoids ambiguous `---` YAML document separators between lessons. Each lesson is separated by blank lines.
 
 ---
 

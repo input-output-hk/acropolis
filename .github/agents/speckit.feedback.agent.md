@@ -226,10 +226,12 @@ This simplified workflow means:
 
 ## Lesson Entry Format
 
-Each lesson in the database follows this format:
+Each lesson in the central database uses a markdown heading with a fenced YAML metadata block:
 
 ```markdown
----
+### L###
+
+```yaml
 lesson_id: L###
 category: <category>
 tags: [tag1, tag2]
@@ -237,10 +239,12 @@ source: pr | manual
 source_ref: "PR #123" | "Manual entry YYYY-MM-DD"
 date: YYYY-MM-DD
 frequency: 1
----
+```
 
 <Lesson content in plain text or markdown>
 ```
+
+**Note**: Lessons are separated by blank lines. Do NOT use `---` separators between lessons to avoid ambiguous YAML parsing.
 
 ## Categories Reference
 
