@@ -55,7 +55,7 @@ pub fn validate(
 mod tests {
     use super::*;
     use crate::{test_utils::TestContext, validation_fixture};
-    use acropolis_common::{TxHash, UTxOIdentifier};
+    use acropolis_common::{Era, NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
     use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
     use std::str::FromStr;
     use test_case::test_case;
@@ -82,13 +82,17 @@ mod tests {
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
         let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            Era::Shelley,
+        );
+        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[]);
 
-        validate(
-            &tx_inputs,
-            Value::default(),
-            Value::new(143945663102, vec![]),
-            &ctx.utxos,
-        )
-        .map_err(|e| *e)
+        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }
 }
