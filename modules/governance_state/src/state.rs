@@ -1,7 +1,7 @@
 //! Acropolis Governance State: State storage
 
 use crate::{
-    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting,
+    alonzo_babbage_voting::AlonzoBabbageVoting, conway_voting::ConwayVoting, GovernanceStateConfig,
     VotingRegistrationState,
 };
 use acropolis_common::validation::ValidationOutcomes;
@@ -38,20 +38,16 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        context: Arc<Context<Message>>,
-        enact_state_topic: String,
-        verification_output_file: Option<String>,
-    ) -> Self {
+    pub fn new(context: Arc<Context<Message>>, config: Arc<GovernanceStateConfig>) -> Self {
         Self {
-            publisher: RollbackAwarePublisher::new(context, enact_state_topic),
+            publisher: RollbackAwarePublisher::new(context, config.enact_state_topic.clone()),
 
             drep_stake_messages_count: 0,
 
             current_era: Era::default(),
 
             alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file),
+            conway_voting: ConwayVoting::new(config.clone()),
 
             drep_stake: HashMap::new(),
             drep_no_confidence: 0,

@@ -16,8 +16,10 @@ mod tests {
         collections::{BTreeMap, HashMap},
         ops::Bound::Included,
         str::FromStr,
+        sync::Arc,
     };
 
+    use crate::GovernanceStateConfig;
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
 
@@ -276,8 +278,9 @@ mod tests {
             let shelley = cfg.shelley.as_ref().unwrap();
             let conway = cfg.conway.as_ref().unwrap();
             let bootstrap = shelley.protocol_params.protocol_version.major <= 9;
+            let run_config = Arc::new(GovernanceStateConfig::default());
 
-            let mut conway_voting = ConwayVoting::new(None);
+            let mut conway_voting = ConwayVoting::new(run_config);
             conway_voting.update_parameters(&cfg.conway, bootstrap);
             conway_voting
                 .insert_proposal_procedure(record.start_epoch, &record.proposal_procedure)?;

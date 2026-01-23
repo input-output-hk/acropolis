@@ -1,10 +1,9 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::configuration::StartupMode;
-use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::SubscriptionExt,
+    configuration::StartupMode,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
@@ -16,12 +15,13 @@ use acropolis_common::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
-    BlockInfo,
+    validation::ValidationOutcomes,
+    BlockInfo, GovActionId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
@@ -47,6 +47,7 @@ const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
+const MANUAL_GOVERNANCE_PARAMS: &str = "manual-governance-params";
 
 /// Governance State module
 #[module(
@@ -56,6 +57,7 @@ const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 )]
 pub struct GovernanceState;
 
+#[derive(Default)]
 pub struct GovernanceStateConfig {
     governance_topic: String,
     drep_distribution_topic: Option<String>,
@@ -65,6 +67,7 @@ pub struct GovernanceStateConfig {
     governance_query_topic: String,
     validation_outcome_topic: String,
     snapshot_subscribe_topic: String,
+    manual_governance: HashMap<GovActionId, u64>,
     verification_output_file: Option<String>,
 }
 
@@ -83,8 +86,25 @@ impl GovernanceStateConfig {
         actual
     }
 
-    pub fn new(config: &Arc<Config>) -> Arc<Self> {
-        Arc::new(Self {
+    fn read_manual_governance(
+        config: &Arc<Config>,
+        key: &str,
+    ) -> Result<HashMap<GovActionId, u64>> {
+        let mut res = HashMap::<GovActionId, u64>::new();
+        if let Ok(table) = config.get_table(key) {
+            for (id_str, epoch) in table {
+                let gov_id = GovActionId::from_bech32(&id_str)?;
+                let epoch = epoch.into_uint().map_err(|e| {
+                    anyhow!("Invalid epoch number for manual governance action {id_str}: {e}")
+                })?;
+                res.insert(gov_id, epoch);
+            }
+        }
+        Ok(res)
+    }
+
+    pub fn new(config: &Arc<Config>) -> Result<Arc<Self>> {
+        Ok(Arc::new(Self {
             governance_topic: Self::conf(config, CONFIG_GOVERNANCE_TOPIC),
             drep_distribution_topic: Self::conf_option(config, CONFIG_DREP_DISTRIBUTION_TOPIC),
             spo_distribution_topic: Self::conf_option(config, CONFIG_SPO_DISTRIBUTION_TOPIC),
@@ -93,11 +113,12 @@ impl GovernanceStateConfig {
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             validation_outcome_topic: Self::conf(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
             snapshot_subscribe_topic: Self::conf(config, CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC),
+            manual_governance: Self::read_manual_governance(config, MANUAL_GOVERNANCE_PARAMS)?,
             verification_output_file: config
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
                 .unwrap_or(None),
-        })
+        }))
     }
 }
 
@@ -168,11 +189,7 @@ impl GovernanceState {
         mut spo_s: Option<Box<dyn Subscription<Message>>>,
         mut protocol_s: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        let state = Arc::new(Mutex::new(State::new(
-            context.clone(),
-            config.enact_state_topic.clone(),
-            config.verification_output_file.clone(),
-        )));
+        let state = Arc::new(Mutex::new(State::new(context.clone(), config.clone())));
 
         // Wait for snapshot bootstrap if subscription is provided
         if let Some(subscription) = snapshot_subscription {
@@ -346,7 +363,7 @@ impl GovernanceState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let cfg = GovernanceStateConfig::new(&config);
+        let cfg = GovernanceStateConfig::new(&config)?;
 
         // Subscribe for snapshot bootstrap if starting from snapshot
         let snapshot_subscription = if StartupMode::from_config(config.as_ref()).is_snapshot() {
