@@ -34,6 +34,9 @@ info() {
 # Check for gh CLI
 command -v gh >/dev/null 2>&1 || error "GitHub CLI (gh) is required but not installed."
 
+# Check for jq
+command -v jq >/dev/null 2>&1 || error "jq is required but not installed. Install with: brew install jq"
+
 # Verify authentication
 gh auth status >/dev/null 2>&1 || error "Not authenticated with GitHub. Run 'gh auth login' first."
 

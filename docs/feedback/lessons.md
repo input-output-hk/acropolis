@@ -20,8 +20,6 @@ Future speckit phases should read this file to avoid repeating past mistakes.
 - **performance**: Optimization, efficiency
 - **other**: Miscellaneous lessons
 
----
-
 <!-- Lessons are appended below this line -->
 
 ---
@@ -37,8 +35,6 @@ frequency: 2
 When designing message flows, consider rollback scenarios from the start. Add explicit "rescind" or "withdraw" messages to handle cases where all peers roll back to before a particular block. This prevents orphaned state in consensus trees.
 
 ---
-
----
 lesson_id: L002
 category: architecture
 tags: [consensus, chain-store, separation-of-concerns]
@@ -51,8 +47,6 @@ frequency: 1
 Question component responsibilities early in design reviews. If a downstream component (like chain store) can achieve its goal by simply listening to an existing message stream, it may not need explicit changes—keeping designs simpler.
 
 ---
-
----
 lesson_id: L003
 category: architecture
 tags: [mithril, consensus, immutable-data]
@@ -63,8 +57,6 @@ frequency: 1
 ---
 
 Immutable data sources (like Mithril snapshots) can skip interactive flows (offer/wanted) and go directly to "favoured chain" status. Design consensus to recognize immutable blocks and optionally skip validation for trusted sources.
-
----
 
 ---
 lesson_id: L004

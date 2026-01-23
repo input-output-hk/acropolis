@@ -84,8 +84,8 @@ A per-PR file containing lessons extracted from a specific pull request.
 
 **Lifecycle**:
 1. Created when `/speckit.feedback` runs for a PR
-2. Never updated after creation (historical record)
-3. Duplicate run detection: if file exists, prompt user to overwrite or skip
+2. Updated incrementally on subsequent runs (new lessons merged with existing)
+3. Duplicate detection: new lessons are compared to existing; duplicates are skipped, new lessons are appended
 
 ---
 
