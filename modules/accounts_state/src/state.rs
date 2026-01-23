@@ -43,6 +43,10 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 /// Used to determine which reward rules apply (Shelley vs Allegra+)
 const LAST_SHELLEY_EPOCH: u64 = 235;
 
+/// First epoch of Alonzo era on mainnet (epoch 290)
+/// Used to determine MIR semantics (override vs sum)
+const FIRST_ALONZO_EPOCH: u64 = 290;
+
 /// Stability window = slots into epoch at which Haskell node starts the rewards calculation
 // We need this because of a Shelley-era bug where stake deregistrations were still counted
 // up to the point of start of the calculation, rather than point of snapshot
@@ -115,6 +119,19 @@ pub struct State {
 
     /// Flag to track if AVVM cancellation has been handled (happens once at Allegra boundary)
     avvm_handled: bool,
+
+    /// Pending MIRs from reserves to be applied at epoch boundary
+    /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
+    /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
+    pending_mir_reserves: HashMap<StakeAddress, i64>,
+
+    /// Pending MIRs from treasury to be applied at epoch boundary
+    /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
+    /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
+    pending_mir_treasury: HashMap<StakeAddress, i64>,
+
+    /// Current epoch number (set when entering each epoch)
+    current_epoch: u64,
 }
 
 impl State {
@@ -908,6 +925,8 @@ impl State {
         // - Pools retiring this epoch (self.retiring_spos)
         // - Pools that were in previous snapshots (they may have retired in a prior epoch
         //   but still produced blocks because slot leader schedules use older snapshots)
+        // Note: The slot leader schedule for epoch N uses the stake distribution from epoch N-2
+        // (the "go" snapshot), so we must include pools from the go snapshot as well.
         let spo_blocks: HashMap<PoolId, usize> = if block_info.era < Era::Babbage {
             ea_msg
                 .spo_blocks
