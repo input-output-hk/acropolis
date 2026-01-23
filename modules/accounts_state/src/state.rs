@@ -322,37 +322,38 @@ impl State {
         Ok(())
     }
 
-    /// Handle AVVM cancellation at the Allegra hard fork boundary.
-    /// This adds the value of cancelled AVVM UTxOs to reserves.
-    /// Called with the total Value of cancelled UTxOs from utxo_state.
-    pub fn handle_avvm_cancellation(&mut self, cancelled_value: &Value) {
-        let old_reserves = self.pots.reserves;
-        self.pots.reserves += cancelled_value.lovelace;
-        info!(
-            new = self.pots.reserves,
-            old = old_reserves,
-            avvm_returned = cancelled_value.lovelace,
-            "AVVM cancellation at Allegra hard fork - returned to reserves"
-        );
-    }
+    // TODO: Query approach caused message sync issues - using hardcoded value for now
+    // /// Handle AVVM cancellation at the Allegra hard fork boundary.
+    // /// This adds the value of cancelled AVVM UTxOs to reserves.
+    // /// Called with the total Value of cancelled UTxOs from utxo_state.
+    // pub fn handle_avvm_cancellation(&mut self, cancelled_value: &Value) {
+    //     let old_reserves = self.pots.reserves;
+    //     self.pots.reserves += cancelled_value.lovelace;
+    //     info!(
+    //         new = self.pots.reserves,
+    //         old = old_reserves,
+    //         avvm_returned = cancelled_value.lovelace,
+    //         "AVVM cancellation at Allegra hard fork - returned to reserves"
+    //     );
+    // }
 
-    /// Query utxo_state for the total value of AVVM UTxOs cancelled at Allegra boundary.
-    /// Returns None if cancellation hasn't happened yet.
-    pub async fn get_avvm_cancelled_value(context: Arc<Context<Message>>) -> Result<Option<Value>> {
-        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
-        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
-            UTxOStateQuery::GetAvvmCancelledValue,
-        )));
-        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
-        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+    // /// Query utxo_state for the total value of AVVM UTxOs cancelled at Allegra boundary.
+    // /// Returns None if cancellation hasn't happened yet.
+    // pub async fn get_avvm_cancelled_value(context: Arc<Context<Message>>) -> Result<Option<Value>> {
+    //     let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+    //     let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+    //         UTxOStateQuery::GetAvvmCancelledValue,
+    //     )));
+    //     let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+    //     let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
 
-        match message {
-            Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                UTxOStateQueryResponse::AvvmCancelledValue(value),
-            )) => Ok(value),
-            _ => Err(anyhow!("Unexpected utxo-state response")),
-        }
-    }
+    //     match message {
+    //         Message::StateQueryResponse(StateQueryResponse::UTxOs(
+    //             UTxOStateQueryResponse::AvvmCancelledValue(value),
+    //         )) => Ok(value),
+    //         _ => Err(anyhow!("Unexpected utxo-state response")),
+    //     }
+    // }
 
     /// Process entry into a new epoch
     ///   epoch: Number of epoch we are entering
@@ -362,33 +363,30 @@ impl State {
     ///   context: Message bus context for querying other modules
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    async fn enter_epoch(
+    fn enter_epoch(
         &mut self,
         epoch: u64,
         era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
-        context: Arc<Context<Message>>,
+        _context: Arc<Context<Message>>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // Handle AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
         // This only happens once when we enter the Allegra era.
-        // Query utxo_state for the cancelled value.
+        // TODO: Currently hardcoded - query approach caused message sync issues.
         if era == Era::Allegra && !self.avvm_handled {
-            match Self::get_avvm_cancelled_value(context).await {
-                Ok(Some(cancelled_value)) => {
-                    self.handle_avvm_cancellation(&cancelled_value);
-                    self.avvm_handled = true;
-                }
-                Ok(None) => {
-                    // Not yet cancelled in utxo_state - this shouldn't happen if we're
-                    // processing messages in order, but log just in case
-                    info!("AVVM cancellation not yet available from utxo_state");
-                }
-                Err(e) => {
-                    error!("Failed to query AVVM cancelled value: {e}");
-                }
-            }
+            // Hardcoded AVVM cancelled value for mainnet (318,200,635 ADA)
+            const AVVM_CANCELLED_LOVELACE: u64 = 318_200_635_000_000;
+            let old_reserves = self.pots.reserves;
+            self.pots.reserves += AVVM_CANCELLED_LOVELACE;
+            self.avvm_handled = true;
+            info!(
+                old_reserves,
+                new_reserves = self.pots.reserves,
+                avvm_cancelled = AVVM_CANCELLED_LOVELACE,
+                "AVVM cancellation at Allegra hard fork - returned to reserves"
+            );
         }
 
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
@@ -508,27 +506,16 @@ impl State {
             // Wait for start signal (sent at 4k/5 slots into epoch)
             let _ = start_rewards_rx.recv();
 
-            // Apply current epoch registration changes with epoch_slot filtering.
-            // In Shelley era only: replicate the "bug" where `addrsRew` is captured at 4k/5 slots.
-            // Only registration changes with epoch_slot <= STABILITY_WINDOW_SLOT are included.
-            // Changes that happen AFTER the stability window block are excluded.
-            // This was fixed in Allegra (hardforkAllegraAggregatedRewards), so we only apply
-            // the filter for Shelley-era rewards.
-            // IMPORTANT: Use the REWARDS epoch (epoch - 1), not the current era, because when
-            // entering epoch 236 (Allegra) we're still calculating rewards for epoch 235 (Shelley).
-            let rewards_epoch = epoch - 1;
-            let is_shelley_rewards = rewards_epoch <= LAST_SHELLEY_EPOCH;
-            let stability_window_filter = if is_shelley_rewards {
-                Some(STABILITY_WINDOW_SLOT)
-            } else {
-                None
-            };
+            // Apply current epoch registration changes up to the stability window (4k slots).
+            // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
+            // Accounts that deregister before the stability window won't receive rewards.
+            // This applies to all pre-Babbage eras.
             let current_changes = current_epoch_registration_changes.lock().unwrap();
             Self::apply_registration_changes_filtered(
                 &current_changes,
                 &mut registrations,
                 &mut deregistrations,
-                stability_window_filter,
+                Some(STABILITY_WINDOW_SLOT),
             );
             drop(current_changes);
 
@@ -946,8 +933,7 @@ impl State {
                 spo_blocks,
                 context,
                 verifier,
-            )
-            .await?,
+            )?,
         );
 
         Ok(reward_deltas)

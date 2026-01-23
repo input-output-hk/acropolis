@@ -217,6 +217,7 @@ pub fn calculate_rewards(
             pay_to_pool_reward_account,
             deregistrations,
             is_pre_babbage,
+            is_shelley_rewards,
         );
 
         if !rewards.is_empty() {
@@ -283,6 +284,7 @@ fn calculate_spo_rewards(
     pay_to_pool_reward_account: bool,
     deregistrations: &HashSet<StakeAddress>,
     is_pre_babbage: bool,
+    is_shelley_rewards: bool,
 ) -> Vec<RewardDetail> {
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
@@ -411,17 +413,17 @@ fn calculate_spo_rewards(
 
                 // Skip pool's reward address from member rewards
                 // This was a Shelley bug where the pool's reward address could get
-                // member rewards if it delegated to itself
-                if is_pre_babbage {
-                    // Check pool's reward address
-                    if is_reward_account {
-                        debug!(
-                            "Skipping pool reward account {}, losing {to_pay}",
-                            delegator_stake_address
-                        );
-                        continue;
-                    }
+                // member rewards if it delegated to itself. Fixed in Allegra with
+                // hardforkAllegraAggregatedRewards (filterRewards no longer applies).
+                if is_shelley_rewards && is_reward_account {
+                    debug!(
+                        "Skipping pool reward account {}, losing {to_pay}",
+                        delegator_stake_address
+                    );
+                    continue;
+                }
 
+                if is_pre_babbage {
                     // Skip recently deregistered member accounts
                     // In Cardano, addrsRew is captured at the stability window, so accounts
                     // that deregister after the staking snapshot but before the stability window
