@@ -11,6 +11,14 @@ use crate::{
 pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ScriptType {
+    Native,
+    PlutusV1,
+    PlutusV2,
+    PlutusV3,
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum ReferenceScript {
@@ -27,6 +35,15 @@ impl ReferenceScript {
             ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
             ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
             ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+        }
+    }
+
+    pub fn get_script_type(&self) -> ScriptType {
+        match self {
+            ReferenceScript::Native(_) => ScriptType::Native,
+            ReferenceScript::PlutusV1(_) => ScriptType::PlutusV1,
+            ReferenceScript::PlutusV2(_) => ScriptType::PlutusV2,
+            ReferenceScript::PlutusV3(_) => ScriptType::PlutusV3,
         }
     }
 }

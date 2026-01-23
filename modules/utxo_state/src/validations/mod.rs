@@ -26,10 +26,9 @@ pub fn validate_tx(
     let script_hashes_needed =
         scripts_needed.iter().map(|(_, script_hash)| *script_hash).collect::<HashSet<_>>();
 
+    let inputs = &tx_deltas.consumes;
     let vkey_hashes_provided = tx_deltas.get_vkey_hashes_provided();
     let script_hashes_provided = tx_deltas.get_script_hashes_provided();
-
-    let inputs = &tx_deltas.consumes;
 
     shelley::utxo::validate(inputs, total_consumed, total_produced, utxos)
         .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;

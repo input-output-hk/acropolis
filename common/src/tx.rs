@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
-    validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, KeyHash,
-    Lovelace, NativeAsset, NativeAssetsDelta, NativeScript, PoolRegistrationUpdate,
-    ProposalProcedure, Redeemer, ScriptHash, StakeRegistrationUpdate, TxCertificateWithPos,
+    validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
+    KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
+    Redeemer, ReferenceScript, ScriptHash, StakeRegistrationUpdate, TxCertificateWithPos,
     TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
 };
 
@@ -42,6 +42,7 @@ pub struct Transaction {
     pub id: TxIdentifier,
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
+    pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
@@ -52,8 +53,9 @@ pub struct Transaction {
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: Vec<VKeyWitness>,
-    pub native_scripts: Vec<NativeScript>,
+    pub scripts_provided: Vec<(ScriptHash, ReferenceScript)>,
     pub redeemers: Vec<Redeemer>,
+    pub plutus_data: BTreeMap<DatumHash, Vec<u8>>,
     pub error: Option<Phase1ValidationError>,
 }
 
@@ -81,8 +83,9 @@ impl Transaction {
             voting_procedures,
             proposal_procedures,
             vkey_witnesses,
-            native_scripts,
+            scripts_provided,
             redeemers,
+            plutus_data,
             ..
         } = self;
         let mut utxo_deltas = TxUTxODeltas {
@@ -99,8 +102,9 @@ impl Transaction {
             voting_procedures: None,
             proposal_procedures: None,
             vkey_witnesses: None,
-            native_scripts: None,
+            scripts_provided: None,
             redeemers: None,
+            plutus_data: None,
         };
 
         if do_validation {
@@ -112,8 +116,9 @@ impl Transaction {
             utxo_deltas.voting_procedures = voting_procedures;
             utxo_deltas.proposal_procedures = proposal_procedures;
             utxo_deltas.vkey_witnesses = Some(vkey_witnesses);
-            utxo_deltas.native_scripts = Some(native_scripts);
+            utxo_deltas.scripts_provided = Some(scripts_provided);
             utxo_deltas.redeemers = Some(redeemers);
+            utxo_deltas.plutus_data = Some(plutus_data);
         }
 
         utxo_deltas
@@ -169,11 +174,14 @@ pub struct TxUTxODeltas {
     // VKey Witnesses
     pub vkey_witnesses: Option<Vec<VKeyWitness>>,
 
-    // Native scripts
-    pub native_scripts: Option<Vec<NativeScript>>,
+    // Scripts Provided
+    pub scripts_provided: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,
+
+    // Plutus data
+    pub plutus_data: Option<BTreeMap<DatumHash, Vec<u8>>>,
 }
 
 impl TxUTxODeltas {
@@ -186,17 +194,13 @@ impl TxUTxODeltas {
         vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>()
     }
 
-    /// This function returns Script hashes provided
-    /// from Native scripts
-    /// This returns Vec instead of HashSet to
-    /// validate ExtraneousScriptWitnessesUTXOW
-    /// TODO:
-    /// Consider plutus scripts also
+    /// This function returns script hashes provided
+    /// from scripts provided
     pub fn get_script_hashes_provided(&self) -> Vec<ScriptHash> {
-        let Some(native_scripts) = self.native_scripts.as_ref() else {
+        let Some(scripts_provided) = self.scripts_provided.as_ref() else {
             return vec![];
         };
-        native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>()
+        scripts_provided.iter().map(|(script_hash, _)| *script_hash).collect::<Vec<_>>()
     }
 
     /// This functions returns the total consumed value of the transaction

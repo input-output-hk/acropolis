@@ -124,7 +124,12 @@ mod tests {
         let script_hashes_needed =
             scripts_needed.iter().map(|(_, script_hash)| *script_hash).collect::<HashSet<_>>();
         let vkey_hashes_provided = tx_deltas.get_vkey_hashes_provided();
-        let script_hashes_provided = tx_deltas.get_script_hashes_provided();
+        let script_hashes_provided = tx_deltas
+            .scripts_provided
+            .unwrap_or_default()
+            .iter()
+            .map(|(script_hash, _)| *script_hash)
+            .collect::<Vec<_>>();
 
         validate(
             &vkey_hashes_needed,

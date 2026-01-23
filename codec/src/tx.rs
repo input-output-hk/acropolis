@@ -1,14 +1,14 @@
+use std::collections::BTreeMap;
+
 use crate::{
-    address::map_address,
-    certs::map_certificate,
-    map_all_governance_voting_procedures, map_alonzo_update, map_babbage_update, map_datum,
-    map_governance_proposals_procedure, map_mint_burn, map_redeemer, map_reference_script_hash,
-    map_value,
-    witness::{map_native_scripts, map_vkey_witnesses},
+    address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
+    map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
+    map_mint_burn, map_native_script, map_redeemer, map_reference_script_hash, map_value,
+    witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
-use pallas_traverse::{Era as PallasEra, MultiEraInput, MultiEraSigners, MultiEraTx};
+use pallas_traverse::{ComputeHash, Era as PallasEra, MultiEraInput, MultiEraSigners, MultiEraTx};
 
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
     inputs
@@ -81,6 +81,40 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
+pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
+    let mut scripts_provided = Vec::new();
+
+    for script in tx.native_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ReferenceScript::Native(map_native_script(script)),
+        ));
+    }
+
+    for script in tx.plutus_v1_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ReferenceScript::PlutusV1(script.as_ref().to_vec()),
+        ));
+    }
+
+    for script in tx.plutus_v2_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ReferenceScript::PlutusV2(script.as_ref().to_vec()),
+        ));
+    }
+
+    for script in tx.plutus_v3_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ReferenceScript::PlutusV3(script.as_ref().to_vec()),
+        ));
+    }
+
+    scripts_provided
+}
+
 /// Map a Pallas Transaction
 /// NOTE:
 /// This function sorts
@@ -95,6 +129,8 @@ pub fn map_transaction(
     era: Era,
 ) -> Transaction {
     let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+
+    let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
     let is_valid = tx.is_valid();
@@ -204,7 +240,8 @@ pub fn map_transaction(
 
     let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
-    let native_scripts = map_native_scripts(tx.native_scripts());
+
+    let scripts_provided = map_scripts_provided(tx);
 
     let mut redeemers = Vec::new();
     for redeemer in tx.redeemers() {
@@ -214,10 +251,17 @@ pub fn map_transaction(
         }
     }
 
+    let plutus_data = tx
+        .plutus_data()
+        .iter()
+        .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
+        .collect::<BTreeMap<_, _>>();
+
     Transaction {
         id: tx_identifier,
         consumes,
         produces,
+        reference_inputs,
         fee,
         is_valid,
         certs,
@@ -228,8 +272,9 @@ pub fn map_transaction(
         voting_procedures,
         proposal_procedures,
         vkey_witnesses,
-        native_scripts,
+        scripts_provided,
         redeemers,
+        plutus_data,
         error: if errors.is_empty() {
             None
         } else {

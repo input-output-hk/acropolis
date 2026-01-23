@@ -667,25 +667,14 @@ mod tests {
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
 
-        let deltas = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![],
-                produces: vec![output.clone()],
-                fee: 0,
-                is_valid: true,
-                withdrawals: None,
-                certs: None,
-                mint_burn_deltas: None,
-                required_signers: None,
-                proposal_update: None,
-                voting_procedures: None,
-                proposal_procedures: None,
-                vkey_witnesses: None,
-                native_scripts: None,
-                redeemers: None,
-            }],
-        };
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![],
+            produces: vec![output.clone()],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas = UTXODeltasMessage { deltas };
 
         state.handle(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
