@@ -5,9 +5,8 @@ use std::collections::HashSet;
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     queries::assets::{AssetHistory, PolicyAssets},
-    Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadata,
-    AssetMetadataStandard, AssetMintRecord, AssetName, Datum, Lovelace, NativeAssets,
-    NativeAssetsDelta, PolicyAsset, PolicyId, ShelleyAddress, TxIdentifier, TxUTxODeltas,
+    AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetMintRecord, AssetName, Datum,
+    Lovelace, NativeAssets, NativeAssetsDelta, PolicyAsset, PolicyId, TxIdentifier, TxUTxODeltas,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -55,9 +54,6 @@ pub struct State {
     /// Assets mapped to extended info
     pub info: Option<HashMap<AssetId, AssetInfoRecord>>,
 
-    /// Assets mapped to addresses
-    pub addresses: Option<HashMap<AssetId, std::collections::HashMap<ShelleyAddress, u64>>>,
-
     /// Assets mapped to transactions
     pub transactions: Option<HashMap<AssetId, Vector<TxIdentifier>>>,
 
@@ -70,7 +66,6 @@ impl State {
         let store_assets = config.store_assets;
         let store_history = config.store_history;
         let store_info = config.store_info;
-        let store_addresses = config.store_addresses;
         let store_transactions = config.store_transactions;
         let index_by_policy = config.index_by_policy;
 
@@ -87,11 +82,6 @@ impl State {
                 None
             },
             info: if store_info {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            addresses: if store_addresses {
                 Some(HashMap::new())
             } else {
                 None
@@ -164,29 +154,6 @@ impl State {
             .as_ref()
             .and_then(|hist_map| hist_map.get(asset_id))
             .map(|v| v.iter().cloned().collect()))
-    }
-
-    pub fn get_asset_addresses(
-        &self,
-        asset_id: &AssetId,
-    ) -> Result<Option<Vec<AssetAddressEntry>>> {
-        if !self.config.store_addresses {
-            return Err(anyhow::anyhow!(
-                "asset addresses storage disabled in config"
-            ));
-        }
-
-        Ok(
-            self.addresses.as_ref().and_then(|addr_map| addr_map.get(asset_id)).map(|inner_map| {
-                inner_map
-                    .iter()
-                    .map(|(addr, qty)| AssetAddressEntry {
-                        address: addr.clone(),
-                        quantity: *qty,
-                    })
-                    .collect()
-            }),
-        )
     }
 
     pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxIdentifier>>> {
@@ -283,8 +250,6 @@ impl State {
             self.log_assets(history.len());
         } else if let Some(info_map) = &self.info {
             self.log_assets(info_map.len());
-        } else if let Some(addresses) = &self.addresses {
-            self.log_assets(addresses.len());
         } else if let Some(transactions) = &self.transactions {
             self.log_assets(transactions.len());
         } else {
@@ -307,18 +272,20 @@ impl State {
         &self,
         deltas: &[(TxIdentifier, NativeAssetsDelta)],
         registry: &mut AssetRegistry,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<AssetId>)> {
         let mut new_supply = self.supply.clone();
         let mut new_info = self.info.clone();
         let mut new_history = self.history.clone();
         let mut new_index = self.policy_index.clone();
-        let mut new_addresses = self.addresses.clone();
         let mut new_transactions = self.transactions.clone();
+
+        let mut updated_asset_ids = Vec::new();
 
         for (tx_identifier, tx_deltas) in deltas {
             for (policy_id, asset_deltas) in tx_deltas {
                 for delta in asset_deltas {
                     let asset_id = registry.get_or_insert(*policy_id, delta.name);
+                    updated_asset_ids.push(asset_id);
 
                     if let Some(supply) = new_supply.as_mut() {
                         let delta_amount = delta.amount;
@@ -373,9 +340,6 @@ impl State {
                             ids.push_back(asset_id);
                         }
                     }
-                    if let Some(addr_map) = new_addresses.as_mut() {
-                        addr_map.entry(asset_id).or_insert_with(std::collections::HashMap::new);
-                    }
                     if let Some(tx_map) = new_transactions.as_mut() {
                         tx_map.entry(asset_id).or_insert_with(Vector::new);
                     }
@@ -383,15 +347,17 @@ impl State {
             }
         }
 
-        Ok(Self {
-            config: self.config,
-            supply: new_supply,
-            history: new_history,
-            info: new_info,
-            addresses: new_addresses,
-            transactions: new_transactions,
-            policy_index: new_index,
-        })
+        Ok((
+            Self {
+                config: self.config,
+                supply: new_supply,
+                history: new_history,
+                info: new_info,
+                transactions: new_transactions,
+                policy_index: new_index,
+            },
+            updated_asset_ids,
+        ))
     }
 
     pub fn handle_transactions(
@@ -440,60 +406,6 @@ impl State {
 
         Ok(Self {
             transactions: new_txs,
-            ..self.clone()
-        })
-    }
-
-    pub fn handle_address_deltas(
-        &self,
-        deltas: &[AddressDelta],
-        registry: &AssetRegistry,
-    ) -> Result<Self> {
-        let mut new_addresses = self.addresses.clone();
-
-        let Some(addr_map) = new_addresses.as_mut() else {
-            return Ok(Self {
-                addresses: new_addresses,
-                ..self.clone()
-            });
-        };
-
-        for address_delta in deltas {
-            if let Address::Shelley(shelley_addr) = &address_delta.address {
-                for (policy_id, assets) in &address_delta.sent.assets {
-                    for asset in assets {
-                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                            if let Some(holders) = addr_map.get_mut(&asset_id) {
-                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                *current = current.saturating_sub(asset.amount);
-
-                                if *current == 0 {
-                                    holders.remove(shelley_addr);
-                                }
-                            } else {
-                                error!("Sent delta for unknown asset_id: {:?}", asset_id);
-                            }
-                        }
-                    }
-                }
-
-                for (policy_id, assets) in &address_delta.received.assets {
-                    for asset in assets {
-                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                            if let Some(holders) = addr_map.get_mut(&asset_id) {
-                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                *current = current.saturating_add(asset.amount);
-                            } else {
-                                error!("Received delta for unknown asset_id: {:?}", asset_id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(Self {
-            addresses: new_addresses,
             ..self.clone()
         })
     }
