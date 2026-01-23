@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
@@ -255,7 +255,7 @@ pub fn map_transaction(
         .plutus_data()
         .iter()
         .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<HashMap<_, _>>();
 
     Transaction {
         id: tx_identifier,

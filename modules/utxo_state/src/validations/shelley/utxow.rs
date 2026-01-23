@@ -121,8 +121,7 @@ mod tests {
         let vkey_hashes_needed =
             utils::get_vkey_needed(&tx_deltas, &ctx.utxos, Some(&ctx.shelley_params));
         let scripts_needed = utils::get_script_needed(&tx_deltas, &ctx.utxos);
-        let script_hashes_needed =
-            scripts_needed.iter().map(|(_, script_hash)| *script_hash).collect::<HashSet<_>>();
+        let script_hashes_needed = scripts_needed.values().cloned().collect::<HashSet<_>>();
         let vkey_hashes_provided = tx_deltas.get_vkey_hashes_provided();
         let script_hashes_provided = tx_deltas
             .scripts_provided

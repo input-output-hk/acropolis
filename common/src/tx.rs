@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
@@ -55,7 +55,7 @@ pub struct Transaction {
     pub vkey_witnesses: Vec<VKeyWitness>,
     pub scripts_provided: Vec<(ScriptHash, ReferenceScript)>,
     pub redeemers: Vec<Redeemer>,
-    pub plutus_data: BTreeMap<DatumHash, Vec<u8>>,
+    pub plutus_data: HashMap<DatumHash, Vec<u8>>,
     pub error: Option<Phase1ValidationError>,
 }
 
@@ -181,7 +181,7 @@ pub struct TxUTxODeltas {
     pub redeemers: Option<Vec<Redeemer>>,
 
     // Plutus data
-    pub plutus_data: Option<BTreeMap<DatumHash, Vec<u8>>>,
+    pub plutus_data: Option<HashMap<DatumHash, Vec<u8>>>,
 }
 
 impl TxUTxODeltas {

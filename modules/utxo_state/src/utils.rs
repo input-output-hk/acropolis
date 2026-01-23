@@ -100,7 +100,7 @@ pub fn get_vkey_needed(
 pub fn get_script_needed(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> Vec<(RedeemerPointer, ScriptHash)> {
+) -> HashMap<RedeemerPointer, ScriptHash> {
     let TxUTxODeltas {
         consumes: sorted_inputs,
         certs,
@@ -110,7 +110,7 @@ pub fn get_script_needed(
         proposal_procedures,
         ..
     } = tx_deltas;
-    let mut scripts_needed = Vec::new();
+    let mut scripts_needed = HashMap::new();
 
     // for each input, get the required scripts
     scripts_needed.extend(get_scripts_needed_from_inputs(sorted_inputs, utxos));
