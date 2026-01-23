@@ -152,13 +152,15 @@ Prefer `expect("descriptive message")` over `unwrap()` to provide context when a
 
 ## Example File: PR Lessons File
 
-```yaml
+PR lessons files use the same fenced YAML format as the central database, but with simpler metadata (no source/frequency tracking since that's implicit in the PR file itself):
+
+````markdown
 ---
 pr_number: 123
 pr_title: "Add MCP server support"
 pr_url: "https://github.com/org/repo/pull/123"
 extracted_date: 2026-01-20
-lesson_count: 3
+lesson_count: 2
 ---
 
 # Lessons from PR #123: Add MCP server support
@@ -167,19 +169,20 @@ lesson_count: 3
 
 ### L042 - Use expect() over unwrap()
 
-**Category**: code-quality  
-**Tags**: rust, error-handling, panic
+```yaml
+category: code-quality
+tags: [rust, error-handling, panic]
+```
 
 Prefer `expect("descriptive message")` over `unwrap()` to provide context when a panic occurs.
 
----
 
 ### L043 - Document MCP tool capabilities
 
-**Category**: documentation  
-**Tags**: mcp, api
+```yaml
+category: documentation
+tags: [mcp, api]
+```
 
 Each MCP tool should have a clear description of what it does and example usage in its schema.
-
----
-```
+````

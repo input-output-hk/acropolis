@@ -94,7 +94,7 @@ date: 2026-01-22
 frequency: 1
 ```
 
-When implementing file formats, ensure the actual output matches the examples in the data-model specification. PR lessons files should use section headings with Category/Tags metadata lines, not YAML frontmatter per lesson.
+When implementing file formats, ensure the actual output matches the examples in the data-model specification. All lesson files should use fenced YAML code blocks for metadata to maintain consistency.
 
 
 ### L006
@@ -109,7 +109,7 @@ date: 2026-01-22
 frequency: 1
 ```
 
-Avoid using extra `---` separators between YAML frontmatter blocks as it creates ambiguous parsing. Either use a single `---` to end frontmatter, or use a non-YAML separator like blank lines or markdown horizontal rules within content.
+Avoid using `---` separators between lessons as it creates ambiguous YAML parsing. Use blank lines between lessons and fenced YAML code blocks for metadata within each lesson.
 
 
 ### L007
