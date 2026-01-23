@@ -2,7 +2,7 @@
 title: Lessons Learned Database
 description: Accumulated lessons from PR reviews and manual entries
 last_updated: 2026-01-22
-total_lessons: 9
+total_lessons: 10
 ---
 
 # Lessons Learned
@@ -155,3 +155,18 @@ frequency: 1
 ```
 
 When using `eval $(function_that_outputs_assignments)`, ensure all interpolated values are escaped to prevent command injection. A malicious branch name or environment variable containing single quotes can break out of assignments and execute arbitrary commands.
+
+
+### L010
+
+```yaml
+lesson_id: L010
+category: security
+tags: [database, input-validation, sql-injection]
+source: manual
+source_ref: "Manual entry 2026-01-22"
+date: 2026-01-22
+frequency: 1
+```
+
+Always validate user input before passing to database queries. This prevents SQL injection and other database-related security vulnerabilities.
