@@ -24,10 +24,11 @@ The `/speckit.feedback` command captures lessons learned from PR reviews and sto
 
 This will:
 1. Detect the current branch
-2. Find the most recently merged PR for that branch
+2. Find the open PR for that branch (or most recently merged if none open)
 3. Extract review comments and PR description
 4. Categorize lessons and save to `docs/feedback/pr-<number>-lessons.md`
 5. Update the central `docs/feedback/lessons.md` database
+6. Prompt you to commit the changes to your branch
 
 ### Capture Feedback from Specific PR
 
@@ -82,12 +83,13 @@ The lessons database is automatically consulted by:
 
 ## Examples
 
-### After Merging a Feature PR
+### Before Merging a Feature PR
+
+After reviews are complete but before merging:
 
 ```
-$ git checkout main
-$ git pull
-$ /speckit.feedback --pr 142
+$ git checkout feature/add-rest-api
+$ /speckit.feedback
 
 ✅ Extracted 5 lessons from PR #142 "Add REST API endpoints"
    - 2 code-quality lessons
@@ -96,6 +98,40 @@ $ /speckit.feedback --pr 142
 
 📝 Created: docs/feedback/pr-142-lessons.md
 📊 Updated: docs/feedback/lessons.md (now contains 47 total lessons)
+
+📝 Ready to commit! Run:
+   git add docs/feedback/
+   git commit -m "chore(feedback): capture lessons from PR #142"
+   git push
+
+Then merge your PR as usual - lessons will be included!
+```
+
+### Running Again After New Comments
+
+If reviewers add more comments after your first feedback run:
+
+```
+$ /speckit.feedback
+
+✅ Merged 2 new lessons into PR #142 lessons
+   - 5 existing lessons preserved
+   - 2 new lessons added
+   - 1 duplicate skipped
+
+📝 Updated: docs/feedback/pr-142-lessons.md (now contains 7 lessons)
+📊 Updated: docs/feedback/lessons.md (now contains 49 total lessons)
+```
+
+### Adding Manual Lessons Before Merge
+
+You can also add manual lessons alongside PR-extracted ones:
+
+```
+$ /speckit.feedback --category architecture "Consider using the repository pattern for data access"
+
+✅ Added manual lesson to database
+📊 Updated: docs/feedback/lessons.md (now contains 50 total lessons)
 ```
 
 ### Quick Manual Entry After Pair Session

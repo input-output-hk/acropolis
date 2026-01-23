@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add a `/speckit.feedback` command to the local speckit tooling that extracts lessons learned from PR review comments and discussions, stores them in per-PR lesson files and a central lessons database, enabling future speckit phases to leverage accumulated organizational knowledge.
+Add a `/speckit.feedback` command to the local speckit tooling that extracts lessons learned from PR review comments and discussions before merge, stores them in per-PR lesson files and a central lessons database. By running before merge, lessons can be committed directly to the feature branch and merged as part of the original PR, simplifying persistence while enabling future speckit phases to leverage accumulated organizational knowledge. The command supports incremental updates - running multiple times on the same PR merges new lessons with existing ones.
 
 ## Technical Context
 

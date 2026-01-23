@@ -4,7 +4,8 @@
 #
 # Usage:
 #   ./fetch-pr-feedback.sh <pr_number>
-#   ./fetch-pr-feedback.sh --find-recent
+#   ./fetch-pr-feedback.sh --find-current  # Find open PR for current branch (preferred)
+#   ./fetch-pr-feedback.sh --find-recent   # Find most recently merged PR
 #
 # Output: JSON with PR metadata, review comments, and discussion comments
 #
@@ -60,6 +61,32 @@ find_recent_merged_pr() {
     fi
     
     echo "$pr_number"
+}
+
+# Find open PR for current branch (preferred for pre-merge workflow)
+find_current_pr() {
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || error "Not in a git repository."
+    
+    # First try to find an open PR for the current branch
+    local pr_number
+    pr_number=$(gh pr list --state open --head "$current_branch" --json number -q '.[0].number' 2>/dev/null)
+    
+    if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
+        echo "$pr_number"
+        return
+    fi
+    
+    # Fallback: try to find a merged PR for the current branch
+    pr_number=$(gh pr list --state merged --head "$current_branch" --json number -q '.[0].number' 2>/dev/null)
+    
+    if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
+        warn "No open PR found, using most recently merged PR for this branch."
+        echo "$pr_number"
+        return
+    fi
+    
+    error "No open or merged PRs found for branch '$current_branch'."
 }
 
 # Fetch PR basic info
@@ -136,23 +163,29 @@ fetch_all_feedback() {
 
 # Parse arguments
 case "${1:-}" in
+    --find-current)
+        pr_number=$(find_current_pr)
+        info "Found PR for current branch: #$pr_number"
+        fetch_all_feedback "$pr_number"
+        ;;
     --find-recent)
         pr_number=$(find_recent_merged_pr)
         info "Found most recent merged PR: #$pr_number"
         fetch_all_feedback "$pr_number"
         ;;
     --help|-h)
-        echo "Usage: $0 <pr_number> | --find-recent"
+        echo "Usage: $0 <pr_number> | --find-current | --find-recent"
         echo ""
         echo "Arguments:"
-        echo "  <pr_number>    Specific PR number to fetch feedback from"
-        echo "  --find-recent  Find and fetch the most recently merged PR for current branch"
+        echo "  <pr_number>     Specific PR number to fetch feedback from"
+        echo "  --find-current  Find and fetch the open PR for current branch (falls back to merged)"
+        echo "  --find-recent   Find and fetch the most recently merged PR for current branch"
         echo ""
         echo "Output: JSON with PR metadata, review comments, and discussion comments"
         exit 0
         ;;
     "")
-        error "No PR number provided. Use '$0 <pr_number>' or '$0 --find-recent'"
+        error "No PR number provided. Use '$0 <pr_number>', '$0 --find-current', or '$0 --find-recent'"
         ;;
     *)
         if [[ "$1" =~ ^[0-9]+$ ]]; then

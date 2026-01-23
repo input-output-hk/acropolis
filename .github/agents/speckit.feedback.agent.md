@@ -29,14 +29,13 @@ Analyze the `$ARGUMENTS` input to determine the operation mode:
 
 **Mode A - Specific PR**: If `--pr <number>` is present, use that PR number.
 
-**Mode B - Auto-detect PR**: If no `--pr` flag but no inline text, find the most recently merged PR for the current branch.
+**Mode B - Auto-detect PR**: If no `--pr` flag but no inline text, find the open PR for the current branch (or most recently merged if no open PR exists).
 
 **Mode C - Manual Entry**: If inline text is provided (not a flag), treat it as a manual lesson entry.
 
 Parse these optional flags:
 - `--pr <number>`: Specific PR to extract feedback from
 - `--category <category>`: Category for manual lesson (code-quality, architecture, testing, documentation, security, performance, other)
-- `--no-commit`: Skip the auto-commit/PR step and leave files for manual commit
 
 ### Step 2: Ensure Directory Structure
 
@@ -51,11 +50,13 @@ Check if `docs/feedback/` directory exists. If not, create it with:
 
 1. **Get PR Number**:
    - Mode A: Use the `--pr <number>` value
-   - Mode B: Run `.specify/scripts/bash/fetch-pr-feedback.sh --find-recent` to get the most recently merged PR
+   - Mode B: Run `.specify/scripts/bash/fetch-pr-feedback.sh --find-current` to get the open PR for current branch (falls back to most recently merged)
 
-2. **Check for Duplicate PR Processing**:
-   - If `docs/feedback/pr-<number>-lessons.md` exists, ask user: "PR #<number> has already been processed. Overwrite existing lessons file? (yes/no)"
-   - If no, skip to database update step or exit
+2. **Check for Existing PR Lessons** (Incremental Mode):
+   - If `docs/feedback/pr-<number>-lessons.md` exists:
+     - Read existing lessons from the file
+     - Track existing lesson IDs for merge later
+     - Note: No prompt needed - we will merge new lessons with existing ones
 
 3. **Fetch PR Data**:
    - Run `.specify/scripts/bash/fetch-pr-feedback.sh <pr_number>`
@@ -65,7 +66,7 @@ Check if `docs/feedback/` directory exists. If not, create it with:
      - Discussion thread comments
 
 4. **Handle Edge Cases**:
-   - If no PR found: Prompt user "No merged PR found for current branch. Enter a PR number or type a lesson for manual entry."
+   - If no PR found: Prompt user "No open or merged PR found for current branch. Enter a PR number or type a lesson for manual entry."
    - If PR has no review comments: Report "No review feedback found in PR #<number>. Would you like to add a manual lesson instead?"
 
 5. **Extract and Categorize Lessons**:
@@ -75,9 +76,15 @@ Check if `docs/feedback/` directory exists. If not, create it with:
      - Extract the core lesson content
      - Add relevant tags based on file paths, technologies mentioned
    - Limit to top 10 lessons if PR discussion is very long (summarize themes)
+   - **Deduplication**: Skip lessons that match existing lessons (from step 2)
 
-6. **Generate PR Lessons File**:
-   - Create `docs/feedback/pr-<number>-lessons.md` with YAML frontmatter:
+6. **Generate/Update PR Lessons File** (Incremental Merge):
+   - If file exists: Merge new lessons with existing ones
+     - Keep all existing lessons
+     - Add only new lessons (those not matching existing by content)
+     - Update `extracted_date` to today
+     - Update `lesson_count` to new total
+   - If file is new: Create `docs/feedback/pr-<number>-lessons.md` with YAML frontmatter:
      ```yaml
      ---
      pr_number: <number>
@@ -141,7 +148,7 @@ Check if `docs/feedback/` directory exists. If not, create it with:
 
 Output a summary to the user:
 
-**For PR Extraction:**
+**For PR Extraction (first run):**
 ```
 ✅ Extracted <N> lessons from PR #<number> "<title>"
    - <count> code-quality lessons
@@ -152,8 +159,19 @@ Output a summary to the user:
 📝 Created: docs/feedback/pr-<number>-lessons.md
 📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
 
-<If any duplicates found>
+<If any duplicates found in central database>
 ℹ️ <M> lessons matched existing entries (frequency incremented)
+```
+
+**For PR Extraction (incremental run - file already existed):**
+```
+✅ Merged <N> new lessons into PR #<number> lessons
+   - <existing> existing lessons preserved
+   - <new> new lessons added
+   - <skipped> duplicates skipped
+
+📝 Updated: docs/feedback/pr-<number>-lessons.md (now contains <total> lessons)
+📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
 ```
 
 **For Manual Entry:**
@@ -164,46 +182,24 @@ Output a summary to the user:
 📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
 ```
 
-### Step 6: Commit and Merge to Main (unless --no-commit)
+### Step 6: Prompt to Commit (pre-merge workflow)
 
-Check if `--no-commit` flag was provided:
+Since feedback is captured before the PR is merged, the lessons files can be committed directly to the current feature branch:
 
-**With `--no-commit` flag**:
-- Skip the commit/merge step entirely
-- Report: `📁 Files saved locally (--no-commit specified). Commit manually when ready.`
-
-**Default behavior** (no `--no-commit` flag):
-
-After updating the lesson files, guide the user to commit and run the helper script:
-
-1. First, commit the lesson changes to the current branch:
-   ```bash
+**Output**:
+```
+📝 Ready to commit! Run:
    git add docs/feedback/
    git commit -m "chore(feedback): capture lessons from PR #<number>"
-   ```
+   git push
 
-2. Then run the commit-lessons script:
-   ```bash
-   .specify/scripts/bash/commit-lessons.sh <pr_number>
-   ```
-
-The script will:
-- Create a fresh branch from `origin/main`
-- Copy the lesson files from your current branch
-- Push and create a PR with auto-merge enabled
-- Leave you on the new lessons branch
-
-**Important**: The script requires a clean working tree. All changes must be committed before running it.
-
-**Expected Output** (from the script):
+Then merge your PR as usual - lessons will be included!
 ```
-🚀 Created PR to merge lessons into main
-📋 PR: https://github.com/org/repo/pull/123
-✅ Auto-merge enabled (will merge when checks pass)
 
-📍 You are now on branch: chore/feedback-pr-<number>
-💡 To return to your work: git checkout <original-branch>
-```
+This simplified workflow means:
+- No separate branch or PR needed for lessons
+- Lessons are reviewed along with the original PR
+- Merge includes both the feature changes and the captured lessons
 
 ## Lesson Entry Format
 

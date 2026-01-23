@@ -40,7 +40,7 @@
 
 ---
 
-## Phase 3: User Story 1 - Capture PR Feedback After Merge (Priority: P1) 🎯 MVP
+## Phase 3: User Story 1 - Capture PR Feedback Before Merge (Priority: P1) 🎯 MVP
 
 **Goal**: Extract lessons from PR review comments and create per-PR lessons file
 
@@ -72,7 +72,7 @@
 - [X] T016 [US2] Implement frequency increment for duplicate lessons instead of creating new entries
 - [X] T017 [US2] Implement new lesson appending with unique lesson_id generation (L001, L002, etc.)
 - [X] T018 [US2] Implement database metadata update (last_updated, total_lessons count)
-- [X] T019 [US2] Implement duplicate PR detection: if `docs/feedback/pr-<number>-lessons.md` exists, prompt user to overwrite or skip
+- [X] T019 [US2] Implement incremental merge: if `docs/feedback/pr-<number>-lessons.md` exists, merge new lessons with existing ones (no overwrite prompt, incremental update per FR-012)
 
 **Checkpoint**: User Stories 1 AND 2 complete - full PR feedback workflow operational
 
