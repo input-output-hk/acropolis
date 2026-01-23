@@ -1,8 +1,8 @@
 ---
 title: Lessons Learned Database
 description: Accumulated lessons from PR reviews and manual entries
-last_updated: 2026-01-21
-total_lessons: 4
+last_updated: 2026-01-22
+total_lessons: 9
 ---
 
 # Lessons Learned
@@ -69,3 +69,63 @@ frequency: 1
 ---
 
 Use consistent grammatical voice for message naming. Prefer passive voice for state-change events (e.g., `.offered`, `.rescinded`) to clearly indicate something has happened rather than an imperative action.
+
+---
+lesson_id: L005
+category: documentation
+tags: [data-model, consistency, format]
+source: pr
+source_ref: "PR #631"
+date: 2026-01-22
+frequency: 1
+---
+
+When implementing file formats, ensure the actual output matches the examples in the data-model specification. PR lessons files should use section headings with Category/Tags metadata lines, not YAML frontmatter per lesson.
+
+---
+lesson_id: L006
+category: documentation
+tags: [yaml, parsing, format]
+source: pr
+source_ref: "PR #631"
+date: 2026-01-22
+frequency: 1
+---
+
+Avoid using extra `---` separators between YAML frontmatter blocks as it creates ambiguous parsing. Either use a single `---` to end frontmatter, or use a non-YAML separator like blank lines or markdown horizontal rules within content.
+
+---
+lesson_id: L007
+category: code-quality
+tags: [bash, dependencies, validation]
+source: pr
+source_ref: "PR #631"
+date: 2026-01-22
+frequency: 1
+---
+
+When a script depends on external CLI tools (like `jq`, `gh`, etc.), always verify they are installed before attempting to use them. Add checks like: `command -v jq >/dev/null 2>&1 || error "jq is required but not installed."`
+
+---
+lesson_id: L008
+category: documentation
+tags: [specification, implementation, consistency]
+source: pr
+source_ref: "PR #631"
+date: 2026-01-22
+frequency: 1
+---
+
+When implementation behavior changes (e.g., from "never updated" to "incremental updates"), update the corresponding specification documents to reflect the new behavior. Spec-implementation drift causes confusion.
+
+---
+lesson_id: L009
+category: security
+tags: [bash, command-injection, eval]
+source: pr
+source_ref: "PR #631"
+date: 2026-01-22
+frequency: 1
+---
+
+When using `eval $(function_that_outputs_assignments)`, ensure all interpolated values are escaped to prevent command injection. A malicious branch name or environment variable containing single quotes can break out of assignments and execute arbitrary commands.
