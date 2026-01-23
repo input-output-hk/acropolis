@@ -155,8 +155,7 @@ impl ImmutableUTXOStore for FjallAsyncImmutableUTXOStore {
             let total_cancelled: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
             info!(
                 count = cancelled.len(),
-                total_cancelled,
-                "Cancelled AVVM/redeem UTxOs"
+                total_cancelled, "Cancelled AVVM/redeem UTxOs"
             );
 
             Ok::<_, anyhow::Error>(cancelled)

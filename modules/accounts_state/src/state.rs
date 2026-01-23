@@ -9,21 +9,26 @@ use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
-        AccountsBootstrapMessage, AvvmCancellationMessage, DRepDelegationDistribution,
-        DRepStateMessage, EpochActivityMessage, GovernanceOutcomesMessage, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
+    queries::{
+        get_query_topic,
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
     PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
-    SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    SPORewards, StakeAddress, StakeRewardDelta, TxCertificate, Value,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
+use caryatid_sdk::Context;
 use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -107,6 +112,9 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
+
+    /// Flag to track if AVVM cancellation has been handled (happens once at Allegra boundary)
+    avvm_handled: bool,
 }
 
 impl State {
@@ -316,17 +324,34 @@ impl State {
 
     /// Handle AVVM cancellation at the Allegra hard fork boundary.
     /// This adds the value of cancelled AVVM UTxOs to reserves.
-    /// Called when receiving an AvvmCancellation message from utxo_state.
-    pub fn handle_avvm_cancellation(&mut self, msg: &AvvmCancellationMessage) {
+    /// Called with the total Value of cancelled UTxOs from utxo_state.
+    pub fn handle_avvm_cancellation(&mut self, cancelled_value: &Value) {
         let old_reserves = self.pots.reserves;
-        self.pots.reserves += msg.cancelled_value;
+        self.pots.reserves += cancelled_value.lovelace;
         info!(
             new = self.pots.reserves,
             old = old_reserves,
-            avvm_returned = msg.cancelled_value,
-            avvm_count = msg.cancelled_count,
+            avvm_returned = cancelled_value.lovelace,
             "AVVM cancellation at Allegra hard fork - returned to reserves"
         );
+    }
+
+    /// Query utxo_state for the total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// Returns None if cancellation hasn't happened yet.
+    pub async fn get_avvm_cancelled_value(context: Arc<Context<Message>>) -> Result<Option<Value>> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetAvvmCancelledValue,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::AvvmCancelledValue(value),
+            )) => Ok(value),
+            _ => Err(anyhow!("Unexpected utxo-state response")),
+        }
     }
 
     /// Process entry into a new epoch
@@ -334,16 +359,38 @@ impl State {
     ///   total_fees: Total fees taken in previous epoch
     ///   total_blocks: Total blocks minted (both SPO and OBFT)
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
+    ///   context: Message bus context for querying other modules
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
     async fn enter_epoch(
         &mut self,
         epoch: u64,
-        _era: Era,
+        era: Era,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
+        context: Arc<Context<Message>>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
+        // Handle AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
+        // This only happens once when we enter the Allegra era.
+        // Query utxo_state for the cancelled value.
+        if era == Era::Allegra && !self.avvm_handled {
+            match Self::get_avvm_cancelled_value(context).await {
+                Ok(Some(cancelled_value)) => {
+                    self.handle_avvm_cancellation(&cancelled_value);
+                    self.avvm_handled = true;
+                }
+                Ok(None) => {
+                    // Not yet cancelled in utxo_state - this shouldn't happen if we're
+                    // processing messages in order, but log just in case
+                    info!("AVVM cancellation not yet available from utxo_state");
+                }
+                Err(e) => {
+                    error!("Failed to query AVVM cancelled value: {e}");
+                }
+            }
+        }
+
         // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
         // 13,887,515,255 - as we enter 208 (Shelley)
         // TODO this will only work in Mainnet - need to know when Shelley starts across networks
@@ -471,8 +518,11 @@ impl State {
             // entering epoch 236 (Allegra) we're still calculating rewards for epoch 235 (Shelley).
             let rewards_epoch = epoch - 1;
             let is_shelley_rewards = rewards_epoch <= LAST_SHELLEY_EPOCH;
-            let stability_window_filter =
-                if is_shelley_rewards { Some(STABILITY_WINDOW_SLOT) } else { None };
+            let stability_window_filter = if is_shelley_rewards {
+                Some(STABILITY_WINDOW_SLOT)
+            } else {
+                None
+            };
             let current_changes = current_epoch_registration_changes.lock().unwrap();
             Self::apply_registration_changes_filtered(
                 &current_changes,
@@ -546,7 +596,7 @@ impl State {
         for change in changes {
             // Skip changes that happened after the stability window
             if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot >= max_slot {
+                if change.epoch_slot > max_slot {
                     continue;
                 }
             }
@@ -860,6 +910,7 @@ impl State {
         &mut self,
         ea_msg: &EpochActivityMessage,
         block_info: &BlockInfo,
+        context: Arc<Context<Message>>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -893,6 +944,7 @@ impl State {
                 block_info.era,
                 ea_msg.total_fees,
                 spo_blocks,
+                context,
                 verifier,
             )
             .await?,

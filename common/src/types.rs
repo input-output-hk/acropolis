@@ -28,6 +28,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
+use std::iter::Sum;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::Add;
 use std::{
@@ -741,6 +742,24 @@ impl Add for Value {
         let mut result = self.clone();
         result += &other;
         result
+    }
+}
+
+impl Sum for Value {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |mut acc, v| {
+            acc += &v; // Use AddAssign<&Value>
+            acc
+        })
+    }
+}
+
+impl<'a> Sum<&'a Value> for Value {
+    fn sum<I: Iterator<Item = &'a Value>>(iter: I) -> Self {
+        iter.fold(Self::default(), |mut acc, v| {
+            acc += v;
+            acc
+        })
     }
 }
 

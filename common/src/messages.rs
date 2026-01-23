@@ -118,17 +118,6 @@ pub struct PotDeltasMessage {
     pub deltas: BootstrapPotDeltas,
 }
 
-/// AVVM (Ada Voucher Vending Machine) cancellation message
-/// Published by UTxO state at the Allegra hard fork boundary when unredeemed
-/// Byron-era AVVM addresses are cancelled and their value returned to reserves.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AvvmCancellationMessage {
-    /// Total lovelace value of cancelled AVVM UTxOs
-    pub cancelled_value: u64,
-    /// Number of AVVM UTxOs that were cancelled
-    pub cancelled_count: usize,
-}
-
 /// Stake address part of address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct StakeAddressDeltasMessage {
@@ -339,8 +328,7 @@ pub enum CardanoMessage {
     TxCertificates(TxCertificatesMessage),   // Transaction certificates received
     AddressDeltas(AddressDeltasMessage),     // Address deltas received
     Withdrawals(WithdrawalsMessage),         // Withdrawals from reward accounts
-    PotDeltas(PotDeltasMessage),               // Changes to pot balances
-    AvvmCancellation(AvvmCancellationMessage), // AVVM UTxOs cancelled at Allegra hard fork
+    PotDeltas(PotDeltasMessage),             // Changes to pot balances
     BlockInfoMessage(BlockTxsMessage), // Transaction Info (total count, total output, total fees in a block)
     EpochActivity(EpochActivityMessage), // Total fees and VRF keys for an epoch
     EpochNonce(Option<Nonce>),         // Epoch nonce for the current epoch

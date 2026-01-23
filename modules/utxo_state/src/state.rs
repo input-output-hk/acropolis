@@ -89,6 +89,10 @@ pub struct State {
 
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
+
+    /// Total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// None until cancellation happens, then Some(total_value).
+    avvm_cancelled_value: Option<Value>,
 }
 
 impl State {
@@ -103,7 +107,14 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
+            avvm_cancelled_value: None,
         }
+    }
+
+    /// Get the total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// Returns None if cancellation hasn't happened yet.
+    pub fn get_avvm_cancelled_value(&self) -> Option<Value> {
+        self.avvm_cancelled_value.clone()
     }
 
     /// Get the total value of multiple utxos
@@ -178,12 +189,18 @@ impl State {
     /// Note: This only handles immutable UTxOs. Volatile UTxOs with redeem addresses
     /// would be extremely rare (recently-spent AVVM addresses just before epoch 236),
     /// and the volatile index structure doesn't support individual removals.
+    ///
+    /// After cancellation, the total_value is stored in `avvm_cancelled_value` for later
+    /// querying by accounts_state.
     pub async fn cancel_redeem_utxos(&mut self, block: &BlockInfo) -> Result<(usize, u64)> {
         // Cancel from immutable store and get the cancelled UTxOs
         let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
 
         let count = cancelled.len();
-        let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+        let total_value: Value = cancelled.iter().map(|(_, u)| &u.value).sum();
+
+        // Store the cancelled value for later query by accounts_state
+        self.avvm_cancelled_value = Some(total_value.clone());
 
         // Generate AddressDeltas for the cancelled UTxOs (as if they were spent)
         if let Some(observer) = &self.address_delta_observer {
@@ -208,7 +225,7 @@ impl State {
             observer.finalise_block(block).await;
         }
 
-        Ok((count, total_value))
+        Ok((count, total_value.lovelace))
     }
 
     /// Observe a block for statistics and handle rollbacks
@@ -398,6 +415,23 @@ impl State {
 
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
+
+        // AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
+        // This only happens once when we enter the Allegra era.
+        // Check new_epoch to ensure we only do this at the epoch boundary.
+        if block.new_epoch && block.era == Era::Allegra && self.avvm_cancelled_value.is_none() {
+            match self.cancel_redeem_utxos(block).await {
+                Ok((count, total_value)) => {
+                    info!(
+                        count,
+                        total_value, "Cancelled AVVM/redeem UTxOs at Allegra boundary"
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to cancel AVVM UTxOs: {e}");
+                }
+            }
+        }
 
         // Process the deltas
         for tx in &deltas.deltas {

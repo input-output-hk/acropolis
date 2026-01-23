@@ -4,12 +4,12 @@
 use acropolis_common::{
     configuration::StartupMode,
     messages::{
-        AvvmCancellationMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse, StateTransitionMessage,
+        CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     validation::ValidationOutcomes,
-    BlockInfo, Era,
+    BlockInfo,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -56,8 +56,6 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
-const DEFAULT_AVVM_CANCELLATION_TOPIC: (&str, &str) =
-    ("avvm-cancellation-publish-topic", "cardano.avvm.cancellation");
 
 /// UTXO state module
 #[module(
@@ -77,11 +75,9 @@ impl UTXOState {
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
-        avvm_cancellation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut genesis_utxo_consumed = false;
-        let mut avvm_cancelled = false;
 
         if is_snapshot_mode {
             if let Some(sub) = pool_registration_updates_subscription.as_mut() {
@@ -181,43 +177,6 @@ impl UTXOState {
                     .instrument(span)
                     .await;
 
-                    // AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet)
-                    // This only happens once when we enter the Allegra era.
-                    if !avvm_cancelled && block.era == Era::Allegra && block.new_epoch {
-                        let span = info_span!("utxo_state.avvm_cancel", block = block.number);
-                        async {
-                            let mut state = state.lock().await;
-                            match state.cancel_redeem_utxos(block).await {
-                                Ok((count, total_value)) => {
-                                    info!(
-                                        count,
-                                        total_value,
-                                        "Cancelled AVVM/redeem UTxOs at Allegra boundary"
-                                    );
-                                    // Publish the AVVM cancellation message
-                                    let msg = Message::Cardano((
-                                        block.clone(),
-                                        CardanoMessage::AvvmCancellation(AvvmCancellationMessage {
-                                            cancelled_value: total_value,
-                                            cancelled_count: count,
-                                        }),
-                                    ));
-                                    if let Err(e) =
-                                        context.publish(&avvm_cancellation_topic, Arc::new(msg)).await
-                                    {
-                                        error!("Failed to publish AVVM cancellation: {e}");
-                                    }
-                                    avvm_cancelled = true;
-                                }
-                                Err(e) => {
-                                    error!("Failed to cancel AVVM UTxOs: {e}");
-                                }
-                            }
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
                     if !genesis_utxo_consumed {
                         genesis_utxo_consumed = true;
                     }
@@ -273,11 +232,6 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
-        let avvm_cancellation_topic = config
-            .get_string(DEFAULT_AVVM_CANCELLATION_TOPIC.0)
-            .unwrap_or(DEFAULT_AVVM_CANCELLATION_TOPIC.1.to_string());
-        info!("Creating AVVM cancellation publisher on '{avvm_cancellation_topic}'");
-
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Create store
@@ -330,7 +284,6 @@ impl UTXOState {
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
-                avvm_cancellation_topic,
                 is_snapshot_mode,
             )
             .await
@@ -405,7 +358,7 @@ impl UTXOState {
                     )));
                 };
 
-                let mut state = state_mutex.lock().await;
+                let state = state_mutex.lock().await;
                 let response = match query {
                     UTxOStateQuery::GetUTxOsSum { utxo_identifiers } => {
                         match state.get_utxos_sum(utxo_identifiers).await {
@@ -423,20 +376,8 @@ impl UTXOState {
                             )),
                         }
                     }
-                    UTxOStateQuery::CancelRedeemUtxos { block_info } => {
-                        match state.cancel_redeem_utxos(block_info).await {
-                            Ok((count, total_value)) => {
-                                info!(
-                                    count,
-                                    total_value,
-                                    "Cancelled AVVM/redeem UTxOs via query"
-                                );
-                                UTxOStateQueryResponse::RedeemUtxosCancelled { count, total_value }
-                            }
-                            Err(e) => UTxOStateQueryResponse::Error(QueryError::internal_error(
-                                e.to_string(),
-                            )),
-                        }
+                    UTxOStateQuery::GetAvvmCancelledValue => {
+                        UTxOStateQueryResponse::AvvmCancelledValue(state.get_avvm_cancelled_value())
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(

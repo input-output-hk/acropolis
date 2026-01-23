@@ -284,7 +284,6 @@ fn calculate_spo_rewards(
     deregistrations: &HashSet<StakeAddress>,
     is_pre_babbage: bool,
 ) -> Vec<RewardDetail> {
-
     // Active stake (sigma)
     let pool_stake = BigDecimal::from(spo.total_stake);
     if pool_stake.is_zero() {

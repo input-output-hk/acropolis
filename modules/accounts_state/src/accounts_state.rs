@@ -17,7 +17,7 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus, Era,
+    BlockInfo, BlockStatus,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -56,7 +56,6 @@ const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
 const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
-const DEFAULT_AVVM_CANCELLATION_TOPIC: &str = "cardano.avvm.cancellation";
 
 // Publishers
 const DEFAULT_DREP_DISTRIBUTION_TOPIC: &str = "cardano.drep.distribution";
@@ -166,7 +165,6 @@ impl AccountsState {
         mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
         mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
-        mut avvm_cancellation_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
         is_snapshot_mode: bool,
     ) -> Result<()> {
@@ -215,9 +213,6 @@ impl AccountsState {
         // We skip rewards calculation on the first epoch since pot deltas were already applied
         let mut skip_first_epoch_rewards = is_snapshot_mode;
 
-        // Track AVVM cancellation (happens once at Allegra boundary, epoch 236 on mainnet)
-        let mut avvm_cancelled = false;
-
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
@@ -263,36 +258,6 @@ impl AccountsState {
             // Read from epoch-boundary messages only when it's a new epoch
             // NEWEPOCH ticks
             if new_epoch {
-                // Handle AVVM cancellation at Allegra boundary (epoch 236 on mainnet)
-                // This only happens once when we enter the Allegra era.
-                if !avvm_cancelled {
-                    if let Some(block_info) = current_block.as_ref() {
-                        if block_info.era == Era::Allegra {
-                            let (_, message) =
-                                avvm_cancellation_subscription.read_ignoring_rollbacks().await?;
-                            match message.as_ref() {
-                                Message::Cardano((
-                                    avvm_block,
-                                    CardanoMessage::AvvmCancellation(avvm_msg),
-                                )) => {
-                                    let span = info_span!(
-                                        "account_state.handle_avvm_cancellation",
-                                        block = avvm_block.number
-                                    );
-                                    async {
-                                        Self::check_sync(&current_block, avvm_block);
-                                        state.handle_avvm_cancellation(avvm_msg);
-                                        avvm_cancelled = true;
-                                    }
-                                    .instrument(span)
-                                    .await;
-                                }
-                                _ => error!("Unexpected AVVM cancellation message type: {message:?}"),
-                            }
-                        }
-                    }
-                }
-
                 // Applies rewards from previous epoch
                 let previous_epoch_rewards_result = state
                     .complete_previous_epoch_rewards_calculation(verifier, skip_first_epoch_rewards)
@@ -433,7 +398,12 @@ impl AccountsState {
                         async {
                             Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg, block_info, verifier)
+                                .handle_epoch_activity(
+                                    ea_msg,
+                                    block_info,
+                                    context.clone(),
+                                    verifier,
+                                )
                                 .await
                                 .inspect_err(|e| {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
@@ -645,11 +615,6 @@ impl AccountsState {
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating protocol parameters subscriber on '{parameters_topic}'");
-
-        let avvm_cancellation_topic = config
-            .get_string("avvm-cancellation-topic")
-            .unwrap_or(DEFAULT_AVVM_CANCELLATION_TOPIC.to_string());
-        info!("Creating AVVM cancellation subscriber on '{avvm_cancellation_topic}'");
 
         // Optional topics
         let drep_state_topic = config.get_string("drep-state-topic").ok();
@@ -969,7 +934,6 @@ impl AccountsState {
             None => None,
         };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
-        let avvm_cancellation_subscription = context.subscribe(&avvm_cancellation_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
@@ -1004,7 +968,6 @@ impl AccountsState {
                 governance_outcomes_subscription,
                 drep_state_subscription,
                 parameters_subscription,
-                avvm_cancellation_subscription,
                 &verifier,
                 is_snapshot_mode,
             )
