@@ -1,7 +1,10 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 use crate::validations::shelley;
 use acropolis_common::{
     validation::UTxOWValidationError, DatumHash, KeyHash, Redeemer, RedeemerPointer, ScriptHash,
-    ShelleyAddressPaymentPart, UTXOValue, UTxOIdentifier,
+    UTXOValue, UTxOIdentifier,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -16,14 +19,6 @@ pub fn get_input_datam_hashes(
     inputs: &[UTxOIdentifier],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<HashSet<DatumHash>, Box<UTxOWValidationError>> {
-    for (index, input) in inputs.iter().enumerate() {
-        if let Some(utxo) = utxos.get(input) {
-            if let Some(ShelleyAddressPaymentPart::ScriptHash(script_hash)) =
-                utxo.address.get_payment_part()
-            {}
-        }
-    }
-
     Ok(HashSet::new())
 }
 
@@ -48,6 +43,7 @@ pub fn validate_redeemers(
 /// 3. MissingRequiredDatums
 /// 4. NotAllowedSupplementalDatums
 /// 5. UnspendableUTxONoDatumHash
+#[allow(clippy::too_many_arguments)]
 pub fn validate(
     inputs: &[UTxOIdentifier],
     vkey_hashes_needed: &HashSet<KeyHash>,
