@@ -718,9 +718,9 @@ impl State {
 
         if different {
             info!("New parameter set: {:?}", params_msg.params);
-            self.previous_protocol_parameters = self.protocol_parameters.clone();
-            self.protocol_parameters = Some(params_msg.params.clone());
         }
+        self.previous_protocol_parameters = self.protocol_parameters.clone();
+        self.protocol_parameters = Some(params_msg.params.clone());
 
         Ok(())
     }
