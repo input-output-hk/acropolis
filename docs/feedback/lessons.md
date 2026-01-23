@@ -2,7 +2,7 @@
 title: Lessons Learned Database
 description: Accumulated lessons from PR reviews and manual entries
 last_updated: 2026-01-22
-total_lessons: 10
+total_lessons: 11
 ---
 
 # Lessons Learned
@@ -170,3 +170,18 @@ frequency: 1
 ```
 
 Always validate user input before passing to database queries. This prevents SQL injection and other database-related security vulnerabilities.
+
+
+### L011
+
+```yaml
+lesson_id: L011
+category: other
+tags: [bash, regex, quoting, sed]
+source: manual
+source_ref: "Manual entry 2026-01-22"
+date: 2026-01-22
+frequency: 1
+```
+
+Use `'\''` rather than `'` in regular expressions within shell scripts. This escape sequence (close quote, escaped quote, open quote) allows embedding literal single quotes in single-quoted strings.
