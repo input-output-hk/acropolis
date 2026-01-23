@@ -26,6 +26,7 @@
 - Q: Can `/speckit.feedback` be run multiple times on the same PR before merge? → A: Yes, subsequent runs merge new lessons with existing ones (incremental updates)
 - Q: What if new comments are added after the first feedback run? → A: Running feedback again extracts only new comments and merges them into existing lesson files
 - Q: Can manual lessons be added between feedback runs? → A: Yes, manual lessons are preserved and merged with PR-extracted lessons
+- Q: Should we automate the git add/commit/push workflow? → A: Yes, add optional `--commit` flag to run git commands automatically
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -111,6 +112,7 @@ As a developer, I want to manually add lessons learned even without a PR context
 - **FR-010**: System MUST report a summary of captured lessons to the user upon completion.
 - **FR-011**: Existing speckit phases (specify, plan, implement) MUST be able to read `docs/feedback/lessons.md` and incorporate relevant lessons as context when generating their outputs. This MUST be achieved via agent instruction files (`AGENTS.md` and `CLAUDE.md`) co-located with the lessons database, NOT by modifying existing agent files.
 - **FR-012**: System MUST support incremental updates when run multiple times on the same PR, merging new lessons with existing ones rather than overwriting.
+- **FR-013**: System MUST support a `--commit` flag that automatically runs `git add docs/feedback/`, `git commit -m "chore(feedback): capture lessons from PR #<number>"`, and `git push` after extracting lessons.
 
 ### Key Entities
 

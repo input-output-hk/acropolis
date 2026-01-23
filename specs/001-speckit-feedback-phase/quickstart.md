@@ -30,13 +30,25 @@ This will:
 5. Update the central `docs/feedback/lessons.md` database
 6. Prompt you to commit the changes to your branch
 
+### Capture and Auto-Commit
+
+```
+/speckit.feedback --commit
+```
+
+Same as above, but automatically runs `git add`, `git commit`, and `git push` after extracting lessons.
+
 ### Capture Feedback from Specific PR
 
 ```
 /speckit.feedback --pr 123
 ```
 
-Explicitly specify which PR to extract feedback from.
+Explicitly specify which PR to extract feedback from. Can be combined with `--commit`:
+
+```
+/speckit.feedback --pr 123 --commit
+```
 
 ### Add Manual Lesson
 

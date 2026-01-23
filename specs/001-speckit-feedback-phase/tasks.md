@@ -115,6 +115,7 @@ The co-located instruction files are automatically discovered by:
 - [X] T027 Implement edge case: very long PR discussions → summarize and limit to top 10 lessons
 - [X] T028 [P] Update `specs/001-speckit-feedback-phase/quickstart.md` with final usage examples after implementation
 - [X] T029 Run quickstart.md validation to verify all documented commands work
+- [X] T030 Implement `--commit` flag to auto-run git add/commit/push after lesson extraction (FR-013)
 
 ---
 
@@ -187,13 +188,13 @@ Value: Immediately usable for capturing PR feedback, even without database conso
 
 | Metric | Count |
 |--------|-------|
-| **Total Tasks** | 29 |
+| **Total Tasks** | 30 |
 | **Setup Tasks** | 5 |
 | **Foundational Tasks** | 2 |
 | **US1 Tasks** | 6 |
 | **US2 Tasks** | 6 |
 | **US3 Tasks** | 4 |
-| **Polish Tasks** | 6 |
+| **Polish Tasks** | 7 |
 | **Parallelizable Tasks** | 6 |
 
 | User Story | Task Range | Parallel Opportunities |
@@ -203,4 +204,4 @@ Value: Immediately usable for capturing PR feedback, even without database conso
 | US1 (P1) | T008-T013 | None (sequential flow) |
 | US2 (P2) | T014-T019 | None (sequential flow) |
 | US3 (P3) | T020-T023 | Can run parallel to US1/US2 |
-| Polish | T024-T029 | T028 |
+| Polish | T024-T030 | T028 |
