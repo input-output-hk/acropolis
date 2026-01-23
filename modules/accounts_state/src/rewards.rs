@@ -17,7 +17,7 @@ use tracing::{debug, info, warn};
 /// Used for Shelley-specific reward calculation bugs (late registration, shared reward accounts)
 const LAST_SHELLEY_EPOCH: u64 = 235;
 
-/// First epoch of the Babbage era on mainnet (epoch 365)
+/// First epoch of the Babbage era on mainnet (epoch 365, protocol version 7)
 /// Used for pre-Babbage reward rules (filterRewards bug, unregistered leader rewards)
 const FIRST_BABBAGE_EPOCH: u64 = 365;
 
@@ -141,9 +141,11 @@ pub fn calculate_rewards(
             operator_id, pay_to_pool_reward_account
         );
 
-        // Also, to handle the early Shelley timing bug, we allow it if it was registered
-        // during the current epoch. Fixed in Allegra (hardforkAllegraAggregatedRewards).
-        if is_shelley_rewards && !pay_to_pool_reward_account {
+        // Also, check if the reward account was registered during the current epoch
+        // (before the stability window). In Cardano, addrsRew is captured at the stability
+        // window, so registrations that happen before that point should allow leader rewards.
+        // This applies to all pre-Babbage eras.
+        if is_pre_babbage && !pay_to_pool_reward_account {
             debug!(
                 "Checking old reward account {} for late registration",
                 staking_spo.reward_account
@@ -154,7 +156,7 @@ pub fn calculate_rewards(
 
             if pay_to_pool_reward_account {
                 info!(
-                    "SPO {}'s reward account {} was registered in this epoch",
+                    "SPO {}'s reward account {} registered before stability window - will pay leader reward",
                     operator_id, staking_spo.reward_account
                 );
             }
