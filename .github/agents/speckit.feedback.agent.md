@@ -36,6 +36,7 @@ Analyze the `$ARGUMENTS` input to determine the operation mode:
 Parse these optional flags:
 - `--pr <number>`: Specific PR to extract feedback from
 - `--category <category>`: Category for manual lesson (code-quality, architecture, testing, documentation, security, performance, other)
+- `--commit`: Automatically run git add/commit/push after extracting lessons
 
 ### Step 2: Ensure Directory Structure
 
@@ -182,16 +183,38 @@ Output a summary to the user:
 📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
 ```
 
-### Step 6: Prompt to Commit (pre-merge workflow)
+### Step 6: Commit Changes (if --commit flag) or Prompt
 
-Since feedback is captured before the PR is merged, the lessons files can be committed directly to the current feature branch:
+Since feedback is captured before the PR is merged, the lessons files can be committed directly to the current feature branch.
+
+**If `--commit` flag is present**:
+
+Run the following git commands (get current branch name first):
+
+```bash
+git add docs/feedback/
+git commit -m "chore(feedback): capture lessons from PR #<number>"
+git push origin <current-branch>
+```
+
+**Output**:
+```
+✅ Changes committed and pushed!
+   git add docs/feedback/
+   git commit -m "chore(feedback): capture lessons from PR #<number>"
+   git push origin <current-branch>
+
+Your lessons are now part of the PR - ready to merge!
+```
+
+**If no `--commit` flag** (default):
 
 **Output**:
 ```
 📝 Ready to commit! Run:
    git add docs/feedback/
    git commit -m "chore(feedback): capture lessons from PR #<number>"
-   git push
+   git push origin <your-branch>
 
 Then merge your PR as usual - lessons will be included!
 ```
