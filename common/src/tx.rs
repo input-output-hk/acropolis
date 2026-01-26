@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ReferenceScript, ScriptHash, StakeRegistrationUpdate, TxCertificateWithPos,
-    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
+    Redeemer, ScriptHash, ScriptType, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
+    UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -52,8 +52,8 @@ pub struct Transaction {
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
-    pub vkey_witnesses: Vec<VKeyWitness>,
-    pub scripts_provided: Vec<(ScriptHash, ReferenceScript)>,
+    pub vkey_witnesses: HashSet<VKeyWitness>,
+    pub script_witnesses: HashMap<ScriptHash, ScriptType>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: HashMap<DatumHash, Vec<u8>>,
     pub error: Option<Phase1ValidationError>,
@@ -84,7 +84,7 @@ impl Transaction {
             voting_procedures,
             proposal_procedures,
             vkey_witnesses,
-            scripts_provided,
+            script_witnesses,
             redeemers,
             plutus_data,
             ..
@@ -104,7 +104,7 @@ impl Transaction {
             voting_procedures: None,
             proposal_procedures: None,
             vkey_witnesses: None,
-            scripts_provided: None,
+            script_witnesses: None,
             redeemers: None,
             plutus_data: None,
         };
@@ -118,7 +118,7 @@ impl Transaction {
             utxo_deltas.voting_procedures = voting_procedures;
             utxo_deltas.proposal_procedures = proposal_procedures;
             utxo_deltas.vkey_witnesses = Some(vkey_witnesses);
-            utxo_deltas.scripts_provided = Some(scripts_provided);
+            utxo_deltas.script_witnesses = Some(script_witnesses);
             utxo_deltas.redeemers = Some(redeemers);
             utxo_deltas.plutus_data = Some(plutus_data);
         }
@@ -177,10 +177,10 @@ pub struct TxUTxODeltas {
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
 
     // VKey Witnesses
-    pub vkey_witnesses: Option<Vec<VKeyWitness>>,
+    pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
 
-    // Scripts Provided
-    pub scripts_provided: Option<Vec<(ScriptHash, ReferenceScript)>>,
+    // Scripts Witnesses Provided (Native, PlutusV1, PlutusV2, PlutusV3)
+    pub script_witnesses: Option<HashMap<ScriptHash, ScriptType>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,
@@ -192,20 +192,20 @@ pub struct TxUTxODeltas {
 impl TxUTxODeltas {
     /// This function returns VKey hashes provided
     /// from Vkey witnesses
-    pub fn get_vkey_hashes_provided(&self) -> Vec<KeyHash> {
+    pub fn get_vkey_witness_hashes(&self) -> HashSet<KeyHash> {
         let Some(vkey_witnesses) = self.vkey_witnesses.as_ref() else {
-            return vec![];
+            return HashSet::new();
         };
-        vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>()
+        vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>()
     }
 
     /// This function returns script hashes provided
-    /// from scripts provided
-    pub fn get_script_hashes_provided(&self) -> Vec<ScriptHash> {
-        let Some(scripts_provided) = self.scripts_provided.as_ref() else {
-            return vec![];
+    /// from scripts witnesses provided
+    pub fn get_script_witness_hashes(&self) -> HashSet<ScriptHash> {
+        let Some(script_witnesses) = self.script_witnesses.as_ref() else {
+            return HashSet::new();
         };
-        scripts_provided.iter().map(|(script_hash, _)| *script_hash).collect::<Vec<_>>()
+        script_witnesses.keys().copied().collect::<HashSet<_>>()
     }
 
     /// This functions returns the total consumed value of the transaction

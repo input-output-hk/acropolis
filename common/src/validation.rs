@@ -198,10 +198,6 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
-
-    /// **Cause:** Malformed UTxO
-    #[error("Malformed UTxO: era={era}, reason={reason}")]
-    MalformedUTxO { era: Era, reason: String },
 }
 
 /// UTxOW Rules Failure
@@ -299,6 +295,7 @@ pub enum UTxOWValidationError {
     NotAllowedSupplementalDatums { datum_hash: DatumHash },
 
     /// **Cause:** Script integrity hash mismatch
+    /// NOTE: This check should be considered for each era. (a bit different in each era)
     #[error(
         "Script integrity hash mismatch: expected={}, actual={}, reason={}",
         hex::encode(expected.unwrap_or_default()),
@@ -321,6 +318,16 @@ pub enum UTxOWValidationError {
         utxo_identifier: UTxOIdentifier,
         input_index: usize,
     },
+
+    /// --------------------------- Babbage Era Errors
+    /// ----------------------------------------------
+    /// **Cause:** Malformed script witness
+    #[error("Malformed script witness: script_hash={script_hash}")]
+    MalformedScriptWitnesses { script_hash: ScriptHash },
+
+    /// **Cause:** Malformed reference script
+    #[error("Malformed reference script: script_hash={script_hash}")]
+    MalformedReferenceScripts { script_hash: ScriptHash },
 }
 
 /// Reference

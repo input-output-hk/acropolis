@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use acropolis_common::{
-    validation::UTxOWValidationError, Datum, DatumHash, Redeemer, RedeemerPointer, ReferenceScript,
-    ScriptHash, ScriptType, ShelleyAddressPaymentPart, TxOutput, UTXOValue, UTxOIdentifier,
+    validation::UTxOWValidationError, Datum, DatumHash, Redeemer, RedeemerPointer, ScriptHash,
+    ScriptType, ShelleyAddressPaymentPart, TxOutput, UTXOValue, UTxOIdentifier,
 };
 use std::{
     cmp::Ordering,
@@ -18,13 +18,9 @@ use std::{
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L241
 pub fn get_input_datum_hashes(
     inputs: &[UTxOIdentifier],
-    scripts_provided: &[(ScriptHash, ReferenceScript)],
+    scripts_provided: &HashMap<ScriptHash, ScriptType>,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<HashSet<DatumHash>, Box<UTxOWValidationError>> {
-    let scripts_provided = scripts_provided
-        .iter()
-        .map(|(script_hash, script)| (script_hash, script.get_script_type()))
-        .collect::<HashMap<_, _>>();
     let mut input_hashes = HashSet::new();
 
     for (index, input) in inputs.iter().enumerate() {
@@ -89,7 +85,7 @@ pub fn validate_datums(
     inputs: &[UTxOIdentifier],
     outputs: &[TxOutput],
     ref_inputs: &[UTxOIdentifier],
-    scripts_provided: &[(ScriptHash, ReferenceScript)],
+    scripts_provided: &HashMap<ScriptHash, ScriptType>,
     plutus_data: &HashMap<DatumHash, Vec<u8>>,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<(), Box<UTxOWValidationError>> {
@@ -168,7 +164,7 @@ pub fn validate(
     outputs: &[TxOutput],
     ref_inputs: &[UTxOIdentifier],
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
-    scripts_provided: &[(ScriptHash, ReferenceScript)],
+    scripts_provided: &HashMap<ScriptHash, ScriptType>,
     plutus_data: &HashMap<DatumHash, Vec<u8>>,
     redeemers: &[Redeemer],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,

@@ -20,7 +20,7 @@ pub enum ScriptType {
 }
 
 // The full CBOR bytes of a reference script
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
     Native(NativeScript),
     PlutusV1(Vec<u8>),
@@ -48,7 +48,7 @@ impl ReferenceScript {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum NativeScript {
     ScriptPubkey(AddrKeyhash),
     ScriptAll(Vec<NativeScript>),
