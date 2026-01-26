@@ -73,6 +73,7 @@ impl Transaction {
             id,
             consumes,
             produces,
+            reference_inputs,
             fee,
             is_valid,
             certs,
@@ -92,6 +93,7 @@ impl Transaction {
             tx_identifier: id,
             consumes,
             produces,
+            reference_inputs,
             fee,
             is_valid,
             withdrawals: None,
@@ -136,6 +138,9 @@ pub struct TxUTxODeltas {
     // Spent and Created UTxOs
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
+
+    // Reference inputs (introduced in Alonzo)
+    pub reference_inputs: Vec<UTxOIdentifier>,
 
     // Transaction fee
     pub fee: u64,

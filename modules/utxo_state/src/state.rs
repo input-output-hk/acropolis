@@ -9,7 +9,7 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
+    Address, AddressDelta, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
     UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
@@ -546,16 +546,20 @@ impl State {
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley {
-                if let Err(e) = validations::validate_tx(
-                    tx_deltas,
-                    pool_registration_updates,
-                    stake_registration_updates,
-                    &utxos,
-                    protocol_params.shelley.as_ref(),
-                ) {
-                    bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
-                }
+            if let Err(e) = validations::validate_tx(
+                tx_deltas,
+                pool_registration_updates,
+                stake_registration_updates,
+                &utxos,
+                protocol_params.shelley.as_ref(),
+                block.era,
+            ) {
+                bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
+            }
+
+            // remove this transaction's inputs from the utxos
+            for input in &tx_deltas.consumes {
+                utxos.remove(input);
             }
 
             // add this transaction's outputs to the utxos
