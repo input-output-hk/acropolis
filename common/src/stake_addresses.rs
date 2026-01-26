@@ -348,10 +348,6 @@ impl StakeAddressMap {
             .map(|(cred, _)| (cred.clone(), AtomicU64::new(0)))
             .collect::<BTreeMap<_, _>>();
         self.inner.values().collect::<Vec<_>>().par_iter().for_each(|state| {
-            if !state.registered {
-                return;
-            }
-
             let Some(drep) = state.delegated_drep.clone() else {
                 return;
             };
@@ -471,34 +467,6 @@ impl StakeAddressMap {
         for sas in self.inner.values_mut() {
             if sas.delegated_spo.as_ref() == Some(spo) {
                 sas.delegated_spo = None;
-            }
-        }
-    }
-
-    /// Deregister a DRep - clears all delegations to this DRep
-    ///
-    /// TODO: This currently iterates ALL stake addresses to find delegations (O(n)).
-    /// The Haskell ledger maintains a reverse index (`drepDelegs`) on each DRepState
-    /// that tracks which credentials delegated TO that DRep, enabling O(k) clearing
-    /// where k = number of delegators. We could consider adding similar reverse tracking for
-    /// better performance.
-    /// See: https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
-    /// `clearDRepDelegations` function.
-    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
-        for sas in self.inner.values_mut() {
-            if let Some(ref drep) = sas.delegated_drep {
-                let matches = match drep {
-                    DRepChoice::Key(hash) => {
-                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
-                    }
-                    DRepChoice::Script(hash) => {
-                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
-                    }
-                    _ => false,
-                };
-                if matches {
-                    sas.delegated_drep = None;
-                }
             }
         }
     }

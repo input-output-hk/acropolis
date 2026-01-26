@@ -1099,12 +1099,32 @@ impl State {
 
     /// record a DRep delegation
     fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
-        let _previous_drep = {
+        let previous_drep = {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             stake_addresses
                 .record_drep_delegation(stake_address, drep)
                 .expect("invalid DRep delegation during replay")
         };
+
+        if *drep == DRepChoice::NoConfidence {
+            if let Some(prev_choice) = previous_drep {
+                if let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) {
+                    if let Some(delegators) = self.drep_delegators.get(&prev_cred) {
+                        if delegators.contains(stake_address) {
+                            let new_inner = delegators.without(stake_address);
+
+                            if new_inner.is_empty() {
+                                self.drep_delegators = self.drep_delegators.without(&prev_cred);
+                            } else {
+                                self.drep_delegators =
+                                    self.drep_delegators.update(prev_cred, new_inner);
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
 
         if let Some(new_cred) = DRepChoice::to_credential(drep) {
             self.drep_delegators.entry(new_cred).or_default().insert(stake_address.clone());
@@ -1115,14 +1135,22 @@ impl State {
     fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
         self.dreps.retain(|(cred, _)| cred != drep);
 
-        // Only needed for Conway PV9
-        if let Some(delegators) = self.drep_delegators.remove(drep) {
-            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        if let Some(params) = &self.protocol_parameters {
+            if let Some(params) = &params.shelley {
+                if params.protocol_params.protocol_version.major <= 9 {
+                    let Some(delegators) = self.drep_delegators.remove(drep) else {
+                        return;
+                    };
 
-            for stake_address in delegators {
-                // This comparison is the *actual* ledger rule
-                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
-                    sas.delegated_drep = None;
+                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
+
+                    for stake_address in delegators {
+                        let Some(sas) = stake_addresses.get_mut(&stake_address) else {
+                            continue;
+                        };
+
+                        sas.delegated_drep = None;
+                    }
                 }
             }
         }
