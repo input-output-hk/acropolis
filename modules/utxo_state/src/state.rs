@@ -378,11 +378,9 @@ impl State {
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
 
-        // If we're entering a new epoch, capture the total UTXO value
+        // If we're entering Shelley era, capture the total UTXO value
         // (used to resync reserves on entry to Shelley in AccountsState)
-        // Do this only on the first epoch of Shelley
-        if block.new_epoch && block.era == Era::Shelley && self.utxos_sum_at_shelley_start.is_none()
-        {
+        if block.is_new_era && block.era == Era::Shelley {
             let total_utxos = self.get_total_utxos_sum().await?;
             info!(epoch = block.epoch, total_utxos.lovelace, "Shelley start");
 
@@ -624,6 +622,7 @@ mod tests {
             epoch: 99,
             epoch_slot: slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: slot,
             tip_slot: None,
             era: Era::Byron,

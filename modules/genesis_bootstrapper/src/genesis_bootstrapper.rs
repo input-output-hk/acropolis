@@ -129,6 +129,7 @@ impl GenesisBootstrapper {
                     epoch: 0,
                     epoch_slot: 0,
                     new_epoch: false,
+                    is_new_era: true,
                     timestamp: byron_genesis.start_time,
                     era: Era::Byron,
                     tip_slot: None,

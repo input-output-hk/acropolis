@@ -108,9 +108,6 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
-
-    /// Have we fixed Shelley reserves yet?
-    fixed_shelley_reserves: bool,
 }
 
 impl State {
@@ -156,9 +153,6 @@ impl State {
             "Loaded pots: reserves={}, treasury={}, deposits={}",
             self.pots.reserves, self.pots.treasury, self.pots.deposits
         );
-
-        // Assume we've fixed the reserves at Shelley boundary so we don't overwrite it
-        self.fixed_shelley_reserves = true;
 
         // Load mark/set/go snapshots
         let snapshots = bootstrap_msg.bootstrap_snapshots;
@@ -328,11 +322,13 @@ impl State {
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
+    #[allow(clippy::too_many_arguments)]
     async fn enter_epoch(
         &mut self,
         context: Arc<Context<Message>>,
         epoch: u64,
         era: Era,
+        is_new_era: bool,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
@@ -357,8 +353,8 @@ impl State {
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
         // is painful, requiring lookup of UTXO value for every input
-        if !self.fixed_shelley_reserves {
-            info!("Entering Shelley boundary - need to fix up reserves");
+        if is_new_era && era == Era::Shelley {
+            info!("Entering Shelley era - fixing up reserves");
 
             let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
             info!("Total UTXO value: {total_utxos}");
@@ -366,7 +362,6 @@ impl State {
             let reserves = shelley_params.max_lovelace_supply - total_utxos;
             info!("Reserves remaining: {reserves}");
             self.pots.reserves = reserves;
-            self.fixed_shelley_reserves = true;
         }
 
         info!(
@@ -835,6 +830,7 @@ impl State {
         context: Arc<Context<Message>>,
         ea_msg: &EpochActivityMessage,
         era: Era,
+        is_new_era: bool,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -857,6 +853,7 @@ impl State {
                 context,
                 ea_msg.epoch + 1,
                 era,
+                is_new_era,
                 ea_msg.total_fees,
                 spo_blocks,
                 verifier,

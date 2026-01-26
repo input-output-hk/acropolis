@@ -402,6 +402,7 @@ impl AccountsState {
                                     context.clone(),
                                     ea_msg,
                                     block_info.era,
+                                    block_info.is_new_era,
                                     verifier,
                                 )
                                 .await

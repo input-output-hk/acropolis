@@ -90,6 +90,7 @@ impl BootstrapContext {
             epoch: target_epoch,
             epoch_slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: genesis.slot_to_timestamp(slot),
             tip_slot: None,
             era: block_ctx.era,
