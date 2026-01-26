@@ -1,7 +1,7 @@
 //! On-disk store using Sled for immutable UTXOs
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -66,14 +66,15 @@ impl ImmutableUTXOStore for SledImmutableUTXOStore {
         Ok(self.db.len())
     }
 
-    /// Get the total value of UTXOs in the store
-    async fn sum(&self) -> Result<Value> {
-        self.db.iter().try_fold(Value::default(), |mut acc, item| {
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        self.db.iter().try_fold(0u64, |acc, item| {
             let (_k, bytes) = item?;
             if let Ok(utxo) = serde_cbor::from_slice::<UTXOValue>(&bytes) {
-                acc += &utxo.value;
+                Ok(acc + utxo.value.lovelace)
+            } else {
+                Ok(acc)
             }
-            Ok(acc)
         })
     }
 }

@@ -702,6 +702,10 @@ impl Value {
     pub fn coin(&self) -> u64 {
         self.lovelace
     }
+
+    pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
+        iter.map(|v| v.lovelace).sum()
+    }
 }
 
 impl AddAssign<&Value> for Value {
@@ -741,7 +745,7 @@ impl Add for Value {
 impl Sum for Value {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::default(), |mut acc, v| {
-            acc += &v; // Use AddAssign<&Value>
+            acc += &v;
             acc
         })
     }

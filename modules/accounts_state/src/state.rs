@@ -511,16 +511,16 @@ impl State {
         let response = context.message_bus.request(&utxos_query_topic, msg).await?;
         let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
 
-        let total = match message {
+        let total_lovelace = match message {
             Message::StateQueryResponse(StateQueryResponse::UTxOs(
-                UTxOStateQueryResponse::UTxOsSum(value),
-            )) => value,
+                UTxOStateQueryResponse::LovelaceSum(lovelace),
+            )) => lovelace,
             _ => {
                 return Err(anyhow!("Unexpected utxo-state response"));
             }
         };
 
-        Ok(total.lovelace)
+        Ok(total_lovelace)
     }
 
     /// Apply a registration change set to registration/deregistration lists

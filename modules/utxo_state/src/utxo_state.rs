@@ -354,9 +354,9 @@ impl UTXOState {
                         }
                     }
                     UTxOStateQuery::GetAllUTxOsSumAtShelleyStart => {
-                        let total = match state.get_total_utxos_sum_at_shelley_start() {
+                        let total_lovelace = match state.get_lovelace_at_shelley_start() {
                             Some(cached) => cached,
-                            None => match state.get_total_utxos_sum().await {
+                            None => match state.get_total_lovelace().await {
                                 Ok(v) => v,
                                 Err(e) => {
                                     return Arc::new(Message::StateQueryResponse(
@@ -367,7 +367,7 @@ impl UTXOState {
                                 }
                             },
                         };
-                        UTxOStateQueryResponse::UTxOsSum(total)
+                        UTxOStateQueryResponse::LovelaceSum(total_lovelace)
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(

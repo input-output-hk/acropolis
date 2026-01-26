@@ -58,8 +58,8 @@ pub trait ImmutableUTXOStore: Send + Sync {
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
 
-    /// Get the total value of UTXOs (ADA and assets) in the store
-    async fn sum(&self) -> Result<Value>;
+    /// Get the total lovelace of all UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64>;
 }
 
 /// Ledger state storage
@@ -88,8 +88,8 @@ pub struct State {
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
 
-    /// Sum of UTXOs at Shelley epoch boundary
-    utxos_sum_at_shelley_start: Option<Value>,
+    /// Total lovelace at Shelley epoch boundary
+    lovelace_at_shelley_start: Option<u64>,
 }
 
 impl State {
@@ -104,21 +104,20 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
-            utxos_sum_at_shelley_start: None,
+            lovelace_at_shelley_start: None,
         }
     }
 
-    /// Get the current total value of all utxos, with ADA and assets
-    pub async fn get_total_utxos_sum(&self) -> Result<Value> {
-        Ok(
-            self.volatile_utxos.values().map(|v| &v.value).sum::<Value>()
-                + self.immutable_utxos.sum().await?,
-        )
+    /// Get the current total lovelace of all utxos
+    pub async fn get_total_lovelace(&self) -> Result<u64> {
+        let volatile = Value::sum_lovelace(self.volatile_utxos.values().map(|v| &v.value));
+        let immutable = self.immutable_utxos.sum_lovelace().await?;
+        Ok(volatile + immutable)
     }
 
-    /// Get the total value of all utxos (with ADA and assets) at the Shelley epoch boundary
-    pub fn get_total_utxos_sum_at_shelley_start(&self) -> Option<Value> {
-        self.utxos_sum_at_shelley_start.clone()
+    /// Get the total lovelace at the Shelley epoch boundary
+    pub fn get_lovelace_at_shelley_start(&self) -> Option<u64> {
+        self.lovelace_at_shelley_start
     }
 
     /// Get the total value of multiple utxos
@@ -378,13 +377,13 @@ impl State {
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
 
-        // If we're entering Shelley era, capture the total UTXO value
+        // If we're entering Shelley era, capture the total lovelace
         // (used to resync reserves on entry to Shelley in AccountsState)
         if block.is_new_era && block.era == Era::Shelley {
-            let total_utxos = self.get_total_utxos_sum().await?;
-            info!(epoch = block.epoch, total_utxos.lovelace, "Shelley start");
+            let total_lovelace = self.get_total_lovelace().await?;
+            info!(epoch = block.epoch, total_lovelace, "Shelley start");
 
-            self.utxos_sum_at_shelley_start = Some(total_utxos);
+            self.lovelace_at_shelley_start = Some(total_lovelace);
         }
 
         // Process the deltas

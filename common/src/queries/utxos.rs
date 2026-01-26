@@ -19,5 +19,6 @@ pub enum UTxOStateQuery {
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
     UTxOs(Vec<UTXOValue>),
+    LovelaceSum(u64),
     Error(QueryError),
 }

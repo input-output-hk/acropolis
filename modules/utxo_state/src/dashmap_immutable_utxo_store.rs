@@ -3,7 +3,7 @@
 // but it takes a lot more memory than HashMap
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -50,11 +50,8 @@ impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
         Ok(self.utxos.len())
     }
 
-    /// Get the total value of UTXOs in the store
-    async fn sum(&self) -> Result<Value> {
-        Ok(self.utxos.iter().fold(Value::default(), |mut acc, entry| {
-            acc += &entry.value().value;
-            acc
-        }))
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(self.utxos.iter().map(|entry| entry.value().value.lovelace).sum())
     }
 }
