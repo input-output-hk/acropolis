@@ -86,7 +86,7 @@ pub struct State {
     pots: Pots,
 
     /// All registered DReps
-    dreps: Vec<(DRepCredential, Lovelace)>,
+    dreps: OrdMap<DRepCredential, Lovelace>,
 
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
@@ -151,7 +151,7 @@ impl State {
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
         // Load DReps
-        self.dreps = bootstrap_msg.dreps;
+        self.dreps = bootstrap_msg.dreps.into();
         info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
@@ -762,6 +762,8 @@ impl State {
             info!("New parameter set: {:?}", params_msg.params);
             self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
+        } else if self.previous_protocol_parameters != self.protocol_parameters {
+            self.previous_protocol_parameters = self.protocol_parameters.clone()
         }
 
         Ok(())
@@ -1094,7 +1096,7 @@ impl State {
 
     /// Record a DRep registration
     fn record_drep_registration(&mut self, drep: &DRepCredential, deposit: u64) {
-        self.dreps.push((drep.clone(), deposit));
+        self.dreps.insert(drep.clone(), deposit);
     }
 
     /// record a DRep delegation
@@ -1106,23 +1108,35 @@ impl State {
                 .expect("invalid DRep delegation during replay")
         };
 
-        if *drep == DRepChoice::NoConfidence {
-            if let Some(prev_choice) = previous_drep {
-                if let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) {
-                    if let Some(delegators) = self.drep_delegators.get(&prev_cred) {
-                        if delegators.contains(stake_address) {
-                            let new_inner = delegators.without(stake_address);
+        if self.major_protocol_version() > Some(9) {
+            return;
+        }
 
-                            if new_inner.is_empty() {
-                                self.drep_delegators = self.drep_delegators.without(&prev_cred);
-                            } else {
-                                self.drep_delegators =
-                                    self.drep_delegators.update(prev_cred, new_inner);
-                            }
-                        }
-                    }
-                }
+        if *drep == DRepChoice::NoConfidence {
+            let Some(prev_choice) = previous_drep else {
+                return;
+            };
+
+            let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) else {
+                return;
+            };
+
+            let Some(delegators) = self.drep_delegators.get(&prev_cred) else {
+                return;
+            };
+
+            if !delegators.contains(stake_address) {
+                return;
             }
+
+            let updated = delegators.without(stake_address);
+
+            self.drep_delegators = if updated.is_empty() {
+                self.drep_delegators.without(&prev_cred)
+            } else {
+                self.drep_delegators.update(prev_cred, updated)
+            };
+
             return;
         }
 
@@ -1133,22 +1147,14 @@ impl State {
 
     /// Record a DRep deregistration
     fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
-        self.dreps.retain(|(cred, _)| cred != drep);
+        self.dreps.remove(drep);
 
-        if let Some(params) = &self.protocol_parameters {
-            if let Some(params) = &params.shelley {
-                if params.protocol_params.protocol_version.major <= 9 {
-                    let Some(delegators) = self.drep_delegators.remove(drep) else {
-                        return;
-                    };
+        if self.major_protocol_version() <= Some(9) {
+            if let Some(delegators) = self.drep_delegators.remove(drep) {
+                let mut stake_addresses = self.stake_addresses.lock().unwrap();
 
-                    let mut stake_addresses = self.stake_addresses.lock().unwrap();
-
-                    for stake_address in delegators {
-                        let Some(sas) = stake_addresses.get_mut(&stake_address) else {
-                            continue;
-                        };
-
+                for stake_address in delegators {
+                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
                         sas.delegated_drep = None;
                     }
                 }
@@ -1420,6 +1426,18 @@ impl State {
         }
 
         Ok(())
+    }
+
+    fn major_protocol_version(&self) -> Option<u64> {
+        let params = match &self.previous_protocol_parameters {
+            Some(params) => params,
+            None => match &self.protocol_parameters {
+                Some(params) => params,
+                None => return None,
+            },
+        };
+
+        params.shelley.as_ref().map(|shelley| shelley.protocol_params.protocol_version.major)
     }
 }
 
