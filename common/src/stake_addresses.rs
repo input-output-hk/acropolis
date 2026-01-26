@@ -5,6 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
+use imbl::OrdMap;
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::{
@@ -339,7 +340,7 @@ impl StakeAddressMap {
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(
         &self,
-        dreps: &[(DRepCredential, Lovelace)],
+        dreps: &OrdMap<DRepCredential, Lovelace>,
     ) -> DRepDelegationDistribution {
         let abstain = AtomicU64::new(0);
         let no_confidence = AtomicU64::new(0);
@@ -1228,7 +1229,7 @@ mod tests {
                 .unwrap();
             stake_addresses.add_to_reward(&addr3, 150);
 
-            let dreps = vec![(DRepCredential::AddrKeyHash(DREP_HASH), 500)];
+            let dreps = OrdMap::from_iter([(DRepCredential::AddrKeyHash(DREP_HASH), 500_u64)]);
             let drdd = stake_addresses.generate_drdd(&dreps);
 
             assert_eq!(drdd.abstain, 1050); // 1000 + 50
