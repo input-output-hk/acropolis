@@ -109,7 +109,7 @@ impl State {
     }
 
     /// Get the current total value of all utxos, with ADA and assets
-    async fn get_total_utxos_sum(&self) -> Result<Value> {
+    pub async fn get_total_utxos_sum(&self) -> Result<Value> {
         Ok(
             self.volatile_utxos.values().map(|v| &v.value).sum::<Value>()
                 + self.immutable_utxos.sum().await?,
