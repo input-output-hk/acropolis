@@ -11,8 +11,8 @@ use acropolis_common::{
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
         EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage,
-        TxCertificatesMessage, WithdrawalsMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
+        WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     stake_addresses::{StakeAddressMap, StakeAddressState},
@@ -598,7 +598,7 @@ impl State {
         for change in changes {
             // Skip changes that happened after the stability window
             if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot > max_slot {
+                if change.epoch_slot >= max_slot {
                     continue;
                 }
             }
@@ -1006,6 +1006,7 @@ impl State {
                         || self.retiring_spos.contains(hash)
                         || self.epoch_snapshots.mark.spos.contains_key(hash)
                         || self.epoch_snapshots.set.spos.contains_key(hash)
+                        || self.epoch_snapshots.go.spos.contains_key(hash)
                 })
                 .map(|(hash, count)| (*hash, *count))
                 .collect()
