@@ -49,4 +49,9 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(self.utxos.read().await.len())
     }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(self.utxos.read().await.values().map(|v| v.value.lovelace).sum())
+    }
 }

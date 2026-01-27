@@ -49,4 +49,9 @@ impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(self.utxos.len())
     }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(self.utxos.iter().map(|entry| entry.value().value.lovelace).sum())
+    }
 }
