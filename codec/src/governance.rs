@@ -308,7 +308,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
             Ok(GovernanceAction::ParameterChange(ParameterChangeAction {
                 previous_action_id: map_nullable_gov_action_id(id)?,
                 protocol_param_update: map_conway_protocol_param_update(protocol_update),
-                script_hash: map_nullable(|x: &PallasScriptHash| x.to_vec(), script),
+                script_hash: map_nullable(|x: &PallasScriptHash| to_hash(x), script),
             }))
         }
 
@@ -324,7 +324,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
                 rewards: HashMap::from_iter(
                     withdrawals.iter().map(|(account, coin)| (account.to_vec(), *coin)),
                 ),
-                script_hash: map_nullable(|x: &PallasScriptHash| x.to_vec(), script),
+                script_hash: map_nullable(|x: &PallasScriptHash| to_hash(x), script),
             }),
         ),
 
@@ -358,7 +358,7 @@ fn map_governance_action(action: &conway::GovAction) -> Result<GovernanceAction>
     }
 }
 
-pub fn map_governance_proposals_procedures(
+pub fn map_governance_proposals_procedure(
     gov_action_id: &GovActionId,
     prop: &conway::ProposalProcedure,
 ) -> Result<ProposalProcedure> {

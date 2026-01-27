@@ -25,7 +25,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::AccountState;
-use crate::{Pots, TxUTxODeltas};
+use crate::{Pots, TxUTxODeltas, UTXOValue, UTxOIdentifier};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
