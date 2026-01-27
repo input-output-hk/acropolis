@@ -753,24 +753,6 @@ impl Add for Value {
     }
 }
 
-impl Sum for Value {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self::default(), |mut acc, v| {
-            acc += &v; // Use AddAssign<&Value>
-            acc
-        })
-    }
-}
-
-impl<'a> Sum<&'a Value> for Value {
-    fn sum<I: Iterator<Item = &'a Value>>(iter: I) -> Self {
-        iter.fold(Self::default(), |mut acc, v| {
-            acc += v;
-            acc
-        })
-    }
-}
-
 /// Hashmap representation of Value (lovelace + multiasset)
 #[derive(
     Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
