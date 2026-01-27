@@ -255,6 +255,10 @@ pub struct BlockInfo {
     /// Does this block start a new epoch?
     pub new_epoch: bool,
 
+    /// Does this block start a new era?
+    #[serde(default)]
+    pub is_new_era: bool,
+
     /// Which slot was the tip at when we received this block?
     #[serde(default)]
     pub tip_slot: Option<u64>,
@@ -708,6 +712,10 @@ impl Value {
     pub fn coin(&self) -> u64 {
         self.lovelace
     }
+
+    pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
+        iter.map(|v| v.lovelace).sum()
+    }
 }
 
 impl AddAssign<&Value> for Value {
@@ -891,7 +899,7 @@ impl Neg for ValueDelta {
 }
 
 /// Value stored in UTXO
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct UTXOValue {
     /// Address in binary
     pub address: Address,
