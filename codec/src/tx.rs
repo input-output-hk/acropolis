@@ -82,37 +82,35 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
 }
 
 pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
-    let mut scripts_provided = Vec::new();
+    let native = tx.native_scripts().iter().map(|s| {
+        (
+            ScriptHash::from(*s.compute_hash()),
+            ReferenceScript::Native(map_native_script(s)),
+        )
+    });
 
-    for script in tx.native_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.compute_hash()),
-            ReferenceScript::Native(map_native_script(script)),
-        ));
-    }
+    let v1 = tx.plutus_v1_scripts().iter().map(|s| {
+        (
+            ScriptHash::from(*s.compute_hash()),
+            ReferenceScript::PlutusV1(s.as_ref().to_vec()),
+        )
+    });
 
-    for script in tx.plutus_v1_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.compute_hash()),
-            ReferenceScript::PlutusV1(script.as_ref().to_vec()),
-        ));
-    }
+    let v2 = tx.plutus_v2_scripts().iter().map(|s| {
+        (
+            ScriptHash::from(*s.compute_hash()),
+            ReferenceScript::PlutusV2(s.as_ref().to_vec()),
+        )
+    });
 
-    for script in tx.plutus_v2_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.compute_hash()),
-            ReferenceScript::PlutusV2(script.as_ref().to_vec()),
-        ));
-    }
+    let v3 = tx.plutus_v3_scripts().iter().map(|s| {
+        (
+            ScriptHash::from(*s.compute_hash()),
+            ReferenceScript::PlutusV3(s.as_ref().to_vec()),
+        )
+    });
 
-    for script in tx.plutus_v3_scripts() {
-        scripts_provided.push((
-            ScriptHash::from(*script.compute_hash()),
-            ReferenceScript::PlutusV3(script.as_ref().to_vec()),
-        ));
-    }
-
-    scripts_provided
+    native.chain(v1).chain(v2).chain(v3).collect()
 }
 
 /// Map a Pallas Transaction
