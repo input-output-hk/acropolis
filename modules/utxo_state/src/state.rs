@@ -98,7 +98,7 @@ pub struct State {
 
     /// Total value of AVVM UTxOs cancelled at Allegra boundary.
     /// None until cancellation happens, then Some(total_value).
-    avvm_cancelled_value: Option<Value>,
+    avvm_cancelled_value: Option<u64>,
 }
 
 impl State {
@@ -132,7 +132,7 @@ impl State {
 
     /// Get the total value of AVVM UTxOs cancelled at Allegra boundary.
     /// Returns None if cancellation hasn't happened yet.
-    pub fn get_avvm_cancelled_value(&self) -> Option<Value> {
+    pub fn get_avvm_cancelled_value(&self) -> Option<u64> {
         self.avvm_cancelled_value.clone()
     }
 
@@ -216,7 +216,7 @@ impl State {
         let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
 
         let count = cancelled.len();
-        let total_value: Value = cancelled.iter().map(|(_, u)| &u.value).sum();
+        let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
 
         // Store the cancelled value for later query by accounts_state
         self.avvm_cancelled_value = Some(total_value.clone());
@@ -247,7 +247,7 @@ impl State {
         //     observer.finalise_block(block).await;
         // }
 
-        Ok((count, total_value.lovelace))
+        Ok((count, total_value))
     }
 
     /// Observe a block for statistics and handle rollbacks

@@ -627,7 +627,7 @@ impl State {
         for change in changes {
             // Skip changes that happened after the stability window
             if let Some(max_slot) = max_epoch_slot {
-                if change.epoch_slot >= max_slot {
+                if change.epoch_slot > max_slot {
                     continue;
                 }
             }
@@ -753,19 +753,27 @@ impl State {
                     InstantaneousRewardSource::Treasury => "treasury",
                 };
 
-                let mut total_value: i64 = 0;
+                // First, sum all deltas within this MIR by address
+                // (a single MIR certificate shouldn't have duplicates, but sum them if it does)
+                let mut mir_totals: HashMap<StakeAddress, i64> = HashMap::new();
                 for (stake_address, value) in deltas.iter() {
+                    *mir_totals.entry(stake_address.clone()).or_default() += *value;
+                }
+
+                // Then apply to pending map with era-appropriate semantics
+                let mut total_value: i64 = 0;
+                for (stake_address, value) in mir_totals {
                     if is_alonzo_plus {
-                        // Alonzo+: sum values
+                        // Alonzo+: sum values across all MIRs in the epoch
                         pending_map
-                            .entry(stake_address.clone())
-                            .and_modify(|v| *v += *value)
-                            .or_insert(*value);
+                            .entry(stake_address)
+                            .and_modify(|v| *v += value)
+                            .or_insert(value);
                     } else {
-                        // Pre-Alonzo: override (last value wins)
-                        pending_map.insert(stake_address.clone(), *value);
+                        // Pre-Alonzo: this MIR's total overrides any previous MIR for this address
+                        pending_map.insert(stake_address, value);
                     }
-                    total_value += *value;
+                    total_value += value;
                 }
 
                 info!(
@@ -1809,6 +1817,7 @@ mod tests {
         };
 
         state.pay_mir(&mir);
+        state.apply_pending_mirs(); // Apply accumulated MIRs
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
         assert_eq!(state.pots.deposits, 2_000_000); // Paid deposit
@@ -1858,6 +1867,7 @@ mod tests {
         };
 
         state.pay_mir(&mir);
+        state.apply_pending_mirs(); // Apply accumulated MIRs
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();

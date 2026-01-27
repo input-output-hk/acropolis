@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test:spdd": "node --loader ts-node/esm spdd.test.ts"
+    "test:spdd": "node --loader ts-node/esm spdd.test.ts",
+    "test:delegation": "node --loader ts-node/esm delegation-verify.test.ts"
   },
   "dependencies": {
     "axios": "^1.12.2",

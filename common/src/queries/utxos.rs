@@ -21,6 +21,6 @@ pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
     UTxOs(Vec<UTXOValue>),
     LovelaceSum(u64),
-    AvvmCancelledValue(Option<Value>),
+    AvvmCancelledValue(Option<u64>),
     Error(QueryError),
 }
