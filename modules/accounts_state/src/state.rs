@@ -11,10 +11,14 @@ use acropolis_common::{
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
         EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage,
-        WithdrawalsMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
+    queries::{
+        get_query_topic,
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
@@ -372,13 +376,15 @@ impl State {
     ///   context: Message bus context for querying other modules
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    fn enter_epoch(
+    #[allow(clippy::too_many_arguments)]
+    async fn enter_epoch(
         &mut self,
+        context: Arc<Context<Message>>,
         epoch: u64,
         era: Era,
+        is_new_era: bool,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
-        _context: Arc<Context<Message>>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         // Handle AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
@@ -398,23 +404,6 @@ impl State {
             );
         }
 
-        // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
-        // 13,887,515,255 - as we enter 208 (Shelley)
-        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
-        // and the reserves value, if we can't properly calculate it
-        if epoch == 208 {
-            // Fix reserves to that given in the CF Java implementation:
-            // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
-            let old_reserves = self.pots.reserves;
-            self.pots.reserves = 13_888_022_852_926_644;
-            warn!(
-                new = self.pots.reserves,
-                old = old_reserves,
-                diff = self.pots.reserves - old_reserves,
-                "Fixed reserves"
-            );
-        }
-
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
@@ -431,6 +420,20 @@ impl State {
             },
         }
         .clone();
+
+        // First time into Shelley, fix reserves to max_supply - total_utxos
+        // We need to do this because tracking fees - which increase reserves - during Byron
+        // is painful, requiring lookup of UTXO value for every input
+        if is_new_era && era == Era::Shelley {
+            info!("Entering Shelley era - fixing up reserves");
+
+            let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
+            info!("Total UTXO value: {total_utxos}");
+
+            let reserves = shelley_params.max_lovelace_supply - total_utxos;
+            info!("Reserves remaining: {reserves}");
+            self.pots.reserves = reserves;
+        }
 
         info!(
             epoch,
@@ -573,6 +576,32 @@ impl State {
             .collect();
 
         Ok(reward_deltas)
+    }
+
+    /// Get the total UTXO value from UTXO State at epoch start
+    /// Note UTXOState may well have seen transactions in the new epoch before we
+    /// get to process this, so it captures the total at the epoch boundary
+    async fn get_total_utxos_at_shelley_start(
+        &self,
+        context: Arc<Context<Message>>,
+    ) -> Result<u64> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetAllUTxOsSumAtShelleyStart,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        let total_lovelace = match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::LovelaceSum(lovelace),
+            )) => lovelace,
+            _ => {
+                return Err(anyhow!("Unexpected utxo-state response"));
+            }
+        };
+
+        Ok(total_lovelace)
     }
 
     /// Apply a registration change set to registration/deregistration lists
@@ -982,9 +1011,11 @@ impl State {
     /// This returns stake reward deltas (Refund for pools retiring at epoch N) for publishing to the StakeRewardDeltas topic
     pub async fn handle_epoch_activity(
         &mut self,
-        ea_msg: &EpochActivityMessage,
-        block_info: &BlockInfo,
         context: Arc<Context<Message>>,
+        ea_msg: &EpochActivityMessage,
+        era: Era,
+        is_new_era: bool,
+        block_info: &BlockInfo,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -1015,14 +1046,18 @@ impl State {
         };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
-            ea_msg.epoch + 1,
-            block_info.era,
-            ea_msg.total_fees,
-            spo_blocks,
-            context,
-            verifier,
-        )?);
+        reward_deltas.extend(
+            self.enter_epoch(
+                context,
+                ea_msg.epoch + 1,
+                era,
+                is_new_era,
+                ea_msg.total_fees,
+                spo_blocks,
+                verifier,
+            )
+            .await?,
+        );
 
         Ok(reward_deltas)
     }

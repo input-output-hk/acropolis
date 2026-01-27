@@ -402,9 +402,11 @@ impl AccountsState {
                             Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
                                 .handle_epoch_activity(
-                                    ea_msg,
-                                    block_info,
                                     context.clone(),
+                                    ea_msg,
+                                    block_info.era,
+                                    block_info.is_new_era,
+                                    block_info,
                                     verifier,
                                 )
                                 .await

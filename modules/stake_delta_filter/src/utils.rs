@@ -599,6 +599,7 @@ mod test {
             epoch: 1,
             epoch_slot: 14243,
             new_epoch: true,
+            is_new_era: false,
             timestamp: 2498243,
             tip_slot: None,
             era: Era::Conway,

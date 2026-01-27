@@ -68,4 +68,9 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
         // Fake store doesn't track actual UTxOs
         Ok(Vec::new())
     }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(0)
+    }
 }

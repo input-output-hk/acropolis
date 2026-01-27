@@ -12,8 +12,7 @@ pub enum UTxOStateQuery {
     GetUTxOs {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
-    /// Get the total lovelace value of AVVM UTxOs cancelled at Allegra boundary.
-    /// Returns None if cancellation hasn't happened yet.
+    GetAllUTxOsSumAtShelleyStart,
     GetAvvmCancelledValue,
 }
 
@@ -21,7 +20,7 @@ pub enum UTxOStateQuery {
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
     UTxOs(Vec<UTXOValue>),
-    /// Response to GetAvvmCancelledValue: None if not yet cancelled, Some(value) after cancellation
+    LovelaceSum(u64),
     AvvmCancelledValue(Option<Value>),
     Error(QueryError),
 }
