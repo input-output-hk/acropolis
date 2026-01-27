@@ -1108,40 +1108,17 @@ impl State {
                 .expect("invalid DRep delegation during replay")
         };
 
-        if self.major_protocol_version() > Some(9) {
-            return;
-        }
-
-        if *drep == DRepChoice::NoConfidence {
-            let Some(prev_choice) = previous_drep else {
-                return;
-            };
-
-            let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) else {
-                return;
-            };
-
-            let Some(delegators) = self.drep_delegators.get(&prev_cred) else {
-                return;
-            };
-
-            if !delegators.contains(stake_address) {
-                return;
+        if self.major_protocol_version() <= Some(9) {
+            match DRepChoice::to_credential(drep) {
+                Some(drep) => {
+                    self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
+                }
+                None => {
+                    if let Some(drep) = previous_drep {
+                        self.remove_account_from_drep_delegation_map(stake_address, drep);
+                    }
+                }
             }
-
-            let updated = delegators.without(stake_address);
-
-            self.drep_delegators = if updated.is_empty() {
-                self.drep_delegators.without(&prev_cred)
-            } else {
-                self.drep_delegators.update(prev_cred, updated)
-            };
-
-            return;
-        }
-
-        if let Some(new_cred) = DRepChoice::to_credential(drep) {
-            self.drep_delegators.entry(new_cred).or_default().insert(stake_address.clone());
         }
     }
 
@@ -1152,12 +1129,7 @@ impl State {
         if self.major_protocol_version() <= Some(9) {
             if let Some(delegators) = self.drep_delegators.remove(drep) {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
-
-                for stake_address in delegators {
-                    if let Some(sas) = stake_addresses.get_mut(&stake_address) {
-                        sas.delegated_drep = None;
-                    }
-                }
+                stake_addresses.remove_delegators_from_drep(delegators);
             }
         }
     }
@@ -1426,6 +1398,28 @@ impl State {
         }
 
         Ok(())
+    }
+
+    fn remove_account_from_drep_delegation_map(
+        &mut self,
+        stake_address: &StakeAddress,
+        previous_drep: DRepChoice,
+    ) {
+        let Some(prev_cred) = DRepChoice::to_credential(&previous_drep) else {
+            return;
+        };
+
+        let Some(delegators) = self.drep_delegators.get(&prev_cred) else {
+            return;
+        };
+
+        let updated = delegators.without(stake_address);
+
+        self.drep_delegators = if updated.is_empty() {
+            self.drep_delegators.without(&prev_cred)
+        } else {
+            self.drep_delegators.update(prev_cred, updated)
+        };
     }
 
     fn major_protocol_version(&self) -> Option<u64> {

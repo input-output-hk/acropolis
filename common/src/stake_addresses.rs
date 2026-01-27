@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
-use imbl::OrdMap;
+use imbl::{OrdMap, OrdSet};
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::{
@@ -489,6 +489,14 @@ impl StakeAddressMap {
         let prev = sas.delegated_drep.clone();
         sas.delegated_drep = Some(drep.clone());
         Ok(prev)
+    }
+
+    pub fn remove_delegators_from_drep(&mut self, delegators: OrdSet<StakeAddress>) {
+        for stake_address in delegators {
+            if let Some(sas) = self.get_mut(&stake_address) {
+                sas.delegated_drep = None;
+            }
+        }
     }
 
     /// Add a reward to a reward account (by stake address)
