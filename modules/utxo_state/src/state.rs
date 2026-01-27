@@ -9,7 +9,7 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
+    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
     UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
@@ -59,6 +59,9 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Get the total lovelace of all UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64>;
 }
 
 /// Ledger state storage
@@ -87,6 +90,9 @@ pub struct State {
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
 
+    /// Total lovelace at Shelley epoch boundary
+    lovelace_at_shelley_start: Option<u64>,
+
     /// State History of Protocol Parameter
     protocol_parameters_history: StateHistory<ProtocolParams>,
 }
@@ -103,11 +109,24 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
+            lovelace_at_shelley_start: None,
             protocol_parameters_history: StateHistory::new(
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
             ),
         }
+    }
+
+    /// Get the current total lovelace of all utxos
+    pub async fn get_total_lovelace(&self) -> Result<u64> {
+        let volatile = Value::sum_lovelace(self.volatile_utxos.values().map(|v| &v.value));
+        let immutable = self.immutable_utxos.sum_lovelace().await?;
+        Ok(volatile + immutable)
+    }
+
+    /// Get the total lovelace at the Shelley epoch boundary
+    pub fn get_lovelace_at_shelley_start(&self) -> Option<u64> {
+        self.lovelace_at_shelley_start
     }
 
     /// Get the total value of multiple utxos
@@ -364,8 +383,12 @@ impl State {
         Ok(())
     }
 
-    /// Handle a message
-    pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
+    /// Handle a UTXODeltas message
+    pub async fn handle_utxo_deltas(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<()> {
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -376,6 +399,15 @@ impl State {
 
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
+
+        // If we're entering Shelley era, capture the total lovelace
+        // (used to resync reserves on entry to Shelley in AccountsState)
+        if block.is_new_era && block.era == Era::Shelley {
+            let total_lovelace = self.get_total_lovelace().await?;
+            info!(epoch = block.epoch, total_lovelace, "Shelley start");
+
+            self.lovelace_at_shelley_start = Some(total_lovelace);
+        }
 
         // Process the deltas
         for tx in &deltas.deltas {
@@ -616,6 +648,7 @@ mod tests {
             epoch: 99,
             epoch_slot: slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: slot,
             tip_slot: None,
             era: Era::Byron,
@@ -680,7 +713,7 @@ mod tests {
         }];
         let deltas = UTXODeltasMessage { deltas };
 
-        state.handle(&block, &deltas).await.unwrap();
+        state.handle_utxo_deltas(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -1052,7 +1085,7 @@ mod tests {
         }];
         let deltas1 = UTXODeltasMessage { deltas };
 
-        state.handle(&block1, &deltas1).await.unwrap();
+        state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -1068,8 +1101,8 @@ mod tests {
             ..TxUTxODeltas::default()
         }];
         let deltas2 = UTXODeltasMessage { deltas };
+        state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
-        state.handle(&block2, &deltas2).await.unwrap();
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);
         assert_eq!(0, *observer.balance.lock().await);

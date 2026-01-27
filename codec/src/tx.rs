@@ -80,7 +80,7 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_script_witnesses(tx: &MultiEraTx) -> HashMap<ScriptHash, ScriptType> {
+pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, ScriptType> {
     let mut map_script_witnesses = HashMap::new();
 
     for script in tx.native_scripts() {
@@ -237,7 +237,7 @@ pub fn map_transaction(
     let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
 
-    let script_witnesses = map_script_witnesses(tx);
+    let script_witnesses = map_scripts_provided(tx);
 
     let mut redeemers = Vec::new();
     for redeemer in tx.redeemers() {

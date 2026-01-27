@@ -4,7 +4,7 @@ mod connection;
 mod network;
 
 use acropolis_common::{
-    BlockInfo, BlockIntent, BlockStatus,
+    BlockInfo, BlockIntent, BlockStatus, Era,
     commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
@@ -76,6 +76,7 @@ impl PeerNetworkInterface {
                 genesis_values: genesis_values.clone(),
                 upstream_cache,
                 last_epoch,
+                era: None,
                 rolled_back: false,
             };
 
@@ -256,6 +257,7 @@ struct BlockSink {
     genesis_values: GenesisValues,
     upstream_cache: Option<UpstreamCache>,
     last_epoch: Option<u64>,
+    era: Option<Era>,
     rolled_back: bool,
 }
 impl BlockSink {
@@ -312,6 +314,8 @@ impl BlockSink {
         let (epoch, epoch_slot) = self.genesis_values.slot_to_epoch(slot);
         let new_epoch = self.last_epoch != Some(epoch);
         self.last_epoch = Some(epoch);
+        let is_new_era = self.era != Some(header.era);
+        self.era = Some(header.era);
         let timestamp = self.genesis_values.slot_to_timestamp(slot);
         BlockInfo {
             status: if self.rolled_back {
@@ -326,6 +330,7 @@ impl BlockSink {
             epoch,
             epoch_slot,
             new_epoch,
+            is_new_era,
             tip_slot: tip.map(|p| p.slot_or_default()),
             timestamp,
             era: header.era,

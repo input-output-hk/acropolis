@@ -37,12 +37,8 @@ mod dashmap_immutable_utxo_store;
 use dashmap_immutable_utxo_store::DashMapImmutableUTXOStore;
 mod sled_immutable_utxo_store;
 use sled_immutable_utxo_store::SledImmutableUTXOStore;
-mod sled_async_immutable_utxo_store;
-use sled_async_immutable_utxo_store::SledAsyncImmutableUTXOStore;
 mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
-mod fjall_async_immutable_utxo_store;
-use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 mod utils;
@@ -194,7 +190,7 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
                         state
-                            .handle(block, deltas_msg)
+                            .handle_utxo_deltas(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -279,9 +275,7 @@ impl UTXOState {
             "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
             "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),
             "sled" => Arc::new(SledImmutableUTXOStore::new(config.clone())?),
-            "sled-async" => Arc::new(SledAsyncImmutableUTXOStore::new(config.clone())?),
             "fjall" => Arc::new(FjallImmutableUTXOStore::new(config.clone())?),
-            "fjall-async" => Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?),
             "fake" => Arc::new(FakeImmutableUTXOStore::new(config.clone())),
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
@@ -417,6 +411,22 @@ impl UTXOState {
                                 e.to_string(),
                             )),
                         }
+                    }
+                    UTxOStateQuery::GetAllUTxOsSumAtShelleyStart => {
+                        let total_lovelace = match state.get_lovelace_at_shelley_start() {
+                            Some(cached) => cached,
+                            None => match state.get_total_lovelace().await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return Arc::new(Message::StateQueryResponse(
+                                        StateQueryResponse::UTxOs(UTxOStateQueryResponse::Error(
+                                            QueryError::internal_error(e.to_string()),
+                                        )),
+                                    ));
+                                }
+                            },
+                        };
+                        UTxOStateQueryResponse::LovelaceSum(total_lovelace)
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(

@@ -12,11 +12,13 @@ pub enum UTxOStateQuery {
     GetUTxOs {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
+    GetAllUTxOsSumAtShelleyStart,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
     UTxOs(Vec<UTXOValue>),
+    LovelaceSum(u64),
     Error(QueryError),
 }

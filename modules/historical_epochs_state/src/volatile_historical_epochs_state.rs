@@ -75,6 +75,7 @@ mod tests {
             hash: BlockHash::default(),
             epoch_slot: 1,
             new_epoch: false,
+            is_new_era: false,
             timestamp: 1,
             tip_slot: None,
             era: Era::Shelley,

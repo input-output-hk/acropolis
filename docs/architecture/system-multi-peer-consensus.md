@@ -32,7 +32,6 @@ flowchart LR
   CON -- cardano.block.wanted --> PNI
   PNI -- cardano.block.rescinded --> CON
   PNI -- cardano.block.available --> CON
-  PNI -- cardano.block.unavailable --> CON
   CON -- cardano.block.rejected --> PNI
 
   CON -- cardano.block.proposed --> CLOUD
@@ -60,8 +59,7 @@ offer with a particular chain fork.
 Consensus may then request that a block is fetched with
 `cardano.block.wanted` quoting the block number and hash.  The Peer Network Interface will
 then fetch it from one of the peers, chosen either round-robin or on performance metrics,
-and send a `cardano.block.available` when it receives it, as it does already.  If no peer
-can provide it, it sends a `cardano.block.unavailable` instead.
+and send a `cardano.block.available` when it receives it, as it does already.
 
 It may be that all peers that previously offered a block roll it back, leaving the block as
 an orphan.  In this case PNI can send out a `cardano.block.rescinded`.
@@ -87,7 +85,7 @@ depth), and if it doesn't already have an offered block, and it
 extends the currently favoured chain (see below), it can request it to
 be fetched with a `cardano.block.wanted` message.  It should then get
 a `cardano.block.available` from the Peer Network Interface,
-containing the block data.  If it gets a `cardano.block.unavailable`
+containing the block data.  If it gets a `cardano.block.rescinded`
 it will prune the chain tree to remove it.
 
 It sends it for validation with `cardano.block.proposed` as we saw in

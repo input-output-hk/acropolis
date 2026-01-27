@@ -184,6 +184,7 @@ mod test {
             timestamp: n,
             era: Era::default(),
             tip_slot: None,
+            is_new_era: false,
         }
     }
 
