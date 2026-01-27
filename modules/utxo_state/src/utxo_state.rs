@@ -41,11 +41,15 @@ mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
-
+mod utils;
 mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
+const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
 
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -63,10 +67,12 @@ pub struct UTXOState;
 
 impl UTXOState {
     /// Main run function
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
@@ -89,9 +95,28 @@ impl UTXOState {
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
-            if let Message::Cardano((block_info, CardanoMessage::UTXODeltas(_))) = message.as_ref()
-            {
-                current_block_info = Some(block_info.clone());
+
+            let new_epoch = match message.as_ref() {
+                Message::Cardano((block_info, _)) => {
+                    current_block_info = Some(block_info.clone());
+                    block_info.new_epoch
+                }
+
+                _ => false,
+            };
+
+            let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
+
+            // Read protocol parameters if new epoch
+            if new_epoch {
+                let (_, protocol_parameters_message) =
+                    protocol_parameters_subscription.read().await?;
+
+                if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
+                    protocol_parameters_message.as_ref()
+                {
+                    current_protocol_params = params.params.clone();
+                }
             }
 
             // Read from pool registration updates subscription if available
@@ -146,6 +171,7 @@ impl UTXOState {
                                 deltas_msg,
                                 &pool_registration_updates,
                                 &stake_registration_updates,
+                                &current_protocol_params,
                             )
                             .await
                         {
@@ -191,6 +217,14 @@ impl UTXOState {
 
                 _ => error!("Unexpected message type: {message:?}"),
             }
+
+            // Commit protocol paramemters
+            if let Some(block_info) = current_block_info {
+                state
+                    .lock()
+                    .await
+                    .commit_protocol_parameters(&block_info, current_protocol_params.clone());
+            }
         }
     }
 
@@ -202,6 +236,12 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
 
+        let protocol_parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating protocol parameters subscriber on '{protocol_parameters_subscribe_topic}'");
+
+        // These registration updates subscriptions are only needed for validation
         let pool_registration_updates_subscribe_topic =
             config.get_string("pool-registration-updates-subscribe-topic").ok();
         if let Some(ref topic) = pool_registration_updates_subscribe_topic {
@@ -254,6 +294,8 @@ impl UTXOState {
 
         // Subscribers
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
+        let protocol_parameters_subscription =
+            context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let pool_registration_updates_subscription =
             if let Some(topic) = pool_registration_updates_subscribe_topic {
                 Some(context.subscribe(&topic).await?)
@@ -274,6 +316,7 @@ impl UTXOState {
                 context_run,
                 state_run,
                 utxo_deltas_subscription,
+                protocol_parameters_subscription,
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
                 utxo_validation_publish_topic,

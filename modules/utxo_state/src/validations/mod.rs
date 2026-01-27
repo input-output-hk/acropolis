@@ -1,57 +1,43 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
+    protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
     PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier,
-    Value,
 };
 use anyhow::Result;
+
+use crate::utils;
+mod alonzo;
 mod shelley;
 
-pub fn validate_shelley_tx(
+pub fn validate_tx(
     tx_deltas: &TxUTxODeltas,
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
-    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    shelley_params: Option<&ShelleyParams>,
 ) -> Result<(), Box<TransactionValidationError>> {
-    let inputs = &tx_deltas.consumes;
-
-    // Consumed except inputs = Refund + Withrawals + Value Minted
-    let total_refund = tx_deltas.calculate_total_refund(stake_registration_updates);
-    let total_withdrawals = tx_deltas.total_withdrawals.unwrap_or_default();
-    let mut total_consumed_except_inputs = Value::new(total_refund + total_withdrawals, vec![]);
-    total_consumed_except_inputs += tx_deltas.value_minted.as_ref().unwrap_or(&Value::default());
-
-    // Produced = Outputs + Fee + Deposits + Value Burnt
-    let mut total_produced =
+    let total_consumed = tx_deltas.calculate_total_consumed(stake_registration_updates, utxos);
+    let total_produced =
         tx_deltas.calculate_total_produced(pool_registration_updates, stake_registration_updates);
-    total_produced += tx_deltas.value_burnt.as_ref().unwrap_or(&Value::default());
+    let vkey_hashes_needed = utils::get_vkey_needed(tx_deltas, utxos, shelley_params);
+    let scripts_needed = utils::get_script_needed(tx_deltas, utxos);
+    let script_hashes_needed =
+        scripts_needed.iter().map(|(_, script_hash)| *script_hash).collect::<HashSet<_>>();
 
-    let mut vkey_hashes_needed = tx_deltas.vkey_hashes_needed.clone().unwrap_or_default();
-    let mut script_hashes_needed = tx_deltas.script_hashes_needed.clone().unwrap_or_default();
-    let vkey_hashes_provided = match tx_deltas.vkey_hashes_provided.as_ref() {
-        Some(v) => v,
-        None => &Vec::new(),
-    };
-    let script_hashes_provided = match tx_deltas.script_hashes_provided.as_ref() {
-        Some(v) => v,
-        None => &Vec::new(),
-    };
+    let inputs = &tx_deltas.consumes;
+    let vkey_hashes_provided = tx_deltas.get_vkey_hashes_provided();
+    let script_hashes_provided = tx_deltas.get_script_hashes_provided();
 
-    shelley::utxo::validate(
-        inputs,
-        total_consumed_except_inputs,
-        total_produced,
-        utxos_needed,
-    )
-    .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;
+    shelley::utxo::validate(inputs, total_consumed, total_produced, utxos)
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOValidationError(*e)).into()))?;
+
     shelley::utxow::validate(
-        inputs,
-        &mut vkey_hashes_needed,
-        &mut script_hashes_needed,
-        vkey_hashes_provided,
-        script_hashes_provided,
-        utxos_needed,
+        &vkey_hashes_needed,
+        &script_hashes_needed,
+        &vkey_hashes_provided,
+        &script_hashes_provided,
     )
     .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
