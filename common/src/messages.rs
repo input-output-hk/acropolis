@@ -508,6 +508,11 @@ pub struct AccountsBootstrapMessage {
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
 
+    /// DRep delegations needed to reproduce PV9 DRep deregistration bug.
+    /// Contains a map of all stake addresses that have EVER delegated to a DRep.
+    /// During PV9, if a DRep deregisters then ALL accounts that have EVER delegated
+    /// to the DRep has their delegation cleared, even if they have switched delegations
+    /// since.
     pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
 

@@ -87,13 +87,6 @@ impl DRepChoice {
             DRepChoice::Abstain | DRepChoice::NoConfidence => None,
         }
     }
-
-    pub fn from_credential(drep: &DRepCredential) -> DRepChoice {
-        match drep {
-            Credential::AddrKeyHash(hash) => DRepChoice::Key(*hash),
-            Credential::ScriptHash(hash) => DRepChoice::Script(*hash),
-        }
-    }
 }
 
 /// DRep Registration = reg_drep_cert

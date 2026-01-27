@@ -387,7 +387,7 @@ impl TxCertificateWithPos {
 }
 
 /// Certificate position
-#[derive(Debug, Clone, PartialOrd, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct TxCertificateIdentifier {
     pub tx_identifier: TxIdentifier,
     pub cert_index: u64,
