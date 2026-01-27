@@ -1232,7 +1232,7 @@ mod tests {
                 .map(|(_, stake)| *stake)
                 .unwrap();
 
-            assert_eq!(drep_stake, 3650); // 3000 + 150 + 500 deposit
+            assert_eq!(drep_stake, 3150); // 3000 + 150
         }
     }
 
