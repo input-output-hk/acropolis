@@ -36,7 +36,11 @@ pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHa
 pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
 ) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, Vec<String>) {
-    let parsed_consumes = map_transaction_inputs(&tx.inputs_sorted_set());
+    let consumed = match tx.is_valid() {
+        true => tx.inputs_sorted_set(),
+        false => tx.collateral(),
+    };
+    let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
     let mut errors = Vec::new();
 
