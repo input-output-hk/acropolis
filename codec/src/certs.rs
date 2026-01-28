@@ -59,7 +59,6 @@ pub fn to_pool_reg(
 pub fn map_certificate(
     cert: &MultiEraCert,
     tx_identifier: TxIdentifier,
-    tx_hash: TxHash,
     cert_index: usize,
     network_id: NetworkId,
 ) -> Result<TxCertificateWithPos> {
@@ -70,13 +69,11 @@ pub fn map_certificate(
             alonzo::Certificate::StakeRegistration(cred) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::StakeRegistration(map_stake_address(cred, network_id)),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index.try_into().unwrap(),
             }),
             alonzo::Certificate::StakeDeregistration(cred) => Ok(TxCertificateWithPos {
                 cert: TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index.try_into().unwrap(),
             }),
             alonzo::Certificate::StakeDelegation(cred, pool_key_hash) => Ok(TxCertificateWithPos {
@@ -85,7 +82,6 @@ pub fn map_certificate(
                     operator: to_pool_id(pool_key_hash),
                 }),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index.try_into().unwrap(),
             }),
             alonzo::Certificate::PoolRegistration {
@@ -113,7 +109,6 @@ pub fn map_certificate(
                     false,
                 )?),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index as u64,
             }),
             alonzo::Certificate::PoolRetirement(pool_key_hash, epoch) => Ok(TxCertificateWithPos {
@@ -122,7 +117,6 @@ pub fn map_certificate(
                     epoch: *epoch,
                 }),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index as u64,
             }),
             alonzo::Certificate::GenesisKeyDelegation(
@@ -136,7 +130,6 @@ pub fn map_certificate(
                     vrf_key_hash: to_vrf_key(vrf_key_hash),
                 }),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index as u64,
             }),
             alonzo::Certificate::MoveInstantaneousRewardsCert(mir) => Ok(TxCertificateWithPos {
@@ -164,7 +157,6 @@ pub fn map_certificate(
                     },
                 }),
                 tx_identifier,
-                tx_hash,
                 cert_index: cert_index as u64,
             }),
         },
@@ -175,7 +167,6 @@ pub fn map_certificate(
                 conway::Certificate::StakeRegistration(cred) => Ok(TxCertificateWithPos {
                     cert: TxCertificate::StakeRegistration(map_stake_address(cred, network_id)),
                     tx_identifier,
-                    tx_hash,
 
                     cert_index: cert_index.try_into().unwrap(),
                 }),
@@ -183,7 +174,6 @@ pub fn map_certificate(
                 conway::Certificate::StakeDeregistration(cred) => Ok(TxCertificateWithPos {
                     cert: TxCertificate::StakeDeregistration(map_stake_address(cred, network_id)),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index.try_into().unwrap(),
                 }),
 
@@ -194,7 +184,6 @@ pub fn map_certificate(
                             operator: to_pool_id(pool_key_hash),
                         }),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index.try_into().unwrap(),
                     })
                 }
@@ -229,7 +218,6 @@ pub fn map_certificate(
                         true,
                     )?),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
                 conway::Certificate::PoolRetirement(pool_key_hash, epoch) => {
@@ -239,7 +227,6 @@ pub fn map_certificate(
                             epoch: *epoch,
                         }),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -250,7 +237,6 @@ pub fn map_certificate(
                         deposit: *coin,
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -260,7 +246,6 @@ pub fn map_certificate(
                         refund: *coin,
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -270,7 +255,6 @@ pub fn map_certificate(
                         drep: map_drep(drep),
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -282,7 +266,6 @@ pub fn map_certificate(
                             drep: map_drep(drep),
                         }),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -297,7 +280,6 @@ pub fn map_certificate(
                             },
                         ),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -311,7 +293,6 @@ pub fn map_certificate(
                         },
                     ),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -326,7 +307,6 @@ pub fn map_certificate(
                             },
                         ),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -338,7 +318,6 @@ pub fn map_certificate(
                             hot_credential: map_stake_credential(hot_cred),
                         }),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -350,7 +329,6 @@ pub fn map_certificate(
                             anchor: map_nullable_anchor(anchor),
                         }),
                         tx_identifier,
-                        tx_hash,
                         cert_index: cert_index as u64,
                     })
                 }
@@ -362,7 +340,6 @@ pub fn map_certificate(
                         anchor: map_nullable_anchor(anchor),
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -372,7 +349,6 @@ pub fn map_certificate(
                         refund: *coin,
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
 
@@ -382,7 +358,6 @@ pub fn map_certificate(
                         anchor: map_nullable_anchor(anchor),
                     }),
                     tx_identifier,
-                    tx_hash,
                     cert_index: cert_index as u64,
                 }),
             }

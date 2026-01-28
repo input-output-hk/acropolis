@@ -12,12 +12,11 @@ use acropolis_common::{
         DRepsList, GovernanceStateQuery, GovernanceStateQueryResponse,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, TxHash,
+    BlockInfo, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
-use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
@@ -155,7 +154,6 @@ impl DRepState {
                 h.get_or_init_with(|| State::new(storage_config))
             };
             let mut current_block: Option<BlockInfo> = None;
-            let mut txs_with_certificates: HashSet<TxHash> = HashSet::new();
 
             // Certificates are the synchroniser
             let (_, certs_message) = certs_subscription.read().await?;
@@ -223,9 +221,6 @@ impl DRepState {
                     let span = info_span!("drep_state.handle_certs", block = block_info.number);
                     async {
                         Self::check_sync(&current_block, block_info, "certs");
-                        // Cache txs hashes with certificates for DRep expiries calculations
-                        txs_with_certificates
-                            .extend(tx_certs_msg.certificates.iter().map(|c| c.tx_hash));
                         state
                             .process_certificates(
                                 context.clone(),
@@ -272,14 +267,7 @@ impl DRepState {
                                 );
                             }
 
-                            // When a tx has proposals and no certificates, and the dormant
-                            // counter is non-zero, bump all DRep expiries and reset the dormant epoch counter.
-                            if state.num_dormant_epochs > 0
-                                && gov_msg.proposal_procedures.iter().any(|proposal| {
-                                    !txs_with_certificates
-                                        .contains(&proposal.gov_action_id.transaction_id)
-                                })
-                            {
+                            if !gov_msg.proposal_procedures.is_empty() {
                                 state.apply_dormant_expiry(block_info.epoch);
                             }
 

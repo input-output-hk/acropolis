@@ -821,7 +821,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(pool_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         });
         let block = new_block(1);
@@ -842,7 +841,6 @@ mod tests {
                 epoch: 1,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         let block = new_block(0);
@@ -869,7 +867,6 @@ mod tests {
                 epoch: 2,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -882,7 +879,6 @@ mod tests {
                 epoch: 2,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -915,7 +911,6 @@ mod tests {
                 epoch: 2,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -930,7 +925,6 @@ mod tests {
                 epoch: 2,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -958,7 +952,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(pool_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -975,7 +968,6 @@ mod tests {
                 epoch: 1,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1001,7 +993,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(pool_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1019,7 +1010,6 @@ mod tests {
                 epoch: 1,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1063,7 +1053,6 @@ mod tests {
                 epoch: 2,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1076,7 +1065,6 @@ mod tests {
                 epoch: 3,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1107,7 +1095,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());
@@ -1144,7 +1131,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         let spo_id = test_pool_id_from_bytes(&[1]);
@@ -1152,7 +1138,6 @@ mod tests {
         msg.certificates.push(TxCertificateWithPos {
             cert: TxCertificate::PoolRegistration(default_pool_registration(spo_id, None)),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         });
         assert!(state.handle_tx_certs_no_errors(&block, &msg).is_ok());

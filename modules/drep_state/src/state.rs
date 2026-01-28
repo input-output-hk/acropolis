@@ -150,9 +150,10 @@ impl State {
         }
     }
 
-    fn compute_drep_expiry(current_epoch: u64, drep_activity: u32, num_dormant_epochs: u64) -> u64 {
+    fn update_drep_expiry(&mut self, drep_cred: &DRepCredential, epoch: u64, drep_activity: u32) {
         // drepExpiry = (currentEpoch+drepActivity) − numDormantEpochs
-        current_epoch.saturating_add(drep_activity as u64).saturating_sub(num_dormant_epochs)
+        let expiry = epoch.saturating_add(drep_activity as u64).saturating_sub(self.num_dormant_epochs);
+        self.drep_expiry.insert(drep_cred.clone(), expiry);
     }
 
     #[allow(dead_code)]
@@ -302,7 +303,6 @@ impl State {
         drep_activity: Option<u32>,
     ) -> Result<()> {
         let cfg = self.config;
-        let mut hist_map = self.historical_dreps.as_mut();
 
         let drep_activity = drep_activity.ok_or_else(|| {
             anyhow!("Missing Conway parameter d_rep_activity (required to compute drepExpiry)")
@@ -317,11 +317,9 @@ impl State {
                     _ => continue,
                 };
 
-                let expiry =
-                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
-                self.drep_expiry.insert(drep_cred.clone(), expiry);
+                self.update_drep_expiry(&drep_cred, epoch, drep_activity);
 
-                if let Some(ref mut hist_map) = hist_map {
+                if let Some(ref mut hist_map) = self.historical_dreps {
                     let entry = hist_map
                         .entry(drep_cred)
                         .or_insert_with(|| HistoricalDRepState::from_config(&cfg));
@@ -429,9 +427,7 @@ impl State {
                 };
 
                 // Registration initializes expiry.
-                let expiry =
-                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
-                self.drep_expiry.insert(reg.credential.clone(), expiry);
+                self.update_drep_expiry(&reg.credential, epoch, drep_activity);
 
                 if self.historical_dreps.is_some() {
                     if let Err(err) = self.update_historical(&reg.credential, true, |entry| {
@@ -511,9 +507,7 @@ impl State {
                 drep.anchor = reg.anchor.clone();
 
                 // DRep update counts as activity: update expiry.
-                let expiry =
-                    Self::compute_drep_expiry(epoch, drep_activity, self.num_dormant_epochs);
-                self.drep_expiry.insert(reg.credential.clone(), expiry);
+                self.update_drep_expiry(&reg.credential, epoch, drep_activity);
 
                 // Update history if enabled
                 if let Err(err) = self.update_historical(&reg.credential, false, |entry| {
@@ -722,7 +716,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         };
         let mut state = State::new(DRepStorageConfig::default());
@@ -748,7 +741,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         };
 
@@ -762,7 +754,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         assert!(state.process_one_cert(&bad_tx_cert, 1, Some(20)).is_err());
@@ -788,7 +779,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
@@ -804,7 +794,6 @@ mod tests {
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
 
@@ -831,7 +820,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
@@ -847,7 +835,6 @@ mod tests {
                 anchor: Some(anchor.clone()),
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         assert!(state.process_one_cert(&update_anchor_tx_cert, 1, Some(20)).is_err());
@@ -873,7 +860,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
@@ -885,7 +871,6 @@ mod tests {
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         assert!(state.process_one_cert(&unregister_tx_cert, 1, Some(20)).unwrap());
@@ -912,7 +897,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         };
         assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());
@@ -935,7 +919,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         };
         state.process_one_cert(&update_cert, 31, Some(20)).unwrap();
@@ -982,7 +965,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
@@ -994,7 +976,6 @@ mod tests {
                 refund: 500000000,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 1,
         };
         assert!(state.process_one_cert(&unregister_tx_cert, 1, Some(20)).is_err());
@@ -1017,7 +998,6 @@ mod tests {
                 anchor: None,
             }),
             tx_identifier: TxIdentifier::default(),
-            tx_hash: TxHash::default(),
             cert_index: 0,
         };
         assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());

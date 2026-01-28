@@ -21,21 +21,11 @@ The ledger (i.e. node state) maintains a per-DRep “expiry”/“activity deadl
 (`drepExpiry` in `cardano-ledger`). This is an epoch number used to decide whether the DRep
 is active at a given epoch.
 
-The ledger’s semantics are not “recompute all expires every block”.
-Expiry is a state machine driven by:
-- **Tx-scoped events** (votes and DRep update certificates), and
-- **Epoch-boundary rules** (including dormancy bookkeeping).
-
 ## High-level lifecycle
 
 ### Per-tx (within a block, in tx order)
 
-For each transaction in the block:
-
-- Check if there are proposals in a tx AND the tx has no certificates, if true:
-  - bump `drepExpiry` by the dormant epoch counter for DReps that are not already expired with
-    respect to the current epoch
-  - reset dormant epoch counter to 0
+- For each transaction with active proposal, reset the dormant counter to 0 and add the counter to all active DReps expiration.
 
 - Apply DRep activity events that occur in the tx:
   - **DRep vote** in this tx: counts as DRep activity and updates that DRep’s `drepExpiry`.
