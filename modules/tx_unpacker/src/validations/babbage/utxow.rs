@@ -34,9 +34,7 @@ pub fn validate(
     )?;
 
     // TODO:
-    // Add Alonzo UTxOW transition here
-    // Add new Babbage UTxOW validation rules here
-    // Issue: https://github.com/input-output-hk/acropolis/issues/547
+    // Add ScriptIntegrityHash validation here
 
     Ok(())
 }
@@ -76,10 +74,6 @@ fn shelley_wrapper(
 
     // validate vkey witnesses signatures
     shelley::utxow::validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
-
-    // TODO:
-    // Validate metadata
-    // issue: https://github.com/input-output-hk/acropolis/issues/489
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {

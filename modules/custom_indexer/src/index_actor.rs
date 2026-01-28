@@ -278,6 +278,7 @@ mod tests {
             epoch: 0,
             epoch_slot: 0,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             timestamp: 0,
             era: Era::Conway,

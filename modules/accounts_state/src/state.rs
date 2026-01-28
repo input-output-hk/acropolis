@@ -10,10 +10,15 @@ use acropolis_common::{
     math::update_value_with_delta,
     messages::{
         AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage,
-        SPOStateMessage, StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
+        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
+        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
+        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
+    queries::{
+        get_query_topic,
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
+    },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
@@ -23,6 +28,7 @@ use acropolis_common::{
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
+use caryatid_sdk::Context;
 use imbl::{OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
@@ -316,31 +322,17 @@ impl State {
     ///   spo_block_counts: Count of blocks minted by operator ID in previous epoch
     ///   verifier: Verifier against Haskell node output
     // Follows the general scheme in https://docs.cardano.org/about-cardano/learn/pledging-rewards
-    fn enter_epoch(
+    #[allow(clippy::too_many_arguments)]
+    async fn enter_epoch(
         &mut self,
+        context: Arc<Context<Message>>,
         epoch: u64,
         era: Era,
+        is_new_era: bool,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        // TODO HACK! Investigate why this differs to our calculated reserves after AVVM
-        // 13,887,515,255 - as we enter 208 (Shelley)
-        // TODO this will only work in Mainnet - need to know when Shelley starts across networks
-        // and the reserves value, if we can't properly calculate it
-        if epoch == 208 {
-            // Fix reserves to that given in the CF Java implementation:
-            // https://github.com/cardano-foundation/cf-java-rewards-calculation/blob/b05eddf495af6dc12d96c49718f27c34fa2042b1/calculation/src/main/java/org/cardanofoundation/rewards/calculation/config/NetworkConfig.java#L45C57-L45C74
-            let old_reserves = self.pots.reserves;
-            self.pots.reserves = 13_888_022_852_926_644;
-            warn!(
-                new = self.pots.reserves,
-                old = old_reserves,
-                diff = self.pots.reserves - old_reserves,
-                "Fixed reserves"
-            );
-        }
-
         // Get previous Shelley parameters, silently return if too early in the chain so no
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
@@ -357,6 +349,20 @@ impl State {
             },
         }
         .clone();
+
+        // First time into Shelley, fix reserves to max_supply - total_utxos
+        // We need to do this because tracking fees - which increase reserves - during Byron
+        // is painful, requiring lookup of UTXO value for every input
+        if is_new_era && era == Era::Shelley {
+            info!("Entering Shelley era - fixing up reserves");
+
+            let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
+            info!("Total UTXO value: {total_utxos}");
+
+            let reserves = shelley_params.max_lovelace_supply - total_utxos;
+            info!("Reserves remaining: {reserves}");
+            self.pots.reserves = reserves;
+        }
 
         info!(
             epoch,
@@ -438,16 +444,21 @@ impl State {
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
         let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Wait for start signal
+            // Wait for start signal (sent at 4k/5 slots into epoch)
             let _ = start_rewards_rx.recv();
 
-            // Additional deregistrations from current epoch - early Shelley bug
-            // TODO - make optional, turn off after Allegra
-            Self::apply_registration_changes(
-                &current_epoch_registration_changes.lock().unwrap(),
+            // Apply current epoch registration changes with epoch_slot filtering.
+            // This replicates the Shelley-era "bug" where `addrsRew` is captured at 4k/5 slots.
+            // Only registration changes with epoch_slot <= STABILITY_WINDOW_SLOT are included.
+            // Changes that happen AFTER the stability window block are excluded.
+            let current_changes = current_epoch_registration_changes.lock().unwrap();
+            Self::apply_registration_changes_filtered(
+                &current_changes,
                 &mut registrations,
                 &mut deregistrations,
+                Some(STABILITY_WINDOW_SLOT),
             );
+            drop(current_changes);
 
             if tracing::enabled!(Level::DEBUG) {
                 registrations.iter().for_each(|addr| debug!(epoch, "Registration {}", addr));
@@ -455,6 +466,9 @@ impl State {
             }
 
             // Calculate reward payouts for previous epoch
+            // Use performance_era (the era of the epoch that just ended), not current era
+            // This ensures epoch 235 (Shelley) rewards use Shelley rules even when
+            // calculated from epoch 236 (Allegra)
             calculate_rewards(
                 epoch - 1,
                 era,
@@ -491,6 +505,32 @@ impl State {
         Ok(reward_deltas)
     }
 
+    /// Get the total UTXO value from UTXO State at epoch start
+    /// Note UTXOState may well have seen transactions in the new epoch before we
+    /// get to process this, so it captures the total at the epoch boundary
+    async fn get_total_utxos_at_shelley_start(
+        &self,
+        context: Arc<Context<Message>>,
+    ) -> Result<u64> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetAllUTxOsSumAtShelleyStart,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        let total_lovelace = match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::LovelaceSum(lovelace),
+            )) => lovelace,
+            _ => {
+                return Err(anyhow!("Unexpected utxo-state response"));
+            }
+        };
+
+        Ok(total_lovelace)
+    }
+
     /// Apply a registration change set to registration/deregistration lists
     /// registrations gets all registrations still in effect at the end of the changes
     /// deregistrations likewise for net deregistrations
@@ -499,7 +539,26 @@ impl State {
         registrations: &mut HashSet<StakeAddress>,
         deregistrations: &mut HashSet<StakeAddress>,
     ) {
+        Self::apply_registration_changes_filtered(changes, registrations, deregistrations, None);
+    }
+
+    /// Apply a registration change set with optional epoch_slot filtering.
+    /// If max_epoch_slot is Some, only changes with epoch_slot <= max_epoch_slot are applied.
+    /// This is used to replicate Cardano's Shelley-era bug where `addrsRew` is captured at 4k/5.
+    fn apply_registration_changes_filtered(
+        changes: &Vec<RegistrationChange>,
+        registrations: &mut HashSet<StakeAddress>,
+        deregistrations: &mut HashSet<StakeAddress>,
+        max_epoch_slot: Option<u64>,
+    ) {
         for change in changes {
+            // Skip changes that happened after the stability window
+            if let Some(max_slot) = max_epoch_slot {
+                if change.epoch_slot > max_slot {
+                    continue;
+                }
+            }
+
             match change.kind {
                 RegistrationChangeKind::Registered => {
                     registrations.insert(change.address.clone());
@@ -795,18 +854,30 @@ impl State {
     /// This returns stake reward deltas (Refund for pools retiring at epoch N) for publishing to the StakeRewardDeltas topic
     pub async fn handle_epoch_activity(
         &mut self,
+        context: Arc<Context<Message>>,
         ea_msg: &EpochActivityMessage,
         era: Era,
+        is_new_era: bool,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
         // Map block counts, filtering out SPOs we don't know (OBFT in early Shelley)
-        let spo_blocks: HashMap<PoolId, usize> = if era == Era::Shelley {
+        // We include:
+        // - Currently registered pools (self.spos)
+        // - Pools retiring this epoch (self.retiring_spos)
+        // - Pools that were in previous snapshots (they may have retired in a prior epoch
+        //   but still produced blocks because slot leader schedules use older snapshots)
+        let spo_blocks: HashMap<PoolId, usize> = if era < Era::Babbage {
             ea_msg
                 .spo_blocks
                 .iter()
-                .filter(|(hash, _)| self.spos.contains_key(hash))
+                .filter(|(hash, _)| {
+                    self.spos.contains_key(hash)
+                        || self.retiring_spos.contains(hash)
+                        || self.epoch_snapshots.mark.spos.contains_key(hash)
+                        || self.epoch_snapshots.set.spos.contains_key(hash)
+                })
                 .map(|(hash, count)| (*hash, *count))
                 .collect()
         } else {
@@ -814,13 +885,18 @@ impl State {
         };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
-        reward_deltas.extend(self.enter_epoch(
-            ea_msg.epoch + 1,
-            era,
-            ea_msg.total_fees,
-            spo_blocks,
-            verifier,
-        )?);
+        reward_deltas.extend(
+            self.enter_epoch(
+                context,
+                ea_msg.epoch + 1,
+                era,
+                is_new_era,
+                ea_msg.total_fees,
+                spo_blocks,
+                verifier,
+            )
+            .await?,
+        );
 
         Ok(reward_deltas)
     }
@@ -911,6 +987,7 @@ impl State {
         &mut self,
         stake_address: &StakeAddress,
         deposit: Option<Lovelace>,
+        epoch_slot: u64,
         vld: &mut ValidationOutcomes,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
@@ -938,10 +1015,11 @@ impl State {
             None
         };
 
-        // Add to registration changes
+        // Add to registration changes with epoch_slot from the block
         self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
             address: stake_address.clone(),
             kind: RegistrationChangeKind::Registered,
+            epoch_slot,
         });
 
         outcome
@@ -953,6 +1031,7 @@ impl State {
         &mut self,
         stake_address: &StakeAddress,
         refund: Option<Lovelace>,
+        epoch_slot: u64,
         vld: &mut ValidationOutcomes,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
@@ -979,10 +1058,11 @@ impl State {
 
             self.pots.deposits -= refund_amount;
 
-            // Add to registration changes
+            // Add to registration changes with epoch_slot from the block
             self.current_epoch_registration_changes.lock().unwrap().push(RegistrationChange {
                 address: stake_address.clone(),
                 kind: RegistrationChangeKind::Deregistered,
+                epoch_slot,
             });
 
             Some(StakeRegistrationOutcome::Deregistered(refund_amount))
@@ -1026,9 +1106,12 @@ impl State {
 
     /// Handle TxCertificates
     /// Returns the stake registration updates for publishing
+    /// epoch_slot: The epoch slot of the block containing these certificates (used for
+    ///             registration change timing to replicate Shelley-era behavior)
     pub fn handle_tx_certificates(
         &mut self,
         tx_certs_msg: &TxCertificatesMessage,
+        epoch_slot: u64,
         vld: &mut ValidationOutcomes,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
@@ -1042,7 +1125,7 @@ impl State {
 
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    if let Some(outcome) = self.register_stake_address(reg, None, vld) {
+                    if let Some(outcome) = self.register_stake_address(reg, None, epoch_slot, vld) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1051,7 +1134,9 @@ impl State {
                 }
 
                 TxCertificate::StakeDeregistration(dreg) => {
-                    if let Some(outcome) = self.deregister_stake_address(dreg, None, vld) {
+                    if let Some(outcome) =
+                        self.deregister_stake_address(dreg, None, epoch_slot, vld)
+                    {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1064,9 +1149,12 @@ impl State {
                 }
 
                 TxCertificate::Registration(reg) => {
-                    if let Some(outcome) =
-                        self.register_stake_address(&reg.stake_address, Some(reg.deposit), vld)
-                    {
+                    if let Some(outcome) = self.register_stake_address(
+                        &reg.stake_address,
+                        Some(reg.deposit),
+                        epoch_slot,
+                        vld,
+                    ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1075,9 +1163,12 @@ impl State {
                 }
 
                 TxCertificate::Deregistration(dreg) => {
-                    if let Some(outcome) =
-                        self.deregister_stake_address(&dreg.stake_address, Some(dreg.refund), vld)
-                    {
+                    if let Some(outcome) = self.deregister_stake_address(
+                        &dreg.stake_address,
+                        Some(dreg.refund),
+                        epoch_slot,
+                        vld,
+                    ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1102,6 +1193,7 @@ impl State {
                     if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
+                        epoch_slot,
                         vld,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1116,6 +1208,7 @@ impl State {
                     if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
+                        epoch_slot,
                         vld,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1130,6 +1223,7 @@ impl State {
                     if let Some(outcome) = self.register_stake_address(
                         &delegation.stake_address,
                         Some(delegation.deposit),
+                        epoch_slot,
                         vld,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
@@ -1323,7 +1417,7 @@ mod tests {
         let mut vld = ValidationOutcomes::new();
 
         // Register first
-        state.register_stake_address(&stake_address, None, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut vld);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1418,11 +1512,11 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None, &mut vld);
+        state.register_stake_address(&addr1, None, 0, &mut vld);
         state.record_stake_delegation(&addr1, &spo1);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None, &mut vld);
+        state.register_stake_address(&addr2, None, 0, &mut vld);
         state.record_stake_delegation(&addr2, &spo2);
 
         // Put some value in
@@ -1525,7 +1619,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut vld);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1576,7 +1670,7 @@ mod tests {
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut vld);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -1744,7 +1838,7 @@ mod tests {
             },
         ];
 
-        state.handle_tx_certificates(&TxCertificatesMessage { certificates }, &mut vld)?;
+        state.handle_tx_certificates(&TxCertificatesMessage { certificates }, 0, &mut vld)?;
 
         let deltas = vec![
             StakeAddressDelta {

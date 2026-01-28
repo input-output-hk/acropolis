@@ -16,11 +16,22 @@ everything except the section header can be left out.
 ```toml
 [module.epochs-state]
 
-# Message topics
-subscribe-blocks-topic = "cardano.block.proposed"
-subscribe-fees-topic = "cardano.fees"
-publish-topic = "cardano.epoch.activity"
+# Message subscription topics
+snapshot-subscribe-topic = "cardano.snapshot"
+block-subscribe-topic = "cardano.block.proposed"
+block-txs-subscribe-topic = "cardano.block.txs"
+protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
+bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 
+# Message publishing topics
+epoch-activity-publish-topic = "cardano.epoch.activity"
+epoch-nonce-publish-topic = "cardano.epoch.nonce"
+
+# Validation topic
+validation-publish-topic = "cardano.validation.epochs"
+
+# Epochs state query
+epochs-state-query-topic = "cardano.query.epochs"
 ```
 
 ## Messages
@@ -28,8 +39,4 @@ publish-topic = "cardano.epoch.activity"
 The epochs state subscribes for RawBlockMessages on
 `cardano.block.proposed` (see the [Consensus](../consensus) module for details).
 
-TODO subscription for fees
-
-TODO what it sends
-
-
+TODO all remaining definitions

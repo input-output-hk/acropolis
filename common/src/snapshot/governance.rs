@@ -28,8 +28,8 @@ use crate::snapshot::streaming_snapshot::Anchor;
 use crate::{
     CommitteeChange, CommitteeCredential, Constitution, Credential, GovActionId, GovernanceAction,
     HardForkInitiationAction, Lovelace, NewConstitutionAction, ParameterChangeAction, PoolId,
-    ProposalProcedure, ProtocolParamUpdate, RewardParams, StakeAddress, TreasuryWithdrawalsAction,
-    TxHash, UpdateCommitteeAction, Vote, Voter, VotingProcedure,
+    ProposalProcedure, ProtocolParamUpdate, RewardParams, ScriptHash, StakeAddress,
+    TreasuryWithdrawalsAction, TxHash, UpdateCommitteeAction, Vote, Voter, VotingProcedure,
 };
 
 // Re-export types needed by consumers
@@ -514,7 +514,11 @@ fn parse_gov_action(decoder: &mut Decoder) -> Result<GovernanceAction> {
             // ParameterChange
             let previous_action_id = parse_null_strict_maybe_gov_action_id(decoder)?;
             let protocol_param_update = parse_pparams_update(decoder)?;
-            let script_hash = parse_null_maybe_bytes(decoder)?;
+            let script_hash = parse_null_maybe_bytes(decoder)?
+                .map(|bytes| {
+                    ScriptHash::try_from(bytes).map_err(|_| anyhow!("Invalid script hash length"))
+                })
+                .transpose()?;
 
             Ok(GovernanceAction::ParameterChange(ParameterChangeAction {
                 previous_action_id,
@@ -537,7 +541,11 @@ fn parse_gov_action(decoder: &mut Decoder) -> Result<GovernanceAction> {
         2 => {
             // TreasuryWithdrawals
             let rewards = parse_withdrawals_map(decoder)?;
-            let script_hash = parse_null_maybe_bytes(decoder)?;
+            let script_hash = parse_null_maybe_bytes(decoder)?
+                .map(|bytes| {
+                    ScriptHash::try_from(bytes).map_err(|_| anyhow!("Invalid script hash length"))
+                })
+                .transpose()?;
 
             Ok(GovernanceAction::TreasuryWithdrawals(
                 TreasuryWithdrawalsAction {
