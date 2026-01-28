@@ -25,7 +25,7 @@ is active at a given epoch.
 
 ### Per-tx (within a block, in tx order)
 
-- For each transaction with active proposal, reset the dormant counter to 0 and add the counter to all active DReps expiration.
+- For each transaction with proposals, reset the dormant counter to 0 and add the counter to all active DReps expiration.
 
 - Apply DRep activity events that occur in the tx:
   - **DRep vote** in this tx: counts as DRep activity and updates that DRep’s `drepExpiry`.
