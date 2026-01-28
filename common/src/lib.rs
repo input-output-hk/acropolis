@@ -1,6 +1,7 @@
 // Acropolis common library - main library exports
 
 pub mod address;
+pub mod asset;
 pub mod calculations;
 pub mod caryatid;
 pub mod cbor;
@@ -37,6 +38,7 @@ pub mod validation;
 
 // Flattened re-exports
 pub use self::address::*;
+pub use self::asset::*;
 pub use self::drep::*;
 pub use self::metadata::*;
 pub use self::script::*;
