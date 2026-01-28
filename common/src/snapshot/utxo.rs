@@ -30,8 +30,8 @@ use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AssetName, ByronAddress, Datum, NativeAsset, NativeAssets, NativeScript, PolicyId,
-    ReferenceScript, ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue,
+    Address, AssetName, ByronAddress, Datum, DatumHash, NativeAsset, NativeAssets, NativeScript,
+    PolicyId, ReferenceScript, ShelleyAddress, StakeAddress, StakeCredential, TxHash, UTXOValue,
     UTxOIdentifier, Value,
 };
 
@@ -172,7 +172,7 @@ impl SnapshotUTXOValue {
                 Ok(Type::Bytes) => {
                     let hash_bytes = d.bytes()?;
                     if hash_bytes.len() == 32 {
-                        Some(Datum::Hash(hash_bytes.to_vec()))
+                        Some(Datum::Hash(DatumHash::try_from(hash_bytes).unwrap()))
                     } else {
                         None
                     }
@@ -269,7 +269,9 @@ fn decode_datum_option(d: &mut Decoder) -> Result<Option<Datum>, minicbor::decod
         0 => {
             // Datum hash: [0, hash32]
             let hash_bytes = d.bytes()?;
-            Ok(Some(Datum::Hash(hash_bytes.to_vec())))
+            let hash = DatumHash::try_from(hash_bytes)
+                .map_err(|_| minicbor::decode::Error::message("Invalid datum hash"))?;
+            Ok(Some(Datum::Hash(hash)))
         }
         1 => {
             // Inline datum: [1, #6.24(bytes)]

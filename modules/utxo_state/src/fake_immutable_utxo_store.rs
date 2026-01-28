@@ -61,4 +61,9 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     async fn len(&self) -> Result<usize> {
         Ok(42)
     }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(0)
+    }
 }

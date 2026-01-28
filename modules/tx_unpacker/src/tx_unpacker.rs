@@ -1,7 +1,7 @@
 //! Acropolis transaction unpacker module for Caryatid
 //! Unpacks transaction bodies into UTXO events
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use acropolis_common::{
     messages::{
@@ -24,7 +24,6 @@ use tracing::{debug, error, info, info_span, Instrument};
 use crate::state::State;
 mod crypto;
 mod state;
-mod utils;
 mod validations;
 
 #[cfg(test)]
@@ -112,17 +111,18 @@ impl TxUnpacker {
                     }
 
                     let mut utxo_deltas = Vec::new();
-                    let mut asset_deltas = Vec::new();
+                    let mut total_asset_deltas = Vec::new();
                     let mut cip25_metadata_updates = Vec::new();
-                    let mut withdrawals = Vec::new();
-                    let mut certificates = Vec::new();
-                    let mut voting_procedures = Vec::new();
-                    let mut proposal_procedures = Vec::new();
-                    let mut alonzo_babbage_update_proposals = Vec::new();
+                    let mut total_withdrawals = Vec::new();
+                    let mut total_certificates = Vec::new();
+                    let mut total_voting_procedures = Vec::new();
+                    let mut total_proposal_procedures = Vec::new();
+                    let mut total_alonzo_babbage_update_proposals = Vec::new();
                     let mut total_output: u128 = 0;
                     let block_number = block.number as u32;
 
-                    let span = info_span!("tx_unpacker.handle_txs", block = block.number);
+                    let span: tracing::Span =
+                        info_span!("tx_unpacker.handle_txs", block = block.number);
                     span.in_scope(|| {
                         for (tx_index, raw_tx) in txs_msg.txs.iter().enumerate() {
                             let tx_index = tx_index as u16;
@@ -135,83 +135,20 @@ impl TxUnpacker {
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);
 
                                     let mapped_tx = acropolis_codec::map_transaction(&tx, raw_tx, tx_identifier, network_id.clone(), block.era);
-                                    let tx_total_output = mapped_tx.calculate_total_output();
-
-                                    let Transaction {
-                                        consumes: tx_consumes,
-                                        produces: tx_produces,
-                                        fee:tx_fee,
-                                        is_valid,
-                                        certs: tx_certs,
-                                        withdrawals: tx_withdrawals,
-                                        proposal_update: tx_proposal_update,
-                                        vkey_witnesses,
-                                        native_scripts,
-                                        error: tx_error,
-                                    } = mapped_tx;
-                                    let mut props = None;
-                                    let mut votes = None;
-
-                                    let certs_identifiers = tx_certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
-                                    let total_withdrawals = tx_withdrawals.iter().map(|w| w.value).sum::<u64>();
-                                    let mut vkey_needed = HashSet::new();
-                                    let mut script_needed = HashSet::new();
-                                    utils::get_vkey_script_needed(
-                                        &tx_certs,
-                                        &tx_withdrawals,
-                                        &tx_proposal_update,
-                                        &state.protocol_params,
-                                        &mut vkey_needed,
-                                        &mut script_needed,
-                                    );
-                                    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>();
-                                    let script_hashes_provided = native_scripts.iter().map(|s| s.compute_hash()).collect::<Vec<_>>();
+                                    let tx_output = mapped_tx.calculate_tx_output();
 
                                     // sum up total output lovelace for a block
-                                    total_output += tx_total_output.coin() as u128;
-
-                                    // Mint or burn deltas
-                                    let mut mint_burn_deltas:NativeAssetsDelta =
-                                            Vec::new();
-
-                                    // Mint deltas
-                                    for policy_group in tx.mints().iter() {
-                                        if let Some((policy_id, deltas)) =
-                                            acropolis_codec::map_mint_burn(policy_group)
-                                        {
-                                            mint_burn_deltas.push((policy_id, deltas));
-                                        }
-                                    }
+                                    total_output += tx_output.coin() as u128;
 
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         debug!("Decoded tx with inputs={}, outputs={}, certs={}, total_output_coin={}",
-                                               tx_consumes.len(), tx_produces.len(), tx_certs.len(), tx_total_output.coin());
+                                               &mapped_tx.consumes.len(), &mapped_tx.produces.len(), &mapped_tx.certs.len(), tx_output.coin());
                                     }
 
-                                    if let Some(error) = tx_error {
+                                    if let Some(error) = mapped_tx.error.as_ref() {
                                         error!(
                                             "Errors decoding transaction {tx_hash}: {error}"
                                         );
-                                    }
-
-                                    if publish_utxo_deltas_topic.is_some() {
-                                        // Group deltas by tx
-                                        let (value_minted, value_burnt) = utils::get_value_minted_burnt_from_deltas(&mint_burn_deltas);
-                                        utxo_deltas.push(TxUTxODeltas {
-                                            tx_identifier,
-                                            consumes: tx_consumes,
-                                            produces: tx_produces,
-                                            fee: tx_fee,
-                                            is_valid,
-                                            total_withdrawals: Some(total_withdrawals),
-                                            certs_identifiers: Some(certs_identifiers),
-                                            value_minted: Some(value_minted),
-                                            value_burnt: Some(value_burnt),
-                                            vkey_hashes_needed: Some(vkey_needed),
-                                            script_hashes_needed: Some(script_needed),
-                                            vkey_hashes_provided: Some(vkey_hashes_provided),
-                                            script_hashes_provided: Some(script_hashes_provided),
-                                        });
                                     }
 
                                     if publish_asset_deltas_topic.is_some() {
@@ -228,62 +165,38 @@ impl TxUnpacker {
                                             }
                                         }
 
-                                        if !mint_burn_deltas.is_empty() {
-                                            asset_deltas.push((tx_identifier, mint_burn_deltas));
+                                        if !mapped_tx.mint_burn_deltas.is_empty() {
+                                            total_asset_deltas.push(
+                                                (tx_identifier, mapped_tx.mint_burn_deltas.clone())
+                                            );
                                         }
                                     }
 
                                     if publish_certificates_topic.is_some() {
-                                        certificates.extend(tx_certs);
+                                        total_certificates.extend(mapped_tx.certs.clone());
                                     }
 
                                     if publish_withdrawals_topic.is_some() {
-                                        withdrawals.extend(tx_withdrawals);
+                                        total_withdrawals.extend(mapped_tx.withdrawals.clone());
                                     }
 
                                    if publish_governance_procedures_topic.is_some() {
-                                    if let Some(proposal_update) = tx_proposal_update {
-                                        alonzo_babbage_update_proposals.push(proposal_update);
-                                    }
-                                    }
-
-                                    if let Some(conway) = tx.as_conway() {
-                                        if let Some(ref v) = conway.transaction_body.voting_procedures {
-                                            votes = Some(v);
+                                        if let Some(proposal_update) = mapped_tx.proposal_update.as_ref() {
+                                            total_alonzo_babbage_update_proposals.push(proposal_update.clone());
                                         }
 
-                                        if let Some(ref p) = conway.transaction_body.proposal_procedures
-                                        {
-                                            props = Some(p);
+                                        if let Some(pps) = mapped_tx.proposal_procedures.as_ref() {
+                                            total_proposal_procedures.extend(pps.clone());
+                                        }
+
+                                        if let Some(vps) = mapped_tx.voting_procedures.as_ref() {
+                                            total_voting_procedures.push((tx_hash, vps.clone()));
                                         }
                                     }
 
-                                    if publish_governance_procedures_topic.is_some() {
-                                        if let Some(pp) = props {
-                                            // Nonempty set -- governance_message.proposal_procedures will not be empty
-                                            let mut proc_id = GovActionId {
-                                                transaction_id: tx_hash,
-                                                action_index: 0,
-                                            };
-                                            for (action_index, pallas_governance_proposals) in
-                                                pp.iter().enumerate()
-                                            {
-                                                match proc_id.set_action_index(action_index)
-                                                        .and_then (|proc_id| acropolis_codec::map_governance_proposals_procedures(proc_id, pallas_governance_proposals))
-                                                    {
-                                                        Ok(g) => proposal_procedures.push(g),
-                                                        Err(e) => error!("Cannot decode governance proposal procedure {} idx {} in slot {}: {e}", proc_id, action_index, block.slot)
-                                                    }
-                                            }
-                                        }
-
-                                        if let Some(pallas_vp) = votes {
-                                            // Nonempty set -- governance_message.voting_procedures will not be empty
-                                            match acropolis_codec::map_all_governance_voting_procedures(pallas_vp) {
-                                                    Ok(vp) => voting_procedures.push((tx_hash, vp)),
-                                                    Err(e) => error!("Cannot decode governance voting procedures in slot {}: {e}", block.slot)
-                                                }
-                                        }
+                                    if publish_utxo_deltas_topic.is_some() {
+                                        let deltas = mapped_tx.convert_to_utxo_deltas(true);
+                                        utxo_deltas.push(deltas);
                                     }
                                 }
 
@@ -311,7 +224,7 @@ impl TxUnpacker {
                         let msg = Message::Cardano((
                             block.clone(),
                             CardanoMessage::AssetDeltas(AssetDeltasMessage {
-                                deltas: asset_deltas,
+                                deltas: total_asset_deltas,
                                 cip25_metadata_updates,
                             }),
                         ));
@@ -322,7 +235,9 @@ impl TxUnpacker {
                     if let Some(ref topic) = publish_withdrawals_topic {
                         let msg = Message::Cardano((
                             block.clone(),
-                            CardanoMessage::Withdrawals(WithdrawalsMessage { withdrawals }),
+                            CardanoMessage::Withdrawals(WithdrawalsMessage {
+                                withdrawals: total_withdrawals,
+                            }),
                         ));
 
                         futures.push(context.message_bus.publish(topic, Arc::new(msg)));
@@ -331,7 +246,9 @@ impl TxUnpacker {
                     if let Some(ref topic) = publish_certificates_topic {
                         let msg = Message::Cardano((
                             block.clone(),
-                            CardanoMessage::TxCertificates(TxCertificatesMessage { certificates }),
+                            CardanoMessage::TxCertificates(TxCertificatesMessage {
+                                certificates: total_certificates,
+                            }),
                         ));
 
                         futures.push(context.message_bus.publish(topic, Arc::new(msg)));
@@ -341,9 +258,9 @@ impl TxUnpacker {
                         let governance_msg = Arc::new(Message::Cardano((
                             block.clone(),
                             CardanoMessage::GovernanceProcedures(GovernanceProceduresMessage {
-                                voting_procedures,
-                                proposal_procedures,
-                                alonzo_babbage_updates: alonzo_babbage_update_proposals,
+                                voting_procedures: total_voting_procedures,
+                                proposal_procedures: total_proposal_procedures,
+                                alonzo_babbage_updates: total_alonzo_babbage_update_proposals,
                             }),
                         )));
 

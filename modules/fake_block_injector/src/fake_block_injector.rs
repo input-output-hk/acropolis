@@ -62,6 +62,7 @@ impl FakeBlockInjector {
             epoch,
             epoch_slot,
             new_epoch,
+            is_new_era: false,
             timestamp,
             tip_slot: None,
             era,

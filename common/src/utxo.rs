@@ -1,109 +1,109 @@
-use std::collections::HashSet;
-
 use crate::{
-    certificate::TxCertificateIdentifier, KeyHash, Lovelace, PoolRegistrationUpdate, ScriptHash,
-    StakeRegistrationUpdate, TxIdentifier, TxOutput, UTxOIdentifier, Value,
+    Address, Datum, ScriptHash, ShelleyAddressDelegationPart, StakeCredential, TxHash, Value,
 };
 
-// Individual transaction UTxO deltas
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TxUTxODeltas {
-    // Transaction in which delta occured
-    pub tx_identifier: TxIdentifier,
+// Full UTXO identifier as used in the outside world, with TX hash and output index
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
+)]
+pub struct UTxOIdentifier {
+    #[n(0)]
+    pub tx_hash: TxHash,
 
-    // Created and spent UTxOs
-    pub consumes: Vec<UTxOIdentifier>,
-    pub produces: Vec<TxOutput>,
-
-    // Transaction fee
-    pub fee: u64,
-
-    // Tx validity flag
-    pub is_valid: bool,
-
-    // State needed for validation
-    pub total_withdrawals: Option<Lovelace>,
-    // NOTE:
-    // These certificates will be resolved against
-    // StakeRegistrationUpdates and PoolRegistrationUpdates message
-    // in utxo_state while validating the transaction
-    pub certs_identifiers: Option<Vec<TxCertificateIdentifier>>,
-    pub value_minted: Option<Value>,
-    pub value_burnt: Option<Value>,
-
-    // NOTE:
-    // VKey and Script Hashes here are
-    // missing UTxO (inputs) Authors
-    pub vkey_hashes_needed: Option<HashSet<KeyHash>>,
-    pub script_hashes_needed: Option<HashSet<ScriptHash>>,
-    // From witnesses
-    pub vkey_hashes_provided: Option<Vec<KeyHash>>,
-    // NOTE:
-    // This includes only native scripts
-    // missing Plutus Scripts
-    pub script_hashes_provided: Option<Vec<ScriptHash>>,
+    #[n(1)]
+    pub output_index: u16,
 }
 
-impl TxUTxODeltas {
-    pub fn calculate_total_refund(
-        &self,
-        stake_registration_updates: &[StakeRegistrationUpdate],
-    ) -> Lovelace {
-        let mut total_refund: Lovelace = 0;
-        let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
-            return 0;
-        };
-
-        for cert_identifier in certs_identifiers.iter() {
-            total_refund += stake_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.refund())
-                .unwrap_or(0);
+impl UTxOIdentifier {
+    pub fn new(tx_hash: TxHash, output_index: u16) -> Self {
+        UTxOIdentifier {
+            tx_hash,
+            output_index,
         }
-        total_refund
     }
 
-    pub fn calculate_total_deposit(
-        &self,
-        pool_registration_updates: &[PoolRegistrationUpdate],
-        stake_registration_updates: &[StakeRegistrationUpdate],
-    ) -> Lovelace {
-        let mut total_deposit: Lovelace = 0;
-        let Some(certs_identifiers) = self.certs_identifiers.as_ref() else {
-            return 0;
-        };
-
-        for cert_identifier in certs_identifiers.iter() {
-            total_deposit += pool_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.deposit())
-                .unwrap_or(0);
-            total_deposit += stake_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.deposit())
-                .unwrap_or(0);
-        }
-        total_deposit
+    /// Get the transaction hash as a hex string
+    pub fn tx_hash_hex(&self) -> String {
+        self.tx_hash.to_string()
     }
 
-    pub fn calculate_total_produced(
-        &self,
-        pool_registration_updates: &[PoolRegistrationUpdate],
-        stake_registration_updates: &[StakeRegistrationUpdate],
-    ) -> Value {
-        let mut total_produced = Value::default();
-        total_produced += &Value::new(
-            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates),
-            vec![],
-        );
-        total_produced += &Value::new(self.fee, vec![]);
+    pub fn to_bytes(&self) -> [u8; 34] {
+        let mut buf = [0u8; 34];
+        buf[..32].copy_from_slice(self.tx_hash.as_inner());
+        buf[32..34].copy_from_slice(&self.output_index.to_be_bytes());
+        buf
+    }
+}
 
-        for output in &self.produces {
-            total_produced += &output.value;
+impl std::fmt::Display for UTxOIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}#{}", self.tx_hash, self.output_index)
+    }
+}
+
+/// Value stored in UTXO
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct UTXOValue {
+    /// Address in binary
+    pub address: Address,
+
+    /// Value in Lovelace
+    pub value: Value,
+
+    /// Datum
+    pub datum: Option<Datum>,
+
+    /// Reference script hash
+    pub reference_script_hash: Option<ScriptHash>,
+}
+
+impl UTXOValue {
+    /// Get the coin (lovelace) value
+    pub fn coin(&self) -> u64 {
+        self.value.lovelace
+    }
+
+    /// Get the address as raw bytes
+    pub fn address_bytes(&self) -> Vec<u8> {
+        match &self.address {
+            Address::Shelley(shelley) => shelley.to_bytes_key(),
+            Address::Byron(byron) => byron.payload.clone(),
+            Address::Stake(stake) => stake.to_binary(),
+            Address::None => Vec::new(),
         }
-        total_produced
+    }
+
+    /// Extract the stake credential from the address, if present.
+    ///
+    /// Returns `Some(StakeCredential)` for Shelley addresses that have
+    /// a stake key or script hash delegation. Returns `None` for:
+    /// - Byron addresses
+    /// - Enterprise addresses (no delegation)
+    /// - Pointer addresses (delegation is a pointer, not a credential)
+    /// - Stake/reward addresses
+    pub fn extract_stake_credential(&self) -> Option<StakeCredential> {
+        match &self.address {
+            Address::Shelley(shelley) => match &shelley.delegation {
+                ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
+                    Some(StakeCredential::AddrKeyHash(*hash))
+                }
+                ShelleyAddressDelegationPart::ScriptHash(hash) => {
+                    Some(StakeCredential::ScriptHash(*hash))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
