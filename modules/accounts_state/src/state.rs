@@ -816,58 +816,95 @@ impl State {
     /// Apply pending MIRs to stake addresses at epoch boundary
     /// This must be called BEFORE generate_spdd() to ensure MIRs are included in active stake.
     /// Also called internally by enter_epoch() for safety.
+    /// MIRs are only applied to registered accounts - deregistered accounts don't receive MIRs.
     pub fn apply_pending_mirs(&mut self) {
         // Apply MIRs from reserves
         if !self.pending_mir_reserves.is_empty() {
             let mut total_applied: i64 = 0;
+            let mut total_not_registered: i64 = 0;
             let count = self.pending_mir_reserves.len();
 
             for (stake_address, value) in self.pending_mir_reserves.drain() {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                let sas = stake_addresses.entry(stake_address.clone()).or_default();
 
-                if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
-                    error!("MIR apply to stake address {}: {e}", stake_address);
-                    continue;
+                // Only apply MIR if the account is registered
+                // If account deregistered before epoch boundary, MIR stays in reserves
+                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                    if sas.registered {
+                        if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
+                            error!("MIR apply to stake address {}: {e}", stake_address);
+                            continue;
+                        }
+
+                        if let Err(e) = update_value_with_delta(&mut self.pots.reserves, -value) {
+                            error!("MIR apply from reserves: {e}");
+                        }
+
+                        total_applied += value;
+                    } else {
+                        debug!(
+                            "MIR not applied to deregistered account {}, {} stays in reserves",
+                            stake_address, value
+                        );
+                        total_not_registered += value;
+                    }
+                } else {
+                    debug!(
+                        "MIR not applied to unknown account {}, {} stays in reserves",
+                        stake_address, value
+                    );
+                    total_not_registered += value;
                 }
-
-                if let Err(e) = update_value_with_delta(&mut self.pots.reserves, -value) {
-                    error!("MIR apply from reserves: {e}");
-                }
-
-                total_applied += value;
             }
 
             info!(
-                "Applied {} pending MIRs from reserves, total value: {}",
-                count, total_applied
+                "Applied {} pending MIRs from reserves: {} applied, {} not applied (deregistered/unknown)",
+                count, total_applied, total_not_registered
             );
         }
 
         // Apply MIRs from treasury
         if !self.pending_mir_treasury.is_empty() {
             let mut total_applied: i64 = 0;
+            let mut total_not_registered: i64 = 0;
             let count = self.pending_mir_treasury.len();
 
             for (stake_address, value) in self.pending_mir_treasury.drain() {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                let sas = stake_addresses.entry(stake_address.clone()).or_default();
 
-                if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
-                    error!("MIR apply to stake address {}: {e}", stake_address);
-                    continue;
+                // Only apply MIR if the account is registered
+                // If account deregistered before epoch boundary, MIR stays in treasury
+                if let Some(sas) = stake_addresses.get_mut(&stake_address) {
+                    if sas.registered {
+                        if let Err(e) = update_value_with_delta(&mut sas.rewards, value) {
+                            error!("MIR apply to stake address {}: {e}", stake_address);
+                            continue;
+                        }
+
+                        if let Err(e) = update_value_with_delta(&mut self.pots.treasury, -value) {
+                            error!("MIR apply from treasury: {e}");
+                        }
+
+                        total_applied += value;
+                    } else {
+                        debug!(
+                            "MIR not applied to deregistered account {}, {} stays in treasury",
+                            stake_address, value
+                        );
+                        total_not_registered += value;
+                    }
+                } else {
+                    debug!(
+                        "MIR not applied to unknown account {}, {} stays in treasury",
+                        stake_address, value
+                    );
+                    total_not_registered += value;
                 }
-
-                if let Err(e) = update_value_with_delta(&mut self.pots.treasury, -value) {
-                    error!("MIR apply from treasury: {e}");
-                }
-
-                total_applied += value;
             }
 
             info!(
-                "Applied {} pending MIRs from treasury, total value: {}",
-                count, total_applied
+                "Applied {} pending MIRs from treasury: {} applied, {} not applied (deregistered/unknown)",
+                count, total_applied, total_not_registered
             );
         }
     }
@@ -1891,6 +1928,41 @@ mod tests {
         let sas = stake_addresses.get(&stake_address).unwrap();
         assert_eq!(sas.rewards, 3);
         vld.as_result().unwrap();
+    }
+
+    #[test]
+    fn mir_not_applied_to_deregistered_account() {
+        let mut state = State::default();
+        let mut vld = ValidationOutcomes::new();
+        let stake_address = create_address(&STAKE_KEY_HASH);
+
+        // Bootstrap with some in reserves
+        state.pots.reserves = 100;
+
+        // Register stake address
+        state.register_stake_address(&stake_address, None, 0, &mut vld);
+
+        // Queue a MIR for this account
+        let mir = MoveInstantaneousReward {
+            source: InstantaneousRewardSource::Reserves,
+            target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
+        };
+        state.pay_mir(&mir);
+
+        // Deregister the account BEFORE applying MIRs (simulates deregistration during epoch)
+        state.deregister_stake_address(&stake_address, None, 100, &mut vld);
+
+        // Now apply pending MIRs at "epoch boundary"
+        state.apply_pending_mirs();
+
+        // MIR should NOT have been applied - reserves should be unchanged
+        assert_eq!(state.pots.reserves, 100);
+
+        // Account should have 0 rewards (cleared on deregistration)
+        let stake_addresses = state.stake_addresses.lock().unwrap();
+        let sas = stake_addresses.get(&stake_address).unwrap();
+        assert_eq!(sas.rewards, 0);
+        assert!(!sas.registered);
     }
 
     #[test]
