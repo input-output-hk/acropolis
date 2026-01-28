@@ -83,6 +83,48 @@ impl ByronAddress {
 
         Ok(buf)
     }
+
+    /// Check if this Byron address is a redeem (AVVM) address.
+    ///
+    /// Byron address payload is CBOR: [root_hash, attributes, addr_type]
+    /// where addr_type is:
+    /// - 0 = ATVerKey (regular verification key address)
+    /// - 2 = ATRedeem (redeem/AVVM address)
+    ///
+    /// At the Allegra hard fork (epoch 236 on mainnet), all redeem addresses
+    /// are cancelled and their value returned to reserves.
+    pub fn is_redeem_address(&self) -> bool {
+        // The payload is CBOR: [root_hash (28 bytes), attributes, addr_type]
+        // We need to decode it and check the third element
+        let mut decoder = minicbor::Decoder::new(&self.payload);
+
+        // Decode the array
+        let Ok(Some(len)) = decoder.array() else {
+            return false;
+        };
+
+        if len != 3 {
+            return false;
+        }
+
+        // Skip root_hash (bytes)
+        if decoder.bytes().is_err() {
+            return false;
+        }
+
+        // Skip attributes (map or other structure)
+        if decoder.skip().is_err() {
+            return false;
+        }
+
+        // Read addr_type - should be a u8
+        // ATVerKey = 0, ATRedeem = 2
+        let Ok(addr_type) = decoder.u8() else {
+            return false;
+        };
+
+        addr_type == 2
+    }
 }
 
 /// A Shelley-era address - payment part
@@ -702,6 +744,17 @@ impl Address {
                 StakeCredential::ScriptHash(_) => true,
             },
             Address::Byron(_) | Address::None => false,
+        }
+    }
+
+    /// Check if this is a Byron redeem (AVVM) address.
+    ///
+    /// Returns true only for Byron addresses with the ATRedeem type.
+    /// These addresses were cancelled at the Allegra hard fork.
+    pub fn is_redeem(&self) -> bool {
+        match self {
+            Address::Byron(byron) => byron.is_redeem_address(),
+            _ => false,
         }
     }
 }

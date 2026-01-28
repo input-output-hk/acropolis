@@ -13,6 +13,7 @@ pub enum UTxOStateQuery {
         utxo_identifiers: Vec<UTxOIdentifier>,
     },
     GetAllUTxOsSumAtShelleyStart,
+    GetAvvmCancelledValue,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -20,5 +21,6 @@ pub enum UTxOStateQueryResponse {
     UTxOsSum(Value),
     UTxOs(Vec<UTXOValue>),
     LovelaceSum(u64),
+    AvvmCancelledValue(Option<u64>),
     Error(QueryError),
 }

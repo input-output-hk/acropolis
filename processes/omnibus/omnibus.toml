@@ -75,45 +75,45 @@ stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
-store-epochs-history = false
+store-epochs-history = true
 # Enable /pools/retired
-store-retired-pools = false
+store-retired-pools = true
 # Enables /pools/{pool_id} endpoint
-store-registration = false
+store-registration = true
 # # Enables /pools/{pool_id}/updates endpoint
-store-updates = false
+store-updates = true
 # Enables /pools/{pool_id}/delegators endpoint (Requires store-stake-addresses to be enabled)
-store-delegators = false
+store-delegators = true
 # Enables /pools/{pool_id}/votes endpoint
-store-votes = false
+store-votes = true
 # Store blocks, enables /pools/{pool_id}/blocks, /epochs/{number}/blocks/{pool_id}
-store-blocks = false
+store-blocks = true
 # Store stake_addresses
-store-stake-addresses = false
+store-stake-addresses = true
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = false
+store-spdd = true
 
-[module.historical-accounts-state]
-# Clear state on start up (default true)
-clear-on-start = true
-# Enables /accounts/{stake_address}/rewards endpoint
-store-rewards-history = false
-# Enables /accounts/{stake_address}/history endpoint
-store-active-stake-history = false
-# Enables /accounts/{stake_address}/registrations endpoint
-store-registration-history = false
-# Enables /accounts/{stake_address}/delegations endpoint
-store-delegation-history = false
-# Enables /accounts/{stake_address}/mirs endpoint
-store-mir-history = false
-# Enables /accounts/{stake_address}/withdrawals endpoint
-store-withdrawal-history = false
-# Enables /accounts/{stake_address}/addresses endpoint
-store-addresses = false
-# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
-store-tx-count = false
+#[module.historical-accounts-state]
+## Clear state on start up (default true)
+#clear-on-start = true
+## Enables /accounts/{stake_address}/rewards endpoint
+#store-rewards-history = false
+## Enables /accounts/{stake_address}/history endpoint
+#store-active-stake-history = false
+## Enables /accounts/{stake_address}/registrations endpoint
+#store-registration-history = false
+## Enables /accounts/{stake_address}/delegations endpoint
+#store-delegation-history = false
+## Enables /accounts/{stake_address}/mirs endpoint
+#store-mir-history = false
+## Enables /accounts/{stake_address}/withdrawals endpoint
+#store-withdrawal-history = false
+## Enables /accounts/{stake_address}/addresses endpoint
+#store-addresses = false
+## Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
+#store-tx-count = false
 
 [module.historical-epochs-state]
 # Clear state on start up (default true)
@@ -187,7 +187,7 @@ clear-on-start = true
 clear-on-start = true
 # Enables /addresses/{address}, /addresses/{address}/extended,
 # /addresses/{address}/utxos/{asset}, and /addresses/{address}/utxos endpoints
-store-info = false
+store-info = true
 # Enables /addresses/{address}/totals endpoint
 store-totals = false
 # Enables /addresses/{address}/transactions endpoint

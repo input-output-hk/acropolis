@@ -428,6 +428,9 @@ impl UTXOState {
                         };
                         UTxOStateQueryResponse::LovelaceSum(total_lovelace)
                     }
+                    UTxOStateQuery::GetAvvmCancelledValue => {
+                        UTxOStateQueryResponse::AvvmCancelledValue(state.get_avvm_cancelled_value())
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,
