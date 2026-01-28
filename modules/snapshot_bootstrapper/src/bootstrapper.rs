@@ -2,6 +2,7 @@ mod block;
 mod configuration;
 mod context;
 mod downloader;
+mod drep_delegations;
 mod nonces;
 mod opcerts;
 mod progress_reader;
