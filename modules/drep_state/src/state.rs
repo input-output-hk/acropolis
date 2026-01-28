@@ -306,10 +306,6 @@ impl State {
         drep_activity: Option<u32>,
     ) -> Result<ValidationOutcomes> {
         let vld = ValidationOutcomes::new();
-        let Some(hist_map) = self.historical_dreps.as_mut() else {
-            return Ok(vld);
-        };
-
         let cfg = self.config;
 
         let drep_activity = drep_activity.ok_or_else(|| {
@@ -704,8 +700,10 @@ fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
 mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
-        validation::ValidationOutcomes, Anchor, Credential, DRepDeregistration, DRepRegistration,
-        DRepUpdate, TxCertificate, TxCertificateWithPos, TxIdentifier,
+        validation::ValidationOutcomes, Anchor, Credential, DRepDeregistration, DRepKeyHash,
+        DRepRegistration, DRepUpdate, GovActionId, GovernanceAction, NetworkId, ProposalProcedure,
+        SingleVoterVotes, StakeAddress, TxCertificate, TxCertificateWithPos, TxHash, TxIdentifier,
+        Vote, Voter, VotingProcedure, VotingProcedures,
     };
     use std::collections::HashMap;
 
@@ -902,6 +900,7 @@ mod tests {
 
     #[test]
     fn test_drep_inactivity() {
+        let mut vld = ValidationOutcomes::new();
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
 
         // Enable historical for checking on expired/active_epoch fields.
@@ -921,7 +920,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());
+        assert!(state.process_one_cert(&register_cert, 10, &mut vld, Some(20)).unwrap());
         assert_eq!(
             state.drep_expiry.get(&tx_cred).copied(),
             Some(30),
@@ -943,7 +942,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        state.process_one_cert(&update_cert, 31, Some(20)).unwrap();
+        state.process_one_cert(&update_cert, 31, &mut vld, Some(20)).unwrap();
         assert_eq!(
             state.drep_expiry.get(&tx_cred).copied(),
             Some(51),
@@ -1009,6 +1008,7 @@ mod tests {
 
     #[test]
     fn test_process_votes_refreshes_drep_expiry() {
+        let mut vld = ValidationOutcomes::new();
         let drep_key = CRED_1.into();
         let drep_cred = Credential::AddrKeyHash(drep_key);
 
@@ -1024,7 +1024,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        assert!(state.process_one_cert(&register_cert, 10, Some(20)).unwrap());
+        assert!(state.process_one_cert(&register_cert, 10, &mut vld, Some(20)).unwrap());
         assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(30));
 
         // Simulate dormancy accumulation. Votes should compute expiry with subtraction.

@@ -165,14 +165,11 @@ impl DRepState {
 
         if let Some(params) = &mut subs.params {
             let (_, message) = params.read_skip_rollbacks().await?;
-            if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) = message.as_ref()
-            {
-                if let Some(conway) = &params.params.conway {
-                    // It is not guaranteed that the snapshot starts at epoch boundary
-                    // therefore params need to be read with the genesis params.
-                    conway_d_rep_activity = Some(conway.d_rep_activity);
-                    conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
-                }
+            if let Some(conway) = &message.params.conway {
+                // It is not guaranteed that the snapshot starts at epoch boundary
+                // therefore params need to be read with the genesis params.
+                conway_d_rep_activity = Some(conway.d_rep_activity);
+                conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
             }
             info!("Consumed initial genesis params from params_subscription");
         }
@@ -220,10 +217,7 @@ impl DRepState {
                             conway_d_rep_activity = Some(cw.d_rep_activity);
                             conway_gov_action_lifetime = Some(cw.gov_action_lifetime);
 
-                            ctx.handle(
-                                "params",
-                                state.update_drep_expirations(new_epoch),
-                            );
+                            ctx.handle("params", state.update_drep_expirations(new_epoch));
                         }
                     }
                 }
