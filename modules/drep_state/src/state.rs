@@ -152,7 +152,8 @@ impl State {
 
     fn update_drep_expiry(&mut self, drep_cred: &DRepCredential, epoch: u64, drep_activity: u32) {
         // drepExpiry = (currentEpoch+drepActivity) − numDormantEpochs
-        let expiry = epoch.saturating_add(drep_activity as u64).saturating_sub(self.num_dormant_epochs);
+        let expiry =
+            epoch.saturating_add(drep_activity as u64).saturating_sub(self.num_dormant_epochs);
         self.drep_expiry.insert(drep_cred.clone(), expiry);
     }
 
