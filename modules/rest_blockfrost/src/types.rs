@@ -9,11 +9,9 @@ use acropolis_common::{
     rest_helper::ToCheckedF64,
     serialization::{Bech32WithHrp, DisplayFromBech32, PoolPrefix},
     AssetAddressEntry, AssetMetadataStandard, AssetMintRecord, Datum, KeyHash, PolicyAsset,
-    PoolEpochState, PoolId, PoolUpdateAction, ReferenceScript, Relay, TxHash, UTXOValue, ValueMap,
-    Vote, VrfKeyHash,
+    PoolEpochState, PoolId, PoolUpdateAction, Relay, TxHash, UTXOValue, ValueMap, Vote, VrfKeyHash,
 };
 use anyhow::Result;
-use blake2::{Blake2b512, Digest};
 use num_traits::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::Serialize;
@@ -957,17 +955,7 @@ impl UTxOREST {
             None => (None, None),
         };
 
-        let reference_script_hash = entry.reference_script.as_ref().map(|script| match script {
-            ReferenceScript::PlutusV1(b)
-            | ReferenceScript::PlutusV2(b)
-            | ReferenceScript::PlutusV3(b) => {
-                let mut hasher = Blake2b512::new();
-                hasher.update(b);
-                let result = hasher.finalize();
-                hex::encode(&result[..32])
-            }
-            ReferenceScript::Native(b) => b.compute_hash().to_string(),
-        });
+        let reference_script_hash = entry.reference_script_hash.as_ref().map(hex::encode);
 
         Self {
             address,

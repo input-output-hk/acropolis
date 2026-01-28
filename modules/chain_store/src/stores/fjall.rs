@@ -319,6 +319,7 @@ mod tests {
             epoch,
             epoch_slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp,
             tip_slot: None,
             era: acropolis_common::Era::Conway,

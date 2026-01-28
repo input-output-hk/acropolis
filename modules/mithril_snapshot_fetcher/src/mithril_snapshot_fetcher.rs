@@ -7,7 +7,7 @@ use acropolis_common::{
     configuration::{StartupMode, SyncMode},
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage},
-    BlockHash, BlockInfo, BlockIntent, BlockStatus, Point,
+    BlockHash, BlockInfo, BlockIntent, BlockStatus, Era, Point,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -282,6 +282,7 @@ impl MithrilSnapshotFetcher {
 
         let mut last_block_number: u64 = 0;
         let mut last_epoch: Option<u64> = None;
+        let mut last_era: Option<Era> = None;
         for raw_block in blocks {
             let mut stop = false;
             match raw_block {
@@ -326,6 +327,8 @@ impl MithrilSnapshotFetcher {
 
                         let timestamp = genesis.slot_to_timestamp(slot);
                         let era = map_to_block_era(&block)?;
+                        let is_new_era = last_era != Some(era);
+                        last_era = Some(era);
 
                         let block_info = BlockInfo {
                             status: BlockStatus::Immutable,
@@ -337,6 +340,7 @@ impl MithrilSnapshotFetcher {
                             epoch,
                             epoch_slot,
                             new_epoch,
+                            is_new_era,
                             timestamp,
                             tip_slot: None,
                             era,

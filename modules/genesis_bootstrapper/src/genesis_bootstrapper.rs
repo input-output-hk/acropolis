@@ -129,6 +129,7 @@ impl GenesisBootstrapper {
                     epoch: 0,
                     epoch_slot: 0,
                     new_epoch: false,
+                    is_new_era: true,
                     timestamp: byron_genesis.start_time,
                     era: Era::Byron,
                     tip_slot: None,
@@ -169,7 +170,7 @@ impl GenesisBootstrapper {
                             }),
                             value: Value::new(*amount, Vec::new()),
                             datum: None,
-                            reference_script: None,
+                            reference_script_hash: None,
                         };
 
                         utxo_deltas_message.deltas.push(TxUTxODeltas {
@@ -178,14 +179,7 @@ impl GenesisBootstrapper {
                             produces: vec![tx_output],
                             fee: 0,
                             is_valid: true,
-                            total_withdrawals: None,
-                            certs_identifiers: None,
-                            value_minted: None,
-                            value_burnt: None,
-                            vkey_hashes_needed: None,
-                            script_hashes_needed: None,
-                            vkey_hashes_provided: None,
-                            script_hashes_provided: None,
+                            ..TxUTxODeltas::default()
                         });
                         total_allocated += amount;
                     }

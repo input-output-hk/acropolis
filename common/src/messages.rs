@@ -25,7 +25,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::AccountState;
-use crate::{Pots, TxUTxODeltas};
+use crate::{Pots, TxUTxODeltas, UTXOValue, UTxOIdentifier};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -355,6 +355,43 @@ pub enum CardanoMessage {
     PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
 }
 
+/// A new block has been announced by some peer
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockOfferedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+    pub parent_hash: BlockHash,
+}
+
+/// A block has been rescinded by all peers (they rolled back to before it)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockRescindedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+/// A particular block has been requested (from whichever peer has announced it)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockWantedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+/// A particular block has failed validation (and all peers who offered it should be penalized)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockRejectedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ConsensusMessage {
+    BlockOffered(BlockOfferedMessage), // A new block has been announced (by at least one peer)
+    BlockRescinded(BlockRescindedMessage), // All peers have un-announced (rolled back to before) a block
+    BlockWanted(BlockWantedMessage),       // A particular block has been requested
+    BlockRejected(BlockRejectedMessage), // A particular block has failed validation, and all peers who offered it should be penalized
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum SnapshotMessage {
     Startup, // subscribers should listen for incremental snapshot data
@@ -566,6 +603,9 @@ pub enum Message {
 
     // Cardano messages with attached BlockInfo
     Cardano((BlockInfo, CardanoMessage)),
+
+    // Consensus messages (without attached BlockInfo)
+    Consensus(ConsensusMessage),
 
     // Initialize state from a snapshot
     Snapshot(SnapshotMessage),

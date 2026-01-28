@@ -219,6 +219,7 @@ mod tests {
             epoch: 208,
             epoch_slot: 0,
             new_epoch: true,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };
@@ -273,6 +274,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 36049,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };
@@ -333,6 +335,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };
@@ -393,6 +396,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };
@@ -454,6 +458,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };
@@ -524,6 +529,7 @@ mod tests {
             epoch: 211,
             epoch_slot: 431949,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Shelley,
         };

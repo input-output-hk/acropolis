@@ -2,6 +2,7 @@
 //! Accepts UTXO events and derives the current ledger state in memory
 
 use acropolis_common::{
+    configuration::StartupMode,
     messages::{
         CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage, StateQuery,
         StateQueryResponse, StateTransitionMessage,
@@ -36,19 +37,19 @@ mod dashmap_immutable_utxo_store;
 use dashmap_immutable_utxo_store::DashMapImmutableUTXOStore;
 mod sled_immutable_utxo_store;
 use sled_immutable_utxo_store::SledImmutableUTXOStore;
-mod sled_async_immutable_utxo_store;
-use sled_async_immutable_utxo_store::SledAsyncImmutableUTXOStore;
 mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
-mod fjall_async_immutable_utxo_store;
-use fjall_async_immutable_utxo_store::FjallAsyncImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
-
+mod utils;
 mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
+const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+);
 
 const DEFAULT_STORE: &str = "memory";
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
@@ -66,23 +67,56 @@ pub struct UTXOState;
 
 impl UTXOState {
     /// Main run function
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
+        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut genesis_utxo_consumed = false;
+
+        if is_snapshot_mode {
+            if let Some(sub) = pool_registration_updates_subscription.as_mut() {
+                let _ = sub.read().await?;
+            }
+
+            if let Some(sub) = stake_registration_updates_subscription.as_mut() {
+                let _ = sub.read().await?;
+            }
+        }
+
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
             let Ok((_, message)) = utxo_deltas_subscription.read().await else {
                 return Err(anyhow!("Failed to read UTxO deltas subscription error"));
             };
-            if let Message::Cardano((block_info, CardanoMessage::UTXODeltas(_))) = message.as_ref()
-            {
-                current_block_info = Some(block_info.clone());
+
+            let new_epoch = match message.as_ref() {
+                Message::Cardano((block_info, _)) => {
+                    current_block_info = Some(block_info.clone());
+                    block_info.new_epoch
+                }
+
+                _ => false,
+            };
+
+            let mut current_protocol_params = state.lock().await.get_or_init_protocol_parameters();
+
+            // Read protocol parameters if new epoch
+            if new_epoch {
+                let (_, protocol_parameters_message) =
+                    protocol_parameters_subscription.read().await?;
+
+                if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
+                    protocol_parameters_message.as_ref()
+                {
+                    current_protocol_params = params.params.clone();
+                }
             }
 
             // Read from pool registration updates subscription if available
@@ -137,6 +171,7 @@ impl UTXOState {
                                 deltas_msg,
                                 &pool_registration_updates,
                                 &stake_registration_updates,
+                                &current_protocol_params,
                             )
                             .await
                         {
@@ -155,7 +190,7 @@ impl UTXOState {
                     async {
                         let mut state = state.lock().await;
                         state
-                            .handle(block, deltas_msg)
+                            .handle_utxo_deltas(block, deltas_msg)
                             .await
                             .inspect_err(|e| error!("Messaging handling error: {e}"))
                             .ok();
@@ -182,6 +217,14 @@ impl UTXOState {
 
                 _ => error!("Unexpected message type: {message:?}"),
             }
+
+            // Commit protocol paramemters
+            if let Some(block_info) = current_block_info {
+                state
+                    .lock()
+                    .await
+                    .commit_protocol_parameters(&block_info, current_protocol_params.clone());
+            }
         }
     }
 
@@ -193,6 +236,12 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber on '{utxo_deltas_subscribe_topic}'");
 
+        let protocol_parameters_subscribe_topic = config
+            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating protocol parameters subscriber on '{protocol_parameters_subscribe_topic}'");
+
+        // These registration updates subscriptions are only needed for validation
         let pool_registration_updates_subscribe_topic =
             config.get_string("pool-registration-updates-subscribe-topic").ok();
         if let Some(ref topic) = pool_registration_updates_subscribe_topic {
@@ -218,15 +267,15 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+
         // Create store
         let store_type = config.get_string("store").unwrap_or(DEFAULT_STORE.to_string());
         let store: Arc<dyn ImmutableUTXOStore> = match store_type.as_str() {
             "memory" => Arc::new(InMemoryImmutableUTXOStore::new(config.clone())),
             "dashmap" => Arc::new(DashMapImmutableUTXOStore::new(config.clone())),
             "sled" => Arc::new(SledImmutableUTXOStore::new(config.clone())?),
-            "sled-async" => Arc::new(SledAsyncImmutableUTXOStore::new(config.clone())?),
             "fjall" => Arc::new(FjallImmutableUTXOStore::new(config.clone())?),
-            "fjall-async" => Arc::new(FjallAsyncImmutableUTXOStore::new(config.clone())?),
             "fake" => Arc::new(FakeImmutableUTXOStore::new(config.clone())),
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
@@ -245,6 +294,8 @@ impl UTXOState {
 
         // Subscribers
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
+        let protocol_parameters_subscription =
+            context.subscribe(&protocol_parameters_subscribe_topic).await?;
         let pool_registration_updates_subscription =
             if let Some(topic) = pool_registration_updates_subscribe_topic {
                 Some(context.subscribe(&topic).await?)
@@ -265,9 +316,11 @@ impl UTXOState {
                 context_run,
                 state_run,
                 utxo_deltas_subscription,
+                protocol_parameters_subscription,
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
+                is_snapshot_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));
@@ -358,6 +411,22 @@ impl UTXOState {
                                 e.to_string(),
                             )),
                         }
+                    }
+                    UTxOStateQuery::GetAllUTxOsSumAtShelleyStart => {
+                        let total_lovelace = match state.get_lovelace_at_shelley_start() {
+                            Some(cached) => cached,
+                            None => match state.get_total_lovelace().await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return Arc::new(Message::StateQueryResponse(
+                                        StateQueryResponse::UTxOs(UTxOStateQueryResponse::Error(
+                                            QueryError::internal_error(e.to_string()),
+                                        )),
+                                    ));
+                                }
+                            },
+                        };
+                        UTxOStateQueryResponse::LovelaceSum(total_lovelace)
                     }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(

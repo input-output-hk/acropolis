@@ -2,6 +2,8 @@
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
+use acropolis_common::protocol_params::ProtocolParams;
+use acropolis_common::state_history::{StateHistory, StateHistoryStore};
 use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
@@ -57,6 +59,9 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Get the total lovelace of all UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64>;
 }
 
 /// Ledger state storage
@@ -84,6 +89,12 @@ pub struct State {
 
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
+
+    /// Total lovelace at Shelley epoch boundary
+    lovelace_at_shelley_start: Option<u64>,
+
+    /// State History of Protocol Parameter
+    protocol_parameters_history: StateHistory<ProtocolParams>,
 }
 
 impl State {
@@ -98,7 +109,24 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
+            lovelace_at_shelley_start: None,
+            protocol_parameters_history: StateHistory::new(
+                "utxo_state.protocol_parameters_history",
+                StateHistoryStore::default_block_store(),
+            ),
         }
+    }
+
+    /// Get the current total lovelace of all utxos
+    pub async fn get_total_lovelace(&self) -> Result<u64> {
+        let volatile = Value::sum_lovelace(self.volatile_utxos.values().map(|v| &v.value));
+        let immutable = self.immutable_utxos.sum_lovelace().await?;
+        Ok(volatile + immutable)
+    }
+
+    /// Get the total lovelace at the Shelley epoch boundary
+    pub fn get_lovelace_at_shelley_start(&self) -> Option<u64> {
+        self.lovelace_at_shelley_start
     }
 
     /// Get the total value of multiple utxos
@@ -133,6 +161,20 @@ impl State {
             }
         }
         Ok(entries)
+    }
+
+    /// Get Protocol Parameter
+    pub fn get_or_init_protocol_parameters(&mut self) -> ProtocolParams {
+        self.protocol_parameters_history.get_or_init_with(ProtocolParams::default)
+    }
+
+    /// Commit protocol parameters
+    pub fn commit_protocol_parameters(
+        &mut self,
+        block_info: &BlockInfo,
+        protocol_params: ProtocolParams,
+    ) {
+        self.protocol_parameters_history.commit(block_info.number, protocol_params);
     }
 
     /// Register the delta observer
@@ -258,7 +300,7 @@ impl State {
             address: output.address.clone(),
             value: output.value.clone(),
             datum: output.datum.clone(),
-            reference_script: output.reference_script.clone(),
+            reference_script_hash: output.reference_script_hash,
         };
 
         // Add to volatile or immutable maps
@@ -341,8 +383,12 @@ impl State {
         Ok(())
     }
 
-    /// Handle a message
-    pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
+    /// Handle a UTXODeltas message
+    pub async fn handle_utxo_deltas(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<()> {
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -353,6 +399,15 @@ impl State {
 
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
+
+        // If we're entering Shelley era, capture the total lovelace
+        // (used to resync reserves on entry to Shelley in AccountsState)
+        if block.is_new_era && block.era == Era::Shelley {
+            let total_lovelace = self.get_total_lovelace().await?;
+            info!(epoch = block.epoch, total_lovelace, "Shelley start");
+
+            self.lovelace_at_shelley_start = Some(total_lovelace);
+        }
 
         // Process the deltas
         for tx in &deltas.deltas {
@@ -507,37 +562,37 @@ impl State {
     pub async fn validate(
         &mut self,
         block: &BlockInfo,
-        deltas: &UTXODeltasMessage,
+        deltas_msg: &UTXODeltasMessage,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
+        protocol_params: &ProtocolParams,
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
+        let deltas = &deltas_msg.deltas;
 
         // collect utxos needed for validation
         // NOTE:
         // Also consider collateral inputs and reference inputs
-        let all_inputs = deltas
-            .deltas
-            .iter()
-            .flat_map(|tx_deltas| tx_deltas.consumes.iter())
-            .collect::<Vec<_>>();
-        let mut utxos_needed = self.collect_utxos(&all_inputs).await;
+        let all_inputs =
+            deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
+        let mut utxos = self.collect_utxos(&all_inputs).await;
 
-        for tx_deltas in deltas.deltas.iter() {
+        for tx_deltas in deltas.iter() {
             if block.era == Era::Shelley {
-                if let Err(e) = validations::validate_shelley_tx(
+                if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
                     stake_registration_updates,
-                    &utxos_needed,
+                    &utxos,
+                    protocol_params.shelley.as_ref(),
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
 
-            // add this transaction's outputs to the utxos needed
+            // add this transaction's outputs to the utxos
             for output in &tx_deltas.produces {
-                utxos_needed.insert(output.utxo_identifier, output.utxo_value());
+                utxos.insert(output.utxo_identifier, output.utxo_value());
             }
         }
 
@@ -567,7 +622,7 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        PolicyId, ReferenceScript, TxHash, TxUTxODeltas, Value,
+        PolicyId, ScriptHash, TxHash, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -589,6 +644,7 @@ mod tests {
             epoch: 99,
             epoch_slot: slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: slot,
             tip_slot: None,
             era: Era::Byron,
@@ -618,7 +674,6 @@ mod tests {
     async fn observe_output_adds_to_immutable_utxos() {
         let mut state = new_state();
         let datum_data = vec![1, 2, 3, 4, 5];
-        let reference_script_bytes = vec![0xde, 0xad, 0xbe, 0xef];
 
         let output = TxOutput {
             utxo_identifier: UTxOIdentifier::new(TxHash::default(), 0),
@@ -640,30 +695,21 @@ mod tests {
                 )],
             ),
             datum: Some(Datum::Inline(datum_data.clone())),
-            reference_script: Some(ReferenceScript::PlutusV1(reference_script_bytes.clone())),
+            reference_script_hash: Some(ScriptHash::default()),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
 
-        let deltas = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![],
-                produces: vec![output.clone()],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![],
+            produces: vec![output.clone()],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas = UTXODeltasMessage { deltas };
 
-        state.handle(&block, &deltas).await.unwrap();
+        state.handle_utxo_deltas(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -693,8 +739,9 @@ mod tests {
                     Some(Datum::Inline(ref data)) if data == &datum_data
                 ));
                 assert!(matches!(
-                    value.reference_script,
-                    Some(ReferenceScript::PlutusV1(ref bytes)) if bytes == &reference_script_bytes));
+                    value.reference_script_hash,
+                    Some(h) if h == ScriptHash::default()
+                ));
             }
 
             _ => panic!("UTXO not found"),
@@ -724,7 +771,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -763,7 +810,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -804,7 +851,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -854,7 +901,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -902,7 +949,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -1021,29 +1068,20 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
-        let deltas1 = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![],
-                produces: vec![output.clone()],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![],
+            produces: vec![output.clone()],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas1 = UTXODeltasMessage { deltas };
 
-        state.handle(&block1, &deltas1).await.unwrap();
+        state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -1051,25 +1089,15 @@ mod tests {
         let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
-        let deltas2 = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![input],
-                produces: vec![],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
-
-        state.handle(&block2, &deltas2).await.unwrap();
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![input],
+            produces: vec![],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas2 = UTXODeltasMessage { deltas };
+        state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);

@@ -41,7 +41,10 @@ impl From<TestContextJson> for TestContext {
                             address: Address::from_string(&v.address).unwrap(),
                             value: v.value.clone(),
                             datum: v.datum.clone(),
-                            reference_script: v.reference_script.clone(),
+                            reference_script_hash: v
+                                .reference_script
+                                .clone()
+                                .and_then(|s| s.compute_hash()),
                         },
                     )
                 })
@@ -76,16 +79,16 @@ macro_rules! include_context {
 
 #[macro_export]
 macro_rules! validation_fixture {
-    ($hash:literal) => {
+    ($era:literal, $hash:literal) => {
         (
-            $crate::include_context!(concat!($hash, "/context.json")),
-            $crate::include_cbor!(concat!($hash, "/tx.cbor")),
+            $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
+            $crate::include_cbor!(concat!($era, "/", $hash, "/tx.cbor")),
         )
     };
-    ($hash:literal, $variant:literal) => {
+    ($era:literal, $hash:literal, $variant:literal) => {
         (
-            $crate::include_context!(concat!($hash, "/", "/context.json")),
-            $crate::include_cbor!(concat!($hash, "/", $variant, ".cbor")),
+            $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
+            $crate::include_cbor!(concat!($era, "/", $hash, "/", $variant, ".cbor")),
         )
     };
 }

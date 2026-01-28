@@ -53,12 +53,17 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
             address: Address::None,
             value: Value::new(42, Vec::new()),
             datum: None,
-            reference_script: None,
+            reference_script_hash: None,
         }))
     }
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize> {
         Ok(42)
+    }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        Ok(0)
     }
 }

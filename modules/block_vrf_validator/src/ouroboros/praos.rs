@@ -126,6 +126,7 @@ mod tests {
             epoch: 368,
             epoch_slot: 1729,
             new_epoch: false,
+            is_new_era: false,
             tip_slot: None,
             era: Era::Babbage,
         };
