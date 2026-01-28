@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use crate::state::{AddressEntry, AddressStorageConfig, UtxoDelta};
 use acropolis_common::{Address, AddressTotals, TxIdentifier, UTxOIdentifier};
 use anyhow::Result;
-use fjall::{Keyspace, Partition, PartitionCreateOptions};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use minicbor::{decode, to_vec};
 use tokio::{sync::Mutex, task};
 use tracing::{debug, error, info};
@@ -22,10 +22,10 @@ struct MergedDeltas {
 }
 
 pub struct ImmutableAddressStore {
-    utxos: Partition,
-    txs: Partition,
-    totals: Partition,
-    keyspace: Keyspace,
+    utxos: Keyspace,
+    txs: Keyspace,
+    totals: Keyspace,
+    database: Database,
     pub pending: Mutex<Vec<HashMap<Address, AddressEntry>>>,
 }
 
@@ -35,19 +35,18 @@ impl ImmutableAddressStore {
         if path.exists() && clear_on_start {
             std::fs::remove_dir_all(path)?;
         }
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
-        let keyspace = Keyspace::open(cfg)?;
 
-        let utxos = keyspace.open_partition("address_utxos", PartitionCreateOptions::default())?;
-        let txs = keyspace.open_partition("address_txs", PartitionCreateOptions::default())?;
-        let totals =
-            keyspace.open_partition("address_totals", PartitionCreateOptions::default())?;
+        let database = Database::builder(path).open()?;
+
+        let utxos = database.keyspace("address_utxos", KeyspaceCreateOptions::default)?;
+        let txs = database.keyspace("address_txs", KeyspaceCreateOptions::default)?;
+        let totals = database.keyspace("address_totals", KeyspaceCreateOptions::default)?;
 
         Ok(Self {
             utxos,
             txs,
             totals,
-            keyspace,
+            database,
             pending: Mutex::new(Vec::new()),
         })
     }
@@ -94,7 +93,7 @@ impl ImmutableAddressStore {
             std::mem::take(&mut *pending)
         };
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         let mut change_count = 0;
 
         for (address, deltas) in Self::merge_block_deltas(drained_blocks) {
@@ -255,9 +254,9 @@ impl ImmutableAddressStore {
     }
 
     pub async fn get_last_epoch_stored(&self) -> Result<Option<u64>> {
-        let read_marker = |partition: Partition, key: &'static [u8]| async move {
+        let read_marker = |keyspace: Keyspace, key: &'static [u8]| async move {
             task::spawn_blocking(move || {
-                Ok::<_, anyhow::Error>(match partition.get(key)? {
+                Ok::<_, anyhow::Error>(match keyspace.get(key)? {
                     Some(bytes) if bytes.len() == 8 => {
                         let mut arr = [0u8; 8];
                         arr.copy_from_slice(&bytes);
@@ -291,12 +290,12 @@ impl ImmutableAddressStore {
 
     async fn epoch_exists(
         &self,
-        partition: Partition,
+        keyspace: Keyspace,
         key: &'static [u8],
         epoch: u64,
     ) -> Result<bool> {
         let exists = task::spawn_blocking(move || -> Result<bool> {
-            let bytes = match partition.get(key)? {
+            let bytes = match keyspace.get(key)? {
                 Some(b) if b.len() == 8 => b,
                 _ => return Ok(false),
             };
