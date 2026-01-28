@@ -29,6 +29,10 @@ pub fn get_input_datum_hashes(
                 utxo.address.get_payment_part()
             {
                 if let Some(script_type) = scripts_provided.get(&script_hash) {
+                    if script_type == &ScriptType::Native {
+                        continue;
+                    }
+
                     match utxo.datum {
                         None => {
                             // only PlutusV3 doesn't require datum
@@ -126,12 +130,24 @@ pub fn validate_datums(
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L263
 pub fn validate_redeemers(
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
+    scripts_provided: &HashMap<ScriptHash, ScriptType>,
     redeemers: &[Redeemer],
 ) -> Result<(), Box<UTxOWValidationError>> {
+    let redeemers_needed = scripts_needed
+        .iter()
+        .filter(|(_, script_hash)| {
+            scripts_provided
+                .get(*script_hash)
+                .map(|script_type| script_type != &ScriptType::Native)
+                .unwrap_or(false)
+        })
+        .map(|(ptr, hash)| (ptr.clone(), *hash))
+        .collect::<HashMap<_, _>>();
+
     // Check all scripts needed have one redeemer
     let redeemers_provided =
         redeemers.iter().map(|redeemer| redeemer.redeemer_pointer()).collect::<HashSet<_>>();
-    for redeemer_pointer in scripts_needed.keys() {
+    for redeemer_pointer in redeemers_needed.keys() {
         if !redeemers_provided.contains(redeemer_pointer) {
             return Err(Box::new(UTxOWValidationError::MissingRedeemers {
                 redeemer_pointer: redeemer_pointer.clone(),
@@ -140,7 +156,7 @@ pub fn validate_redeemers(
     }
 
     // Check extra redeemers
-    let needed_redeemer_pointers = scripts_needed.keys().cloned().collect::<HashSet<_>>();
+    let needed_redeemer_pointers = redeemers_needed.keys().cloned().collect::<HashSet<_>>();
     for redeemer_pointer in redeemers_provided.iter() {
         if !needed_redeemer_pointers.contains(redeemer_pointer) {
             return Err(Box::new(UTxOWValidationError::ExtraRedeemers {
@@ -178,7 +194,7 @@ pub fn validate(
         utxos,
     )?;
 
-    validate_redeemers(scripts_needed, redeemers)?;
+    validate_redeemers(scripts_needed, scripts_provided, redeemers)?;
 
     Ok(())
 }
