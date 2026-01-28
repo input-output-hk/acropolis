@@ -96,9 +96,6 @@ impl PartialEq for Value {
             return false;
         }
 
-        if self.assets.len() != other.assets.len() {
-            return false;
-        }
         let mut counts: HashMap<Vec<u8>, i64> = HashMap::new();
         for (policy_id, assets) in &self.assets {
             for asset in assets {
