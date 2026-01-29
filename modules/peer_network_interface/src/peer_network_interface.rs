@@ -1,3 +1,4 @@
+mod block_flow;
 mod chain_state;
 mod configuration;
 mod connection;
@@ -7,7 +8,10 @@ use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus, Era,
     commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
+    messages::{
+        BlockWantedMessage, CardanoMessage, Command, ConsensusMessage, Message, RawBlockMessage,
+        StateTransitionMessage,
+    },
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -15,12 +19,13 @@ use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use std::{path::Path, sync::Arc, time::Duration};
 
 use crate::{
-    configuration::{InterfaceConfig, SyncPoint},
+    block_flow::BlockFlowHandler,
+    configuration::{BlockFlowMode, InterfaceConfig, SyncPoint},
     connection::Header,
     network::{NetworkEvent, NetworkManager},
 };
@@ -41,6 +46,30 @@ impl PeerNetworkInterface {
             None
         };
         let mut command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
+
+        // Create the event channel early so we can spawn forwarders before init_manager
+        let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
+
+        // Create the flow handler depending on configuration
+        let flow_handler = match cfg.block_flow_mode {
+            BlockFlowMode::Direct => {
+                info!("Block flow mode: Direct (auto-fetch)");
+                BlockFlowHandler::direct()
+            }
+            BlockFlowMode::Consensus => {
+                info!(
+                    "Block flow mode: Consensus (offers on '{}', wants on '{}')",
+                    cfg.consensus_topic, cfg.block_wanted_topic
+                );
+                // Subscribe and spin up 'block forwarder' together
+                let subscription = context.subscribe(&cfg.block_wanted_topic).await?;
+                tokio::spawn(Self::forward_block_wanted_to_events(
+                    subscription,
+                    events_sender.clone(),
+                ));
+                BlockFlowHandler::consensus(context.clone(), cfg.consensus_topic.clone())
+            }
+        };
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -71,7 +100,7 @@ impl PeerNetworkInterface {
             }
 
             let mut sink = BlockSink {
-                context,
+                context: context.clone(),
                 topic: cfg.block_topic.clone(),
                 genesis_values: genesis_values.clone(),
                 upstream_cache,
@@ -82,23 +111,29 @@ impl PeerNetworkInterface {
 
             let manager = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    tracing::info!("Starting sync from origin");
+                    info!("Starting sync from origin");
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
                         genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
+                        flow_handler,
+                        events,
+                        events_sender,
                     );
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
                 SyncPoint::Tip => {
-                    tracing::info!("Starting sync from tip");
+                    info!("Starting sync from tip");
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
                         genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
+                        flow_handler,
+                        events,
+                        events_sender,
                     );
                     if let Err(error) = manager.sync_to_tip().await {
                         warn!("could not sync to tip: {error:#}");
@@ -107,12 +142,15 @@ impl PeerNetworkInterface {
                     manager
                 }
                 SyncPoint::Cache => {
-                    tracing::info!("Starting sync from cache at {:?}", cache_sync_point);
+                    info!("Starting sync from cache at {:?}", cache_sync_point);
                     let mut manager = Self::init_manager(
                         cfg.node_addresses,
                         genesis_values.magic_number.into(),
                         sink,
                         command_subscription,
+                        flow_handler,
+                        events,
+                        events_sender,
                     );
                     manager.sync_to_point(cache_sync_point);
                     manager
@@ -123,17 +161,16 @@ impl PeerNetworkInterface {
                             if let Point::Specific(slot, _) = &point {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
-                                tracing::info!(
-                                    "Starting sync from slot {} in epoch {}",
-                                    slot,
-                                    epoch,
-                                );
+                                info!("Starting sync from slot {} in epoch {}", slot, epoch);
                             }
                             let mut manager = Self::init_manager(
                                 cfg.node_addresses,
                                 genesis_values.magic_number.into(),
                                 sink,
                                 command_subscription,
+                                flow_handler,
+                                events,
+                                events_sender,
                             );
                             manager.sync_to_point(point);
                             manager
@@ -159,16 +196,22 @@ impl PeerNetworkInterface {
         magic_number: u32,
         sink: BlockSink,
         command_subscription: Box<dyn Subscription<Message>>,
+        flow_handler: BlockFlowHandler,
+        events: mpsc::Receiver<NetworkEvent>,
+        events_sender: mpsc::Sender<NetworkEvent>,
     ) -> NetworkManager {
-        let (events_sender, events) = mpsc::channel(1024);
         tokio::spawn(Self::forward_commands_to_events(
             command_subscription,
             events_sender.clone(),
         ));
-        let mut manager = NetworkManager::new(magic_number, events, events_sender, sink);
+
+        let mut manager =
+            NetworkManager::new(magic_number, events, events_sender, sink, flow_handler);
+
         for address in node_addresses {
             manager.handle_new_connection(address, Duration::ZERO);
         }
+
         manager
     }
 
@@ -190,6 +233,30 @@ impl PeerNetworkInterface {
                 if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
                     bail!("event channel closed");
                 }
+            }
+        }
+
+        bail!("subscription closed");
+    }
+
+    async fn forward_block_wanted_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<()> {
+        while let Ok((_, msg)) = subscription.read().await {
+            if let Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
+                hash,
+                slot,
+            })) = msg.as_ref()
+                && events_sender
+                    .send(NetworkEvent::BlockWanted {
+                        hash: *hash,
+                        slot: *slot,
+                    })
+                    .await
+                    .is_err()
+            {
+                bail!("event channel closed");
             }
         }
 
@@ -260,6 +327,7 @@ struct BlockSink {
     era: Option<Era>,
     rolled_back: bool,
 }
+
 impl BlockSink {
     pub async fn announce_roll_forward(
         &mut self,

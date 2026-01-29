@@ -186,6 +186,7 @@ impl ChainState {
                 number: 0,
                 bytes: vec![],
                 era: acropolis_common::Era::Byron,
+                parent_hash: None,
             };
         };
         let hash = Hash::try_from(hash).unwrap_or_default();
@@ -200,6 +201,7 @@ impl ChainState {
                 number: 0,
                 bytes: vec![],
                 era: acropolis_common::Era::default(),
+                parent_hash: None,
             }
         }
     }
@@ -389,6 +391,7 @@ mod tests {
             number: slot,
             bytes: desc.as_bytes().to_vec(),
             era: Era::Conway,
+            parent_hash: None, // Tests don't need parent hash tracking
         };
         let body = desc.as_bytes().to_vec();
         (header, body)
