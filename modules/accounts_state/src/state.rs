@@ -1116,7 +1116,7 @@ impl State {
         // 2. Delegated to NoConfidence or Abstain
         //    We remove the account from its previous DReps account set in the `drep_delegators` map.
         //    This behavior produces a distribution which matches DB Sync.
-        if self.major_protocol_version() <= Some(9) {
+        if self.is_chang() {
             match DRepChoice::to_credential(drep) {
                 Some(drep) => {
                     self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
@@ -1139,7 +1139,7 @@ impl State {
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
         // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
         // the DRep).
-        if self.major_protocol_version() <= Some(9) {
+        if self.is_chang() {
             if let Some(delegators) = self.drep_delegators.remove(drep) {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
                 stake_addresses.remove_delegators_from_drep(delegators);
@@ -1440,16 +1440,19 @@ impl State {
 
     // Retrieve the major protocol version from the previous protocol parameters
     // During bootstrap we use the current protocol parameters for the first epoch
-    fn major_protocol_version(&self) -> Option<u64> {
+    fn is_chang(&self) -> bool {
         let params = match &self.previous_protocol_parameters {
             Some(params) => params,
             None => match &self.protocol_parameters {
                 Some(params) => params,
-                None => return None,
+                None => return false,
             },
         };
 
-        params.shelley.as_ref().map(|shelley| shelley.protocol_params.protocol_version.major)
+        match &params.shelley {
+            Some(shelley) => shelley.protocol_params.protocol_version.major == 9,
+            None => false,
+        }
     }
 }
 
