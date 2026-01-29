@@ -57,53 +57,70 @@ pub fn validate_script_integrity_hash(
 ) -> Result<(), Box<UTxOWValidationError>> {
     let script_data_hash =
         mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
-    match script_data_hash {
-        Some(script_data_hash) => {
-            match (
-                &mtx.transaction_witness_set.plutus_data,
-                &mtx.transaction_witness_set.redeemer,
-            ) {
-                (Some(plutus_data), Some(redeemer)) => {
-                    let plutus_data = plutus_data
-                        .iter()
-                        .map(|x| KeepRaw::unwrap(x.clone()))
-                        .collect::<Vec<alonzo::PlutusData>>();
-                    let computed_hash = compute_script_integrity_hash(&plutus_data, redeemer);
-                    if script_data_hash == computed_hash {
-                        Ok(())
-                    } else {
-                        Err(Box::new(
-                            UTxOWValidationError::ScriptIntegrityHashMismatch {
-                                expected: Some(computed_hash),
-                                actual: Some(script_data_hash),
-                                reason: "Script integrity hash mismatch".to_string(),
-                            },
-                        ))
+
+    let has_plutus_script =
+        mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
+
+    if has_plutus_script {
+        match script_data_hash {
+            Some(script_data_hash) => {
+                match (
+                    &mtx.transaction_witness_set.plutus_data,
+                    &mtx.transaction_witness_set.redeemer,
+                ) {
+                    (Some(plutus_data), Some(redeemer)) => {
+                        let plutus_data = plutus_data
+                            .iter()
+                            .map(|x| KeepRaw::unwrap(x.clone()))
+                            .collect::<Vec<alonzo::PlutusData>>();
+                        let computed_hash = compute_script_integrity_hash(&plutus_data, redeemer);
+                        if script_data_hash == computed_hash {
+                            Ok(())
+                        } else {
+                            Err(Box::new(
+                                UTxOWValidationError::ScriptIntegrityHashMismatch {
+                                    expected: Some(computed_hash),
+                                    actual: Some(script_data_hash),
+                                    reason: "Script integrity hash mismatch".to_string(),
+                                },
+                            ))
+                        }
                     }
+                    _ => Err(Box::new(
+                        UTxOWValidationError::ScriptIntegrityHashMismatch {
+                            expected: None,
+                            actual: None,
+                            reason: "Missing plutus data or redeemer".to_string(),
+                        },
+                    )),
                 }
-                _ => Err(Box::new(
-                    UTxOWValidationError::ScriptIntegrityHashMismatch {
-                        expected: None,
-                        actual: None,
-                        reason: "Missing plutus data or redeemer".to_string(),
-                    },
-                )),
+            }
+            None => {
+                if option_vec_is_empty(&mtx.transaction_witness_set.plutus_data)
+                    && option_vec_is_empty(&mtx.transaction_witness_set.redeemer)
+                {
+                    Ok(())
+                } else {
+                    Err(Box::new(
+                        UTxOWValidationError::ScriptIntegrityHashMismatch {
+                            expected: None,
+                            actual: None,
+                            reason: "Missing script data hash".to_string(),
+                        },
+                    ))
+                }
             }
         }
-        None => {
-            if option_vec_is_empty(&mtx.transaction_witness_set.plutus_data)
-                && option_vec_is_empty(&mtx.transaction_witness_set.redeemer)
-            {
-                Ok(())
-            } else {
-                Err(Box::new(
-                    UTxOWValidationError::ScriptIntegrityHashMismatch {
-                        expected: None,
-                        actual: None,
-                        reason: "Missing script data hash".to_string(),
-                    },
-                ))
-            }
+    } else {
+        match script_data_hash {
+            Some(script_data_hash) => Err(Box::new(
+                UTxOWValidationError::ScriptIntegrityHashMismatch {
+                    expected: None,
+                    actual: Some(script_data_hash),
+                    reason: "Script data hash set without plutus script".to_string(),
+                },
+            )),
+            None => Ok(()),
         }
     }
 }
