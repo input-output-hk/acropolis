@@ -56,7 +56,6 @@ The speckit workflow consists of these phases, each with a corresponding agent f
    - Creates: `docs/feedback/pr-NNN-lessons.md`
    - Updates: `docs/feedback/lessons.md` central database
    - Categories: code-quality, architecture, testing, documentation, security, performance
-   - Integration: `docs/feedback/AGENTS.md` and `docs/feedback/CLAUDE.md` instruct other phases to read lessons
 
 ### Supporting Agents
 
@@ -127,15 +126,11 @@ When a slash command is invoked, read the corresponding agent file and execute i
 ## Best Practices
 
 1. **Always read the agent file** - Don't assume, read `.github/agents/speckit.{phase}.agent.md` before executing
-2. **Incorporate lessons learned** - Before specify/plan/implement phases, read `docs/feedback/lessons.md` and apply relevant lessons:
-   - For specifications: prioritize architecture, documentation lessons
-   - For plans: prioritize architecture, testing, performance lessons  
-   - For implementation: prioritize code-quality, security, testing lessons
-3. **Parse JSON output** - Scripts output JSON with paths and metadata
-4. **Follow phase order** - specify → clarify → plan → tasks → checklist → implement → feedback
-5. **Validate prerequisites** - Use `check-prerequisites.sh` to ensure required files exist
-6. **Respect [NEEDS CLARIFICATION]** - Don't proceed with unclear requirements
-7. **Update agent context** - Keep copilot-instructions.md and similar files current
+2. **Parse JSON output** - Scripts output JSON with paths and metadata
+3. **Follow phase order** - specify → clarify → plan → tasks → checklist → implement → feedback
+4. **Validate prerequisites** - Use `check-prerequisites.sh` to ensure required files exist
+5. **Respect [NEEDS CLARIFICATION]** - Don't proceed with unclear requirements
+6. **Update agent context** - Keep copilot-instructions.md and similar files current
 
 ## Error Handling
 
