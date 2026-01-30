@@ -381,6 +381,7 @@ impl StakeAddressMap {
     pub fn generate_drdd(
         &self,
         dreps: &OrdMap<DRepCredential, Lovelace>,
+        proposal_deposits: &HashMap<StakeAddress, Lovelace>,
     ) -> DRepDelegationDistribution {
         let abstain = AtomicU64::new(0);
         let no_confidence = AtomicU64::new(0);
@@ -388,29 +389,22 @@ impl StakeAddressMap {
             .iter()
             .map(|(cred, _)| (cred.clone(), AtomicU64::new(0)))
             .collect::<BTreeMap<_, _>>();
-        self.inner.values().collect::<Vec<_>>().par_iter().for_each(|state| {
+        self.inner.iter().collect::<Vec<_>>().par_iter().for_each(|(stake_address, state)| {
             let Some(drep) = state.delegated_drep.clone() else {
                 return;
             };
             let total = match drep {
-                DRepChoice::Key(hash) => {
-                    let cred = DRepCredential::AddrKeyHash(hash);
-                    let Some(total) = dreps.get(&cred) else {
-                        return;
-                    };
-                    total
-                }
-                DRepChoice::Script(hash) => {
-                    let cred = DRepCredential::ScriptHash(hash);
-                    let Some(total) = dreps.get(&cred) else {
-                        return;
-                    };
-                    total
-                }
-                DRepChoice::Abstain => &abstain,
-                DRepChoice::NoConfidence => &no_confidence,
+                DRepChoice::Key(hash) => dreps.get(&DRepCredential::AddrKeyHash(hash)),
+                DRepChoice::Script(hash) => dreps.get(&DRepCredential::ScriptHash(hash)),
+                DRepChoice::Abstain => Some(&abstain),
+                DRepChoice::NoConfidence => Some(&no_confidence),
             };
-            let stake = state.utxo_value + state.rewards;
+
+            let Some(total) = total else {
+                return;
+            };
+            let proposal_deposit = proposal_deposits.get(*stake_address).copied().unwrap_or(0);
+            let stake = state.utxo_value + state.rewards + proposal_deposit;
             total.fetch_add(stake, std::sync::atomic::Ordering::Relaxed);
         });
         let abstain = abstain.load(std::sync::atomic::Ordering::Relaxed);
@@ -419,13 +413,10 @@ impl StakeAddressMap {
             .into_iter()
             .filter_map(|(k, v)| {
                 let total = v.load(std::sync::atomic::Ordering::Relaxed);
-                if total > 0 {
-                    Some((k, total))
-                } else {
-                    None
-                }
+                (total > 0).then_some((k, total))
             })
             .collect();
+
         DRepDelegationDistribution {
             abstain,
             no_confidence,
@@ -1259,7 +1250,7 @@ mod tests {
             stake_addresses.add_to_reward(&addr3, 150);
 
             let dreps = OrdMap::from_iter([(DRepCredential::AddrKeyHash(DREP_HASH), 500_u64)]);
-            let drdd = stake_addresses.generate_drdd(&dreps);
+            let drdd = stake_addresses.generate_drdd(&dreps, &HashMap::new());
 
             assert_eq!(drdd.abstain, 1050); // 1000 + 50
             assert_eq!(drdd.no_confidence, 2100); // 2000 + 100

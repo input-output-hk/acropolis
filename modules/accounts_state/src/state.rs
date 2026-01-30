@@ -3,7 +3,9 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
-use acropolis_common::messages::{Message, StateQuery, StateQueryResponse};
+use acropolis_common::messages::{
+    GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
+};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
@@ -96,6 +98,9 @@ pub struct State {
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
+
+    /// Proposal deposits to apply to DRep delegation distribution
+    proposal_deposits: HashMap<StakeAddress, Lovelace>,
 
     /// Proposal refunds to apply next epoch (list of reward accounts to refund to)
     proposal_refunds: Vec<(StakeAddress, Lovelace)>,
@@ -602,6 +607,24 @@ impl State {
         let refunds = take(&mut self.proposal_refunds);
 
         for (reward_account, deposit) in refunds {
+            let Some(balance) = self.proposal_deposits.get_mut(&reward_account) else {
+                warn!("No proposal deposit for {}", reward_account);
+                continue;
+            };
+
+            if *balance < deposit {
+                warn!(
+                    "Refund {} exceeds proposal deposit {} for {}",
+                    deposit, *balance, reward_account
+                );
+                continue;
+            }
+
+            *balance -= deposit;
+            if *balance == 0 {
+                self.proposal_deposits.remove(&reward_account);
+            }
+
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             if stake_addresses.is_registered(&reward_account) {
                 reward_deltas.push(StakeRewardDelta {
@@ -746,7 +769,7 @@ impl State {
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.generate_drdd(&self.dreps)
+        stake_addresses.generate_drdd(&self.dreps, &self.proposal_deposits)
     }
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
@@ -1399,6 +1422,15 @@ impl State {
         );
 
         Ok(())
+    }
+
+    pub fn handle_governance_procedures(&mut self, procedures: &GovernanceProceduresMessage) {
+        for proposal in &procedures.proposal_procedures {
+            self.proposal_deposits
+                .entry(proposal.reward_account.clone())
+                .and_modify(|amount| *amount += proposal.deposit)
+                .or_insert(proposal.deposit);
+        }
     }
 
     pub fn handle_governance_outcomes(
