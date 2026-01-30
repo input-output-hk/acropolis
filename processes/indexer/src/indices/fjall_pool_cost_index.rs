@@ -4,7 +4,7 @@ use acropolis_common::{BlockInfo, Lovelace, Point, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
 use anyhow::Result;
 use caryatid_sdk::async_trait;
-use fjall::{Config, Keyspace, Partition, PartitionCreateOptions};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use pallas::ledger::primitives::{alonzo, conway};
 use pallas::ledger::traverse::{MultiEraCert, MultiEraTx};
 use std::collections::BTreeMap;
@@ -20,20 +20,19 @@ pub struct FjallPoolCostState {
 pub struct FjallPoolCostIndex {
     state: FjallPoolCostState,
     sender: watch::Sender<FjallPoolCostState>,
-    partition: Partition,
+    keyspace: Keyspace,
 }
 
 impl FjallPoolCostIndex {
     pub fn new(path: impl AsRef<Path>, sender: watch::Sender<FjallPoolCostState>) -> Result<Self> {
         // Open DB
-        let cfg = Config::new(path).max_write_buffer_size(512 * 1024 * 1024);
-        let keyspace = Keyspace::open(cfg)?;
-        let partition = keyspace.open_partition("pools", PartitionCreateOptions::default())?;
+        let database = Database::builder(path).open()?;
+        let keyspace = database.keyspace("pools", KeyspaceCreateOptions::default)?;
 
         // Read existing state into memory
         let mut pools = BTreeMap::new();
-        for item in partition.iter() {
-            let (key, val) = item?;
+        for item in keyspace.iter() {
+            let (key, val) = item.into_inner()?;
             let pool_id = PoolId::try_from(key.as_ref())?;
             let cost: Lovelace = bincode::deserialize(&val)?;
             pools.insert(pool_id, cost);
@@ -42,7 +41,7 @@ impl FjallPoolCostIndex {
         Ok(Self {
             state: FjallPoolCostState { pools },
             sender,
-            partition,
+            keyspace,
         })
     }
 }
@@ -64,7 +63,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         let value = bincode::serialize(cost)?;
 
                         self.state.pools.insert(pool_id, *cost);
-                        self.partition.insert(key, value)?;
+                        self.keyspace.insert(key, value)?;
                         changed = true;
                     }
                     alonzo::Certificate::PoolRetirement(operator, ..) => {
@@ -72,7 +71,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         let key = pool_id.as_ref();
 
                         self.state.pools.remove(&pool_id);
-                        self.partition.remove(key)?;
+                        self.keyspace.remove(key)?;
                         changed = true;
                     }
 
@@ -85,7 +84,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         let value = bincode::serialize(cost)?;
 
                         self.state.pools.insert(pool_id, *cost);
-                        self.partition.insert(key, value)?;
+                        self.keyspace.insert(key, value)?;
                         changed = true;
                     }
                     conway::Certificate::PoolRetirement(operator, ..) => {
@@ -93,7 +92,7 @@ impl ChainIndex for FjallPoolCostIndex {
                         let key = pool_id.as_ref();
 
                         self.state.pools.remove(&pool_id);
-                        self.partition.remove(key)?;
+                        self.keyspace.remove(key)?;
                         changed = true;
                     }
                     _ => {}
@@ -112,9 +111,9 @@ impl ChainIndex for FjallPoolCostIndex {
     async fn reset(&mut self, start: &Point) -> Result<Point> {
         self.state.pools = BTreeMap::new();
 
-        for item in self.partition.iter() {
-            let (key, _) = item?;
-            self.partition.remove(key.as_ref())?;
+        for item in self.keyspace.iter() {
+            let key = item.key()?;
+            self.keyspace.remove(key.as_ref())?;
         }
 
         Ok(start.clone())
