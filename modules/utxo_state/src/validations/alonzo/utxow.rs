@@ -251,7 +251,7 @@ mod tests {
         "unspendable_utxo_no_datum_hash"
     ) =>
         matches Err(UTxOWValidationError::UnspendableUTxONoDatumHash { utxo_identifier, input_index })
-        if utxo_identifier == UTxOIdentifier { 
+        if utxo_identifier == UTxOIdentifier {
             tx_hash: TxHash::from_str("241f6fa120e4c2d28282553f6116c4bb3bb3b14e42c047493b492be656b8f41a").unwrap(), 
             output_index: 2u16
         } && input_index == 0;
