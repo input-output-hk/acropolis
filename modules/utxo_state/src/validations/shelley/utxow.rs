@@ -98,14 +98,14 @@ mod tests {
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
     )]
     #[test_case(validation_fixture!(
         "shelley",
         "b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46"
     ) =>
         matches Ok(());
-        "valid transaction 2 - with protocol update"
+        "shelley - valid transaction 2 - with protocol update"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -114,7 +114,7 @@ mod tests {
     ) =>
         matches Err(UTxOWValidationError::MissingVKeyWitnessesUTxOW { key_hash })
         if key_hash == KeyHash::from_str("b0baefb8dedefd7ec935514696ea5a66e9520f31dc8867737f0f0084").unwrap();
-        "missing_vkey_witnesses_utxow"
+        "shelley - missing_vkey_witnesses_utxow"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {

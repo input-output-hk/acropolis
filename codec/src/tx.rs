@@ -84,31 +84,31 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, ScriptType> {
+pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, Option<ScriptLang>> {
     let mut map_script_witnesses = HashMap::new();
 
     for script in tx.native_scripts() {
-        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), ScriptType::Native);
+        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), None);
     }
 
     for script in tx.plutus_v1_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            ScriptType::PlutusV1,
+            Some(ScriptLang::PlutusV1),
         );
     }
 
     for script in tx.plutus_v2_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            ScriptType::PlutusV2,
+            Some(ScriptLang::PlutusV2),
         );
     }
 
     for script in tx.plutus_v3_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            ScriptType::PlutusV3,
+            Some(ScriptLang::PlutusV3),
         );
     }
 
@@ -128,7 +128,8 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    let (mut consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    consumes.sort();
 
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 

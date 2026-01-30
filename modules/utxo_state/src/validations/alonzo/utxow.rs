@@ -2,12 +2,9 @@
 
 use acropolis_common::{
     validation::UTxOWValidationError, Datum, DatumHash, Redeemer, RedeemerPointer, ScriptHash,
-    ScriptType, ShelleyAddressPaymentPart, TxOutput, UTXOValue, UTxOIdentifier,
+    ScriptLang, ShelleyAddressPaymentPart, TxOutput, UTXOValue, UTxOIdentifier,
 };
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 /// This function checks consumed UTxOs for its attached datum
 /// For each spending UTxO locked by script
@@ -18,7 +15,7 @@ use std::{
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L241
 pub fn get_input_datum_hashes(
     inputs: &[UTxOIdentifier],
-    scripts_provided: &HashMap<ScriptHash, ScriptType>,
+    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<HashSet<DatumHash>, Box<UTxOWValidationError>> {
     let mut input_hashes = HashSet::new();
@@ -28,15 +25,11 @@ pub fn get_input_datum_hashes(
             if let Some(ShelleyAddressPaymentPart::ScriptHash(script_hash)) =
                 utxo.address.get_payment_part()
             {
-                if let Some(script_type) = scripts_provided.get(&script_hash) {
-                    if script_type == &ScriptType::Native {
-                        continue;
-                    }
-
+                if let Some(Some(script_lang)) = scripts_provided.get(&script_hash) {
                     match utxo.datum {
                         None => {
                             // only PlutusV3 doesn't require datum
-                            if script_type.cmp(&ScriptType::PlutusV3) == Ordering::Less {
+                            if !script_lang.eq(&ScriptLang::PlutusV3) {
                                 return Err(Box::new(
                                     UTxOWValidationError::UnspendableUTxONoDatumHash {
                                         utxo_identifier: *input,
@@ -89,7 +82,7 @@ pub fn validate_datums(
     inputs: &[UTxOIdentifier],
     outputs: &[TxOutput],
     ref_inputs: &[UTxOIdentifier],
-    scripts_provided: &HashMap<ScriptHash, ScriptType>,
+    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
     plutus_data: &HashMap<DatumHash, Vec<u8>>,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<(), Box<UTxOWValidationError>> {
@@ -130,7 +123,7 @@ pub fn validate_datums(
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L263
 pub fn validate_redeemers(
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
-    scripts_provided: &HashMap<ScriptHash, ScriptType>,
+    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
     redeemers: &[Redeemer],
 ) -> Result<(), Box<UTxOWValidationError>> {
     let redeemers_needed = scripts_needed
@@ -138,7 +131,7 @@ pub fn validate_redeemers(
         .filter(|(_, script_hash)| {
             scripts_provided
                 .get(*script_hash)
-                .map(|script_type| script_type != &ScriptType::Native)
+                .map(|script_type| script_type.is_some())
                 .unwrap_or(false)
         })
         .map(|(ptr, hash)| (ptr.clone(), *hash))
@@ -180,7 +173,7 @@ pub fn validate(
     outputs: &[TxOutput],
     ref_inputs: &[UTxOIdentifier],
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
-    scripts_provided: &HashMap<ScriptHash, ScriptType>,
+    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
     plutus_data: &HashMap<DatumHash, Vec<u8>>,
     redeemers: &[Redeemer],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
@@ -197,4 +190,107 @@ pub fn validate(
     validate_redeemers(scripts_needed, scripts_provided, redeemers)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::{test_utils::TestContext, utils, validation_fixture};
+    use acropolis_common::{Era, NetworkId, RedeemerTag, TxHash, TxIdentifier};
+    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use test_case::test_case;
+
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - with contracts"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
+        "missing_redeemers"
+    ) =>
+        matches Err(UTxOWValidationError::MissingRedeemers { redeemer_pointer })
+        if redeemer_pointer == RedeemerPointer {tag: RedeemerTag::Spend, index: 1};
+        "alonzo - missing redeemers"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
+        "extra_redeemers"
+    ) =>
+        matches Err(UTxOWValidationError::ExtraRedeemers { redeemer_pointer })
+        if redeemer_pointer == RedeemerPointer {tag: RedeemerTag::Spend, index: 0};
+        "alonzo - extra redeemers"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
+        "missing_required_datums"
+    ) =>
+        matches Err(UTxOWValidationError::MissingRequiredDatums { datum_hash })
+        if datum_hash == DatumHash::from_str("c8296567eaffef4efdafa652335bbd34e91cddbcf061a17d110d16e540324c32").unwrap();
+        "alonzo - missing required datums"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
+        "not_allowed_supplemental_datums"
+    ) =>
+        matches Err(UTxOWValidationError::NotAllowedSupplementalDatums { datum_hash })
+        if datum_hash == DatumHash::from_str("f1f6589679d8b007a9a83c71b0e4450202dbebb897d296597fb218633d102a5e").unwrap();
+        "alonzo - not allowed supplemental datums"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
+        "unspendable_utxo_no_datum_hash"
+    ) =>
+        matches Err(UTxOWValidationError::UnspendableUTxONoDatumHash { utxo_identifier, input_index })
+        if utxo_identifier == UTxOIdentifier { 
+            tx_hash: TxHash::from_str("241f6fa120e4c2d28282553f6116c4bb3bb3b14e42c047493b492be656b8f41a").unwrap(), 
+            output_index: 2u16
+        } && input_index == 0;
+        "alonzo - unspendable utxo no datum hash"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+        let raw_tx = tx.encode();
+        let tx_identifier = TxIdentifier::new(4533644, 1);
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            tx_identifier,
+            NetworkId::Mainnet,
+            Era::Shelley,
+        );
+        let tx_error = mapped_tx.error.as_ref();
+        assert!(tx_error.is_none());
+
+        let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
+        let inputs = &tx_deltas.consumes;
+        let outputs = &tx_deltas.produces;
+        let ref_inputs = &tx_deltas.reference_inputs;
+        let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
+        let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
+        let scripts_needed = utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
+        let scripts_provided = utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
+
+        validate(
+            inputs,
+            outputs,
+            ref_inputs,
+            &scripts_needed,
+            &scripts_provided,
+            plutus_data,
+            redeemers,
+            &ctx.utxos,
+        )
+        .map_err(|e| *e)
+    }
 }

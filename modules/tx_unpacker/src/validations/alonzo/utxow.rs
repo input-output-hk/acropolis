@@ -3,7 +3,7 @@
 //!
 //! NOTE: Alonzo UTxOW re-uses Shelley UTxOW rules, but introduces several new validation rules.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::validations::shelley;
 use acropolis_common::{
@@ -12,37 +12,47 @@ use acropolis_common::{
 };
 use pallas::{
     codec::{
-        minicbor::{self, Encoder},
+        minicbor::{encode, Encoder},
         utils::KeepRaw,
     },
     ledger::primitives::alonzo,
 };
 
-fn option_vec_is_empty<T>(option_vec: &Option<Vec<T>>) -> bool {
-    option_vec.as_ref().map(|vec| vec.is_empty()).unwrap_or(true)
-}
-
+/// Script integrity hash input bytes:
+/// redeemers ++ (if plutus data non-empty then plutus data else []) ++ lang_views.
 fn compute_script_integrity_hash(
-    plutus_data: &[alonzo::PlutusData],
     redeemer: &[alonzo::Redeemer],
-) -> ScriptIntegrityHash {
+    plutus_data: &[alonzo::PlutusData],
+    used_plutusv1_script: bool,
+) -> Option<ScriptIntegrityHash> {
+    if redeemer.is_empty() && plutus_data.is_empty() {
+        return None;
+    }
     let mut value_to_hash: Vec<u8> = Vec::new();
+
     // First, the Redeemer.
-    let _ = minicbor::encode(redeemer, &mut value_to_hash);
-    // Next, the PlutusData.
+    let _ = encode(redeemer, &mut value_to_hash);
+
+    // Next, the PlutusData (definite-length array encoding).
     let mut plutus_data_encoder: Encoder<Vec<u8>> = Encoder::new(Vec::new());
-    let _ = plutus_data_encoder.begin_array();
+    let _ = plutus_data_encoder.array(plutus_data.len() as u64);
     for single_plutus_data in plutus_data.iter() {
         let _ = plutus_data_encoder.encode(single_plutus_data);
     }
-    let _ = plutus_data_encoder.end();
     value_to_hash.extend(plutus_data_encoder.writer().clone());
+
     // Finally, the cost model.
-    value_to_hash.extend(cost_model_cbor());
-    keyhash_256(&value_to_hash)
+    if used_plutusv1_script {
+        value_to_hash.extend(plutus_language_views_cbor());
+    } else {
+        let empty_lang_views = HashMap::<Vec<u8>, Vec<u8>>::new();
+        let _ = encode(empty_lang_views, &mut value_to_hash);
+    }
+
+    Some(keyhash_256(&value_to_hash))
 }
 
-fn cost_model_cbor() -> Vec<u8> {
+fn plutus_language_views_cbor() -> Vec<u8> {
     // Mainnet, preprod and preview all have the same cost model during the Alonzo
     // era.
     hex::decode(
@@ -58,70 +68,33 @@ pub fn validate_script_integrity_hash(
     let script_data_hash =
         mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
 
-    let has_plutus_script =
+    let used_plutusv1_script =
         mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
 
-    if has_plutus_script {
-        match script_data_hash {
-            Some(script_data_hash) => {
-                match (
-                    &mtx.transaction_witness_set.plutus_data,
-                    &mtx.transaction_witness_set.redeemer,
-                ) {
-                    (Some(plutus_data), Some(redeemer)) => {
-                        let plutus_data = plutus_data
-                            .iter()
-                            .map(|x| KeepRaw::unwrap(x.clone()))
-                            .collect::<Vec<alonzo::PlutusData>>();
-                        let computed_hash = compute_script_integrity_hash(&plutus_data, redeemer);
-                        if script_data_hash == computed_hash {
-                            Ok(())
-                        } else {
-                            Err(Box::new(
-                                UTxOWValidationError::ScriptIntegrityHashMismatch {
-                                    expected: Some(computed_hash),
-                                    actual: Some(script_data_hash),
-                                    reason: "Script integrity hash mismatch".to_string(),
-                                },
-                            ))
-                        }
-                    }
-                    _ => Err(Box::new(
-                        UTxOWValidationError::ScriptIntegrityHashMismatch {
-                            expected: None,
-                            actual: None,
-                            reason: "Missing plutus data or redeemer".to_string(),
-                        },
-                    )),
-                }
-            }
-            None => {
-                if option_vec_is_empty(&mtx.transaction_witness_set.plutus_data)
-                    && option_vec_is_empty(&mtx.transaction_witness_set.redeemer)
-                {
-                    Ok(())
-                } else {
-                    Err(Box::new(
-                        UTxOWValidationError::ScriptIntegrityHashMismatch {
-                            expected: None,
-                            actual: None,
-                            reason: "Missing script data hash".to_string(),
-                        },
-                    ))
-                }
-            }
-        }
+    let redeemers = if let Some(redeemers) = mtx.transaction_witness_set.redeemer.as_ref() {
+        redeemers
     } else {
-        match script_data_hash {
-            Some(script_data_hash) => Err(Box::new(
-                UTxOWValidationError::ScriptIntegrityHashMismatch {
-                    expected: None,
-                    actual: Some(script_data_hash),
-                    reason: "Script data hash set without plutus script".to_string(),
-                },
-            )),
-            None => Ok(()),
-        }
+        &vec![]
+    };
+    let plutus_data = if let Some(plutus_data) = mtx.transaction_witness_set.plutus_data.as_ref() {
+        plutus_data.iter().map(|x| KeepRaw::unwrap(x.clone())).collect::<Vec<alonzo::PlutusData>>()
+    } else {
+        vec![]
+    };
+
+    let computed_hash =
+        compute_script_integrity_hash(redeemers, &plutus_data, used_plutusv1_script);
+
+    if script_data_hash.eq(&computed_hash) {
+        Ok(())
+    } else {
+        Err(Box::new(
+            UTxOWValidationError::ScriptIntegrityHashMismatch {
+                expected: computed_hash,
+                actual: script_data_hash,
+                reason: "Script integrity hash mismatch".to_string(),
+            },
+        ))
     }
 }
 
@@ -149,4 +122,50 @@ pub fn validate(
     validate_script_integrity_hash(mtx)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{test_utils::TestContext, validation_fixture};
+    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use test_case::test_case;
+
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "97779c4e21031457206c64c4f6adee02287178ba24242de475c68d7fbe1f12ba"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - mint assets using native script"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "137f32a8c6e55a5b85472ba13e9908160623a18877e9d0fa4f7a8c393df0560e"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 2 - has plutus data, no redeemer"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 3 - has plutus data, contract, redeemer"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Alonzo, &raw_tx).unwrap();
+        let mtx = tx.as_alonzo().unwrap();
+        let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
+        let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+        validate(
+            mtx,
+            TxHash::from(*tx.hash()),
+            &vkey_witnesses,
+            &native_scripts,
+            &ctx.shelley_params.gen_delegs,
+            ctx.shelley_params.update_quorum,
+        )
+        .map_err(|e| *e)
+    }
 }

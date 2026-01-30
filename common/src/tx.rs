@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ScriptHash, ScriptType, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
     UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
 };
 
@@ -53,7 +53,7 @@ pub struct Transaction {
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: HashSet<VKeyWitness>,
-    pub script_witnesses: HashMap<ScriptHash, ScriptType>,
+    pub script_witnesses: HashMap<ScriptHash, Option<ScriptLang>>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: HashMap<DatumHash, Vec<u8>>,
     pub error: Option<Phase1ValidationError>,
@@ -179,8 +179,8 @@ pub struct TxUTxODeltas {
     // VKey Witnesses
     pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
 
-    // Scripts Witnesses Provided (Native, PlutusV1, PlutusV2, PlutusV3)
-    pub script_witnesses: Option<HashMap<ScriptHash, ScriptType>>,
+    // Scripts Witnesses Provided
+    pub script_witnesses: Option<HashMap<ScriptHash, Option<ScriptLang>>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,

@@ -1,5 +1,4 @@
 {
-  "current_slot": 7084748,
   "shelley_params": {
     "activeSlotsCoeff": 0.05,
     "epochLength": 432000,
@@ -10,13 +9,13 @@
     "protocolParams": {
       "protocolVersion": {
         "minor": 0,
-        "major": 2
+        "major": 6
       },
       "maxTxSize": 16384,
       "maxBlockBodySize": 65536,
       "maxBlockHeaderSize": 1100,
       "keyDeposit": 2000000,
-      "minUTxOValue": 1000000,
+      "minUTxOValue": 34482,
       "minFeeA": 44,
       "minFeeB": 155381,
       "poolDeposit": 500000000,
@@ -26,7 +25,7 @@
       "extraEntropy": {
         "tag": "NeutralNonce"
       },
-      "decentralisationParam": 1,
+      "decentralisationParam": 0,
       "rho": 0.003,
       "tau": 0.2,
       "a0": 0.3
@@ -65,6 +64,36 @@
         "delegate": "1d4f2e1fda43070d71bb22a5522f86943c7c18aeb4fa47a362c27e23",
         "vrf": "63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db"
       }
+    }
+  },
+  "utxos": {
+    "241f6fa120e4c2d28282553f6116c4bb3bb3b14e42c047493b492be656b8f41a#1": {
+      "address": "addr1q9vkj35zmpf7ded0k48h2qsm6nsj4k8497lzfwvh3actwq0r5trhu0w86skq40guuk92pm7semqym3t08k0lnshc0jjsmlqg5u",
+      "value": {
+        "lovelace": 56540159,
+        "assets": []
+      },
+      "datum": null,
+      "reference_script": null
+    },
+    "241f6fa120e4c2d28282553f6116c4bb3bb3b14e42c047493b492be656b8f41a#2": {
+      "address": "addr1w9yr0zr530tp9yzrhly8lw5upddu0eym3yh0mjwa0qlr9pgmkzgv0",
+      "value": {
+        "lovelace": 56540159,
+        "assets": []
+      },
+      "reference_script": null
+    },
+    "36e2d638bc4d7b2371596463f84ea6e0e4a03f579e814c2c6b8b1f52927a1f48#0": {
+      "address": "addr1w9yr0zr530tp9yzrhly8lw5upddu0eym3yh0mjwa0qlr9pgmkzgv0",
+      "value": {
+        "lovelace": 185185,
+        "assets": []
+      },
+      "datum": {
+        "Hash": "c8296567eaffef4efdafa652335bbd34e91cddbcf061a17d110d16e540324c32"
+      },
+      "reference_script": null
     }
   }
 }

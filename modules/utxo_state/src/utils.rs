@@ -5,7 +5,7 @@ use acropolis_common::{
     get_scripts_needed_from_certificates, get_scripts_needed_from_inputs,
     get_scripts_needed_from_mint_burn, get_scripts_needed_from_proposal,
     get_scripts_needed_from_voting, get_scripts_needed_from_withdrawals,
-    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash, ScriptType,
+    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash, ScriptLang,
     ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 
@@ -148,14 +148,14 @@ pub fn get_scripts_needed(
 pub fn get_scripts_provided(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> HashMap<ScriptHash, ScriptType> {
+) -> HashMap<ScriptHash, Option<ScriptLang>> {
     let mut scripts_provided = HashMap::new();
 
     if let Some(script_witnesses) = tx_deltas.script_witnesses.as_ref() {
         scripts_provided.extend(
             script_witnesses
                 .iter()
-                .map(|(script_hash, script_type)| (*script_hash, script_type.clone())),
+                .map(|(script_hash, script_lang)| (*script_hash, script_lang.clone())),
         );
     }
 
@@ -165,7 +165,7 @@ pub fn get_scripts_provided(
             if let Some(reference_script_hash) = utxo.reference_script_hash {
                 // TODO:
                 // Using PlutusV2 as a placeholder for now
-                scripts_provided.insert(reference_script_hash, ScriptType::PlutusV2);
+                scripts_provided.insert(reference_script_hash, Some(ScriptLang::PlutusV2));
             }
         }
     }

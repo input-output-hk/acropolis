@@ -11,9 +11,10 @@ use crate::{
 pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ScriptType {
-    Native,
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum ScriptLang {
     PlutusV1,
     PlutusV2,
     PlutusV3,
@@ -38,12 +39,12 @@ impl ReferenceScript {
         }
     }
 
-    pub fn get_script_type(&self) -> ScriptType {
+    pub fn get_script_lang(&self) -> Option<ScriptLang> {
         match self {
-            ReferenceScript::Native(_) => ScriptType::Native,
-            ReferenceScript::PlutusV1(_) => ScriptType::PlutusV1,
-            ReferenceScript::PlutusV2(_) => ScriptType::PlutusV2,
-            ReferenceScript::PlutusV3(_) => ScriptType::PlutusV3,
+            ReferenceScript::PlutusV1(_) => Some(ScriptLang::PlutusV1),
+            ReferenceScript::PlutusV2(_) => Some(ScriptLang::PlutusV2),
+            ReferenceScript::PlutusV3(_) => Some(ScriptLang::PlutusV3),
+            _ => None,
         }
     }
 }

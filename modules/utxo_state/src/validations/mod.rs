@@ -51,8 +51,8 @@ pub fn validate_tx(
 
     let outputs = &tx_deltas.produces;
     let ref_inputs = &tx_deltas.reference_inputs;
-    let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
     let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
+    let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
     if era >= Era::Alonzo {
         alonzo::utxow::validate(
             inputs,
