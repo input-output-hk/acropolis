@@ -360,7 +360,7 @@ impl PoolRegistrationOutcome {
 }
 
 /// Individual address balance change
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
     // Address involved in delta
     pub address: Address,

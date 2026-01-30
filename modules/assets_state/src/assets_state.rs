@@ -85,7 +85,6 @@ impl AssetsState {
                     // rollback only on asset deltas
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
-                        // TODO: rollback address_state
                     }
                     current_block = block_info.clone();
 
@@ -95,7 +94,11 @@ impl AssetsState {
                         state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
                             Ok((new_state, updated_asset_ids)) => {
                                 let mut address_state = address_state.lock().await;
-                                address_state.add_asset_ids(&updated_asset_ids);
+                                address_state.new_block(
+                                    block_info.number,
+                                    &updated_asset_ids,
+                                    &reg,
+                                );
                                 new_state
                             }
                             Err(e) => {
