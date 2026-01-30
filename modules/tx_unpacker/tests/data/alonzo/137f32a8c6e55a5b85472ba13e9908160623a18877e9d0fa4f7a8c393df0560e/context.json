@@ -1,5 +1,5 @@
 {
-  "current_slot": 7084748,
+  "current_slot": 61517184,
   "shelley_params": {
     "activeSlotsCoeff": 0.05,
     "epochLength": 432000,
@@ -10,13 +10,13 @@
     "protocolParams": {
       "protocolVersion": {
         "minor": 0,
-        "major": 2
+        "major": 6
       },
       "maxTxSize": 16384,
       "maxBlockBodySize": 65536,
       "maxBlockHeaderSize": 1100,
       "keyDeposit": 2000000,
-      "minUTxOValue": 1000000,
+      "minUTxOValue": 34482,
       "minFeeA": 44,
       "minFeeB": 155381,
       "poolDeposit": 500000000,
@@ -26,7 +26,7 @@
       "extraEntropy": {
         "tag": "NeutralNonce"
       },
-      "decentralisationParam": 1,
+      "decentralisationParam": 0,
       "rho": 0.003,
       "tau": 0.2,
       "a0": 0.3

@@ -5,7 +5,7 @@ use acropolis_common::{
     get_scripts_needed_from_certificates, get_scripts_needed_from_inputs,
     get_scripts_needed_from_mint_burn, get_scripts_needed_from_proposal,
     get_scripts_needed_from_voting, get_scripts_needed_from_withdrawals,
-    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash,
+    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash, ScriptLang,
     ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 
@@ -19,7 +19,7 @@ use acropolis_common::{
 /// 6. Governance authors: keys authorizing governance actions (e.g. protocol update)
 ///    **NOTE:** This is removed from Conway era.
 /// 7. Vote authors: Keys for Commmittee, DRep, Stake Pool (added from Conway era)
-pub fn get_vkey_needed(
+pub fn get_vkeys_needed(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     shelley_params: Option<&ShelleyParams>,
@@ -97,10 +97,10 @@ pub fn get_vkey_needed(
 /// 4. Mint/Burn scripts: scripts which mint/burn non-Ada assets (added from Mary era)
 /// 5. Voting scripts: scripts authorizing voting actions (added from Conway era)
 /// 6. Proposing scripts: scripts authorizing proposing actions (added from Conway era)
-pub fn get_script_needed(
+pub fn get_scripts_needed(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> Vec<(RedeemerPointer, ScriptHash)> {
+) -> HashMap<RedeemerPointer, ScriptHash> {
     let TxUTxODeltas {
         consumes: sorted_inputs,
         certs,
@@ -110,7 +110,7 @@ pub fn get_script_needed(
         proposal_procedures,
         ..
     } = tx_deltas;
-    let mut scripts_needed = Vec::new();
+    let mut scripts_needed = HashMap::new();
 
     // for each input, get the required scripts
     scripts_needed.extend(get_scripts_needed_from_inputs(sorted_inputs, utxos));
@@ -141,4 +141,33 @@ pub fn get_script_needed(
     }
 
     scripts_needed
+}
+
+/// Get Scripts provided by transaction
+/// Provided = Scripts Witnesses + Reference Scripts
+pub fn get_scripts_provided(
+    tx_deltas: &TxUTxODeltas,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+) -> HashMap<ScriptHash, Option<ScriptLang>> {
+    let mut scripts_provided = HashMap::new();
+
+    if let Some(script_witnesses) = tx_deltas.script_witnesses.as_ref() {
+        scripts_provided.extend(
+            script_witnesses
+                .iter()
+                .map(|(script_hash, script_lang)| (*script_hash, script_lang.clone())),
+        );
+    }
+
+    // for each reference input, get the script hash
+    for input in tx_deltas.reference_inputs.iter() {
+        if let Some(utxo) = utxos.get(input) {
+            if let Some(reference_script_hash) = utxo.reference_script_hash {
+                // TODO:
+                // Using PlutusV2 as a placeholder for now
+                scripts_provided.insert(reference_script_hash, Some(ScriptLang::PlutusV2));
+            }
+        }
+    }
+    scripts_provided
 }

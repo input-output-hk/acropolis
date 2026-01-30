@@ -1,5 +1,4 @@
 {
-  "current_slot": 7084748,
   "shelley_params": {
     "activeSlotsCoeff": 0.05,
     "epochLength": 432000,
@@ -10,7 +9,7 @@
     "protocolParams": {
       "protocolVersion": {
         "minor": 0,
-        "major": 2
+        "major": 4
       },
       "maxTxSize": 16384,
       "maxBlockBodySize": 65536,
@@ -26,7 +25,7 @@
       "extraEntropy": {
         "tag": "NeutralNonce"
       },
-      "decentralisationParam": 1,
+      "decentralisationParam": 0,
       "rho": 0.003,
       "tau": 0.2,
       "a0": 0.3
@@ -65,6 +64,17 @@
         "delegate": "1d4f2e1fda43070d71bb22a5522f86943c7c18aeb4fa47a362c27e23",
         "vrf": "63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db"
       }
+    }
+  },
+  "utxos": {
+    "4f6ca0109e3e8d60686742eae9a27317ada28600f8ee6b9cdc4f03183e3bf08d#0": {
+      "address": "addr1q9ejhngmelschufp2kkt92et447244kfe3wrrhzy8v2zwm0fmywl7nt0neajsesraje4dxzq26m46mt76cza56ug0rps3ew8rj",
+      "value": {
+        "lovelace": 799300772,
+        "assets": []
+      },
+      "datum": null,
+      "reference_script": null
     }
   }
 }

@@ -95,4 +95,37 @@ mod tests {
 
         validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }
+
+    #[test_case(validation_fixture!(
+        "mary",
+        "12eb4f1d4bc1dae27d916d4bc1a6cf6fd167c7413e77792fbd1edead310847ab"
+    ) =>
+        matches Ok(());
+        "valid transaction 1 - with native assets amount of 0"
+    )]
+    #[test_case(validation_fixture!(
+        "mary",
+        "12eb4f1d4bc1dae27d916d4bc1a6cf6fd167c7413e77792fbd1edead310847ab",
+        "value_not_conserved_utxo"
+    ) =>
+        matches Err(UTxOValidationError::ValueNotConservedUTxO { .. });
+        "value_not_conserved_utxo"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn mary_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Mary, &raw_tx).unwrap();
+        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            Era::Mary,
+        );
+        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[]);
+
+        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
+    }
 }
