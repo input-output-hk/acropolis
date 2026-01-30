@@ -5,9 +5,8 @@ use std::collections::HashSet;
 use crate::asset_registry::{AssetId, AssetRegistry};
 use acropolis_common::{
     queries::assets::{AssetHistory, PolicyAssets},
-    Address, AddressDelta, AssetAddressEntry, AssetInfoRecord, AssetMetadata,
-    AssetMetadataStandard, AssetMintRecord, AssetName, Datum, Lovelace, NativeAssets,
-    NativeAssetsDelta, PolicyAsset, PolicyId, ShelleyAddress, TxIdentifier, TxUTxODeltas,
+    AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetMintRecord, AssetName, Datum,
+    Lovelace, NativeAssets, NativeAssetsDelta, PolicyAsset, PolicyId, TxIdentifier, TxUTxODeltas,
 };
 use anyhow::Result;
 use imbl::{HashMap, Vector};
@@ -55,9 +54,6 @@ pub struct State {
     /// Assets mapped to extended info
     pub info: Option<HashMap<AssetId, AssetInfoRecord>>,
 
-    /// Assets mapped to addresses
-    pub addresses: Option<HashMap<AssetId, std::collections::HashMap<ShelleyAddress, u64>>>,
-
     /// Assets mapped to transactions
     pub transactions: Option<HashMap<AssetId, Vector<TxIdentifier>>>,
 
@@ -70,7 +66,6 @@ impl State {
         let store_assets = config.store_assets;
         let store_history = config.store_history;
         let store_info = config.store_info;
-        let store_addresses = config.store_addresses;
         let store_transactions = config.store_transactions;
         let index_by_policy = config.index_by_policy;
 
@@ -87,11 +82,6 @@ impl State {
                 None
             },
             info: if store_info {
-                Some(HashMap::new())
-            } else {
-                None
-            },
-            addresses: if store_addresses {
                 Some(HashMap::new())
             } else {
                 None
@@ -164,29 +154,6 @@ impl State {
             .as_ref()
             .and_then(|hist_map| hist_map.get(asset_id))
             .map(|v| v.iter().cloned().collect()))
-    }
-
-    pub fn get_asset_addresses(
-        &self,
-        asset_id: &AssetId,
-    ) -> Result<Option<Vec<AssetAddressEntry>>> {
-        if !self.config.store_addresses {
-            return Err(anyhow::anyhow!(
-                "asset addresses storage disabled in config"
-            ));
-        }
-
-        Ok(
-            self.addresses.as_ref().and_then(|addr_map| addr_map.get(asset_id)).map(|inner_map| {
-                inner_map
-                    .iter()
-                    .map(|(addr, qty)| AssetAddressEntry {
-                        address: addr.clone(),
-                        quantity: *qty,
-                    })
-                    .collect()
-            }),
-        )
     }
 
     pub fn get_asset_transactions(&self, asset_id: &AssetId) -> Result<Option<Vec<TxIdentifier>>> {
@@ -283,8 +250,6 @@ impl State {
             self.log_assets(history.len());
         } else if let Some(info_map) = &self.info {
             self.log_assets(info_map.len());
-        } else if let Some(addresses) = &self.addresses {
-            self.log_assets(addresses.len());
         } else if let Some(transactions) = &self.transactions {
             self.log_assets(transactions.len());
         } else {
@@ -307,18 +272,20 @@ impl State {
         &self,
         deltas: &[(TxIdentifier, NativeAssetsDelta)],
         registry: &mut AssetRegistry,
-    ) -> Result<Self> {
+    ) -> Result<(Self, Vec<AssetId>)> {
         let mut new_supply = self.supply.clone();
         let mut new_info = self.info.clone();
         let mut new_history = self.history.clone();
         let mut new_index = self.policy_index.clone();
-        let mut new_addresses = self.addresses.clone();
         let mut new_transactions = self.transactions.clone();
+
+        let mut updated_asset_ids = Vec::new();
 
         for (tx_identifier, tx_deltas) in deltas {
             for (policy_id, asset_deltas) in tx_deltas {
                 for delta in asset_deltas {
                     let asset_id = registry.get_or_insert(*policy_id, delta.name);
+                    updated_asset_ids.push(asset_id);
 
                     if let Some(supply) = new_supply.as_mut() {
                         let delta_amount = delta.amount;
@@ -373,9 +340,6 @@ impl State {
                             ids.push_back(asset_id);
                         }
                     }
-                    if let Some(addr_map) = new_addresses.as_mut() {
-                        addr_map.entry(asset_id).or_insert_with(std::collections::HashMap::new);
-                    }
                     if let Some(tx_map) = new_transactions.as_mut() {
                         tx_map.entry(asset_id).or_insert_with(Vector::new);
                     }
@@ -383,15 +347,17 @@ impl State {
             }
         }
 
-        Ok(Self {
-            config: self.config,
-            supply: new_supply,
-            history: new_history,
-            info: new_info,
-            addresses: new_addresses,
-            transactions: new_transactions,
-            policy_index: new_index,
-        })
+        Ok((
+            Self {
+                config: self.config,
+                supply: new_supply,
+                history: new_history,
+                info: new_info,
+                transactions: new_transactions,
+                policy_index: new_index,
+            },
+            updated_asset_ids,
+        ))
     }
 
     pub fn handle_transactions(
@@ -440,60 +406,6 @@ impl State {
 
         Ok(Self {
             transactions: new_txs,
-            ..self.clone()
-        })
-    }
-
-    pub fn handle_address_deltas(
-        &self,
-        deltas: &[AddressDelta],
-        registry: &AssetRegistry,
-    ) -> Result<Self> {
-        let mut new_addresses = self.addresses.clone();
-
-        let Some(addr_map) = new_addresses.as_mut() else {
-            return Ok(Self {
-                addresses: new_addresses,
-                ..self.clone()
-            });
-        };
-
-        for address_delta in deltas {
-            if let Address::Shelley(shelley_addr) = &address_delta.address {
-                for (policy_id, assets) in &address_delta.sent.assets {
-                    for asset in assets {
-                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                            if let Some(holders) = addr_map.get_mut(&asset_id) {
-                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                *current = current.saturating_sub(asset.amount);
-
-                                if *current == 0 {
-                                    holders.remove(shelley_addr);
-                                }
-                            } else {
-                                error!("Sent delta for unknown asset_id: {:?}", asset_id);
-                            }
-                        }
-                    }
-                }
-
-                for (policy_id, assets) in &address_delta.received.assets {
-                    for asset in assets {
-                        if let Some(asset_id) = registry.lookup_id(policy_id, &asset.name) {
-                            if let Some(holders) = addr_map.get_mut(&asset_id) {
-                                let current = holders.entry(shelley_addr.clone()).or_insert(0);
-                                *current = current.saturating_add(asset.amount);
-                            } else {
-                                error!("Received delta for unknown asset_id: {:?}", asset_id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(Self {
-            addresses: new_addresses,
             ..self.clone()
         })
     }
@@ -689,9 +601,9 @@ mod tests {
         state::{AssetsStorageConfig, State, StoreTransactions, CIP67_LABEL_222, CIP68_LABEL_100},
     };
     use acropolis_common::{
-        Address, AddressDelta, AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName,
-        Datum, NativeAsset, NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxIdentifier,
-        TxOutput, TxUTxODeltas, UTxOIdentifier, Value,
+        AssetInfoRecord, AssetMetadata, AssetMetadataStandard, AssetName, Datum, NativeAsset,
+        NativeAssetDelta, PolicyId, ShelleyAddress, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
+        UTxOIdentifier, Value,
     };
     use serde_cbor::Value as CborValue;
 
@@ -723,7 +635,6 @@ mod tests {
         policy_id: PolicyId,
         asset_name_bytes: &[u8],
         seed_info: bool,
-        seed_addresses: bool,
         seed_transactions: StoreTransactions,
     ) -> (State, AssetId, AssetName) {
         let asset_name = AssetName::new(asset_name_bytes).unwrap();
@@ -742,13 +653,6 @@ mod tests {
                 .info
                 .get_or_insert_with(Default::default)
                 .insert(asset_id, AssetInfoRecord::default());
-        }
-
-        if seed_addresses {
-            state
-                .addresses
-                .get_or_insert_with(Default::default)
-                .insert(asset_id, std::collections::HashMap::new());
         }
 
         if seed_transactions.is_enabled() {
@@ -788,50 +692,6 @@ mod tests {
         }
 
         serde_cbor::to_vec(&serde_cbor::Value::Map(policy_map)).unwrap()
-    }
-
-    fn make_address_delta(
-        policy_id: PolicyId,
-        name: AssetName,
-        sent_amount: u64,
-        received_amount: u64,
-    ) -> AddressDelta {
-        AddressDelta {
-            address: dummy_address(),
-            tx_identifier: TxIdentifier::new(0, 0),
-            spent_utxos: Vec::new(),
-            created_utxos: Vec::new(),
-
-            sent: Value::new(
-                0,
-                if sent_amount > 0 {
-                    vec![(
-                        policy_id,
-                        vec![NativeAsset {
-                            name,
-                            amount: sent_amount,
-                        }],
-                    )]
-                } else {
-                    vec![]
-                },
-            ),
-
-            received: Value::new(
-                0,
-                if received_amount > 0 {
-                    vec![(
-                        policy_id,
-                        vec![NativeAsset {
-                            name,
-                            amount: received_amount,
-                        }],
-                    )]
-                } else {
-                    vec![]
-                },
-            ),
-        }
     }
 
     fn dummy_address() -> acropolis_common::Address {
@@ -891,7 +751,7 @@ mod tests {
             vec![(policy, vec![NativeAssetDelta { name, amount: 100 }])],
         )];
 
-        let new_state = state.handle_mint_deltas(&deltas, &mut registry).unwrap();
+        let (new_state, _) = state.handle_mint_deltas(&deltas, &mut registry).unwrap();
 
         // supply updated
         let asset_id = registry.lookup_id(&policy, &name).unwrap();
@@ -934,8 +794,8 @@ mod tests {
             vec![(policy, vec![NativeAssetDelta { name, amount: 25 }])],
         )];
 
-        let state = state.handle_mint_deltas(&deltas1, &mut registry).unwrap();
-        let state = state.handle_mint_deltas(&deltas2, &mut registry).unwrap();
+        let (state, _) = state.handle_mint_deltas(&deltas1, &mut registry).unwrap();
+        let (state, _) = state.handle_mint_deltas(&deltas2, &mut registry).unwrap();
 
         let asset_id = registry.lookup_id(&policy, &name).unwrap();
 
@@ -972,8 +832,8 @@ mod tests {
             vec![(policy, vec![NativeAssetDelta { name, amount: -40 }])],
         )];
 
-        let state = state.handle_mint_deltas(&mint, &mut registry).unwrap();
-        let state = state.handle_mint_deltas(&burn, &mut registry).unwrap();
+        let (state, _) = state.handle_mint_deltas(&mint, &mut registry).unwrap();
+        let (state, _) = state.handle_mint_deltas(&burn, &mut registry).unwrap();
 
         let asset_id = registry.lookup_id(&policy, &name).unwrap();
 
@@ -1042,7 +902,6 @@ mod tests {
         assert!(state.get_assets_list(&AssetRegistry::new()).is_err());
         assert!(state.get_asset_info(&fake_id, &reg).is_err());
         assert!(state.get_asset_history(&fake_id).is_err());
-        assert!(state.get_asset_addresses(&fake_id).is_err());
         assert!(state.get_asset_transactions(&fake_id).is_err());
         assert!(state.get_policy_assets(&dummy_policy(1), &AssetRegistry::new()).is_err());
     }
@@ -1058,7 +917,6 @@ mod tests {
             policy_id,
             b"TestAsset",
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1087,7 +945,6 @@ mod tests {
             policy_id,
             b"VersionedAsset",
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1116,7 +973,6 @@ mod tests {
             policy_id,
             b"KnownAsset",
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1144,7 +1000,6 @@ mod tests {
             policy_id,
             b"BadAsset",
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1177,7 +1032,6 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x01],
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1204,7 +1058,6 @@ mod tests {
             policy_id,
             &[0xAA, 0xBB, 0xCC],
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1231,7 +1084,6 @@ mod tests {
             &mut registry,
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x02],
-            false,
             false,
             StoreTransactions::None,
         );
@@ -1262,7 +1114,6 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0x02],
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1293,7 +1144,6 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0, 0xAA],
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1329,7 +1179,6 @@ mod tests {
             policy_id,
             &[0x00, 0x06, 0x43, 0xb0],
             true,
-            false,
             StoreTransactions::None,
         );
 
@@ -1411,7 +1260,6 @@ mod tests {
             policy_id,
             b"TKN",
             false,
-            false,
             StoreTransactions::All,
         );
 
@@ -1439,7 +1287,6 @@ mod tests {
             &mut registry,
             policy_id,
             b"TKN",
-            false,
             false,
             StoreTransactions::All,
         );
@@ -1471,7 +1318,6 @@ mod tests {
             policy_id,
             b"TKN",
             false,
-            false,
             StoreTransactions::Last(2),
         );
 
@@ -1489,80 +1335,5 @@ mod tests {
         // Transactions are in order with newest last
         assert_eq!(entry[0], TxIdentifier::new(8, 0));
         assert_eq!(entry[1], TxIdentifier::new(7, 0));
-    }
-
-    #[test]
-    fn handle_address_deltas_accumulates_address_balance() {
-        let mut registry = AssetRegistry::new();
-        let policy_id = PolicyId::from([4u8; 28]);
-        let (state, asset_id, asset_name) = setup_state_with_asset(
-            &mut registry,
-            policy_id,
-            b"TKN",
-            false,
-            true,
-            StoreTransactions::None,
-        );
-
-        let delta1 = make_address_delta(policy_id, asset_name, 0, 10);
-        let delta2 = make_address_delta(policy_id, asset_name, 0, 15);
-
-        let new_state = state.handle_address_deltas(&[delta1, delta2], &registry).unwrap();
-        let addr_map = new_state.addresses.unwrap();
-        let holders = addr_map.get(&asset_id).unwrap();
-
-        // Sum of both deltas applied to address balance
-        assert_eq!(
-            *holders
-                .get(match &dummy_address() {
-                    Address::Shelley(s) => s,
-                    _ => panic!(),
-                })
-                .unwrap(),
-            25
-        );
-    }
-
-    #[test]
-    fn handle_address_deltas_removes_zero_balance_addresses() {
-        let mut registry = AssetRegistry::new();
-        let policy_id = PolicyId::from([5u8; 28]);
-
-        let (state, asset_id, asset_name) = setup_state_with_asset(
-            &mut registry,
-            policy_id,
-            b"TKN",
-            false,
-            true,
-            StoreTransactions::None,
-        );
-
-        let add_delta = make_address_delta(policy_id, asset_name, 0, 10);
-        let state_after_add = state.handle_address_deltas(&[add_delta], &registry).unwrap();
-        let addr_map = state_after_add.addresses.as_ref().unwrap();
-        let holders = addr_map.get(&asset_id).unwrap();
-
-        // Address added to asset map with correct balance
-        assert_eq!(
-            *holders
-                .get(match &dummy_address() {
-                    Address::Shelley(s) => s,
-                    _ => panic!(),
-                })
-                .unwrap(),
-            10
-        );
-
-        let remove_delta = make_address_delta(policy_id, asset_name, 10, 0);
-        let state_after_remove =
-            state_after_add.handle_address_deltas(&[remove_delta], &registry).unwrap();
-        let addr_map = state_after_remove.addresses.as_ref().unwrap();
-        let holders = addr_map.get(&asset_id).unwrap();
-
-        // Address removed from asset map after balance zeroed
-        assert!(!holders.contains_key(match &dummy_address() {
-            Address::Shelley(s) => s,
-            _ => panic!(),
-        }));
     }
 }
