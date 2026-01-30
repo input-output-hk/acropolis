@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
     BlockSink,
+    block_flow::{BlockFlowAction, BlockFlowHandler},
     chain_state::{ChainEvent, ChainState},
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
@@ -15,6 +16,7 @@ struct PeerData {
     conn: PeerConnection,
     reqs: Vec<(BlockHash, u64)>,
 }
+
 impl PeerData {
     fn new(conn: PeerConnection) -> Self {
         Self { conn, reqs: vec![] }
@@ -56,6 +58,7 @@ pub struct NetworkManager {
     block_sink: BlockSink,
     published_blocks: u64,
     sync_point: Option<Point>,
+    flow_handler: BlockFlowHandler,
 }
 
 impl NetworkManager {
@@ -64,6 +67,7 @@ impl NetworkManager {
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
+        flow_handler: BlockFlowHandler,
     ) -> Self {
         Self {
             network_magic,
@@ -75,6 +79,7 @@ impl NetworkManager {
             block_sink,
             published_blocks: 0,
             sync_point: None,
+            flow_handler,
         }
     }
 
@@ -90,10 +95,12 @@ impl NetworkManager {
         match event {
             NetworkEvent::PeerUpdate { peer, event } => {
                 self.handle_peer_update(peer, event);
+                self.flow_handler.publish_pending().await?;
                 self.publish_events().await?;
             }
             NetworkEvent::SyncPointUpdate { point } => {
                 self.chain = ChainState::new();
+                self.flow_handler.on_sync_reset();
 
                 for peer in self.peers.values_mut() {
                     peer.reqs.clear();
@@ -112,9 +119,21 @@ impl NetworkManager {
 
                 self.sync_to_point(point);
             }
+            NetworkEvent::BlockWanted { hash, slot } => {
+                self.handle_block_wanted(hash, slot);
+            }
         }
 
         Ok(())
+    }
+
+    fn handle_block_wanted(&mut self, hash: BlockHash, slot: u64) {
+        let announcers = self.chain.block_announcers(slot, hash);
+        if announcers.is_empty() {
+            warn!("BlockWanted for unknown block {hash} at slot {slot}");
+            return;
+        }
+        self.request_block(slot, hash, announcers);
     }
 
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) {
@@ -176,14 +195,28 @@ impl NetworkManager {
                 self.chain.handle_tip(peer, tip);
                 let slot = header.slot;
                 let hash = header.hash;
-                let request_body_from = self.chain.handle_roll_forward(peer, header);
-                if !request_body_from.is_empty() {
-                    // Request the block from the first peer which announced it
-                    self.request_block(slot, hash, request_body_from);
+                let announcers = self.chain.handle_roll_forward(peer, header.clone());
+
+                // Delegate decision to flow handler
+                match self.flow_handler.on_block_announced(&header, announcers) {
+                    BlockFlowAction::FetchFrom(peers) if !peers.is_empty() => {
+                        self.request_block(slot, hash, peers);
+                    }
+                    _ => {
+                        // AwaitDecision or empty peers - don't fetch yet
+                    }
                 }
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
                 self.chain.handle_tip(peer, tip);
+
+                // Notify flow handler of rollback
+                let rollback_slot = match &point {
+                    Point::Origin => 0,
+                    Point::Specific(slot, _) => *slot,
+                };
+                self.flow_handler.on_rollback(rollback_slot);
+
                 self.chain.handle_roll_backward(peer, point);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
@@ -198,6 +231,8 @@ impl NetworkManager {
                 for peer in self.peers.values_mut() {
                     peer.ack_block(fetched.hash);
                 }
+                // Notify flow handler that block was fetched
+                self.flow_handler.on_block_fetched(fetched.slot, fetched.hash);
                 self.chain.handle_body_fetched(fetched.slot, fetched.hash, fetched.body);
             }
             PeerEvent::Disconnected => {
@@ -274,6 +309,7 @@ impl NetworkManager {
 pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
     SyncPointUpdate { point: Point },
+    BlockWanted { hash: BlockHash, slot: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -283,6 +319,7 @@ pub struct PeerMessageSender {
     id: PeerId,
     sink: mpsc::Sender<NetworkEvent>,
 }
+
 impl PeerMessageSender {
     pub async fn write(&self, event: PeerEvent) -> Result<()> {
         self.sink
