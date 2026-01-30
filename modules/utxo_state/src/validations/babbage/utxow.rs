@@ -11,7 +11,7 @@ pub fn validate(
     _script_witness_hashes: &HashSet<ScriptHash>,
 ) -> Result<(), Box<UTxOWValidationError>> {
     // TODO:
-    // Check script witnesses and reference scripts
+    // Check script and reference scripts
     // are correctly formed
 
     Ok(())
