@@ -222,6 +222,27 @@ impl StakeAddressMap {
         Some(map)
     }
 
+    pub fn generate_delegation_map(&self) -> OrdMap<DRepCredential, OrdSet<StakeAddress>> {
+        let mut map: OrdMap<DRepCredential, OrdSet<StakeAddress>> = OrdMap::new();
+
+        for (stake_address, sas) in self.inner.iter() {
+            let Some(drep_choice) = &sas.delegated_drep else {
+                continue;
+            };
+
+            let Some(cred) = DRepChoice::to_credential(drep_choice) else {
+                continue;
+            };
+
+            map = map.update_with(cred, OrdSet::new(), |mut set, _| {
+                set.insert(stake_address.clone());
+                set
+            });
+        }
+
+        map
+    }
+
     /// Map stake_addresses to their total balances (utxo + rewards)
     /// Return None if any of the stake_addresses are not found
     pub fn get_accounts_balances_map(

@@ -762,10 +762,33 @@ impl State {
             self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
         } else if self.previous_protocol_parameters != self.protocol_parameters {
+            let was_chang = self
+                .previous_protocol_parameters
+                .as_ref()
+                .and_then(|p| p.shelley.as_ref())
+                .map(|s| s.protocol_params.protocol_version.major == 9)
+                .unwrap_or(false);
+
+            let is_chang = params_msg
+                .params
+                .shelley
+                .as_ref()
+                .map(|s| s.protocol_params.protocol_version.major == 9)
+                .unwrap_or(false);
+
+            if was_chang && !is_chang {
+                self.reset_delegation_map();
+            }
+
             self.previous_protocol_parameters = self.protocol_parameters.clone()
         }
 
         Ok(())
+    }
+
+    pub fn reset_delegation_map(&mut self) {
+        let stake_addresses = self.stake_addresses.lock().unwrap();
+        self.drep_delegators = stake_addresses.generate_delegation_map();
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1139,11 +1162,9 @@ impl State {
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
         // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
         // the DRep).
-        if self.is_chang() {
-            if let Some(delegators) = self.drep_delegators.remove(drep) {
-                let mut stake_addresses = self.stake_addresses.lock().unwrap();
-                stake_addresses.remove_delegators_from_drep(delegators);
-            }
+        if let Some(delegators) = self.drep_delegators.remove(drep) {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            stake_addresses.remove_delegators_from_drep(delegators);
         }
     }
 
