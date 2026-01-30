@@ -1150,6 +1150,20 @@ impl State {
                     }
                 }
             }
+        } else {
+            if let Some(prev_choice) = previous_drep {
+                if let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) {
+                    if let Some(set) = self.drep_delegators.get_mut(&prev_cred) {
+                        set.remove(stake_address);
+                        if set.is_empty() {
+                            self.drep_delegators.remove(&prev_cred);
+                        }
+                    }
+                }
+            }
+            if let Some(drep) = DRepChoice::to_credential(drep) {
+                self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
+            }
         }
 
         Ok(())
