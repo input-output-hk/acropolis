@@ -243,6 +243,25 @@ impl StakeAddressMap {
         map
     }
 
+    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
+        for sas in self.inner.values_mut() {
+            if let Some(ref drep) = sas.delegated_drep {
+                let matches = match drep {
+                    DRepChoice::Key(hash) => {
+                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
+                    }
+                    DRepChoice::Script(hash) => {
+                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
+                    }
+                    _ => false,
+                };
+                if matches {
+                    sas.delegated_drep = None;
+                }
+            }
+        }
+    }
+
     /// Map stake_addresses to their total balances (utxo + rewards)
     /// Return None if any of the stake_addresses are not found
     pub fn get_accounts_balances_map(

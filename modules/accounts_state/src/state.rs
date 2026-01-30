@@ -1176,9 +1176,14 @@ impl State {
         // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
         // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
         // the DRep).
-        if let Some(delegators) = self.drep_delegators.remove(drep) {
+        if self.is_chang() {
+            if let Some(delegators) = self.drep_delegators.remove(drep) {
+                let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                stake_addresses.remove_delegators_from_drep(delegators);
+            }
+        } else {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            stake_addresses.remove_delegators_from_drep(delegators);
+            stake_addresses.deregister_drep(drep);
         }
     }
 
