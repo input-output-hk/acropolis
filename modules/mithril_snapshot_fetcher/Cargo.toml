@@ -25,6 +25,7 @@ pallas-traverse = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tikv-jemalloc-ctl = "0.6.1"
 
 [lib]
 path = "src/mithril_snapshot_fetcher.rs"
