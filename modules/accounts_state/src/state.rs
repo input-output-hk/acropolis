@@ -129,11 +129,8 @@ pub struct State {
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
     pending_mir_treasury: HashMap<StakeAddress, i64>,
 
-    /// Current epoch number (set when entering each epoch)
-    current_epoch: u64,
-
     /// Current era (set from BlockInfo on each block)
-    current_era: Era,
+    era: Era,
 }
 
 impl State {
@@ -380,7 +377,6 @@ impl State {
         &mut self,
         context: Arc<Context<Message>>,
         epoch: u64,
-        era: Era,
         is_new_era: bool,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
@@ -389,7 +385,7 @@ impl State {
         // At the Allegra hard fork boundary, all Byron redeem (AVVM) UTxOs are cancelled
         // and their value returned to reserves. Query utxo_state for the cancelled amount,
         // which it computes by scanning and removing all redeem-address UTxOs.
-        if era == Era::Allegra && !self.avvm_handled {
+        if self.era == Era::Allegra && !self.avvm_handled {
             let avvm_cancelled =
                 self.get_avvm_cancelled_value(context.clone()).await?.ok_or_else(|| {
                     anyhow!(
@@ -433,7 +429,7 @@ impl State {
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
         // is painful, requiring lookup of UTXO value for every input
-        if is_new_era && era == Era::Shelley {
+        if is_new_era && self.era == Era::Shelley {
             info!("Entering Shelley era - fixing up reserves");
 
             let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
@@ -457,9 +453,6 @@ impl State {
 
         // Apply any pending MIRs (no-op if already drained by the caller before SPDD generation)
         self.apply_pending_mirs();
-
-        // Advance current_epoch so MIRs accumulated during the new epoch use the correct semantics
-        self.current_epoch = epoch;
 
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -529,9 +522,9 @@ impl State {
         // The rewarded epoch is epoch-1. If we just crossed an era boundary, the
         // rewarded epoch was in the previous era; otherwise it's the same era.
         let rewarded_era = if is_new_era {
-            Era::try_from((era as u8).saturating_sub(1)).unwrap_or(era)
+            Era::try_from((self.era as u8).saturating_sub(1)).unwrap_or(self.era)
         } else {
-            era
+            self.era
         };
 
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
@@ -664,7 +657,7 @@ impl State {
 
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
     pub fn notify_block(&mut self, block: &BlockInfo) {
-        self.current_era = block.era;
+        self.era = block.era;
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= self.stability_window_slot {
                 info!(
@@ -764,7 +757,7 @@ impl State {
                     InstantaneousRewardSource::Treasury => &mut self.pending_mir_treasury,
                 };
 
-                let is_alonzo_plus = self.current_era >= Era::Alonzo;
+                let is_alonzo_plus = self.era >= Era::Alonzo;
                 let source_name = match &mir.source {
                     InstantaneousRewardSource::Reserves => "reserves",
                     InstantaneousRewardSource::Treasury => "treasury",
@@ -794,9 +787,8 @@ impl State {
                 }
 
                 info!(
-                    "MIR accumulated: {total_value} to {} stake addresses from {source_name} (epoch {}, {})",
+                    "MIR accumulated: {total_value} stake addresses from {source_name} (epoch {}, {})",
                     deltas.len(),
-                    self.current_epoch,
                     if is_alonzo_plus { "sum" } else { "override" }
                 );
             }
@@ -1078,8 +1070,6 @@ impl State {
         &mut self,
         context: Arc<Context<Message>>,
         ea_msg: &EpochActivityMessage,
-        era: Era,
-        is_new_era: bool,
         block_info: &BlockInfo,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
@@ -1115,8 +1105,7 @@ impl State {
             self.enter_epoch(
                 context,
                 ea_msg.epoch + 1,
-                era,
-                is_new_era,
+                block_info.is_new_era,
                 ea_msg.total_fees,
                 spo_blocks,
                 verifier,

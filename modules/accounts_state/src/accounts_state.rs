@@ -374,8 +374,6 @@ impl AccountsState {
                                 .handle_epoch_activity(
                                     context.clone(),
                                     ea_msg,
-                                    block_info.era,
-                                    block_info.is_new_era,
                                     block_info,
                                     verifier,
                                 )
