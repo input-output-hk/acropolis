@@ -128,7 +128,8 @@ impl DRepState {
                         drep_msg.epoch
                     );
                     let block_number = drep_msg.block_number;
-                    let mut state = State::new(storage_config);
+                    // Snapshot bootstrap: protocol parameters not known yet.
+                    let mut state = State::new(storage_config, None, None, None);
                     state.bootstrap(drep_msg);
                     let drep_count = state.dreps.len();
                     history.lock().await.bootstrap_init_with(state, block_number);
@@ -159,17 +160,23 @@ impl DRepState {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
-        // Cache the latest Conway params needed for DRep expiries calculations.
-        let mut conway_d_rep_activity: Option<u32> = None;
-        let mut conway_gov_action_lifetime: Option<u32> = None;
+        // Initial Conway params (needed for DRep expiries calculations)
+        // and Shelly params (protocol version).
+        let mut initial_d_rep_activity: Option<u32> = None;
+        let mut initial_gov_action_lifetime: Option<u32> = None;
+        let mut is_bootstrap: Option<bool> = None;
 
         if let Some(params) = &mut subs.params {
             let (_, message) = params.read_skip_rollbacks().await?;
-            if let Some(conway) = &message.params.conway {
-                // It is not guaranteed that the snapshot starts at epoch boundary
-                // therefore params need to be read with the genesis params.
-                conway_d_rep_activity = Some(conway.d_rep_activity);
-                conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
+
+            // Snapshot may start mid-epoch, so read protocol params from genesis.
+            if let (Some(shelley), Some(conway)) = (&message.params.shelley, &message.params.conway)
+            {
+                is_bootstrap = Option::from(shelley.protocol_params.protocol_version.is_chang()?);
+                initial_d_rep_activity = Some(conway.d_rep_activity);
+                initial_gov_action_lifetime = Some(conway.gov_action_lifetime);
+            } else if message.params.conway.is_some() {
+                bail!("Invalid protocol parameters: Conway parameters require Shelley parameters.");
             }
             info!("Consumed initial genesis params from params_subscription");
         }
@@ -179,7 +186,14 @@ impl DRepState {
             // Get the current state snapshot
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(|| State::new(storage_config))
+                h.get_or_init_with(|| {
+                    State::new(
+                        storage_config,
+                        initial_d_rep_activity,
+                        initial_gov_action_lifetime,
+                        is_bootstrap,
+                    )
+                })
             };
 
             let mut ctx = ValidationContext::new(&context, &validation_topic);
@@ -213,12 +227,8 @@ impl DRepState {
                     if let Some((_, msg)) =
                         ctx.consume("params", params.read_skip_rollbacks().await)
                     {
-                        if let Some(cw) = &msg.params.conway {
-                            conway_d_rep_activity = Some(cw.d_rep_activity);
-                            conway_gov_action_lifetime = Some(cw.gov_action_lifetime);
-
-                            ctx.handle("params", state.update_drep_expirations(new_epoch));
-                        }
+                        ctx.handle("params", state.update_protocol_params(&msg.params));
+                        ctx.handle("params", state.update_drep_expirations(new_epoch));
                     }
                 }
 
@@ -239,7 +249,7 @@ impl DRepState {
                                 context.clone(),
                                 &tx_certs.certificates,
                                 block_info.epoch,
-                                conway_d_rep_activity,
+                                state.conway_d_rep_activity,
                             )
                             .await,
                     )
@@ -255,14 +265,8 @@ impl DRepState {
                     let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
                     async {
                         // Track proposals for dormant-epoch counting, so that
-                        // they can be checked if they are active at the N+1 epoch boundary
-                        if let Some(lifetime) = conway_gov_action_lifetime {
-                            state.record_proposals(
-                                &gov.proposal_procedures,
-                                blk_inf.epoch,
-                                lifetime,
-                            );
-                        }
+                        // they can be checked if they are active at the N+1 epoch boundary.
+                        state.record_proposals(&gov.proposal_procedures, blk_inf.epoch);
 
                         if !gov.proposal_procedures.is_empty() {
                             state.apply_dormant_expiry(blk_inf.epoch);
@@ -273,7 +277,7 @@ impl DRepState {
                             state.process_votes(
                                 &gov.voting_procedures,
                                 blk_inf.epoch,
-                                conway_d_rep_activity,
+                                state.conway_d_rep_activity,
                             ),
                         );
                     }

@@ -45,6 +45,37 @@ were governance actions available to vote on during this epoch.
 This **dormancy counter** is then used as an input when computing/updating `drepExpiry` for a
 specific DRep on activity events (votes or DRep update certificates).
 
+### Dormancy counter rules
+
+The dormancy counter tracks epochs where no governance actions were available to vote on.
+This prevents DReps from being penalized for inactivity when there was nothing to vote on.
+
+1. **At each epoch boundary**: If there are no active proposals (all have expired), the dormancy
+   counter increases by one.
+
+2. **When a new proposal appears**: The dormancy counter resets to zero, and all active DReps
+   get their expiry extended by the number of dormant epochs that were accumulated.
+
+A proposal is considered "active" until the epoch it was submitted plus the governance action
+lifetime (a protocol parameter) has passed.
+
+### DRep expiry calculation rules
+
+When a DRep performs an activity (registration, update, or vote), their expiry is set to allow
+them to remain active for a number of epochs defined by the `dRepActivity` protocol parameter.
+
+**For DRep registration**, the calculation depends on the protocol version:
+- During the Conway bootstrap phase (protocol version 9), the expiry is simply the current epoch
+  plus the activity period. Dormant epochs are not considered.
+- After the bootstrap phase (protocol version 10 and later), dormant epochs are subtracted from
+  the expiry, effectively giving the DRep credit for time when there was nothing to vote on.
+
+**For DRep updates and votes**, dormant epochs are always subtracted from the expiry calculation,
+regardless of protocol version.
+
+**Reference**: See `computeDRepExpiryVersioned` and `computeDRepExpiry` in
+`cardano-ledger/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs`
+
 ## What makes a DRep “active” after it expired?
 
 DRep becomes active again when it performs any of the activity events:
