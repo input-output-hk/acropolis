@@ -163,7 +163,6 @@ impl AccountsState {
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
         mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
-        mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
         is_snapshot_mode: bool,
@@ -313,35 +312,6 @@ impl AccountsState {
                     }
                 }
 
-                // Handle DRep (if configured)
-                if let Some(ref mut subscription) = drep_state_subscription {
-                    let (_, message) = subscription.read_ignoring_rollbacks().await?;
-                    match message.as_ref() {
-                        Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
-                            let span = info_span!(
-                                "account_state.handle_drep_state",
-                                block = block_info.number
-                            );
-                            async {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_drep_state(dreps_msg);
-
-                                let drdd = state.generate_drdd();
-                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await
-                                {
-                                    vld.push_anyhow(anyhow!(
-                                        "Error publishing drep voting stake distribution: {e:#}"
-                                    ))
-                                }
-                            }
-                            .instrument(span)
-                            .await;
-                        }
-
-                        _ => error!("Unexpected message type: {message:?}"),
-                    }
-                }
-
                 // Handle SPOs
                 let (_, message) = spos_subscription.read_ignoring_rollbacks().await?;
                 match message.as_ref() {
@@ -410,6 +380,13 @@ impl AccountsState {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
                                 })
                                 .ok();
+
+                            let drdd = state.generate_drdd();
+                            if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing drep voting stake distribution: {e:#}"
+                                ))
+                            }
                             if let Some(refund_deltas) = after_epoch_result {
                                 // publish stake reward deltas
                                 stake_reward_deltas.extend(refund_deltas);
@@ -616,12 +593,6 @@ impl AccountsState {
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating protocol parameters subscriber on '{parameters_topic}'");
-
-        // Optional topics
-        let drep_state_topic = config.get_string("drep-state-topic").ok();
-        if let Some(ref topic) = drep_state_topic {
-            info!("Creating DRep state subscriber on '{topic}'");
-        }
 
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -930,10 +901,6 @@ impl AccountsState {
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
         let governance_outcomes_subscription =
             context.subscribe(&governance_outcomes_topic).await?;
-        let drep_state_subscription = match drep_state_topic {
-            Some(ref topic) => Some(context.subscribe(topic).await?),
-            None => None,
-        };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
@@ -967,7 +934,6 @@ impl AccountsState {
                 pot_deltas_subscription,
                 stake_subscription,
                 governance_outcomes_subscription,
-                drep_state_subscription,
                 parameters_subscription,
                 &verifier,
                 is_snapshot_mode,
