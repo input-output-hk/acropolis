@@ -108,6 +108,13 @@ mod tests {
         "shelley - valid transaction 2 - with protocol update"
     )]
     #[test_case(validation_fixture!(
+        "alonzo",
+        "13ac79a68317eb2f67f3224e2eb9fcad7d8b70d202b998af20dd6cce881087ef"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - with genesis delegations"
+    )]
+    #[test_case(validation_fixture!(
         "shelley",
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
         "missing_vkey_witnesses_utxow"
