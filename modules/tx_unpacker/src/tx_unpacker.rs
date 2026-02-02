@@ -130,6 +130,10 @@ impl TxUnpacker {
                             // Parse the tx
                             match MultiEraTx::decode(raw_tx) {
                                 Ok(tx) => {
+                                    if !tx.is_valid() {
+                                        continue;
+                                    }
+
                                     let tx_hash: TxHash =
                                         tx.hash().to_vec().try_into().expect("invalid tx hash length");
                                     let tx_identifier = TxIdentifier::new(block_number, tx_index);

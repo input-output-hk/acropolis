@@ -34,6 +34,10 @@ pub fn validate_tx(
         }
     })?;
 
+    if !tx.is_valid() {
+        return Ok(());
+    }
+
     match era {
         Era::Shelley | Era::Allegra | Era::Mary | Era::Alonzo => {
             validate_alonzo_compatible_tx(&tx, genesis_delegs, shelley_params, current_slot, era)?;
