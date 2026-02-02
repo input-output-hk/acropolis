@@ -39,10 +39,6 @@ use tracing::{debug, error, info, warn, Level};
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
-/// First epoch of Alonzo era on mainnet (epoch 290)
-/// Used to determine MIR semantics (override vs sum)
-const FIRST_ALONZO_EPOCH: u64 = 290;
-
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
@@ -135,6 +131,9 @@ pub struct State {
 
     /// Current epoch number (set when entering each epoch)
     current_epoch: u64,
+
+    /// Current era (set from BlockInfo on each block)
+    current_era: Era,
 }
 
 impl State {
@@ -527,6 +526,14 @@ impl State {
             &mut deregistrations,
         );
 
+        // The rewarded epoch is epoch-1. If we just crossed an era boundary, the
+        // rewarded epoch was in the previous era; otherwise it's the same era.
+        let rewarded_era = if is_new_era {
+            Era::try_from((era as u8).saturating_sub(1)).unwrap_or(era)
+        } else {
+            era
+        };
+
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
         let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
         let stability_window_slot = self.stability_window_slot;
@@ -554,6 +561,7 @@ impl State {
             // Calculate reward payouts for previous epoch
             calculate_rewards(
                 epoch - 1,
+                rewarded_era,
                 performance,
                 staking,
                 &shelley_params,
@@ -656,6 +664,7 @@ impl State {
 
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
     pub fn notify_block(&mut self, block: &BlockInfo) {
+        self.current_era = block.era;
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= self.stability_window_slot {
                 info!(
@@ -755,7 +764,7 @@ impl State {
                     InstantaneousRewardSource::Treasury => &mut self.pending_mir_treasury,
                 };
 
-                let is_alonzo_plus = self.current_epoch >= FIRST_ALONZO_EPOCH;
+                let is_alonzo_plus = self.current_era >= Era::Alonzo;
                 let source_name = match &mir.source {
                     InstantaneousRewardSource::Reserves => "reserves",
                     InstantaneousRewardSource::Treasury => "treasury",
