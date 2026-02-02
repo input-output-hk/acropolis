@@ -106,21 +106,6 @@ pub fn validate_script_integrity_hash(
 ) -> Result<(), Box<UTxOWValidationError>> {
     let script_data_hash =
         mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
-
-    // let used_plutusv1_script =
-    //     mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
-
-    // let redeemers = if let Some(redeemers) = mtx.transaction_witness_set.redeemer.as_ref() {
-    //     redeemers
-    // } else {
-    //     &vec![]
-    // };
-    // let plutus_data = if let Some(plutus_data) = mtx.transaction_witness_set.plutus_data.as_ref() {
-    //     plutus_data.iter().map(|x| KeepRaw::unwrap(x.clone())).collect::<Vec<alonzo::PlutusData>>()
-    // } else {
-    //     vec![]
-    // };
-
     let computed_hash = compute_script_integrity_hash(mtx);
 
     if script_data_hash.eq(&computed_hash) {
