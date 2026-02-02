@@ -10,43 +10,82 @@ use acropolis_common::{
     crypto::keyhash_256, hash::Hash, validation::UTxOWValidationError, GenesisDelegates,
     NativeScript, ScriptIntegrityHash, TxHash, VKeyWitness,
 };
+use anyhow::Result;
 use pallas::{
-    codec::{
-        minicbor::{encode, Encoder},
-        utils::KeepRaw,
-    },
+    codec::{minicbor, utils::AnyCbor},
     ledger::primitives::alonzo,
 };
+use tracing::error;
+
+/// Extract raw CBOR bytes for witness set map key 4 (plutus_data) and key 5 (redeemer)
+/// so that the exact on-chain encoding is preserved (e.g. indefinite-length 9f...ff
+/// is not normalized to definite-length 81...).
+#[allow(clippy::type_complexity)]
+fn extract_raw_witness_script_data(
+    raw_witness_set: &[u8],
+) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>)> {
+    let mut decoder = minicbor::Decoder::new(raw_witness_set);
+    let mut plutus_data_raw: Option<Vec<u8>> = None;
+    let mut redeemer_raw: Option<Vec<u8>> = None;
+    let iter = decoder.map_iter::<u64, AnyCbor>()?;
+    for pair in iter {
+        let (key, value) = pair?;
+        match key {
+            4 => plutus_data_raw = Some(value.raw_bytes().to_vec()),
+            5 => redeemer_raw = Some(value.raw_bytes().to_vec()),
+            _ => {}
+        }
+    }
+    Ok((plutus_data_raw, redeemer_raw))
+}
 
 /// Script integrity hash input bytes:
 /// redeemers ++ (if plutus data non-empty then plutus data else []) ++ lang_views.
-fn compute_script_integrity_hash(
-    redeemer: &[alonzo::Redeemer],
-    plutus_data: &[alonzo::PlutusData],
-    used_plutusv1_script: bool,
-) -> Option<ScriptIntegrityHash> {
-    if redeemer.is_empty() && plutus_data.is_empty() {
+/// Uses the original CBOR bytes from the witness set so indefinite-length encodings
+/// (e.g. 9f...ff) are preserved and the hash matches on-chain.
+fn compute_script_integrity_hash(mtx: &alonzo::MintedTx) -> Option<ScriptIntegrityHash> {
+    let raw_witness_set = mtx.transaction_witness_set.raw_cbor();
+    let (plutus_data_raw, redeemer_raw) = match extract_raw_witness_script_data(raw_witness_set) {
+        Ok(x) => x,
+        Err(_) => {
+            error!("Failed to extract raw witness script data");
+            return None;
+        }
+    };
+
+    let has_redeemer =
+        mtx.transaction_witness_set.redeemer.as_ref().map(|r| !r.is_empty()).unwrap_or(false);
+    let plutus_data_non_empty =
+        mtx.transaction_witness_set.plutus_data.as_ref().map(|pd| !pd.is_empty()).unwrap_or(false);
+
+    if !has_redeemer && !plutus_data_non_empty {
         return None;
     }
+
+    let used_plutusv1_script =
+        mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
+
     let mut value_to_hash: Vec<u8> = Vec::new();
 
-    // First, the Redeemer.
-    let _ = encode(redeemer, &mut value_to_hash);
-
-    // Next, the PlutusData (definite-length array encoding).
-    let mut plutus_data_encoder: Encoder<Vec<u8>> = Encoder::new(Vec::new());
-    let _ = plutus_data_encoder.array(plutus_data.len() as u64);
-    for single_plutus_data in plutus_data.iter() {
-        let _ = plutus_data_encoder.encode(single_plutus_data);
+    // First, the Redeemer (original CBOR bytes, or empty array 0x80 when absent).
+    match redeemer_raw {
+        Some(r) => value_to_hash.extend(r),
+        None => value_to_hash.push(0x80), // CBOR empty array
     }
-    value_to_hash.extend(plutus_data_encoder.writer().clone());
+
+    // Next, the PlutusData (original CBOR bytes) only when non-empty.
+    if plutus_data_non_empty {
+        if let Some(pd) = plutus_data_raw {
+            value_to_hash.extend(pd);
+        }
+    }
 
     // Finally, the cost model.
     if used_plutusv1_script {
         value_to_hash.extend(plutus_language_views_cbor());
     } else {
         let empty_lang_views = HashMap::<Vec<u8>, Vec<u8>>::new();
-        let _ = encode(empty_lang_views, &mut value_to_hash);
+        let _ = minicbor::encode(empty_lang_views, &mut value_to_hash);
     }
 
     Some(keyhash_256(&value_to_hash))
@@ -68,22 +107,21 @@ pub fn validate_script_integrity_hash(
     let script_data_hash =
         mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
 
-    let used_plutusv1_script =
-        mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
+    // let used_plutusv1_script =
+    //     mtx.transaction_witness_set.plutus_script.as_ref().map(|x| !x.is_empty()).unwrap_or(false);
 
-    let redeemers = if let Some(redeemers) = mtx.transaction_witness_set.redeemer.as_ref() {
-        redeemers
-    } else {
-        &vec![]
-    };
-    let plutus_data = if let Some(plutus_data) = mtx.transaction_witness_set.plutus_data.as_ref() {
-        plutus_data.iter().map(|x| KeepRaw::unwrap(x.clone())).collect::<Vec<alonzo::PlutusData>>()
-    } else {
-        vec![]
-    };
+    // let redeemers = if let Some(redeemers) = mtx.transaction_witness_set.redeemer.as_ref() {
+    //     redeemers
+    // } else {
+    //     &vec![]
+    // };
+    // let plutus_data = if let Some(plutus_data) = mtx.transaction_witness_set.plutus_data.as_ref() {
+    //     plutus_data.iter().map(|x| KeepRaw::unwrap(x.clone())).collect::<Vec<alonzo::PlutusData>>()
+    // } else {
+    //     vec![]
+    // };
 
-    let computed_hash =
-        compute_script_integrity_hash(redeemers, &plutus_data, used_plutusv1_script);
+    let computed_hash = compute_script_integrity_hash(mtx);
 
     if script_data_hash.eq(&computed_hash) {
         Ok(())
@@ -151,6 +189,20 @@ mod tests {
     ) =>
         matches Ok(());
         "alonzo - valid transaction 3 - has plutus data, contract, redeemer"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "567070233c5328d572a371ea481351df043e536846d763ea593b730048f60e4c"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 4 - has contract, no plutus data, redeemer"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "94a4e70902256267f37d1bb0cf95a0d6e05d7f8ae06f901ce4c9554267c7006c"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 5 - has contract, plutus data, redeemer"
     )]
     #[allow(clippy::result_large_err)]
     fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
