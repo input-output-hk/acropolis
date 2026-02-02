@@ -22,6 +22,11 @@ treasury(epoch) = treasury(epoch-1)
 treasury_increase = total_rewards * tau ( 0.2 )
 ```
 
+## Protocol Version 9 DRep Deregistration bug
+Throughout PV9 there is a bug which causes accounts to lose their DRep delegation if any DRep
+they have ever delegated to deregisters (Even if the account is no longer delegated to the DRep). 
+This requires us to keep a map `drep_delegations` in state that maps accounts to all DReps they have delegated to. Another condition of this bug is that if an account delegates to No Confidence or Abstain then it is removed from its previous DRep's delegation map. Upon hard fork to PV10 at transition to epoch 537 we disable this logic.
+
 ## Epoch numbers from DBSync (ada_pots)
 
 ```
