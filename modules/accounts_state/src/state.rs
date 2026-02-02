@@ -810,8 +810,7 @@ impl State {
     }
 
     pub fn reset_delegation_map(&mut self) {
-        let stake_addresses = self.stake_addresses.lock().unwrap();
-        self.drep_delegators = stake_addresses.generate_delegation_map();
+        self.drep_delegators = OrdMap::new();
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1172,20 +1171,6 @@ impl State {
                         self.remove_account_from_drep_delegation_map(stake_address, &drep);
                     }
                 }
-            }
-        } else {
-            if let Some(prev_choice) = previous_drep {
-                if let Some(prev_cred) = DRepChoice::to_credential(&prev_choice) {
-                    if let Some(set) = self.drep_delegators.get_mut(&prev_cred) {
-                        set.remove(stake_address);
-                        if set.is_empty() {
-                            self.drep_delegators.remove(&prev_cred);
-                        }
-                    }
-                }
-            }
-            if let Some(drep) = DRepChoice::to_credential(drep) {
-                self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
             }
         }
 

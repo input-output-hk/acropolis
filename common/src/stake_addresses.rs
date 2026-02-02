@@ -273,46 +273,6 @@ impl StakeAddressMap {
         Some(map)
     }
 
-    pub fn generate_delegation_map(&self) -> OrdMap<DRepCredential, OrdSet<StakeAddress>> {
-        let mut map: OrdMap<DRepCredential, OrdSet<StakeAddress>> = OrdMap::new();
-
-        for (stake_address, sas) in self.inner.iter() {
-            let Some(drep_choice) = &sas.delegated_drep else {
-                continue;
-            };
-
-            let Some(cred) = DRepChoice::to_credential(drep_choice) else {
-                continue;
-            };
-
-            map = map.update_with(cred, OrdSet::new(), |mut set, _| {
-                set.insert(stake_address.clone());
-                set
-            });
-        }
-
-        map
-    }
-
-    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
-        for sas in self.inner.values_mut() {
-            if let Some(ref drep) = sas.delegated_drep {
-                let matches = match drep {
-                    DRepChoice::Key(hash) => {
-                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
-                    }
-                    DRepChoice::Script(hash) => {
-                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
-                    }
-                    _ => false,
-                };
-                if matches {
-                    sas.delegated_drep = None;
-                }
-            }
-        }
-    }
-
     /// Map stake_addresses to their total balances (utxo + rewards)
     /// Return None if any of the stake_addresses are not found
     pub fn get_accounts_balances_map(
@@ -571,12 +531,29 @@ impl StakeAddressMap {
         stake_address: &StakeAddress,
         drep: &DRepChoice,
     ) -> Result<Option<DRepChoice>> {
-        let sas = self
-            .get_mut(stake_address)
-            .filter(|sas| sas.registered)
-            .ok_or_else(|| anyhow!("Invalid or unregistered stake address: {stake_address}"))?;
+        let prev_drep = {
+            let sas = self
+                .inner
+                .get(stake_address)
+                .ok_or_else(|| anyhow!("Invalid stake address: {stake_address}"))?;
 
-        Ok(sas.delegated_drep.replace(drep.clone()))
+            if !sas.registered {
+                return Err(anyhow!("Unregistered stake address: {stake_address}"));
+            }
+
+            sas.delegated_drep.clone()
+        };
+
+        if prev_drep.as_ref() != Some(drep) {
+            // Update the reverse index.
+            self.remove_drep_delegate(stake_address, prev_drep.as_ref());
+            self.add_drep_delegate(stake_address, Some(drep));
+        }
+
+        let sas = self.inner.get_mut(stake_address).unwrap();
+        sas.delegated_drep = Some(drep.clone());
+
+        Ok(prev_drep)
     }
 
     /// Remove delegators from a DRep
@@ -891,8 +868,8 @@ mod tests {
             stake_addresses.register_stake_address(&address2);
 
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&address1, &drep_choice);
-            stake_addresses.record_drep_delegation(&address2, &drep_choice);
+            stake_addresses.record_drep_delegation(&address1, &drep_choice).unwrap();
+            stake_addresses.record_drep_delegation(&address2, &drep_choice).unwrap();
 
             stake_addresses.deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH));
             assert_eq!(stake_addresses.get(&address1).unwrap().delegated_drep, None);
@@ -907,8 +884,10 @@ mod tests {
             stake_addresses.register_stake_address(&address);
 
             // Delegate to one DRep then re-delegate to another.
-            stake_addresses.record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH));
-            stake_addresses.record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH_2));
+            stake_addresses.record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH)).unwrap();
+            stake_addresses
+                .record_drep_delegation(&address, &DRepChoice::Key(DREP_HASH_2))
+                .unwrap();
 
             // Deregistering first DRep must not clear the current delegation.
             stake_addresses.deregister_drep(&DRepCredential::AddrKeyHash(DREP_HASH));
