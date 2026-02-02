@@ -175,9 +175,9 @@ pub fn calculate_rewards(
 
         // Shelley-only bug: if multiple SPOs shared a reward account, only one got paid.
         // Fixed in Allegra (hardforkAllegraAggregatedRewards allows aggregation of all rewards).
+        // When colliding, the SPO with the lowest operator hash wins.
         if is_shelley_rewards {
             if pay_to_pool_reward_account {
-                // QUESTION: Which one wins? Lowest hash seems to work in epoch 212
                 // Check all SPOs to see if they match this reward account
                 for (other_id, other_spo) in staking.spos.iter() {
                     if other_spo.reward_account == staking_spo.reward_account
@@ -461,7 +461,9 @@ fn calculate_spo_rewards(
         owner_rewards
     };
 
-    // Leader reward handling depends on era:
+    // Leader reward handling:
+    // - Pre-Babbage: only emit if reward account is registered, otherwise stays in reserves
+    // - Babbage+: always emit regardless of registration (Errata 17.2)
     if is_pre_babbage {
         if pay_to_pool_reward_account {
             rewards.push(RewardDetail {

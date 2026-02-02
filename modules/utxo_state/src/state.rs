@@ -224,51 +224,21 @@ impl State {
         total
     }
 
-    /// Cancel all unspent Byron redeem (AVVM) addresses and generate AddressDeltas.
-    /// Returns (count of cancelled UTxOs, total lovelace value of cancelled UTxOs).
-    /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
+    /// Cancel all unspent Byron redeem (AVVM) addresses at the Allegra hard fork boundary.
+    /// Returns (count of cancelled UTxOs, total lovelace value).
     ///
-    /// Note: This only handles immutable UTxOs. Volatile UTxOs with redeem addresses
-    /// would be extremely rare (recently-spent AVVM addresses just before epoch 236),
-    /// and the volatile index structure doesn't support individual removals.
+    /// Only handles immutable UTxOs. By the Allegra boundary all Byron redeem UTxOs
+    /// are long-confirmed and immutable, so volatile UTxOs are not a concern.
     ///
-    /// After cancellation, the total_value is stored in `avvm_cancelled_value` for later
-    /// querying by accounts_state.
+    /// The total cancelled value is stored for later querying by accounts_state,
+    /// which adds it back to reserves.
     pub async fn cancel_redeem_utxos(&mut self) -> Result<(usize, u64)> {
-        // Cancel from immutable store and get the cancelled UTxOs
         let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
 
         let count = cancelled.len();
         let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
 
-        // Store the cancelled value for later query by accounts_state
         self.avvm_cancelled_value = Some(total_value);
-
-        // TODO: Address deltas for AVVM cancellation commented out - was causing message sync issues.
-        // These are special redeem/bootstrap addresses that can't be used after Allegra anyway,
-        // so downstream consumers likely don't need balance updates for them.
-        // // Generate AddressDeltas for the cancelled UTxOs (as if they were spent)
-        // if let Some(observer) = &self.address_delta_observer {
-        //     observer.start_block(block).await;
-
-        //     // Create a synthetic TxIdentifier for AVVM cancellation
-        //     // Using block 0 / tx 0 to indicate this is a system operation, not a real tx
-        //     let tx_id = acropolis_common::TxIdentifier::new(0, 0);
-
-        //     for (utxo_id, utxo) in &cancelled {
-        //         let delta = AddressDelta {
-        //             address: utxo.address.clone(),
-        //             tx_identifier: tx_id,
-        //             spent_utxos: vec![*utxo_id],
-        //             created_utxos: Vec::new(),
-        //             sent: utxo.value.clone(),
-        //             received: Value::new(0, Vec::new()),
-        //         };
-        //         observer.observe_delta(&delta).await;
-        //     }
-
-        //     observer.finalise_block(block).await;
-        // }
 
         Ok((count, total_value))
     }
@@ -454,24 +424,6 @@ impl State {
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
     ) -> Result<()> {
-        // AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
-        // This only happens once when we enter the Allegra era.
-        // Must happen BEFORE observer.start_block() since cancel_redeem_utxos has its own
-        // observer start/end block calls.
-        if block.new_epoch && block.era == Era::Allegra && self.avvm_cancelled_value.is_none() {
-            match self.cancel_redeem_utxos().await {
-                Ok((count, total_value)) => {
-                    info!(
-                        count,
-                        total_value, "Cancelled AVVM/redeem UTxOs at Allegra boundary"
-                    );
-                }
-                Err(e) => {
-                    error!("Failed to cancel AVVM UTxOs: {e}");
-                }
-            }
-        }
-
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;

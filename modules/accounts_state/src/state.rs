@@ -43,11 +43,6 @@ const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 /// Used to determine MIR semantics (override vs sum)
 const FIRST_ALONZO_EPOCH: u64 = 290;
 
-/// Stability window = slots into epoch at which Haskell node starts the rewards calculation
-// We need this because of a Shelley-era bug where stake deregistrations were still counted
-// up to the point of start of the calculation, rather than point of snapshot
-const STABILITY_WINDOW_SLOT: u64 = 4 * 2160 * 20; // TODO configure from genesis?
-
 /// State for rewards calculation
 #[derive(Debug, Default, Clone)]
 pub struct EpochSnapshots {
@@ -118,6 +113,12 @@ pub struct State {
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
+
+    /// Randomness stabilization window (4k/f slots), computed from protocol params.
+    /// Rewards calculation starts at this slot offset within the epoch.
+    /// In Cardano, `addrsRew` is captured at this point, so registration/deregistration
+    /// changes after the staking snapshot but before this slot affect reward eligibility.
+    stability_window_slot: u64,
 
     /// Flag to track if AVVM cancellation has been handled (happens once at Allegra boundary)
     avvm_handled: bool,
@@ -344,38 +345,28 @@ impl State {
         Ok(())
     }
 
-    // TODO: Query approach caused message sync issues - using hardcoded value for now
-    // /// Handle AVVM cancellation at the Allegra hard fork boundary.
-    // /// This adds the value of cancelled AVVM UTxOs to reserves.
-    // /// Called with the total Value of cancelled UTxOs from utxo_state.
-    // pub fn handle_avvm_cancellation(&mut self, cancelled_value: &Value) {
-    //     let old_reserves = self.pots.reserves;
-    //     self.pots.reserves += cancelled_value.lovelace;
-    //     info!(
-    //         new = self.pots.reserves,
-    //         old = old_reserves,
-    //         avvm_returned = cancelled_value.lovelace,
-    //         "AVVM cancellation at Allegra hard fork - returned to reserves"
-    //     );
-    // }
+    /// Query utxo_state for the total lovelace of AVVM UTxOs cancelled at the Allegra boundary.
+    /// Returns None if cancellation hasn't happened yet.
+    async fn get_avvm_cancelled_value(
+        &self,
+        context: Arc<Context<Message>>,
+    ) -> Result<Option<u64>> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetAvvmCancelledValue,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
 
-    // /// Query utxo_state for the total value of AVVM UTxOs cancelled at Allegra boundary.
-    // /// Returns None if cancellation hasn't happened yet.
-    // pub async fn get_avvm_cancelled_value(context: Arc<Context<Message>>) -> Result<Option<Value>> {
-    //     let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
-    //     let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
-    //         UTxOStateQuery::GetAvvmCancelledValue,
-    //     )));
-    //     let response = context.message_bus.request(&utxos_query_topic, msg).await?;
-    //     let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
-
-    //     match message {
-    //         Message::StateQueryResponse(StateQueryResponse::UTxOs(
-    //             UTxOStateQueryResponse::AvvmCancelledValue(value),
-    //         )) => Ok(value),
-    //         _ => Err(anyhow!("Unexpected utxo-state response")),
-    //     }
-    // }
+        match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::AvvmCancelledValue(value),
+            )) => Ok(value),
+            _ => Err(anyhow!(
+                "Unexpected utxo-state response for AVVM cancelled value"
+            )),
+        }
+    }
 
     /// Process entry into a new epoch
     ///   epoch: Number of epoch we are entering
@@ -396,19 +387,24 @@ impl State {
         spo_block_counts: HashMap<PoolId, usize>,
         verifier: &Verifier,
     ) -> Result<Vec<StakeRewardDelta>> {
-        // Handle AVVM cancellation at Allegra hard fork boundary (epoch 236 on mainnet).
-        // This only happens once when we enter the Allegra era.
-        // TODO: Currently hardcoded - query approach caused message sync issues.
+        // At the Allegra hard fork boundary, all Byron redeem (AVVM) UTxOs are cancelled
+        // and their value returned to reserves. Query utxo_state for the cancelled amount,
+        // which it computes by scanning and removing all redeem-address UTxOs.
         if era == Era::Allegra && !self.avvm_handled {
-            // Hardcoded AVVM cancelled value for mainnet (318,200,635 ADA)
-            const AVVM_CANCELLED_LOVELACE: u64 = 318_200_635_000_000;
+            let avvm_cancelled =
+                self.get_avvm_cancelled_value(context.clone()).await?.ok_or_else(|| {
+                    anyhow!(
+                        "AVVM cancelled value not available from utxo_state at Allegra boundary"
+                    )
+                })?;
+
             let old_reserves = self.pots.reserves;
-            self.pots.reserves += AVVM_CANCELLED_LOVELACE;
+            self.pots.reserves += avvm_cancelled;
             self.avvm_handled = true;
             info!(
                 old_reserves,
                 new_reserves = self.pots.reserves,
-                avvm_cancelled = AVVM_CANCELLED_LOVELACE,
+                avvm_cancelled,
                 "AVVM cancellation at Allegra hard fork - returned to reserves"
             );
         }
@@ -429,6 +425,11 @@ impl State {
             },
         }
         .clone();
+        // Compute the randomness stabilization window (4k/f) from Shelley genesis params.
+        // This is when Cardano captures `addrsRew` and starts the rewards calculation.
+        let f = &shelley_params.active_slots_coeff;
+        self.stability_window_slot =
+            4 * (shelley_params.security_param as u64) * f.denom() / f.numer();
 
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
@@ -455,11 +456,10 @@ impl State {
         // as 'OBFT' style (the legacy nodes)
         let total_non_obft_blocks = spo_block_counts.values().sum();
 
-        // Apply pending MIRs before snapshot, so they are included in active stake
-        // and reserves is correct for total_supply in rewards
+        // Apply any pending MIRs (no-op if already drained by the caller before SPDD generation)
         self.apply_pending_mirs();
 
-        // Update current_epoch for next epoch's MIR accumulation
+        // Advance current_epoch so MIRs accumulated during the new epoch use the correct semantics
         self.current_epoch = epoch;
 
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
@@ -529,20 +529,20 @@ impl State {
 
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
         let current_epoch_registration_changes = self.current_epoch_registration_changes.clone();
+        let stability_window_slot = self.stability_window_slot;
         self.epoch_rewards_task = Arc::new(Mutex::new(Some(spawn_blocking(move || {
-            // Wait for start signal (sent at 4k/5 slots into epoch)
+            // Wait for start signal (sent at stability_window_slot into epoch)
             let _ = start_rewards_rx.recv();
 
-            // Apply current epoch registration changes up to the stability window (4k slots).
+            // Apply current epoch registration changes up to the stability window.
             // In Cardano, addrsRew is captured at the stability window, not the epoch boundary.
             // Accounts that deregister before the stability window won't receive rewards.
-            // This applies to all pre-Babbage eras.
             let current_changes = current_epoch_registration_changes.lock().unwrap();
             Self::apply_registration_changes_filtered(
                 &current_changes,
                 &mut registrations,
                 &mut deregistrations,
-                Some(STABILITY_WINDOW_SLOT),
+                Some(stability_window_slot),
             );
             drop(current_changes);
 
@@ -563,8 +563,8 @@ impl State {
             )
         }))));
 
-        // Delay starting calculation until 4k into epoch, to capture late deregistrations
-        // wrongly counted in early Shelley, and also to put them out of reach of rollbacks
+        // Delay starting calculation until stability window into epoch, to capture registration
+        // changes that affect addrsRew, and also to put them out of reach of rollbacks
         self.start_rewards_tx = Some(start_rewards_tx);
 
         // Now retire the SPOs fully
@@ -654,11 +654,10 @@ impl State {
         }
     }
 
-    /// Notify of a new block
+    /// Notify of a new block — triggers rewards calculation once we reach the stability window
     pub fn notify_block(&mut self, block: &BlockInfo) {
-        // Is the rewards task blocked on us reaching the 4 * k block?
         if let Some(tx) = &self.start_rewards_tx {
-            if block.epoch_slot >= STABILITY_WINDOW_SLOT {
+            if block.epoch_slot >= self.stability_window_slot {
                 info!(
                     "Starting rewards calculation at block {}, epoch slot {}",
                     block.number, block.epoch_slot
@@ -822,10 +821,13 @@ impl State {
         }
     }
 
-    /// Apply pending MIRs to stake addresses at epoch boundary
-    /// This must be called BEFORE generate_spdd() to ensure MIRs are included in active stake.
-    /// Also called internally by enter_epoch() for safety.
-    /// MIRs are only applied to registered accounts - deregistered accounts don't receive MIRs.
+    /// Apply pending MIRs to stake addresses at the epoch boundary.
+    ///
+    /// Called before SPDD generation (so MIRs are included in active stake) and again
+    /// inside enter_epoch() (to ensure reserves are correct for rewards). The second call
+    /// is a no-op because `drain()` empties the pending maps on the first call.
+    ///
+    /// Only registered accounts receive MIRs; deregistered accounts' MIRs stay in the source pot.
     pub fn apply_pending_mirs(&mut self) {
         // Apply MIRs from reserves
         if !self.pending_mir_reserves.is_empty() {
