@@ -31,6 +31,10 @@ impl ProtocolParams {
             .ok_or_else(|| anyhow::anyhow!("Shelley params are not set"))
             .map(|shelley_params| shelley_params.min_fee(tx_bytes))
     }
+
+    pub fn major_protocol_version(&self) -> Option<u64> {
+        self.shelley.as_ref().map(|s| s.protocol_params.protocol_version.major)
+    }
 }
 
 //

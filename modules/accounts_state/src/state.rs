@@ -785,32 +785,22 @@ impl State {
             self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
         } else if self.previous_protocol_parameters != self.protocol_parameters {
-            let was_chang = self
-                .previous_protocol_parameters
+            let was_pv9 = self
+                .protocol_parameters
                 .as_ref()
-                .and_then(|p| p.shelley.as_ref())
-                .map(|s| s.protocol_params.protocol_version.major == 9)
-                .unwrap_or(false);
+                .is_some_and(|p| p.major_protocol_version() == Some(9));
 
-            let is_chang = params_msg
-                .params
-                .shelley
-                .as_ref()
-                .map(|s| s.protocol_params.protocol_version.major == 9)
-                .unwrap_or(false);
+            let is_pv9 = params_msg.params.major_protocol_version() == Some(9);
 
-            if was_chang && !is_chang {
-                self.reset_delegation_map();
+            // Clear PV9 DRep delegators map on transition to PV10
+            if was_pv9 && !is_pv9 {
+                self.drep_delegators = OrdMap::new();
             }
 
             self.previous_protocol_parameters = self.protocol_parameters.clone()
         }
 
         Ok(())
-    }
-
-    pub fn reset_delegation_map(&mut self) {
-        self.drep_delegators = OrdMap::new();
     }
 
     /// Complete the previous epoch rewards calculation
@@ -1498,18 +1488,10 @@ impl State {
     // Retrieve the major protocol version from the previous protocol parameters
     // During bootstrap we use the current protocol parameters for the first epoch
     fn is_chang(&self) -> bool {
-        let params = match &self.previous_protocol_parameters {
-            Some(params) => params,
-            None => match &self.protocol_parameters {
-                Some(params) => params,
-                None => return false,
-            },
-        };
-
-        match &params.shelley {
-            Some(shelley) => shelley.protocol_params.protocol_version.major == 9,
-            None => false,
-        }
+        self.previous_protocol_parameters
+            .as_ref()
+            .or(self.protocol_parameters.as_ref())
+            .is_some_and(|p| p.major_protocol_version() == Some(9))
     }
 }
 

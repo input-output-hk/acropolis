@@ -64,17 +64,8 @@ impl StakeAddressMap {
     }
 
     #[inline]
-    fn drep_choice_to_credential(choice: &DRepChoice) -> Option<DRepCredential> {
-        match choice {
-            DRepChoice::Key(hash) => Some(DRepCredential::AddrKeyHash(*hash)),
-            DRepChoice::Script(hash) => Some(DRepCredential::ScriptHash(*hash)),
-            _ => None,
-        }
-    }
-
-    #[inline]
     fn remove_drep_delegate(&mut self, stake_address: &StakeAddress, drep: Option<&DRepChoice>) {
-        let Some(drep_cred) = drep.and_then(Self::drep_choice_to_credential) else {
+        let Some(drep_cred) = drep.and_then(DRepChoice::to_credential) else {
             return;
         };
         let Some(stake_addresses) = self.drep_delegates.get_mut(&drep_cred) else {
@@ -88,7 +79,7 @@ impl StakeAddressMap {
 
     #[inline]
     fn add_drep_delegate(&mut self, stake_address: &StakeAddress, drep: Option<&DRepChoice>) {
-        let Some(drep_cred) = drep.and_then(Self::drep_choice_to_credential) else {
+        let Some(drep_cred) = drep.and_then(DRepChoice::to_credential) else {
             return;
         };
 
@@ -121,16 +112,6 @@ impl StakeAddressMap {
             self.add_drep_delegate(&stake_address, current_drep.as_ref());
         }
         old_stake_address
-    }
-
-    #[inline]
-    pub fn remove(&mut self, stake_address: &StakeAddress) -> Option<StakeAddressState> {
-        let old_stake_address_state = self.inner.remove(stake_address);
-        let old_drep = old_stake_address_state.as_ref().and_then(|s| s.delegated_drep.as_ref());
-        if old_drep.is_some() {
-            self.remove_drep_delegate(stake_address, old_drep);
-        }
-        old_stake_address_state
     }
 
     #[inline]
@@ -427,7 +408,6 @@ impl StakeAddressMap {
                 (total > 0).then_some((k, total))
             })
             .collect();
-
         DRepDelegationDistribution {
             abstain,
             no_confidence,
@@ -516,7 +496,7 @@ impl StakeAddressMap {
 
         for stake_address in delegators {
             if let Some(sas) = self.inner.get_mut(&stake_address) {
-                if sas.delegated_drep.as_ref().and_then(Self::drep_choice_to_credential).as_ref()
+                if sas.delegated_drep.as_ref().and_then(DRepChoice::to_credential).as_ref()
                     == Some(drep_credential)
                 {
                     sas.delegated_drep = None;
