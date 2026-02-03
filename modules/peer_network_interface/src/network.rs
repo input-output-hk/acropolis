@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
     BlockSink,
-    block_flow::{BlockFlowAction, BlockFlowHandler},
+    block_flow::BlockFlowHandler,
     chain_state::{ChainEvent, ChainState},
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
@@ -100,7 +100,7 @@ impl NetworkManager {
             }
             NetworkEvent::SyncPointUpdate { point } => {
                 self.chain = ChainState::new();
-                self.flow_handler.on_sync_reset();
+                self.flow_handler.handle_sync_reset();
 
                 for peer in self.peers.values_mut() {
                     peer.reqs.clear();
@@ -197,14 +197,8 @@ impl NetworkManager {
                 let hash = header.hash;
                 let announcers = self.chain.handle_roll_forward(peer, header.clone());
 
-                // Delegate decision to flow handler
-                match self.flow_handler.on_block_announced(&header, announcers) {
-                    BlockFlowAction::FetchFrom(peers) if !peers.is_empty() => {
-                        self.request_block(slot, hash, peers);
-                    }
-                    _ => {
-                        // AwaitDecision or empty peers - don't fetch yet
-                    }
+                if let Some(peers) = self.flow_handler.handle_roll_forward(&header, announcers) {
+                    self.request_block(slot, hash, peers);
                 }
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
@@ -215,7 +209,7 @@ impl NetworkManager {
                     Point::Origin => 0,
                     Point::Specific(slot, _) => *slot,
                 };
-                self.flow_handler.on_rollback(rollback_slot);
+                self.flow_handler.handle_roll_backward(rollback_slot);
 
                 self.chain.handle_roll_backward(peer, point);
             }
@@ -232,7 +226,7 @@ impl NetworkManager {
                     peer.ack_block(fetched.hash);
                 }
                 // Notify flow handler that block was fetched
-                self.flow_handler.on_block_fetched(fetched.slot, fetched.hash);
+                self.flow_handler.handle_block_fetched(fetched.slot, fetched.hash);
                 self.chain.handle_body_fetched(fetched.slot, fetched.hash, fetched.body);
             }
             PeerEvent::Disconnected => {

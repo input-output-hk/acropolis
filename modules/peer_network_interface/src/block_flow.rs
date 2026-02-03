@@ -3,65 +3,93 @@ use std::sync::Arc;
 
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
-    BlockOfferedMessage, BlockRescindedMessage, ConsensusMessage, Message,
+    BlockOfferedMessage, BlockRescindedMessage, BlockWantedMessage, ConsensusMessage, Message,
 };
-use anyhow::Result;
-use caryatid_sdk::Context;
-use tracing::{error, warn};
+use anyhow::{Result, bail};
+use caryatid_sdk::{Context, Subscription};
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
 
+use crate::configuration::{BlockFlowMode, InterfaceConfig};
 use crate::connection::Header;
-use crate::network::PeerId;
+use crate::network::{NetworkEvent, PeerId};
 
-pub enum BlockFlowAction {
-    // Fetch the block immediately from these peers
-    FetchFrom(Vec<PeerId>),
-    // Don't fetch yet - consensus component will request via BlockWanted
-    AwaitDecision,
-}
-
+/// Block flow handling strategies.
 pub enum BlockFlowHandler {
-    // Direct: auto-fetch blocks as announced
+    /// Direct: auto-fetch blocks as announced
     Direct,
-    // Consensus-driven: publish offers, wait for wants before fetching
+    /// Consensus-driven: publish offers, wait for wants before fetching
     Consensus(ConsensusFlowState),
 }
 
-// Implements the block flow handling strategies:
-// - Direct: blocks are auto-fetched as announced.
-// - Consensus: blocks are offered to a consensus module which decides what to fetch.
 impl BlockFlowHandler {
-    pub fn direct() -> Self {
-        BlockFlowHandler::Direct
-    }
-
-    pub fn consensus(context: Arc<Context<Message>>, topic: String) -> Self {
-        BlockFlowHandler::Consensus(ConsensusFlowState::new(context, topic))
-    }
-
-    // Called when a peer announces a new block (Chainsync RollForward).
-    pub fn on_block_announced(
-        &mut self,
-        header: &Header,
-        announcers: Vec<PeerId>,
-    ) -> BlockFlowAction {
-        match self {
-            BlockFlowHandler::Direct => {
-                if announcers.is_empty() {
-                    BlockFlowAction::AwaitDecision
-                } else {
-                    BlockFlowAction::FetchFrom(announcers)
-                }
+    pub async fn new(
+        config: &InterfaceConfig,
+        context: Arc<Context<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<Self> {
+        match config.block_flow_mode {
+            BlockFlowMode::Direct => {
+                info!("Block flow mode: Direct (auto-fetch)");
+                Ok(BlockFlowHandler::Direct)
             }
-            BlockFlowHandler::Consensus(state) => {
-                state.on_block_announced(header);
-                BlockFlowAction::AwaitDecision
+            BlockFlowMode::Consensus => {
+                info!(
+                    "Block flow mode: Consensus (offers on '{}', wants on '{}')",
+                    config.consensus_topic, config.block_wanted_topic
+                );
+                let subscription = context.subscribe(&config.block_wanted_topic).await?;
+                tokio::spawn(Self::forward_block_wanted_to_events(
+                    subscription,
+                    events_sender,
+                ));
+                Ok(BlockFlowHandler::Consensus(ConsensusFlowState::new(
+                    context,
+                    config.consensus_topic.clone(),
+                )))
             }
         }
     }
 
-    pub fn on_rollback(&mut self, rollback_to_slot: u64) {
+    async fn forward_block_wanted_to_events(
+        mut subscription: Box<dyn Subscription<Message>>,
+        events_sender: mpsc::Sender<NetworkEvent>,
+    ) -> Result<()> {
+        while let Ok((_, msg)) = subscription.read().await {
+            if let Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
+                hash,
+                slot,
+            })) = msg.as_ref()
+                && events_sender
+                    .send(NetworkEvent::BlockWanted {
+                        hash: *hash,
+                        slot: *slot,
+                    })
+                    .await
+                    .is_err()
+            {
+                bail!("event channel closed");
+            }
+        }
+        bail!("subscription closed");
+    }
+
+    /// Handle a new block announcement. Returns peers to fetch from, or None if awaiting consensus.
+    pub fn handle_roll_forward(&mut self, header: &Header, announcers: Vec<PeerId>) -> Option<Vec<PeerId>> {
+        match self {
+            BlockFlowHandler::Direct => {
+                if announcers.is_empty() { None } else { Some(announcers) }
+            }
+            BlockFlowHandler::Consensus(state) => {
+                state.handle_roll_forward(header);
+                None
+            }
+        }
+    }
+
+    pub fn handle_roll_backward(&mut self, rollback_to_slot: u64) {
         if let BlockFlowHandler::Consensus(state) = self {
-            state.on_rollback(rollback_to_slot);
+            state.handle_roll_backward(rollback_to_slot);
         }
     }
 
@@ -72,15 +100,15 @@ impl BlockFlowHandler {
         Ok(())
     }
 
-    pub fn on_block_fetched(&mut self, slot: u64, hash: BlockHash) {
+    pub fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash) {
         if let BlockFlowHandler::Consensus(state) = self {
-            state.on_block_fetched(slot, hash);
+            state.handle_block_fetched(slot, hash);
         }
     }
 
-    pub fn on_sync_reset(&mut self) {
+    pub fn handle_sync_reset(&mut self) {
         if let BlockFlowHandler::Consensus(state) = self {
-            state.on_sync_reset();
+            state.handle_sync_reset();
         }
     }
 }
@@ -118,7 +146,7 @@ impl ConsensusFlowState {
         }
     }
 
-    fn on_block_announced(&mut self, header: &Header) {
+    fn handle_roll_forward(&mut self, header: &Header) {
         let hash = header.hash;
         let slot = header.slot;
         let parent_hash = header.parent_hash.unwrap_or_default();
@@ -136,7 +164,7 @@ impl ConsensusFlowState {
         }
     }
 
-    fn on_rollback(&mut self, rollback_to_slot: u64) {
+    fn handle_roll_backward(&mut self, rollback_to_slot: u64) {
         // Collect slots that need to be rescinded (slot > rollback point)
         let slots_to_rescind: Vec<u64> =
             self.offered_blocks.range((rollback_to_slot + 1)..).map(|(slot, _)| *slot).collect();
@@ -194,7 +222,7 @@ impl ConsensusFlowState {
         Ok(())
     }
 
-    fn on_block_fetched(&mut self, slot: u64, hash: BlockHash) {
+    fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash) {
         // Remove from tracking - block has been fetched
         if let Some(hashes) = self.offered_blocks.get_mut(&slot) {
             hashes.remove(&hash);
@@ -204,7 +232,7 @@ impl ConsensusFlowState {
         }
     }
 
-    fn on_sync_reset(&mut self) {
+    fn handle_sync_reset(&mut self) {
         self.offered_blocks.clear();
         self.pending_events.clear();
     }
@@ -223,29 +251,6 @@ mod tests {
             bytes: vec![],
             era: Era::Conway,
             parent_hash: Some(BlockHash::new([hash_byte.wrapping_sub(1); 32])),
-        }
-    }
-
-    #[test]
-    fn direct_handler_returns_fetch_action() {
-        let mut handler = BlockFlowHandler::direct();
-        let header = make_header(100, 1);
-        let peers = vec![PeerId(1), PeerId(2)];
-
-        match handler.on_block_announced(&header, peers.clone()) {
-            BlockFlowAction::FetchFrom(p) => assert_eq!(p, peers),
-            BlockFlowAction::AwaitDecision => panic!("expected FetchFrom"),
-        }
-    }
-
-    #[test]
-    fn direct_handler_awaits_when_no_announcers() {
-        let mut handler = BlockFlowHandler::direct();
-        let header = make_header(100, 1);
-
-        match handler.on_block_announced(&header, vec![]) {
-            BlockFlowAction::AwaitDecision => {}
-            BlockFlowAction::FetchFrom(_) => panic!("expected AwaitDecision"),
         }
     }
 

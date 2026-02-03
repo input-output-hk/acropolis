@@ -8,10 +8,7 @@ use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus, Era,
     commands::chain_sync::ChainSyncCommand,
     genesis_values::GenesisValues,
-    messages::{
-        BlockWantedMessage, CardanoMessage, Command, ConsensusMessage, Message, RawBlockMessage,
-        StateTransitionMessage,
-    },
+    messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
 };
 use anyhow::{Result, bail};
@@ -25,7 +22,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use crate::{
     block_flow::BlockFlowHandler,
-    configuration::{BlockFlowMode, InterfaceConfig, SyncPoint},
+    configuration::{InterfaceConfig, SyncPoint},
     connection::Header,
     network::{NetworkEvent, NetworkManager},
 };
@@ -50,26 +47,8 @@ impl PeerNetworkInterface {
         // Create the event channel early so we can spawn forwarders before init_manager
         let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
 
-        // Create the flow handler depending on configuration
-        let flow_handler = match cfg.block_flow_mode {
-            BlockFlowMode::Direct => {
-                info!("Block flow mode: Direct (auto-fetch)");
-                BlockFlowHandler::direct()
-            }
-            BlockFlowMode::Consensus => {
-                info!(
-                    "Block flow mode: Consensus (offers on '{}', wants on '{}')",
-                    cfg.consensus_topic, cfg.block_wanted_topic
-                );
-                // Subscribe and spin up 'block forwarder' together
-                let subscription = context.subscribe(&cfg.block_wanted_topic).await?;
-                tokio::spawn(Self::forward_block_wanted_to_events(
-                    subscription,
-                    events_sender.clone(),
-                ));
-                BlockFlowHandler::consensus(context.clone(), cfg.consensus_topic.clone())
-            }
-        };
+        let flow_handler =
+            BlockFlowHandler::new(&cfg, context.clone(), events_sender.clone()).await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -233,30 +212,6 @@ impl PeerNetworkInterface {
                 if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
                     bail!("event channel closed");
                 }
-            }
-        }
-
-        bail!("subscription closed");
-    }
-
-    async fn forward_block_wanted_to_events(
-        mut subscription: Box<dyn Subscription<Message>>,
-        events_sender: mpsc::Sender<NetworkEvent>,
-    ) -> Result<()> {
-        while let Ok((_, msg)) = subscription.read().await {
-            if let Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
-                hash,
-                slot,
-            })) = msg.as_ref()
-                && events_sender
-                    .send(NetworkEvent::BlockWanted {
-                        hash: *hash,
-                        slot: *slot,
-                    })
-                    .await
-                    .is_err()
-            {
-                bail!("event channel closed");
             }
         }
 
