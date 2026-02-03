@@ -75,10 +75,18 @@ impl BlockFlowHandler {
     }
 
     /// Handle a new block announcement. Returns peers to fetch from, or None if awaiting consensus.
-    pub fn handle_roll_forward(&mut self, header: &Header, announcers: Vec<PeerId>) -> Option<Vec<PeerId>> {
+    pub fn handle_roll_forward(
+        &mut self,
+        header: &Header,
+        announcers: Vec<PeerId>,
+    ) -> Option<Vec<PeerId>> {
         match self {
             BlockFlowHandler::Direct => {
-                if announcers.is_empty() { None } else { Some(announcers) }
+                if announcers.is_empty() {
+                    None
+                } else {
+                    Some(announcers)
+                }
             }
             BlockFlowHandler::Consensus(state) => {
                 state.handle_roll_forward(header);
@@ -113,6 +121,7 @@ impl BlockFlowHandler {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ConsensusEvent {
     BlockOffered {
         hash: BlockHash,
@@ -125,11 +134,73 @@ enum ConsensusEvent {
     },
 }
 
+/// Tracks block offers and generates consensus events.
+#[derive(Default)]
+struct BlockOfferTracker {
+    pending_events: Vec<ConsensusEvent>,
+    offered_blocks: BTreeMap<u64, HashSet<BlockHash>>,
+}
+
+impl BlockOfferTracker {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a new block announcement and produce BlockOffered event if this
+    /// is the first 'new block'.
+    fn roll_forward(&mut self, slot: u64, hash: BlockHash, parent_hash: BlockHash) {
+        let is_new = self.offered_blocks.entry(slot).or_default().insert(hash);
+        if is_new {
+            self.pending_events.push(ConsensusEvent::BlockOffered {
+                hash,
+                slot,
+                parent_hash,
+            });
+        }
+    }
+
+    /// Handle a rollback, produces BlockRescinded events for all blocks
+    /// at slots strictly greater than the rollback point.
+    fn roll_backward(&mut self, rollback_to_slot: u64) {
+        // Collect slots beyond the rollback point
+        let slots_to_rescind: Vec<u64> =
+            self.offered_blocks.range((rollback_to_slot + 1)..).map(|(slot, _)| *slot).collect();
+
+        for slot in slots_to_rescind {
+            if let Some(hashes) = self.offered_blocks.remove(&slot) {
+                for hash in hashes {
+                    self.pending_events.push(ConsensusEvent::BlockRescinded { hash, slot });
+                }
+            }
+        }
+    }
+
+    /// A block was successfully fetched - remove it from tracking.
+    fn block_fetched(&mut self, slot: u64, hash: BlockHash) {
+        if let Some(hashes) = self.offered_blocks.get_mut(&slot) {
+            hashes.remove(&hash);
+            if hashes.is_empty() {
+                self.offered_blocks.remove(&slot);
+            }
+        }
+    }
+
+    /// Clear all state (used on sync reset).
+    fn reset(&mut self) {
+        self.offered_blocks.clear();
+        self.pending_events.clear();
+    }
+
+    /// Take all pending events for publishing.
+    fn take_events(&mut self) -> Vec<ConsensusEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
+}
+
 pub struct ConsensusFlowState {
     context: Arc<Context<Message>>,
     topic: String,
-    pending_events: Vec<ConsensusEvent>,
-    offered_blocks: BTreeMap<u64, HashSet<BlockHash>>,
+    tracker: BlockOfferTracker,
     publish_failure_count: u32,
 }
 
@@ -140,51 +211,25 @@ impl ConsensusFlowState {
         Self {
             context,
             topic,
-            pending_events: Vec::new(),
-            offered_blocks: BTreeMap::new(),
+            tracker: BlockOfferTracker::new(),
             publish_failure_count: 0,
         }
     }
 
     fn handle_roll_forward(&mut self, header: &Header) {
-        let hash = header.hash;
-        let slot = header.slot;
         let parent_hash = header.parent_hash.unwrap_or_default();
-
-        // Track that we're offering this block
-        let is_new = self.offered_blocks.entry(slot).or_default().insert(hash);
-
-        // Only publish offer if we haven't offered this exact block before
-        if is_new {
-            self.pending_events.push(ConsensusEvent::BlockOffered {
-                hash,
-                slot,
-                parent_hash,
-            });
-        }
+        self.tracker.roll_forward(header.slot, header.hash, parent_hash);
     }
 
     fn handle_roll_backward(&mut self, rollback_to_slot: u64) {
-        // Collect slots that need to be rescinded (slot > rollback point)
-        let slots_to_rescind: Vec<u64> =
-            self.offered_blocks.range((rollback_to_slot + 1)..).map(|(slot, _)| *slot).collect();
-
-        // Rescind all blocks at those slots
-        for slot in slots_to_rescind {
-            if let Some(hashes) = self.offered_blocks.remove(&slot) {
-                for hash in hashes {
-                    self.pending_events.push(ConsensusEvent::BlockRescinded { hash, slot });
-                }
-            }
-        }
+        self.tracker.roll_backward(rollback_to_slot);
     }
 
     async fn publish_pending(&mut self) -> Result<()> {
-        if self.pending_events.is_empty() {
+        let events = self.tracker.take_events();
+        if events.is_empty() {
             return Ok(());
         }
-
-        let events = std::mem::take(&mut self.pending_events);
 
         for event in events {
             let msg = match event {
@@ -223,78 +268,147 @@ impl ConsensusFlowState {
     }
 
     fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash) {
-        // Remove from tracking - block has been fetched
-        if let Some(hashes) = self.offered_blocks.get_mut(&slot) {
-            hashes.remove(&hash);
-            if hashes.is_empty() {
-                self.offered_blocks.remove(&slot);
-            }
-        }
+        self.tracker.block_fetched(slot, hash);
     }
 
     fn handle_sync_reset(&mut self) {
-        self.offered_blocks.clear();
-        self.pending_events.clear();
+        self.tracker.reset();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::Era;
 
-    fn make_header(slot: u64, hash_byte: u8) -> Header {
-        Header {
-            hash: BlockHash::new([hash_byte; 32]),
-            slot,
-            number: slot,
-            bytes: vec![],
-            era: Era::Conway,
-            parent_hash: Some(BlockHash::new([hash_byte.wrapping_sub(1); 32])),
+    fn hash(n: u8) -> BlockHash {
+        BlockHash::new([n; 32])
+    }
+
+    mod offer_tracker {
+        use super::*;
+
+        fn has_block(tracker: &BlockOfferTracker, slot: u64, h: BlockHash) -> bool {
+            tracker.offered_blocks.get(&slot).is_some_and(|set| set.contains(&h))
+        }
+
+        #[test]
+        fn roll_forward_tracks_block_and_emits_offer() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+
+            assert!(has_block(&tracker, 100, hash(1)));
+            let events = tracker.take_events();
+            assert!(matches!(
+                &events[..],
+                [ConsensusEvent::BlockOffered { slot: 100, hash, parent_hash }]
+                    if *hash == self::hash(1) && *parent_hash == self::hash(0)
+            ));
+        }
+
+        #[test]
+        fn duplicate_announcement_emits_single_offer() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+            tracker.roll_forward(100, hash(1), hash(0));
+
+            assert_eq!(tracker.offered_blocks[&100].len(), 1);
+            assert_eq!(tracker.take_events().len(), 1);
+        }
+
+        #[test]
+        fn fork_at_same_slot_tracks_both_blocks() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+            tracker.roll_forward(100, hash(2), hash(0));
+
+            assert_eq!(tracker.offered_blocks[&100].len(), 2);
+            assert_eq!(tracker.take_events().len(), 2);
+        }
+
+        #[test]
+        fn rollback_rescinds_blocks_beyond_slot() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+            tracker.roll_forward(101, hash(2), hash(1));
+            tracker.roll_forward(102, hash(3), hash(2));
+            tracker.take_events();
+
+            tracker.roll_backward(100);
+
+            assert!(has_block(&tracker, 100, hash(1)));
+            assert!(!has_block(&tracker, 101, hash(2)));
+            assert!(!has_block(&tracker, 102, hash(3)));
+
+            let events = tracker.take_events();
+            assert_eq!(events.len(), 2);
+            assert!(events.iter().all(|e| matches!(e, ConsensusEvent::BlockRescinded { .. })));
+        }
+
+        #[test]
+        fn block_fetched_removes_from_tracking() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+            tracker.roll_forward(101, hash(2), hash(1));
+            tracker.block_fetched(100, hash(1));
+
+            assert!(!has_block(&tracker, 100, hash(1)));
+            assert!(has_block(&tracker, 101, hash(2)));
+        }
+
+        #[test]
+        fn reset_clears_all_state() {
+            let mut tracker = BlockOfferTracker::new();
+
+            tracker.roll_forward(100, hash(1), hash(0));
+            tracker.reset();
+
+            assert!(tracker.offered_blocks.is_empty());
+            assert!(tracker.take_events().is_empty());
         }
     }
 
-    #[test]
-    fn consensus_state_tracks_offered_blocks() {
-        let header1 = make_header(100, 1);
-        let header2 = make_header(101, 2);
-        let header3 = make_header(102, 3);
+    mod block_flow_handler {
+        use super::*;
+        use crate::network::PeerId;
 
-        // Simulate the tracking that would happen
-        let mut offered: BTreeMap<u64, HashSet<BlockHash>> = BTreeMap::new();
+        #[test]
+        fn direct_mode_returns_announcers() {
+            let mut handler = BlockFlowHandler::Direct;
+            let header = crate::connection::Header {
+                hash: hash(1),
+                slot: 100,
+                number: 100,
+                bytes: vec![],
+                era: acropolis_common::Era::Conway,
+                parent_hash: Some(hash(0)),
+            };
 
-        offered.entry(header1.slot).or_default().insert(header1.hash);
-        offered.entry(header2.slot).or_default().insert(header2.hash);
-        offered.entry(header3.slot).or_default().insert(header3.hash);
+            let peers = vec![PeerId(1), PeerId(2)];
+            let result = handler.handle_roll_forward(&header, peers.clone());
 
-        assert_eq!(offered.len(), 3);
-
-        // Simulate rollback to slot 100
-        let rollback_to = 100;
-        let to_remove: Vec<u64> = offered.range((rollback_to + 1)..).map(|(s, _)| *s).collect();
-        for slot in to_remove {
-            offered.remove(&slot);
+            assert_eq!(result, Some(peers));
         }
 
-        assert_eq!(offered.len(), 1);
-        assert!(offered.contains_key(&100));
-    }
+        #[test]
+        fn direct_mode_returns_none_for_empty_announcers() {
+            let mut handler = BlockFlowHandler::Direct;
+            let header = crate::connection::Header {
+                hash: hash(1),
+                slot: 100,
+                number: 100,
+                bytes: vec![],
+                era: acropolis_common::Era::Conway,
+                parent_hash: Some(hash(0)),
+            };
 
-    #[test]
-    fn consensus_state_deduplicates_offers() {
-        let header = make_header(100, 1);
+            let result = handler.handle_roll_forward(&header, vec![]);
 
-        let mut offered: BTreeMap<u64, HashSet<BlockHash>> = BTreeMap::new();
-
-        // First announcement
-        let is_new_1 = offered.entry(header.slot).or_default().insert(header.hash);
-        assert!(is_new_1);
-
-        // Second announcement of same block
-        let is_new_2 = offered.entry(header.slot).or_default().insert(header.hash);
-        assert!(!is_new_2); // Should not be new
-
-        // Only one entry
-        assert_eq!(offered.get(&100).unwrap().len(), 1);
+            assert!(result.is_none());
+        }
     }
 }
