@@ -5,10 +5,11 @@ use std::collections::HashSet;
 
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
-    validation::UTxOWValidationError, GenesisDelegates, KeyHash, NativeScript, TxHash, VKeyWitness,
+    crypto::keyhash_256, protocol_params::ProtocolVersion, validation::UTxOWValidationError,
+    DataHash, GenesisDelegates, KeyHash, NativeScript, TxHash, VKeyWitness,
 };
 use anyhow::Result;
-use pallas::ledger::primitives::alonzo;
+use pallas::{codec::utils::Nullable, ledger::primitives::alonzo};
 
 fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
     mtx.transaction_body
@@ -20,6 +21,27 @@ fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
                 .any(|cert| matches!(cert, alonzo::Certificate::MoveInstantaneousRewardsCert(_)))
         })
         .unwrap_or(false)
+}
+
+fn get_aux_data_hash(
+    mtx: &alonzo::MintedTx,
+) -> Result<Option<DataHash>, Box<UTxOWValidationError>> {
+    let aux_data_hash = match mtx.transaction_body.auxiliary_data_hash.as_ref() {
+        Some(x) => Some(DataHash::try_from(x.to_vec()).map_err(|_| {
+            Box::new(UTxOWValidationError::InvalidMetadataHash {
+                reason: "invalid metadata hash".to_string(),
+            })
+        })?),
+        None => None,
+    };
+    Ok(aux_data_hash)
+}
+
+fn get_aux_data(mtx: &alonzo::MintedTx) -> Option<Vec<u8>> {
+    match &mtx.auxiliary_data {
+        Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
+        _ => None,
+    }
 }
 
 /// Validate Native Scripts from Transaction witnesses
@@ -61,6 +83,35 @@ pub fn validate_vkey_witnesses(
     Ok(())
 }
 
+/// Validate metadata (hash must match with computed one, check metadatum value-size when pv > 2.0)
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
+pub fn validate_metadata(
+    aux_data_hash: Option<DataHash>,
+    aux_data: Option<Vec<u8>>,
+    _protocol_version: &ProtocolVersion,
+) -> Result<(), Box<UTxOWValidationError>> {
+    match (aux_data_hash, aux_data) {
+        (None, None) => Ok(()),
+        (Some(aux_data_hash), Some(aux_data)) => {
+            let computed_hash = keyhash_256(aux_data.as_slice());
+            if aux_data_hash != computed_hash {
+                Err(Box::new(UTxOWValidationError::ConflictingMetadataHash {
+                    expected: aux_data_hash,
+                    actual: computed_hash,
+                }))
+            } else {
+                Ok(())
+            }
+        }
+        (Some(aux_data_hash), None) => Err(Box::new(UTxOWValidationError::MissingTxMetadata {
+            metadata_hash: aux_data_hash,
+        })),
+        (None, Some(aux_data)) => Err(Box::new(UTxOWValidationError::MissingTxBodyMetadataHash {
+            metadata_hash: keyhash_256(aux_data.as_slice()),
+        })),
+    }
+}
+
 /// Validate genesis keys signatures for MIR certificate
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L463
 pub fn validate_mir_genesis_sigs(
@@ -96,6 +147,7 @@ pub fn validate(
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;
 
@@ -113,9 +165,8 @@ pub fn validate(
     // validate vkey witnesses signatures
     validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
-    // TODO:
-    // Validate metadata
-    // issue: https://github.com/input-output-hk/acropolis/issues/489
+    // validate metadata
+    validate_metadata(get_aux_data_hash(mtx)?, get_aux_data(mtx), protocol_version)?;
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
@@ -154,6 +205,13 @@ mod tests {
     ) =>
         matches Ok(());
         "shelley - valid transaction 2 - with mir certificates"
+    )]
+    #[test_case(validation_fixture!(
+        "shelley",
+        "c220e20cc480df9ce7cd871df491d7390c6a004b9252cf20f45fc3c968535b4a"
+    ) =>
+        matches Ok(());
+        "shelley - valid transaction 3 - with metadata"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -218,6 +276,7 @@ mod tests {
             &native_scripts,
             &ctx.shelley_params.gen_delegs,
             ctx.shelley_params.update_quorum,
+            &ctx.shelley_params.protocol_params.protocol_version,
         )
         .map_err(|e| *e)
     }

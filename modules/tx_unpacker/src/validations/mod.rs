@@ -99,6 +99,7 @@ fn validate_alonzo_compatible_tx(
                 &native_scripts,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -113,6 +114,7 @@ fn validate_alonzo_compatible_tx(
                 &native_scripts,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -127,6 +129,7 @@ fn validate_alonzo_compatible_tx(
                 &native_scripts,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -138,6 +141,7 @@ fn validate_alonzo_compatible_tx(
                 &native_scripts,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -181,6 +185,7 @@ fn validate_babbage_tx(
             &native_scripts,
             genesis_delegs,
             shelley_params.update_quorum,
+            &shelley_params.protocol_params.protocol_version,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
