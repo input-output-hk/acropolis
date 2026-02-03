@@ -451,7 +451,12 @@ impl AccountsState {
                     async {
                         Self::check_sync(&current_block, block_info);
                         let stake_registration_updates = state
-                            .handle_tx_certificates(tx_certs_msg, block_info.epoch_slot, &mut vld)
+                            .handle_tx_certificates(
+                                tx_certs_msg,
+                                block_info.epoch_slot,
+                                block_info.era,
+                                &mut vld,
+                            )
                             .inspect_err(|e| {
                                 vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
                             })

@@ -111,13 +111,15 @@ pub struct State {
     start_rewards_tx: Option<mpsc::Sender<()>>,
 
     /// Randomness stabilization window (4k/f slots), computed from protocol params.
-    /// Rewards calculation starts at this slot offset within the epoch.
-    /// In Cardano, `addrsRew` is captured at this point, so registration/deregistration
-    /// changes after the staking snapshot but before this slot affect reward eligibility.
+    /// Used to delay the rewards calculation and filter registration changes:
+    /// - `notify_block` waits until `block.epoch_slot >= stability_window_slot` before
+    ///   signalling the rewards task to start
+    /// - `apply_registration_changes_filtered` skips any `RegistrationChange` with
+    ///   `epoch_slot > stability_window_slot`, so only changes before this point
+    ///   affect `addrsRew` (the set of addresses eligible for rewards)
+    /// - Changes after this slot remain in `current_epoch_registration_changes` and
+    ///   are picked up at the next epoch boundary
     stability_window_slot: u64,
-
-    /// Flag to track if AVVM cancellation has been handled (happens once at Allegra boundary)
-    avvm_handled: bool,
 
     /// Pending MIRs from reserves to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
@@ -128,9 +130,6 @@ pub struct State {
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
     pending_mir_treasury: HashMap<StakeAddress, i64>,
-
-    /// Current era (set from BlockInfo on each block)
-    era: Era,
 }
 
 impl State {
@@ -377,6 +376,7 @@ impl State {
         &mut self,
         context: Arc<Context<Message>>,
         epoch: u64,
+        era: Era,
         is_new_era: bool,
         total_fees: u64,
         spo_block_counts: HashMap<PoolId, usize>,
@@ -385,7 +385,7 @@ impl State {
         // At the Allegra hard fork boundary, all Byron redeem (AVVM) UTxOs are cancelled
         // and their value returned to reserves. Query utxo_state for the cancelled amount,
         // which it computes by scanning and removing all redeem-address UTxOs.
-        if self.era == Era::Allegra && !self.avvm_handled {
+        if is_new_era && era == Era::Allegra {
             let avvm_cancelled =
                 self.get_avvm_cancelled_value(context.clone()).await?.ok_or_else(|| {
                     anyhow!(
@@ -395,7 +395,6 @@ impl State {
 
             let old_reserves = self.pots.reserves;
             self.pots.reserves += avvm_cancelled;
-            self.avvm_handled = true;
             info!(
                 old_reserves,
                 new_reserves = self.pots.reserves,
@@ -429,7 +428,7 @@ impl State {
         // First time into Shelley, fix reserves to max_supply - total_utxos
         // We need to do this because tracking fees - which increase reserves - during Byron
         // is painful, requiring lookup of UTXO value for every input
-        if is_new_era && self.era == Era::Shelley {
+        if is_new_era && era == Era::Shelley {
             info!("Entering Shelley era - fixing up reserves");
 
             let total_utxos = self.get_total_utxos_at_shelley_start(context).await?;
@@ -450,9 +449,6 @@ impl State {
         // Filter the block counts for SPOs that are registered - treating any we don't know
         // as 'OBFT' style (the legacy nodes)
         let total_non_obft_blocks = spo_block_counts.values().sum();
-
-        // Apply any pending MIRs (no-op if already drained by the caller before SPDD generation)
-        self.apply_pending_mirs();
 
         let mut reward_deltas = Vec::<StakeRewardDelta>::new();
 
@@ -522,9 +518,9 @@ impl State {
         // The rewarded epoch is epoch-1. If we just crossed an era boundary, the
         // rewarded epoch was in the previous era; otherwise it's the same era.
         let rewarded_era = if is_new_era {
-            Era::try_from((self.era as u8).saturating_sub(1)).unwrap_or(self.era)
+            Era::try_from((era as u8).saturating_sub(1)).unwrap_or(era)
         } else {
-            self.era
+            era
         };
 
         let (start_rewards_tx, start_rewards_rx) = mpsc::channel::<()>();
@@ -657,7 +653,6 @@ impl State {
 
     /// Notify of a new block — triggers rewards calculation once we reach the stability window
     pub fn notify_block(&mut self, block: &BlockInfo) {
-        self.era = block.era;
         if let Some(tx) = &self.start_rewards_tx {
             if block.epoch_slot >= self.stability_window_slot {
                 info!(
@@ -747,7 +742,7 @@ impl State {
     /// Accumulate MIRs for application at epoch boundary
     /// Pre-Alonzo (epoch < 290): override semantics (last value wins)
     /// Alonzo+ (epoch >= 290): sum semantics (values are added)
-    fn pay_mir(&mut self, mir: &MoveInstantaneousReward) {
+    fn pay_mir(&mut self, mir: &MoveInstantaneousReward, era: Era) {
         match &mir.target {
             InstantaneousRewardTarget::StakeAddresses(deltas) => {
                 // Accumulate MIRs for stake addresses - don't apply immediately
@@ -757,7 +752,7 @@ impl State {
                     InstantaneousRewardSource::Treasury => &mut self.pending_mir_treasury,
                 };
 
-                let is_alonzo_plus = self.era >= Era::Alonzo;
+                let is_alonzo_plus = era >= Era::Alonzo;
                 let source_name = match &mir.source {
                     InstantaneousRewardSource::Reserves => "reserves",
                     InstantaneousRewardSource::Treasury => "treasury",
@@ -1105,6 +1100,7 @@ impl State {
             self.enter_epoch(
                 context,
                 ea_msg.epoch + 1,
+                block_info.era,
                 block_info.is_new_era,
                 ea_msg.total_fees,
                 spo_blocks,
@@ -1358,6 +1354,7 @@ impl State {
         &mut self,
         tx_certs_msg: &TxCertificatesMessage,
         epoch_slot: u64,
+        era: Era,
         vld: &mut ValidationOutcomes,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
@@ -1391,7 +1388,7 @@ impl State {
                 }
 
                 TxCertificate::MoveInstantaneousReward(mir) => {
-                    self.pay_mir(mir);
+                    self.pay_mir(mir, era);
                 }
 
                 TxCertificate::Registration(reg) => {
@@ -1883,7 +1880,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(42),
         };
 
-        state.pay_mir(&mir);
+        state.pay_mir(&mir, Era::Shelley);
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 42);
         assert_eq!(state.pots.deposits, 0);
@@ -1894,7 +1891,7 @@ mod tests {
             target: InstantaneousRewardTarget::OtherAccountingPot(10),
         };
 
-        state.pay_mir(&mir);
+        state.pay_mir(&mir, Era::Shelley);
         assert_eq!(state.pots.reserves, 68);
         assert_eq!(state.pots.treasury, 32);
         assert_eq!(state.pots.deposits, 0);
@@ -1939,7 +1936,7 @@ mod tests {
             ]),
         };
 
-        state.pay_mir(&mir);
+        state.pay_mir(&mir, Era::Shelley);
         state.apply_pending_mirs(); // Apply accumulated MIRs
         assert_eq!(state.pots.reserves, 58);
         assert_eq!(state.pots.treasury, 0);
@@ -1989,7 +1986,7 @@ mod tests {
             target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
         };
 
-        state.pay_mir(&mir);
+        state.pay_mir(&mir, Era::Shelley);
         state.apply_pending_mirs(); // Apply accumulated MIRs
 
         {
@@ -2033,12 +2030,12 @@ mod tests {
             source: InstantaneousRewardSource::Reserves,
             target: InstantaneousRewardTarget::StakeAddresses(vec![(stake_address.clone(), 42)]),
         };
-        state.pay_mir(&mir);
+        state.pay_mir(&mir, Era::Shelley);
 
-        // Deregister the account BEFORE applying MIRs (simulates deregistration during epoch)
+        // Deregister the account BEFORE applying instant rewards (simulates deregistration during epoch)
         state.deregister_stake_address(&stake_address, None, 100, &mut vld);
 
-        // Now apply pending MIRs at "epoch boundary"
+        // Now apply instant rewards at "epoch boundary"
         state.apply_pending_mirs();
 
         // MIR should NOT have been applied - reserves should be unchanged
@@ -2140,7 +2137,12 @@ mod tests {
             },
         ];
 
-        state.handle_tx_certificates(&TxCertificatesMessage { certificates }, 0, &mut vld)?;
+        state.handle_tx_certificates(
+            &TxCertificatesMessage { certificates },
+            0,
+            Era::Shelley,
+            &mut vld,
+        )?;
 
         let deltas = vec![
             StakeAddressDelta {

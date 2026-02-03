@@ -91,39 +91,13 @@ impl ByronAddress {
     /// - 0 = ATVerKey (regular verification key address)
     /// - 2 = ATRedeem (redeem/AVVM address)
     ///
+    /// The addr_type is the last element and CBOR-encodes small integers as
+    /// a single byte, so we can simply check if the last byte is 2.
+    ///
     /// At the Allegra hard fork (epoch 236 on mainnet), all redeem addresses
     /// are cancelled and their value returned to reserves.
     pub fn is_redeem_address(&self) -> bool {
-        // The payload is CBOR: [root_hash (28 bytes), attributes, addr_type]
-        // We need to decode it and check the third element
-        let mut decoder = minicbor::Decoder::new(&self.payload);
-
-        // Decode the array
-        let Ok(Some(len)) = decoder.array() else {
-            return false;
-        };
-
-        if len != 3 {
-            return false;
-        }
-
-        // Skip root_hash (bytes)
-        if decoder.bytes().is_err() {
-            return false;
-        }
-
-        // Skip attributes (map or other structure)
-        if decoder.skip().is_err() {
-            return false;
-        }
-
-        // Read addr_type - should be a u8
-        // ATVerKey = 0, ATRedeem = 2
-        let Ok(addr_type) = decoder.u8() else {
-            return false;
-        };
-
-        addr_type == 2
+        self.payload.last() == Some(&2)
     }
 }
 
