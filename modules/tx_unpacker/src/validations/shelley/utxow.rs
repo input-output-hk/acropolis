@@ -84,7 +84,7 @@ pub fn validate_vkey_witnesses(
 }
 
 /// Validate metadata (hash must match with computed one, check metadatum value-size when pv > 2.0)
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L401
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L440
 pub fn validate_metadata(
     aux_data_hash: Option<DataHash>,
     aux_data: Option<Vec<u8>>,
