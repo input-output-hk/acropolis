@@ -3,8 +3,9 @@ use crate::{
     DRepCredential, DelegatedStake, Lovelace, PoolId, PoolLiveStakeInfo, StakeAddress,
     StakeAddressDelta, Withdrawal,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use dashmap::DashMap;
+use imbl::{OrdMap, OrdSet};
 use rayon::prelude::*;
 use serde_with::{hex::Hex, serde_as};
 use std::{
@@ -14,7 +15,7 @@ use std::{
     },
     sync::atomic::AtomicU64,
 };
-use tracing::{error, warn};
+use tracing::error;
 
 /// State of an individual stake address
 #[serde_as]
@@ -339,13 +340,13 @@ impl StakeAddressMap {
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(
         &self,
-        dreps: &[(DRepCredential, Lovelace)],
+        dreps: &OrdMap<DRepCredential, Lovelace>,
     ) -> DRepDelegationDistribution {
         let abstain = AtomicU64::new(0);
         let no_confidence = AtomicU64::new(0);
         let dreps = dreps
             .iter()
-            .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
+            .map(|(cred, _)| (cred.clone(), AtomicU64::new(0)))
             .collect::<BTreeMap<_, _>>();
         self.inner.values().collect::<Vec<_>>().par_iter().for_each(|state| {
             let Some(drep) = state.delegated_drep.clone() else {
@@ -355,7 +356,6 @@ impl StakeAddressMap {
                 DRepChoice::Key(hash) => {
                     let cred = DRepCredential::AddrKeyHash(hash);
                     let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep address {cred:?}");
                         return;
                     };
                     total
@@ -363,7 +363,6 @@ impl StakeAddressMap {
                 DRepChoice::Script(hash) => {
                     let cred = DRepCredential::ScriptHash(hash);
                     let Some(total) = dreps.get(&cred) else {
-                        warn!("Delegated to unregistered DRep script {cred:?}");
                         return;
                     };
                     total
@@ -378,7 +377,14 @@ impl StakeAddressMap {
         let no_confidence = no_confidence.load(std::sync::atomic::Ordering::Relaxed);
         let dreps = dreps
             .into_iter()
-            .map(|(k, v)| (k, v.load(std::sync::atomic::Ordering::Relaxed)))
+            .filter_map(|(k, v)| {
+                let total = v.load(std::sync::atomic::Ordering::Relaxed);
+                if total > 0 {
+                    Some((k, total))
+                } else {
+                    None
+                }
+            })
             .collect();
         DRepDelegationDistribution {
             abstain,
@@ -412,6 +418,7 @@ impl StakeAddressMap {
             if sas.registered {
                 sas.registered = false;
                 sas.delegated_spo = None;
+                sas.delegated_drep = None;
                 true
             } else {
                 error!(
@@ -457,57 +464,30 @@ impl StakeAddressMap {
         }
     }
 
-    /// Deregister a DRep - clears all delegations to this DRep
-    ///
-    /// TODO: This currently iterates ALL stake addresses to find delegations (O(n)).
-    /// The Haskell ledger maintains a reverse index (`drepDelegs`) on each DRepState
-    /// that tracks which credentials delegated TO that DRep, enabling O(k) clearing
-    /// where k = number of delegators. We could consider adding similar reverse tracking for
-    /// better performance.
-    /// See: https://github.com/IntersectMBO/cardano-ledger/blob/master/eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs
-    /// `clearDRepDelegations` function.
-    pub fn deregister_drep(&mut self, drep_credential: &DRepCredential) {
-        for sas in self.inner.values_mut() {
-            if let Some(ref drep) = sas.delegated_drep {
-                let matches = match drep {
-                    DRepChoice::Key(hash) => {
-                        matches!(drep_credential, DRepCredential::AddrKeyHash(h) if h == hash)
-                    }
-                    DRepChoice::Script(hash) => {
-                        matches!(drep_credential, DRepCredential::ScriptHash(h) if h == hash)
-                    }
-                    _ => false,
-                };
-                if matches {
-                    sas.delegated_drep = None;
-                }
-            }
-        }
-    }
-
     /// Record a drep delegation
     pub fn record_drep_delegation(
         &mut self,
         stake_address: &StakeAddress,
         drep: &DRepChoice,
-    ) -> bool {
-        if let Some(sas) = self.get_mut(stake_address) {
-            if sas.registered {
-                sas.delegated_drep = Some(drep.clone());
-                true
-            } else {
-                error!(
-                    "Unregistered stake address in DRep delegation: {}",
-                    stake_address
-                );
-                false
+    ) -> Result<Option<DRepChoice>> {
+        let sas = self
+            .get_mut(stake_address)
+            .filter(|sas| sas.registered)
+            .ok_or_else(|| anyhow!("Invalid or unregistered stake address: {stake_address}"))?;
+
+        Ok(sas.delegated_drep.replace(drep.clone()))
+    }
+
+    /// Remove delegators from a DRep
+    /// This is only used during PV9 to handle the DRep deregistration bug
+    /// which requires that we remove the current delegation from all accounts
+    /// that have ever delegated to a DRep upon its deregistration, even if the
+    /// account is no longer delegating to the DRep.
+    pub fn remove_delegators_from_drep(&mut self, delegators: OrdSet<StakeAddress>) {
+        for stake_address in delegators {
+            if let Some(sas) = self.get_mut(&stake_address) {
+                sas.delegated_drep.take();
             }
-        } else {
-            error!(
-                "Unknown stake address in drep delegation: {}",
-                stake_address
-            );
-            false
         }
     }
 
@@ -673,7 +653,7 @@ mod tests {
             // Delegate
             stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH);
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&stake_address, &drep_choice);
+            stake_addresses.record_drep_delegation(&stake_address, &drep_choice).unwrap();
 
             // Deregister
             assert!(stake_addresses.deregister_stake_address(&stake_address));
@@ -724,7 +704,9 @@ mod tests {
 
             stake_addresses.register_stake_address(&stake_address);
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            assert!(stake_addresses.record_drep_delegation(&stake_address, &drep_choice));
+            let prev =
+                stake_addresses.record_drep_delegation(&stake_address, &drep_choice).unwrap();
+            assert_eq!(prev, None);
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
                 Some(drep_choice)
@@ -738,8 +720,9 @@ mod tests {
 
             // Test unknown address
             assert!(!stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
-            assert!(!stake_addresses
-                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH)));
+            assert!(stake_addresses
+                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
+                .is_err());
 
             // Create an unregistered entry with UTXO value
             stake_addresses
@@ -753,8 +736,9 @@ mod tests {
 
             // Delegation should still fail for unregistered address
             assert!(!stake_addresses.record_stake_delegation(&stake_address, &SPO_HASH));
-            assert!(!stake_addresses
-                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH)));
+            assert!(stake_addresses
+                .record_drep_delegation(&stake_address, &DRepChoice::Key(DREP_HASH))
+                .is_err());
         }
 
         #[test]
@@ -779,14 +763,16 @@ mod tests {
             );
 
             // First DRep delegation
-            stake_addresses.record_drep_delegation(&stake_address, &DRepChoice::Abstain);
+            stake_addresses.record_drep_delegation(&stake_address, &DRepChoice::Abstain).unwrap();
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
                 Some(DRepChoice::Abstain)
             );
 
             // DRep re-delegation
-            stake_addresses.record_drep_delegation(&stake_address, &DRepChoice::NoConfidence);
+            stake_addresses
+                .record_drep_delegation(&stake_address, &DRepChoice::NoConfidence)
+                .unwrap();
             assert_eq!(
                 stake_addresses.get(&stake_address).unwrap().delegated_drep,
                 Some(DRepChoice::NoConfidence)
@@ -1198,9 +1184,9 @@ mod tests {
             stake_addresses.register_stake_address(&addr2);
             stake_addresses.register_stake_address(&addr3);
 
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain);
-            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::NoConfidence);
-            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Key(DREP_HASH));
+            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain).unwrap();
+            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::NoConfidence).unwrap();
+            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Key(DREP_HASH)).unwrap();
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
@@ -1232,7 +1218,7 @@ mod tests {
                 .unwrap();
             stake_addresses.add_to_reward(&addr3, 150);
 
-            let dreps = vec![(DRepCredential::AddrKeyHash(DREP_HASH), 500)];
+            let dreps = OrdMap::from_iter([(DRepCredential::AddrKeyHash(DREP_HASH), 500_u64)]);
             let drdd = stake_addresses.generate_drdd(&dreps);
 
             assert_eq!(drdd.abstain, 1050); // 1000 + 50
@@ -1246,7 +1232,7 @@ mod tests {
                 .map(|(_, stake)| *stake)
                 .unwrap();
 
-            assert_eq!(drep_stake, 3650); // 3000 + 150 + 500 deposit
+            assert_eq!(drep_stake, 3150); // 3000 + 150
         }
     }
 
@@ -1657,8 +1643,8 @@ mod tests {
             stake_addresses.register_stake_address(&addr2);
             stake_addresses.register_stake_address(&addr3);
 
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain);
-            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::Key(DREP_HASH));
+            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::Abstain).unwrap();
+            stake_addresses.record_drep_delegation(&addr2, &DRepChoice::Key(DREP_HASH)).unwrap();
 
             let addresses = vec![addr1.clone(), addr2.clone(), addr3.clone()];
             let map = stake_addresses.get_drep_delegations_map(&addresses).unwrap();
@@ -1676,7 +1662,7 @@ mod tests {
             let addr2 = create_stake_address(STAKE_KEY_HASH_2);
 
             stake_addresses.register_stake_address(&addr1);
-            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::NoConfidence);
+            stake_addresses.record_drep_delegation(&addr1, &DRepChoice::NoConfidence).unwrap();
 
             let addresses = vec![addr1, addr2];
 
@@ -1706,9 +1692,9 @@ mod tests {
             stake_addresses.register_stake_address(&addr3);
 
             let drep_choice = DRepChoice::Key(DREP_HASH);
-            stake_addresses.record_drep_delegation(&addr1, &drep_choice);
-            stake_addresses.record_drep_delegation(&addr2, &drep_choice);
-            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Abstain);
+            stake_addresses.record_drep_delegation(&addr1, &drep_choice).unwrap();
+            stake_addresses.record_drep_delegation(&addr2, &drep_choice).unwrap();
+            stake_addresses.record_drep_delegation(&addr3, &DRepChoice::Abstain).unwrap();
 
             stake_addresses
                 .process_stake_delta(&StakeAddressDelta {
