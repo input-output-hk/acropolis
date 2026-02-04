@@ -44,6 +44,22 @@ impl UTxOIdentifier {
         buf[32..34].copy_from_slice(&self.output_index.to_be_bytes());
         buf
     }
+    pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        if bytes.len() != 34 {
+            return Err(anyhow::anyhow!(
+                "Invalid UTxOIdentifier bytes length: expected 34, got {}",
+                bytes.len()
+            ));
+        }
+        let mut hash_bytes = [0u8; 32];
+        hash_bytes.copy_from_slice(&bytes[..32]);
+        let tx_hash = TxHash::from(hash_bytes);
+        let output_index = u16::from_be_bytes([bytes[32], bytes[33]]);
+        Ok(Self {
+            tx_hash,
+            output_index,
+        })
+    }
 }
 
 impl std::fmt::Display for UTxOIdentifier {

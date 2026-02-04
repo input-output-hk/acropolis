@@ -99,6 +99,38 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
         Ok(self.partition.approximate_len())
     }
 
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        let mut cancelled = Vec::new();
+
+        // Iterate over all UTxOs and collect redeem addresses
+        for entry in self.partition.iter() {
+            let (key_bytes, value_bytes) = entry?;
+            let utxo: UTXOValue = serde_cbor::from_slice(&value_bytes)?;
+            if utxo.address.is_redeem() {
+                let key = UTxOIdentifier::from_bytes(&key_bytes)?;
+                cancelled.push((key, utxo));
+            }
+        }
+
+        // Remove them
+        for (key, _) in &cancelled {
+            self.partition.remove(key.to_bytes())?;
+        }
+
+        // Flush after mass delete
+        self.keyspace.persist(PersistMode::Buffer)?;
+
+        let total_cancelled: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+        info!(
+            count = cancelled.len(),
+            total_cancelled, "Cancelled AVVM/redeem UTxOs"
+        );
+
+        Ok(cancelled)
+    }
+
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         self.partition.iter().try_fold(0u64, |acc, item| {
