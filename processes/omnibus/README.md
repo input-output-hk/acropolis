@@ -11,3 +11,20 @@ production.
 $ cd processes/omnibus
 $ cargo run
 ```
+
+## Known issues
+
+### Too many open files when using modules using Fjall
+
+There are two things that contribute towards this:
+- The version of lsm-tree used by the Fjall package is known to leave file
+  descriptors open for closed files.
+- The default maximum open file limit per Fjall database is 512, so running
+  multiple modules with Fjall stores can quickly reach the default limits of
+  some systems
+
+This issue can be worked around by increasing the open file limit. On Linux
+systems this can be done with the ulimit command:
+```
+$ ulimit -n 4096
+```
