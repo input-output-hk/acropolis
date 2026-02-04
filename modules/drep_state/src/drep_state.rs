@@ -164,7 +164,7 @@ impl DRepState {
         // and Shelly params (protocol version).
         let mut initial_d_rep_activity: Option<u32> = None;
         let mut initial_gov_action_lifetime: Option<u32> = None;
-        let mut initial_is_bootstrap: Option<bool> = None;
+        let mut initial_is_pv9: Option<bool> = None;
 
         if let Some(params) = &mut subs.params {
             let (_, message) = params.read_skip_rollbacks().await?;
@@ -172,7 +172,8 @@ impl DRepState {
             // Snapshot may start mid-epoch, so read protocol params from genesis.
             if let (Some(shelley), Some(conway)) = (&message.params.shelley, &message.params.conway)
             {
-                initial_is_bootstrap = Option::from(shelley.protocol_params.protocol_version.is_chang()?);
+                // 'Chang' is PV9 State::update_drep_expiry_versioned() for further details.
+                initial_is_pv9 = Option::from(shelley.protocol_params.protocol_version.is_chang()?);
                 initial_d_rep_activity = Some(conway.d_rep_activity);
                 initial_gov_action_lifetime = Some(conway.gov_action_lifetime);
             } else if message.params.conway.is_some() {
@@ -191,7 +192,7 @@ impl DRepState {
                         storage_config,
                         initial_d_rep_activity,
                         initial_gov_action_lifetime,
-                        initial_is_bootstrap,
+                        initial_is_pv9,
                     )
                 })
             };

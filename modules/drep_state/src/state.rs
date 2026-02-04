@@ -102,7 +102,7 @@ pub struct State {
 
     /// Derived from Shelley protocol parameter: for bootstrap phase detection (protocol version).
     /// See update_drep_expiry_versioned() for further information
-    pub is_bootstrap: Option<bool>,
+    pub is_pv9: Option<bool>,
 }
 
 impl State {
@@ -110,7 +110,7 @@ impl State {
         config: DRepStorageConfig,
         conway_d_rep_activity: Option<u32>,
         conway_gov_action_lifetime: Option<u32>,
-        is_bootstrap: Option<bool>,
+        is_pv9: Option<bool>,
     ) -> Self {
         Self {
             config,
@@ -125,7 +125,7 @@ impl State {
             },
             conway_d_rep_activity,
             conway_gov_action_lifetime,
-            is_bootstrap,
+            is_pv9,
         }
     }
 
@@ -175,7 +175,9 @@ impl State {
         if let (Some(shelley), Some(conway)) = (&params.shelley, &params.conway) {
             self.conway_d_rep_activity = Some(conway.d_rep_activity);
             self.conway_gov_action_lifetime = Some(conway.gov_action_lifetime);
-            self.is_bootstrap = Some(shelley.protocol_params.protocol_version.is_chang()?);
+
+            // 'Chang' is PV9.
+            self.is_pv9 = Some(shelley.protocol_params.protocol_version.is_chang()?);
         } else if params.conway.is_some() {
             bail!("Invalid protocol parameters: Conway parameters require Shelley parameters.");
         }
@@ -193,7 +195,7 @@ impl State {
         epoch: u64,
         drep_activity: u32,
     ) -> Result<()> {
-        let expiry = match self.is_bootstrap {
+        let expiry = match self.is_pv9 {
             // Bootstrap phase: expiry = currentEpoch + drepActivity
             Some(true) => epoch + (drep_activity as u64),
             // Post-bootstrap: expiry = (currentEpoch + drepActivity) − numDormantEpochs
