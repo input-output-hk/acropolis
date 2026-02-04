@@ -610,7 +610,7 @@ impl AccountsState {
         let governance_procedures_topic = config
             .get_string("governance-procedures-topic")
             .unwrap_or(DEFAULT_GOVERNANCE_PROCEDURES_TOPIC.to_string());
-        info!("Creating governance outcomes subscriber on '{governance_procedures_topic}'");
+        info!("Creating governance procedures subscriber on '{governance_procedures_topic}'");
 
         let governance_outcomes_topic = config
             .get_string("governance-outcomes-topic")
