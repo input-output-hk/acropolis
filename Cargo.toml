@@ -31,6 +31,9 @@ members = [
     "modules/block_vrf_validator",          # Validate the VRF calculation in the block header
     "modules/block_kes_validator",          # Validate KES in the block header
     "modules/fake_block_injector",          # Fake block injector
+    "modules/rest_blockfrost",              # Blockfrost-compatible REST API
+    "modules/mcp_server",                   # Model Context Protocol server
+    "modules/custom_indexer",               # Custom indexer module
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process
@@ -48,6 +51,7 @@ caryatid_module_rest_server = "0.15.2"
 caryatid_module_clock = "0.13.2"
 caryatid_module_spy = "0.13.2"
 anyhow = "1.0"
+axum = "0.8"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "string"] }
 config = "0.15.11"

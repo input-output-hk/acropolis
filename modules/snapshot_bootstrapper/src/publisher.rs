@@ -3,6 +3,7 @@ use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
 use acropolis_common::RewardParams;
+use acropolis_common::StakeAddress;
 use acropolis_common::{commands::chain_sync::ChainSyncCommand, messages::Command};
 use acropolis_common::{
     epoch_snapshot::SnapshotsContainer,
@@ -55,6 +56,8 @@ pub struct EpochContext {
     pub era: Era,
     /// Magic number from genesis params
     pub magic_number: MagicNumber,
+    /// DRep Delegations needed to reproduce PV9 deregistration bug
+    pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
 
 impl EpochContext {
@@ -73,6 +76,7 @@ impl EpochContext {
         epoch: u64,
         era: Era,
         genesis: &GenesisValues,
+        drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
     ) -> Self {
         let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
         let epoch_start_time = genesis.slot_to_timestamp(epoch_start_slot);
@@ -87,6 +91,7 @@ impl EpochContext {
             last_block_height: header_block_height,
             era,
             magic_number: genesis.magic_number.clone(),
+            drep_delegations,
         }
     }
 }
@@ -342,6 +347,7 @@ impl AccountsCallback for SnapshotPublisher {
             pots: data.pots,
             bootstrap_snapshots: data.snapshots,
             pot_deltas: data.pot_deltas,
+            drep_delegations: self.epoch_context.drep_delegations.clone(),
         };
 
         let msg = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
@@ -681,6 +687,7 @@ mod tests {
             509,       // epoch
             Era::Conway,
             &genesis,
+            Vec::new(),
         );
 
         assert_eq!(ctx.nonces.epoch, 509);
@@ -702,6 +709,7 @@ mod tests {
             509,
             Era::Conway,
             &genesis,
+            Vec::new(),
         );
 
         // Verify nonce conversion works

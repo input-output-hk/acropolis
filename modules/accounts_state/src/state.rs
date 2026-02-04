@@ -3,16 +3,16 @@ use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
+use acropolis_common::messages::{Message, StateQuery, StateQueryResponse};
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
-        AccountsBootstrapMessage, DRepDelegationDistribution, DRepStateMessage,
-        EpochActivityMessage, GovernanceOutcomesMessage, Message, PotDeltasMessage,
-        ProtocolParamsMessage, SPOStateMessage, StakeAddressDeltasMessage, StateQuery,
-        StateQueryResponse, TxCertificatesMessage, WithdrawalsMessage,
+        AccountsBootstrapMessage, DRepDelegationDistribution, EpochActivityMessage,
+        GovernanceOutcomesMessage, PotDeltasMessage, ProtocolParamsMessage, SPOStateMessage,
+        StakeAddressDeltasMessage, TxCertificatesMessage, WithdrawalsMessage,
     },
     protocol_params::ProtocolParams,
     queries::{
@@ -86,7 +86,7 @@ pub struct State {
     pots: Pots,
 
     /// All registered DReps
-    dreps: Vec<(DRepCredential, Lovelace)>,
+    dreps: OrdMap<DRepCredential, Lovelace>,
 
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
@@ -105,6 +105,12 @@ pub struct State {
 
     /// Task for rewards calculation if necessary
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
+
+    /// DReps mapped to all accounts that have ever delegated to them
+    /// Required to properly replay PV9 in which there was a DRep deregistration
+    /// bug causing all accounts that have ever delegated to the DRep to have their
+    /// delegation wiped reguardless of if they were currently delegated to the DRep.
+    drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
     start_rewards_tx: Option<mpsc::Sender<()>>,
@@ -144,7 +150,7 @@ impl State {
         info!("Loaded {} retiring pools", self.retiring_spos.len());
 
         // Load DReps
-        self.dreps = bootstrap_msg.dreps;
+        self.dreps = bootstrap_msg.dreps.into();
         info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
@@ -188,6 +194,9 @@ impl State {
         update_value_with_delta(&mut self.pots.treasury, deltas.delta_treasury)?;
         update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
         update_value_with_delta(&mut self.pots.deposits, deltas.delta_deposits)?;
+
+        // Apply DRep delegations (Used to reproduce PV9 deregistration bug)
+        self.drep_delegators = bootstrap_msg.drep_delegations.into();
 
         info!(
             "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
@@ -752,6 +761,8 @@ impl State {
             info!("New parameter set: {:?}", params_msg.params);
             self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
+        } else if self.previous_protocol_parameters != self.protocol_parameters {
+            self.previous_protocol_parameters = self.protocol_parameters.clone()
         }
 
         Ok(())
@@ -806,7 +817,7 @@ impl State {
                                 pool: reward.pool,
                             });
                         } else {
-                            warn!(
+                            debug!(
                                 "Reward account {} deregistered - paying reward {} to treasury",
                                 reward.account, reward.amount
                             );
@@ -1075,10 +1086,6 @@ impl State {
         }
     }
 
-    pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
-        self.dreps = drep_msg.dreps.clone();
-    }
-
     /// Record a stake delegation
     fn record_stake_delegation(&mut self, stake_address: &StakeAddress, spo: &PoolId) {
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
@@ -1088,20 +1095,56 @@ impl State {
 
     /// Record a DRep registration
     fn record_drep_registration(&mut self, drep: &DRepCredential, deposit: u64) {
-        self.dreps.push((drep.clone(), deposit));
+        self.dreps.insert(drep.clone(), deposit);
     }
 
     /// record a DRep delegation
-    fn record_drep_delegation(&mut self, stake_address: &StakeAddress, drep: &DRepChoice) {
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.record_drep_delegation(stake_address, drep);
+    fn record_drep_delegation(
+        &mut self,
+        stake_address: &StakeAddress,
+        drep: &DRepChoice,
+    ) -> Result<()> {
+        let previous_drep = {
+            let mut stake_addresses = self.stake_addresses.lock().unwrap();
+            stake_addresses.record_drep_delegation(stake_address, drep)?
+        };
+
+        // In PV9 there are 2 cases we need to handle on delegation:
+        // 1. Delegated to a real DRep
+        //    We add the account to the `drep_delegators` map under the new DRep so that we can
+        //    clear the account's delegation if the DRep deregisters within PV9.
+        // 2. Delegated to NoConfidence or Abstain
+        //    We remove the account from its previous DReps account set in the `drep_delegators` map.
+        //    This behavior produces a distribution which matches DB Sync.
+        if self.is_chang() {
+            match DRepChoice::to_credential(drep) {
+                Some(drep) => {
+                    self.drep_delegators.entry(drep).or_default().insert(stake_address.clone());
+                }
+                None => {
+                    if let Some(drep) = previous_drep {
+                        self.remove_account_from_drep_delegation_map(stake_address, &drep);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Record a DRep deregistration
     fn record_drep_deregistration(&mut self, drep: &DRepCredential) {
-        self.dreps.retain(|(cred, _)| cred != drep);
-        let mut stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.deregister_drep(drep);
+        self.dreps.remove(drep);
+
+        // In PV9 we need to remove the current delegation of all accounts that have ever delegated to
+        // this DRep (Excluding accounts that delegated to No Confidence or Abstain after delegating to
+        // the DRep).
+        if self.is_chang() {
+            if let Some(delegators) = self.drep_delegators.remove(drep) {
+                let mut stake_addresses = self.stake_addresses.lock().unwrap();
+                stake_addresses.remove_delegators_from_drep(delegators);
+            }
+        }
     }
 
     /// Handle TxCertificates
@@ -1181,12 +1224,12 @@ impl State {
                 }
 
                 TxCertificate::VoteDelegation(delegation) => {
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
                 }
 
                 TxCertificate::StakeAndVoteDelegation(delegation) => {
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
                 }
 
                 TxCertificate::StakeRegistrationAndDelegation(delegation) => {
@@ -1216,7 +1259,7 @@ impl State {
                             outcome,
                         });
                     }
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
                 }
 
                 TxCertificate::StakeRegistrationAndStakeAndVoteDelegation(delegation) => {
@@ -1231,8 +1274,9 @@ impl State {
                             outcome,
                         });
                     }
+
                     self.record_stake_delegation(&delegation.stake_address, &delegation.operator);
-                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep);
+                    self.record_drep_delegation(&delegation.stake_address, &delegation.drep)?;
                 }
 
                 TxCertificate::DRepRegistration(reg) => {
@@ -1368,6 +1412,48 @@ impl State {
 
         Ok(())
     }
+
+    // Remove an account from a DReps delegation set
+    // Used during PV9 when an account delegates to either Abstain or No Confidence
+    // after their previous DRep
+    fn remove_account_from_drep_delegation_map(
+        &mut self,
+        stake_address: &StakeAddress,
+        previous_drep: &DRepChoice,
+    ) {
+        let Some(prev_cred) = DRepChoice::to_credential(previous_drep) else {
+            return;
+        };
+
+        let Some(delegators) = self.drep_delegators.get(&prev_cred) else {
+            return;
+        };
+
+        let updated = delegators.without(stake_address);
+
+        if updated.is_empty() {
+            self.drep_delegators = self.drep_delegators.without(&prev_cred);
+        } else {
+            self.drep_delegators = self.drep_delegators.update(prev_cred, updated);
+        }
+    }
+
+    // Retrieve the major protocol version from the previous protocol parameters
+    // During bootstrap we use the current protocol parameters for the first epoch
+    fn is_chang(&self) -> bool {
+        let params = match &self.previous_protocol_parameters {
+            Some(params) => params,
+            None => match &self.protocol_parameters {
+                Some(params) => params,
+                None => return false,
+            },
+        };
+
+        match &params.shelley {
+            Some(shelley) => shelley.protocol_params.protocol_version.major == 9,
+            None => false,
+        }
+    }
 }
 
 // -- Tests --
@@ -1379,10 +1465,12 @@ mod tests {
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
-        Ratio, Registration, StakeAddress, StakeAddressDelta, StakeAndVoteDelegation,
-        StakeCredential, StakeRegistrationAndStakeAndVoteDelegation,
-        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, TxIdentifier, VoteDelegation,
-        VrfKeyHash, Withdrawal,
+        Ratio, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier, VrfKeyHash,
+        Withdrawal,
+    };
+    use acropolis_common::{
+        Registration, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
+        StakeRegistrationAndVoteDelegation, TxCertificateWithPos, VoteDelegation,
     };
 
     // Helper to create a StakeAddress from a byte slice
@@ -1731,40 +1819,14 @@ mod tests {
     }
 
     #[test]
-    fn drdd_includes_initial_deposit() {
-        let mut state = State::default();
-
-        let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
-        state.handle_drep_state(&DRepStateMessage {
-            epoch: 1337,
-            dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
-        });
-
-        let drdd = state.generate_drdd();
-        assert_eq!(
-            drdd,
-            DRepDelegationDistribution {
-                abstain: 0,
-                no_confidence: 0,
-                dreps: vec![(drep_addr_cred, 1_000_000)],
-            }
-        );
-    }
-
-    #[test]
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
         let mut vld = ValidationOutcomes::new();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
+        state.dreps.insert(drep_addr_cred.clone(), 1_000_000);
         let drep_script_cred = DRepCredential::ScriptHash(test_keyhash_from_bytes(&DREP_HASH));
-        state.handle_drep_state(&DRepStateMessage {
-            epoch: 1337,
-            dreps: vec![
-                (drep_addr_cred.clone(), 1_000_000),
-                (drep_script_cred.clone(), 2_000_000),
-            ],
-        });
+        state.dreps.insert(drep_script_cred.clone(), 2_000_000);
 
         let spo1 = create_address(&[0x01]);
         let spo2 = create_address(&[0x02]);
@@ -1874,7 +1936,7 @@ mod tests {
             DRepDelegationDistribution {
                 abstain: 10_000,
                 no_confidence: 100_000,
-                dreps: vec![(drep_script_cred, 2_001_000), (drep_addr_cred, 1_000_100)],
+                dreps: vec![(drep_script_cred, 1_000), (drep_addr_cred, 100)],
             }
         );
 

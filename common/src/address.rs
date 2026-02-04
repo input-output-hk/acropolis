@@ -444,7 +444,9 @@ impl ShelleyAddress {
 }
 
 /// A stake address
-#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct StakeAddress {
     /// Network id
     pub network: NetworkId,
