@@ -10,15 +10,18 @@ use caryatid_sdk::{Context, Subscription};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::BlockSink;
+use crate::chain_state::{ChainEvent, ChainState};
 use crate::configuration::{BlockFlowMode, InterfaceConfig};
 use crate::connection::Header;
 use crate::network::{NetworkEvent, PeerId};
 
 /// Block flow handling strategies.
 pub enum BlockFlowHandler {
-    /// Direct: auto-fetch blocks as announced
+    /// Direct: auto-fetch blocks as announced, PNI manages chain selection
     Direct,
-    /// Consensus-driven: publish offers, wait for wants before fetching
+    /// Consensus-driven: publish offers, wait for wants before fetching.
+    /// Chain selection is delegated to the consensus module.
     Consensus(ConsensusFlowState),
 }
 
@@ -101,9 +104,38 @@ impl BlockFlowHandler {
         }
     }
 
-    pub async fn publish_pending(&mut self) -> Result<()> {
-        if let BlockFlowHandler::Consensus(state) = self {
-            state.publish_pending().await?;
+    /// Publish events appropriate for the current flow mode.
+    ///
+    /// - Direct mode: publishes RollForward/RollBackward from chain state
+    /// - Consensus mode: publishes BlockOffered/BlockRescinded to consensus
+    pub async fn publish(
+        &mut self,
+        chain: &mut ChainState,
+        block_sink: &mut BlockSink,
+        published_blocks: &mut u64,
+    ) -> Result<()> {
+        match self {
+            BlockFlowHandler::Direct => {
+                while let Some(event) = chain.next_unpublished_event() {
+                    let tip = chain.preferred_upstream_tip();
+                    match event {
+                        ChainEvent::RollForward { header, body } => {
+                            block_sink.announce_roll_forward(header, body, tip).await?;
+                            *published_blocks += 1;
+                            if published_blocks.is_multiple_of(100) {
+                                info!("Published block {}", header.number);
+                            }
+                        }
+                        ChainEvent::RollBackward { header } => {
+                            block_sink.announce_roll_backward(header, tip).await?;
+                        }
+                    }
+                    chain.handle_event_published();
+                }
+            }
+            BlockFlowHandler::Consensus(state) => {
+                state.publish_pending().await?;
+            }
         }
         Ok(())
     }
