@@ -44,6 +44,7 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
+    pub total_collateral: u64,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
@@ -75,6 +76,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            total_collateral,
             is_valid,
             certs,
             withdrawals,
@@ -95,6 +97,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            total_collateral,
             is_valid,
             withdrawals: None,
             certs: None,
@@ -144,6 +147,9 @@ pub struct TxUTxODeltas {
 
     // Transaction fee
     pub fee: u64,
+
+    // Transaction total collateral
+    pub total_collateral: u64,
 
     // Tx validity flag
     pub is_valid: bool,
@@ -215,9 +221,7 @@ impl TxUTxODeltas {
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> Value {
-        let total_refund = self.calculate_total_refund(stake_registration_updates);
-        let total_withdrawals = self.calculate_total_withdrawals();
-        let mut total_consumed = Value::new(total_refund + total_withdrawals, vec![]);
+        let mut total_consumed = Value::new(0, vec![]);
 
         // Add Inputs UTxO values
         for input in self.consumes.iter() {
@@ -225,6 +229,16 @@ impl TxUTxODeltas {
                 total_consumed += &utxo.value;
             }
         }
+
+        if !self.is_valid {
+            // If the transaction is invalid, it only consumes
+            // collateral inputs
+            return total_consumed;
+        }
+
+        let total_refund = self.calculate_total_refund(stake_registration_updates);
+        let total_withdrawals = self.calculate_total_withdrawals();
+        total_consumed += &Value::new(total_refund + total_withdrawals, vec![]);
 
         // Add Value Minted
         total_consumed += &self.get_minted_value();
@@ -239,14 +253,23 @@ impl TxUTxODeltas {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
     ) -> Value {
-        let total_deposit =
-            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
-        let mut total_produced = Value::new(total_deposit + self.fee, vec![]);
+        let mut total_produced = Value::new(0, vec![]);
 
         // Add Outputs UTxO values
         for output in &self.produces {
             total_produced += &output.value;
         }
+
+        if !self.is_valid {
+            // If the transaction is invalid, it only produces
+            // collateral outputs plus total collateral
+            total_produced += &Value::new(self.total_collateral, vec![]);
+            return total_produced;
+        }
+
+        let total_deposit =
+            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
+        total_produced += &Value::new(total_deposit + self.fee, vec![]);
 
         // Add Value Burnt
         total_produced += &self.get_burnt_value();

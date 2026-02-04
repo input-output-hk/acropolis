@@ -78,6 +78,13 @@ mod tests {
         "mary - valid transaction 1 - with native assets amount of 0"
     )]
     #[test_case(validation_fixture!(
+        "conway",
+        "a6ae48485ace169cfac1dd7383fa8f26016c49637bab901215e9ee69c25313bd"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - failed transaction"
+    )]
+    #[test_case(validation_fixture!(
         "shelley",
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
         "bad_inputs_utxo"
