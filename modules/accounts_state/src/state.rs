@@ -88,9 +88,6 @@ pub struct State {
     /// All registered DReps
     dreps: Vec<(DRepCredential, Lovelace)>,
 
-    /// All inactive DReps
-    inactive_dreps: HashSet<DRepCredential>,
-
     /// Protocol parameters that apply during this epoch
     protocol_parameters: Option<ProtocolParams>,
 
@@ -148,7 +145,6 @@ impl State {
 
         // Load DReps
         self.dreps = bootstrap_msg.dreps;
-        self.inactive_dreps.clear();
         info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
@@ -741,7 +737,7 @@ impl State {
     /// delegated to each DRep, including the special "abstain" and "no confidence" dreps.
     pub fn generate_drdd(&self) -> DRepDelegationDistribution {
         let stake_addresses = self.stake_addresses.lock().unwrap();
-        stake_addresses.generate_drdd(&self.dreps, &self.inactive_dreps)
+        stake_addresses.generate_drdd(&self.dreps)
     }
 
     /// Handle an ProtocolParamsMessage with the latest parameters at the start of a new
@@ -1081,7 +1077,6 @@ impl State {
 
     pub fn handle_drep_state(&mut self, drep_msg: &DRepStateMessage) {
         self.dreps = drep_msg.dreps.clone();
-        self.inactive_dreps = drep_msg.inactive_dreps.iter().cloned().collect();
     }
 
     /// Record a stake delegation
@@ -1743,7 +1738,6 @@ mod tests {
         state.handle_drep_state(&DRepStateMessage {
             epoch: 1337,
             dreps: vec![(drep_addr_cred.clone(), 1_000_000)],
-            inactive_dreps: vec![],
         });
 
         let drdd = state.generate_drdd();
@@ -1770,7 +1764,6 @@ mod tests {
                 (drep_addr_cred.clone(), 1_000_000),
                 (drep_script_cred.clone(), 2_000_000),
             ],
-            inactive_dreps: vec![],
         });
 
         let spo1 = create_address(&[0x01]);

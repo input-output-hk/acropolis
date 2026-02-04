@@ -10,7 +10,7 @@ use serde_with::{hex::Hex, serde_as};
 use std::{
     collections::{
         hash_map::{Entry, Iter, Values},
-        BTreeMap, HashMap, HashSet,
+        BTreeMap, HashMap,
     },
     sync::atomic::AtomicU64,
 };
@@ -340,13 +340,11 @@ impl StakeAddressMap {
     pub fn generate_drdd(
         &self,
         dreps: &[(DRepCredential, Lovelace)],
-        inactive_dreps: &HashSet<DRepCredential>,
     ) -> DRepDelegationDistribution {
         let abstain = AtomicU64::new(0);
         let no_confidence = AtomicU64::new(0);
         let dreps = dreps
             .iter()
-            .filter(|(cred, _)| !inactive_dreps.contains(cred))
             .map(|(cred, deposit)| (cred.clone(), AtomicU64::new(*deposit)))
             .collect::<BTreeMap<_, _>>();
         self.inner.values().collect::<Vec<_>>().par_iter().for_each(|state| {
@@ -356,9 +354,6 @@ impl StakeAddressMap {
             let total = match drep {
                 DRepChoice::Key(hash) => {
                     let cred = DRepCredential::AddrKeyHash(hash);
-                    if inactive_dreps.contains(&cred) {
-                        return;
-                    }
                     let Some(total) = dreps.get(&cred) else {
                         warn!("Delegated to unregistered DRep address {cred:?}");
                         return;
@@ -367,9 +362,6 @@ impl StakeAddressMap {
                 }
                 DRepChoice::Script(hash) => {
                     let cred = DRepCredential::ScriptHash(hash);
-                    if inactive_dreps.contains(&cred) {
-                        return;
-                    }
                     let Some(total) = dreps.get(&cred) else {
                         warn!("Delegated to unregistered DRep script {cred:?}");
                         return;
@@ -1241,7 +1233,7 @@ mod tests {
             stake_addresses.add_to_reward(&addr3, 150);
 
             let dreps = vec![(DRepCredential::AddrKeyHash(DREP_HASH), 500)];
-            let drdd = stake_addresses.generate_drdd(&dreps, &HashSet::new());
+            let drdd = stake_addresses.generate_drdd(&dreps);
 
             assert_eq!(drdd.abstain, 1050); // 1000 + 50
             assert_eq!(drdd.no_confidence, 2100); // 2000 + 100
