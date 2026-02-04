@@ -3,6 +3,7 @@
 //! as well as utxo delta events for CIP68 metadata and asset transactions tracking
 
 use crate::{
+    address_state::AddressState,
     asset_registry::AssetRegistry,
     state::{AssetsStorageConfig, State, StoreTransactions},
 };
@@ -22,6 +23,7 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
+mod address_state;
 pub mod asset_registry;
 mod state;
 
@@ -52,6 +54,7 @@ pub struct AssetsState;
 impl AssetsState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        address_state: Option<Arc<Mutex<AddressState>>>,
         mut asset_deltas_subscription: Box<dyn Subscription<Message>>,
         mut utxo_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
         mut address_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
@@ -89,7 +92,17 @@ impl AssetsState {
                     {
                         let mut reg = registry.lock().await;
                         state = match state.handle_mint_deltas(&deltas_msg.deltas, &mut reg) {
-                            Ok(new_state) => new_state,
+                            Ok((new_state, updated_asset_ids)) => {
+                                if let Some(ref address_state) = address_state {
+                                    let mut address_state = address_state.lock().await;
+                                    address_state.new_block(
+                                        block_info.number,
+                                        &updated_asset_ids,
+                                        &reg,
+                                    );
+                                }
+                                new_state
+                            }
                             Err(e) => {
                                 error!("Asset deltas handling error: {e:#}");
                                 state
@@ -164,13 +177,16 @@ impl AssetsState {
                         Self::check_sync(&current_block, block_info, "address");
 
                         let reg = registry.lock().await;
-                        state = match state.handle_address_deltas(&address_deltas_msg.deltas, &reg)
-                        {
-                            Ok(new_state) => new_state,
-                            Err(e) => {
-                                error!("Address deltas handling error: {e:#}");
-                                state
-                            }
+                        if let Some(ref address_state) = address_state {
+                            let mut address_state = address_state.lock().await;
+                            match address_state
+                                .handle_address_deltas(&address_deltas_msg.deltas, &reg)
+                            {
+                                Ok(new_state) => new_state,
+                                Err(e) => {
+                                    error!("Address deltas handling error: {e:#}");
+                                }
+                            };
                         };
                     }
                     other => error!("Unexpected message on address-deltas subscription: {other:?}"),
@@ -267,9 +283,16 @@ impl AssetsState {
             "AssetsState",
             StateHistoryStore::default_block_store(),
         )));
+        let address_state = if storage_config.store_addresses {
+            Some(Arc::new(Mutex::new(AddressState::new())))
+        } else {
+            None
+        };
         let history_run = history.clone();
         let query_history = history.clone();
         let tick_history = history.clone();
+        let address_state_run = address_state.clone();
+        let query_address_state = address_state.clone();
 
         // Initialize asset registry
         let registry = Arc::new(Mutex::new(asset_registry::AssetRegistry::new()));
@@ -279,6 +302,7 @@ impl AssetsState {
         // Query handler
         context.handle(&assets_query_topic, move |message| {
             let history = query_history.clone();
+            let address_state = query_address_state.clone();
             let registry = query_registry.clone();
             async move {
                 let Message::StateQuery(StateQuery::Assets(query)) = message.as_ref() else {
@@ -368,39 +392,49 @@ impl AssetsState {
                             }
                         }
                     }
-                    AssetsStateQuery::GetAssetAddresses { policy, name } => {
-                        let reg = registry.lock().await;
-                        match reg.lookup_id(policy, name) {
-                            Some(asset_id) => match state.get_asset_addresses(&asset_id) {
-                                Ok(Some(addresses)) => {
-                                    AssetsStateQueryResponse::AssetAddresses(addresses)
+                    AssetsStateQuery::GetAssetAddresses { policy, name } => match address_state {
+                        Some(address_state) => {
+                            let reg = registry.lock().await;
+                            let address_state = address_state.lock().await;
+                            match reg.lookup_id(policy, name) {
+                                Some(asset_id) => {
+                                    match address_state.get_asset_addresses(&asset_id) {
+                                        Ok(Some(addresses)) => {
+                                            AssetsStateQueryResponse::AssetAddresses(addresses)
+                                        }
+                                        Ok(None) => AssetsStateQueryResponse::Error(
+                                            QueryError::not_found(format!(
+                                                "Asset addresses for {}:{}",
+                                                hex::encode(policy),
+                                                hex::encode(name.as_slice())
+                                            )),
+                                        ),
+                                        Err(e) => AssetsStateQueryResponse::Error(
+                                            QueryError::internal_error(e.to_string()),
+                                        ),
+                                    }
                                 }
-                                Ok(None) => {
-                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
-                                        "Asset addresses for {}:{}",
-                                        hex::encode(policy),
-                                        hex::encode(name.as_slice())
-                                    )))
-                                }
-                                Err(e) => AssetsStateQueryResponse::Error(
-                                    QueryError::internal_error(e.to_string()),
-                                ),
-                            },
-                            None => {
-                                if state.config.store_addresses {
-                                    AssetsStateQueryResponse::Error(QueryError::not_found(format!(
-                                        "Asset addresses for {}:{}",
-                                        hex::encode(policy),
-                                        hex::encode(name.as_slice())
-                                    )))
-                                } else {
-                                    AssetsStateQueryResponse::Error(QueryError::storage_disabled(
-                                        "asset addresses",
-                                    ))
+                                None => {
+                                    if state.config.store_addresses {
+                                        AssetsStateQueryResponse::Error(QueryError::not_found(
+                                            format!(
+                                                "Asset addresses for {}:{}",
+                                                hex::encode(policy),
+                                                hex::encode(name.as_slice())
+                                            ),
+                                        ))
+                                    } else {
+                                        AssetsStateQueryResponse::Error(
+                                            QueryError::storage_disabled("asset addresses"),
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
+                        None => AssetsStateQueryResponse::Error(QueryError::storage_disabled(
+                            "asset addresses",
+                        )),
+                    },
                     AssetsStateQuery::GetAssetTransactions { policy, name } => {
                         let reg = registry.lock().await;
                         match reg.lookup_id(policy, name) {
@@ -507,6 +541,7 @@ impl AssetsState {
         context.run(async move {
             Self::run(
                 history_run,
+                address_state_run,
                 asset_deltas_sub,
                 utxo_deltas_sub,
                 address_deltas_sub,
