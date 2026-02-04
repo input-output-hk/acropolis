@@ -785,21 +785,6 @@ impl State {
             self.previous_protocol_parameters = self.protocol_parameters.clone();
             self.protocol_parameters = Some(params_msg.params.clone());
         } else if self.previous_protocol_parameters != self.protocol_parameters {
-            let was_pv9 = self
-                .previous_protocol_parameters
-                .as_ref()
-                .is_some_and(|p| p.major_protocol_version() == Some(9));
-
-            let is_pv9 = self
-                .protocol_parameters
-                .as_ref()
-                .is_some_and(|p| p.major_protocol_version() == Some(9));
-
-            // Clear PV9 DRep delegators map on transition to PV10
-            if was_pv9 && !is_pv9 {
-                self.drep_delegators = OrdMap::new();
-            }
-
             self.previous_protocol_parameters = self.protocol_parameters.clone()
         }
 
@@ -1183,6 +1168,10 @@ impl State {
                 stake_addresses.remove_delegators_from_drep(delegators);
             }
         } else {
+            // Clear PV9 historical delegators map if not empty
+            if !self.drep_delegators.is_empty() {
+                self.drep_delegators = OrdMap::new()
+            }
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             stake_addresses.deregister_drep(drep);
         }
