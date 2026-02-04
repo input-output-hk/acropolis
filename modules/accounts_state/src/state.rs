@@ -786,11 +786,14 @@ impl State {
             self.protocol_parameters = Some(params_msg.params.clone());
         } else if self.previous_protocol_parameters != self.protocol_parameters {
             let was_pv9 = self
-                .protocol_parameters
+                .previous_protocol_parameters
                 .as_ref()
                 .is_some_and(|p| p.major_protocol_version() == Some(9));
 
-            let is_pv9 = params_msg.params.major_protocol_version() == Some(9);
+            let is_pv9 = self
+                .protocol_parameters
+                .as_ref()
+                .is_some_and(|p| p.major_protocol_version() == Some(9));
 
             // Clear PV9 DRep delegators map on transition to PV10
             if was_pv9 && !is_pv9 {
