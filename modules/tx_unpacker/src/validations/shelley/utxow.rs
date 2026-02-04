@@ -5,8 +5,9 @@ use std::collections::HashSet;
 
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
-    crypto::keyhash_256, protocol_params::ProtocolVersion, validation::UTxOWValidationError,
-    DataHash, GenesisDelegates, KeyHash, NativeScript, TxHash, VKeyWitness,
+    crypto::keyhash_256, protocol_params::ProtocolVersion, soft_fork,
+    validation::UTxOWValidationError, DataHash, GenesisDelegates, KeyHash, NativeScript, TxHash,
+    VKeyWitness,
 };
 use anyhow::Result;
 use pallas::{codec::utils::Nullable, ledger::primitives::alonzo};
@@ -83,25 +84,33 @@ pub fn validate_vkey_witnesses(
     Ok(())
 }
 
+pub fn validate_aux_data(_aux_data: &[u8]) -> Result<(), Box<UTxOWValidationError>> {
+    Ok(())
+}
+
 /// Validate metadata (hash must match with computed one, check metadatum value-size when pv > 2.0)
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L440
 pub fn validate_metadata(
     aux_data_hash: Option<DataHash>,
     aux_data: Option<Vec<u8>>,
-    _protocol_version: &ProtocolVersion,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     match (aux_data_hash, aux_data) {
         (None, None) => Ok(()),
         (Some(aux_data_hash), Some(aux_data)) => {
             let computed_hash = keyhash_256(aux_data.as_slice());
             if aux_data_hash != computed_hash {
-                Err(Box::new(UTxOWValidationError::ConflictingMetadataHash {
+                return Err(Box::new(UTxOWValidationError::ConflictingMetadataHash {
                     expected: aux_data_hash,
                     actual: computed_hash,
-                }))
-            } else {
-                Ok(())
+                }));
             }
+
+            if soft_fork::should_check_metadata(protocol_version) {
+                validate_aux_data(aux_data.as_slice())?;
+            }
+
+            Ok(())
         }
         (Some(aux_data_hash), None) => Err(Box::new(UTxOWValidationError::MissingTxMetadata {
             metadata_hash: aux_data_hash,
