@@ -74,7 +74,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script": null
+      "reference_script_hash": null
     },
     "241f6fa120e4c2d28282553f6116c4bb3bb3b14e42c047493b492be656b8f41a#2": {
       "address": "addr1w9yr0zr530tp9yzrhly8lw5upddu0eym3yh0mjwa0qlr9pgmkzgv0",
@@ -82,7 +82,7 @@
         "lovelace": 56540159,
         "assets": []
       },
-      "reference_script": null
+      "reference_script_hash": null
     },
     "36e2d638bc4d7b2371596463f84ea6e0e4a03f579e814c2c6b8b1f52927a1f48#0": {
       "address": "addr1w9yr0zr530tp9yzrhly8lw5upddu0eym3yh0mjwa0qlr9pgmkzgv0",
@@ -93,7 +93,7 @@
       "datum": {
         "Hash": "c8296567eaffef4efdafa652335bbd34e91cddbcf061a17d110d16e540324c32"
       },
-      "reference_script": null
+      "reference_script_hash": null
     }
   }
 }

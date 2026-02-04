@@ -60,9 +60,12 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
+    use crate::{
+        test_utils::{to_pallas_era, TestContext},
+        validation_fixture,
+    };
     use acropolis_common::KeyHash;
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -82,8 +85,10 @@ mod tests {
         "invalid_witnesses_utxow"
     )]
     #[allow(clippy::result_large_err)]
-    fn conway_test((_ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Conway, &raw_tx).unwrap();
+    fn conway_utxow_test(
+        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let mtx = tx.as_conway().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());

@@ -197,9 +197,12 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{test_utils::TestContext, utils, validation_fixture};
-    use acropolis_common::{Era, NetworkId, RedeemerTag, TxHash, TxIdentifier};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_era, to_pallas_era, TestContext},
+        utils, validation_fixture,
+    };
+    use acropolis_common::{NetworkId, RedeemerTag, TxHash, TxIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -258,8 +261,10 @@ mod tests {
         "alonzo - unspendable utxo no datum hash"
     )]
     #[allow(clippy::result_large_err)]
-    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn alonzo_utxow_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
         let tx_identifier = TxIdentifier::new(4533644, 1);
         let mapped_tx = acropolis_codec::map_transaction(
@@ -267,7 +272,7 @@ mod tests {
             &raw_tx,
             tx_identifier,
             NetworkId::Mainnet,
-            Era::Shelley,
+            to_era(era),
         );
         let tx_error = mapped_tx.error.as_ref();
         assert!(tx_error.is_none());

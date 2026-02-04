@@ -150,8 +150,11 @@ pub fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -190,8 +193,10 @@ mod tests {
         "alonzo - valid transaction 5 - has contract, plutus data, redeemer"
     )]
     #[allow(clippy::result_large_err)]
-    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Alonzo, &raw_tx).unwrap();
+    fn alonzo_utxow_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());

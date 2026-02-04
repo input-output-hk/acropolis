@@ -54,9 +54,12 @@ pub fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use acropolis_common::{Era, NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_era, to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use acropolis_common::{NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
     use std::str::FromStr;
     use test_case::test_case;
 
@@ -65,7 +68,14 @@ mod tests {
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
+    )]
+    #[test_case(validation_fixture!(
+        "mary",
+        "12eb4f1d4bc1dae27d916d4bc1a6cf6fd167c7413e77792fbd1edead310847ab"
+    ) =>
+        matches Ok(());
+        "mary - valid transaction 1 - with native assets amount of 0"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -76,32 +86,7 @@ mod tests {
         if bad_input == UTxOIdentifier::new(
             TxHash::from_str("e7075bff082ee708dfe49a366717dd4c6d51e9b3a7e5a070dcee253affda0999").unwrap(), 1)
             && bad_input_index == 0;
-        "bad_inputs_utxo"
-    )]
-    #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
-        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
-        let mapped_tx = acropolis_codec::map_transaction(
-            &tx,
-            &raw_tx,
-            TxIdentifier::default(),
-            NetworkId::Mainnet,
-            Era::Shelley,
-        );
-        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
-        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
-        let total_produced = tx_delta.calculate_total_produced(&[], &[]);
-
-        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
-    }
-
-    #[test_case(validation_fixture!(
-        "mary",
-        "12eb4f1d4bc1dae27d916d4bc1a6cf6fd167c7413e77792fbd1edead310847ab"
-    ) =>
-        matches Ok(());
-        "valid transaction 1 - with native assets amount of 0"
+        "shelley - bad_inputs_utxo"
     )]
     #[test_case(validation_fixture!(
         "mary",
@@ -109,18 +94,20 @@ mod tests {
         "value_not_conserved_utxo"
     ) =>
         matches Err(UTxOValidationError::ValueNotConservedUTxO { .. });
-        "value_not_conserved_utxo"
+        "mary - value_not_conserved_utxo"
     )]
     #[allow(clippy::result_large_err)]
-    fn mary_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Mary, &raw_tx).unwrap();
+    fn shelley_utxo_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
         let mapped_tx = acropolis_codec::map_transaction(
             &tx,
             &raw_tx,
             TxIdentifier::default(),
             NetworkId::Mainnet,
-            Era::Mary,
+            to_era(era),
         );
         let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
         let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);

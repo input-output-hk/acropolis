@@ -88,9 +88,12 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{test_utils::TestContext, utils, validation_fixture};
-    use acropolis_common::{Era, NetworkId, TxIdentifier};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_era, to_pallas_era, TestContext},
+        utils, validation_fixture,
+    };
+    use acropolis_common::{NetworkId, TxIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -115,6 +118,13 @@ mod tests {
         "alonzo - valid transaction 1 - with genesis delegations"
     )]
     #[test_case(validation_fixture!(
+        "conway",
+        "0fde070695ee45e29c43d7b381c5a23cf9175ad1b89fd197434fd432ab6578ba"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - with smart contract"
+    )]
+    #[test_case(validation_fixture!(
         "shelley",
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
         "missing_vkey_witnesses_utxow"
@@ -124,8 +134,10 @@ mod tests {
         "shelley - missing_vkey_witnesses_utxow"
     )]
     #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn shelly_utxow_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
         let tx_identifier = TxIdentifier::new(4533644, 1);
         let mapped_tx = acropolis_codec::map_transaction(
@@ -133,7 +145,7 @@ mod tests {
             &raw_tx,
             tx_identifier,
             NetworkId::Mainnet,
-            Era::Shelley,
+            to_era(era),
         );
         let tx_error = mapped_tx.error.as_ref();
         assert!(tx_error.is_none());
