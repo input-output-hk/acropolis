@@ -179,13 +179,10 @@ impl AssetsState {
                         let reg = registry.lock().await;
                         if let Some(ref address_state) = address_state {
                             let mut address_state = address_state.lock().await;
-                            match address_state
+                            if let Err(e) = address_state
                                 .handle_address_deltas(&address_deltas_msg.deltas, &reg)
                             {
-                                Ok(new_state) => new_state,
-                                Err(e) => {
-                                    error!("Address deltas handling error: {e:#}");
-                                }
+                                error!("Address deltas handling error: {e:#}");
                             };
                         };
                     }
