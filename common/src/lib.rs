@@ -18,7 +18,6 @@ pub mod math;
 pub mod messages;
 pub mod metadata;
 pub mod params;
-pub mod pointer_cache;
 pub mod protocol_params;
 pub mod queries;
 pub mod rational_number;

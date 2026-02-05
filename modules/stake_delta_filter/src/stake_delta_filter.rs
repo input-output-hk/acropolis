@@ -3,7 +3,11 @@
 
 use acropolis_common::{
     caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateTransitionMessage},
+    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    queries::{
+        errors::QueryError,
+        stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC},
+    },
     NetworkId,
 };
 use anyhow::{anyhow, Result};
@@ -47,6 +51,7 @@ const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 )]
 pub struct StakeDeltaFilter;
 
+mod predefined;
 mod state;
 mod utils;
 
@@ -151,11 +156,55 @@ impl StakeDeltaFilter {
         }
     }
 
+    /// Register a query handler that resolves pointer addresses using the given cache.
+    fn register_query_handler(
+        context: &Arc<Context<Message>>,
+        config: &Arc<Config>,
+        cache: Arc<PointerCache>,
+    ) {
+        let query_topic = config
+            .get_string(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.1.to_string());
+        info!("Registering query handler on '{query_topic}'");
+
+        context.handle(&query_topic, move |message| {
+            let cache = cache.clone();
+            async move {
+                let Message::StateQuery(StateQuery::StakeDeltas(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(
+                        StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
+                            QueryError::internal_error("Invalid message for stake-delta-filter"),
+                        )),
+                    ));
+                };
+
+                let response = match query {
+                    StakeDeltaQuery::ResolvePointers { pointers } => {
+                        let mut resolved = std::collections::HashMap::new();
+                        for ptr in pointers {
+                            if let Some(Some(stake_addr)) = cache.decode_pointer(ptr) {
+                                resolved.insert(ptr.clone(), stake_addr.clone());
+                            }
+                        }
+                        StakeDeltaQueryResponse::ResolvedPointers(resolved)
+                    }
+                };
+
+                Arc::new(Message::StateQueryResponse(
+                    StateQueryResponse::StakeDeltas(response),
+                ))
+            }
+        });
+    }
+
     async fn stateless_init(
         cache: Arc<PointerCache>,
         params: Arc<StakeDeltaFilterParams>,
     ) -> Result<()> {
         info!("Stateless init: using stake pointer cache");
+
+        // Register query handler for pointer resolution
+        Self::register_query_handler(&params.context, &params.context.config, cache.clone());
 
         // Subscribe for certificate messages
         info!("Creating subscriber on '{}'", params.address_delta_topic);
@@ -206,11 +255,62 @@ impl StakeDeltaFilter {
         Ok(())
     }
 
+    /// Register a query handler for stateful mode, where the cache is behind a Mutex.
+    fn register_query_handler_stateful(
+        context: &Arc<Context<Message>>,
+        config: &Arc<Config>,
+        state: Arc<Mutex<State>>,
+    ) {
+        let query_topic = config
+            .get_string(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.0)
+            .unwrap_or(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.1.to_string());
+        info!("Registering stateful query handler on '{query_topic}'");
+
+        context.handle(&query_topic, move |message| {
+            let state = state.clone();
+            async move {
+                let Message::StateQuery(StateQuery::StakeDeltas(query)) = message.as_ref() else {
+                    return Arc::new(Message::StateQueryResponse(
+                        StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
+                            QueryError::internal_error("Invalid message for stake-delta-filter"),
+                        )),
+                    ));
+                };
+
+                let response = match query {
+                    StakeDeltaQuery::ResolvePointers { pointers } => {
+                        let state = state.lock().await;
+                        let mut resolved = std::collections::HashMap::new();
+                        for ptr in pointers {
+                            if let Some(Some(stake_addr)) =
+                                state.pointer_cache.decode_pointer(ptr)
+                            {
+                                resolved.insert(ptr.clone(), stake_addr.clone());
+                            }
+                        }
+                        StakeDeltaQueryResponse::ResolvedPointers(resolved)
+                    }
+                };
+
+                Arc::new(Message::StateQueryResponse(
+                    StateQueryResponse::StakeDeltas(response),
+                ))
+            }
+        });
+    }
+
     async fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 
         // State
         let state = Arc::new(Mutex::new(State::new(params.clone())));
+
+        // Register query handler for pointer resolution (stateful)
+        Self::register_query_handler_stateful(
+            &params.context,
+            &params.context.config,
+            state.clone(),
+        );
 
         info!("Creating subscriber on '{}'", params.tx_certificates_topic);
 

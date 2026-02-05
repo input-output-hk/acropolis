@@ -101,12 +101,19 @@ impl PointerCache {
     }
 
     pub fn try_load_predefined(name: &str) -> Result<Arc<Self>> {
-        let predefined = acropolis_common::pointer_cache::PredefinedPointerCache::load(name)?;
-        Ok(Arc::new(PointerCache {
-            pointer_map: predefined.pointer_map,
-            conway_start_slot: predefined.conway_start_slot,
-            max_slot: predefined.max_slot,
-        }))
+        let value = crate::predefined::POINTER_CACHE
+            .iter()
+            .fold(None, |prev, (id, val)| {
+                prev.or_else(|| if *id == name { Some(val) } else { None })
+            })
+            .ok_or_else(|| anyhow!("Error finding predefined pointer cache for {name}"))?;
+
+        match serde_json::from_str::<PointerCache>(value) {
+            Ok(res) => Ok(Arc::new(res.clone())),
+            Err(err) => Err(anyhow!(
+                "Error reading predefined cache JSON for {name}: '{err}'"
+            )),
+        }
     }
 
     pub fn try_save(&self, file_path: &str) -> Result<()> {

@@ -17,6 +17,9 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     queries::{
         get_query_topic,
+        stake_deltas::{
+            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
+        },
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
@@ -387,35 +390,62 @@ impl State {
         }
     }
 
+    /// Query stake_delta_filter to resolve a set of pointers to stake addresses.
+    async fn resolve_pointers(
+        &self,
+        context: Arc<Context<Message>>,
+        pointers: Vec<ShelleyAddressPointer>,
+    ) -> Result<HashMap<ShelleyAddressPointer, StakeAddress>> {
+        let query_topic =
+            get_query_topic(context.clone(), DEFAULT_STAKE_DELTAS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::StakeDeltas(
+            StakeDeltaQuery::ResolvePointers { pointers },
+        )));
+        let response = context.message_bus.request(&query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        match message {
+            Message::StateQueryResponse(StateQueryResponse::StakeDeltas(
+                StakeDeltaQueryResponse::ResolvedPointers(resolved),
+            )) => Ok(resolved),
+            _ => Err(anyhow!(
+                "Unexpected stake-delta-filter response for pointer resolution"
+            )),
+        }
+    }
+
     /// At the Conway hard fork boundary, pointer addresses lose their staking
     /// functionality (Conway spec 9.1.2). This method queries utxo_state for
-    /// all unspent pointer address UTxO values, resolves each pointer to its
-    /// stake address using the predefined pointer cache, and subtracts those
+    /// all unspent pointer address UTxO values, then queries stake_delta_filter
+    /// to resolve each pointer to its stake address, and subtracts those
     /// values from the corresponding account's `utxo_value` so they no longer
     /// count towards the stake distribution.
     pub async fn remove_pointer_address_stake(
         &mut self,
         context: Arc<Context<Message>>,
     ) -> Result<()> {
-        use acropolis_common::pointer_cache::PredefinedPointerCache;
-
         // Get pointer -> lovelace from utxo_state
-        let pointer_values = self.get_pointer_address_values(context).await?;
+        let pointer_values = self.get_pointer_address_values(context.clone()).await?;
         if pointer_values.is_empty() {
             info!("No pointer address UTxOs found at Conway boundary");
             return Ok(());
         }
 
-        // Load predefined pointer cache (try Mainnet first, then Testnet)
-        let cache = PredefinedPointerCache::load("Mainnet")
-            .or_else(|_| PredefinedPointerCache::load("Testnet"))
-            .unwrap_or_default();
+        // Resolve pointers to stake addresses via stake_delta_filter
+        let pointers: Vec<ShelleyAddressPointer> = pointer_values.keys().cloned().collect();
+        let resolved_pointers = self.resolve_pointers(context, pointers).await?;
 
-        // Resolve pointers to stake addresses
-        let stake_values = cache.resolve_to_stake_addresses(&pointer_values);
+        // Build stake_address -> total_lovelace by joining pointer values with resolutions
+        let mut stake_values: HashMap<StakeAddress, u64> = HashMap::new();
+        let mut resolved_lovelace: u64 = 0;
+        for (ptr, lovelace) in &pointer_values {
+            if let Some(stake_addr) = resolved_pointers.get(ptr) {
+                *stake_values.entry(stake_addr.clone()).or_insert(0) += lovelace;
+                resolved_lovelace += lovelace;
+            }
+        }
 
         let total_pointer_lovelace: u64 = pointer_values.values().sum();
-        let resolved_lovelace: u64 = stake_values.values().sum();
         let unresolved_lovelace = total_pointer_lovelace - resolved_lovelace;
 
         info!(

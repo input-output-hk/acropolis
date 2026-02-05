@@ -8,6 +8,7 @@ use crate::ledger_state::SPOState;
 use crate::protocol_params::{Nonce, Nonces, PraosParams, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
+use crate::queries::stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -668,6 +669,7 @@ pub enum StateQuery {
     Parameters(ParametersStateQuery),
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
+    StakeDeltas(StakeDeltaQuery),
     Transactions(TransactionsStateQuery),
     UTxOs(UTxOStateQuery),
     SPDD(SPDDStateQuery),
@@ -689,6 +691,7 @@ pub enum StateQueryResponse {
     Parameters(ParametersStateQueryResponse),
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
+    StakeDeltas(StakeDeltaQueryResponse),
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
