@@ -330,6 +330,52 @@ pub struct Nonce {
     pub hash: Option<NonceHash>,
 }
 
+impl std::ops::Mul<&Nonce> for &Nonce {
+    type Output = Nonce;
+
+    fn mul(self, other: &Nonce) -> Nonce {
+        if let Some(self_hash) = self.hash.as_ref() {
+            if let Some(other_hash) = other.hash.as_ref() {
+                let mut hasher = Blake2b::<U32>::new();
+                let mut data = Vec::new();
+                data.extend_from_slice(self_hash);
+                data.extend_from_slice(other_hash);
+                hasher.update(data);
+                let hash: NonceHash = hasher.finalize().into();
+                Nonce::from(hash)
+            } else {
+                self.clone()
+            }
+        } else {
+            other.clone()
+        }
+    }
+}
+
+impl std::ops::Mul<Nonce> for &Nonce {
+    type Output = Nonce;
+
+    fn mul(self, other: Nonce) -> Nonce {
+        self * &other
+    }
+}
+
+impl std::ops::Mul<&Nonce> for Nonce {
+    type Output = Nonce;
+
+    fn mul(self, other: &Nonce) -> Nonce {
+        &self * other
+    }
+}
+
+impl std::ops::Mul<Nonce> for Nonce {
+    type Output = Nonce;
+
+    fn mul(self, other: Nonce) -> Nonce {
+        &self * &other
+    }
+}
+
 impl Display for Nonce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.hash {
@@ -425,30 +471,10 @@ impl Nonces {
         prev_lab: &Nonce,
         extra_entropy: &Nonce,
     ) -> Result<Nonce> {
-        let Some(candidate_hash) = candidate.hash.as_ref() else {
+        let Some(_) = candidate.hash.as_ref() else {
             return Err(anyhow::anyhow!("Candidate hash is not set"));
         };
-
-        // if prev_lab is Neutral then just return candidate
-        // this is for second shelley epoch boundary (from 208 to 209 in mainnet)
-        match prev_lab.tag {
-            NonceVariant::NeutralNonce => Ok(candidate.clone()),
-            NonceVariant::Nonce => {
-                let Some(prev_lab_hash) = prev_lab.hash.as_ref() else {
-                    return Err(anyhow::anyhow!("Prev lab hash is not set"));
-                };
-                let mut hasher = Blake2b::<U32>::new();
-                let mut data = Vec::new();
-                data.extend_from_slice(&(*candidate_hash)[..]);
-                data.extend_from_slice(&(*prev_lab_hash)[..]);
-                if let Some(extra_entropy_hash) = extra_entropy.hash.as_ref() {
-                    data.extend_from_slice(&(*extra_entropy_hash)[..]);
-                }
-                hasher.update(data);
-                let hash: NonceHash = hasher.finalize().into();
-                Ok(Nonce::from(hash))
-            }
-        }
+        Ok(candidate * prev_lab * extra_entropy)
     }
 
     /// Evolve the current nonce by combining it with the current rolling nonce and the
@@ -532,5 +558,45 @@ mod tests {
         assert_eq!(v0_9, ProtocolVersion::new(0, 9));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_nonce_mul() {
+        let nonce1 = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("d1340a9c1491f0face38d41fd5c82953d0eb48320d65e952414a0c5ebaf87587")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let nonce2 = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("ee91d679b0a6ce3015b894c575c799e971efac35c7a8cbdc2b3f579005e69abd")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let nonce3 = Nonce::from(
+            NonceHash::try_from(
+                hex::decode("d982e06fd33e7440b43cefad529b7ecafbaa255e38178ad4189a37e4ce9bf1fa")
+                    .unwrap()
+                    .as_slice(),
+            )
+            .unwrap(),
+        );
+        let result = nonce1 * nonce2 * nonce3;
+        assert_eq!(
+            result,
+            Nonce::from(
+                NonceHash::try_from(
+                    hex::decode("0022cfa563a5328c4fb5c8017121329e964c26ade5d167b1bd9b2ec967772b60")
+                        .unwrap()
+                        .as_slice()
+                )
+                .unwrap()
+            )
+        );
     }
 }
