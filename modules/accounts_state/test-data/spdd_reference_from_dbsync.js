@@ -11,7 +11,7 @@ const path = require("path");
 const { Client } = require("pg");
 
 // ---------- config ----------
-const DBSYNC_URL = "postgresql://dbsync1cmznndxplyqwkheejuh:fO4Cd0Ac2Ak@cardano-mainnet.dbsync-v3.demeter.run:5432/dbsync-mainnet";
+const DBSYNC_URL = "postgresql://username:password@hostname:5432/database_name";
 const START_EPOCH = 515;
 const END_EPOCH = 600;
 

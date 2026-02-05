@@ -423,18 +423,15 @@ impl State {
         &mut self,
         context: Arc<Context<Message>>,
     ) -> Result<()> {
-        // Get pointer -> lovelace from utxo_state
         let pointer_values = self.get_pointer_address_values(context.clone()).await?;
         if pointer_values.is_empty() {
             info!("No pointer address UTxOs found at Conway boundary");
             return Ok(());
         }
 
-        // Resolve pointers to stake addresses via stake_delta_filter
         let pointers: Vec<ShelleyAddressPointer> = pointer_values.keys().cloned().collect();
         let resolved_pointers = self.resolve_pointers(context, pointers).await?;
 
-        // Build stake_address -> total_lovelace by joining pointer values with resolutions
         let mut stake_values: HashMap<StakeAddress, u64> = HashMap::new();
         let mut resolved_lovelace: u64 = 0;
         for (ptr, lovelace) in &pointer_values {
@@ -456,7 +453,6 @@ impl State {
             "Removing pointer address stake at Conway boundary"
         );
 
-        // Subtract from each stake address's utxo_value
         let mut stake_addresses = self.stake_addresses.lock().unwrap();
         for (stake_addr, lovelace) in &stake_values {
             if let Some(sas) = stake_addresses.get_mut(stake_addr) {
@@ -472,7 +468,7 @@ impl State {
                     );
                     sas.utxo_value = 0;
                 }
-                info!(
+                debug!(
                     stake_address = %stake_addr,
                     old_value,
                     subtracted = lovelace,
@@ -1206,7 +1202,6 @@ impl State {
         //   but still produced blocks because slot leader schedules use older snapshots)
         // Note: The slot leader schedule for epoch N uses the stake distribution from epoch N-2
         // (the "go" snapshot), so we must include pools from the go snapshot as well.
-        // let spo_blocks: HashMap<PoolId, usize> = if block_info.era < Era::Babbage {
         let spo_blocks = ea_msg
             .spo_blocks
             .iter()
@@ -1219,9 +1214,6 @@ impl State {
             })
             .map(|(hash, count)| (*hash, *count))
             .collect();
-        // } else {
-        //     ea_msg.spo_blocks.iter().cloned().collect()
-        // };
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(
@@ -2137,7 +2129,6 @@ mod tests {
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&stake_address).unwrap();
-        // Drain semantics: rewards set to zero regardless of withdrawal amount
         assert_eq!(sas.rewards, 0);
         vld.as_result().unwrap();
     }

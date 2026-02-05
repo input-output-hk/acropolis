@@ -75,9 +75,7 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
         Ok(0)
     }
 
-    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
     async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
-        // Fake store doesn't track actual UTxOs
         Ok(HashMap::new())
     }
 }

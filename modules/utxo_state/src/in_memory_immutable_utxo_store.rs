@@ -84,7 +84,6 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
         Ok(self.utxos.read().await.values().map(|v| v.value.lovelace).sum())
     }
 
-    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
     async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
         let utxos = self.utxos.read().await;
         let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();

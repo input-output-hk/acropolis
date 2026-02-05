@@ -144,7 +144,6 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
         })
     }
 
-    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
     async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
         let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();
 
