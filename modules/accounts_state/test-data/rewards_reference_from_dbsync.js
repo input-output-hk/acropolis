@@ -11,9 +11,9 @@ const path = require("path");
 const { Client } = require("pg");
 
 // ---------- config ----------
-const DBSYNC_URL = "postgresql://username:password@hostname:5432/database_name";
-const START_EPOCH = 508;
-const END_EPOCH = 510;
+const DBSYNC_URL = "postgresql://dbsync1cmznndxplyqwkheejuh:fO4Cd0Ac2Ak@cardano-mainnet.dbsync-v3.demeter.run:5432/dbsync-mainnet";
+const START_EPOCH = 525;
+const END_EPOCH = 600;
 
 if ((!DBSYNC_URL) || (DBSYNC_URL == "postgresql://username:password@hostname:5432/database_name")) {
   throw new Error("Missing MAINNET_DBSYNC_URL");

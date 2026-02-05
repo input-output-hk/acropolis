@@ -71,9 +71,7 @@ pub trait ImmutableUTXOStore: Send + Sync {
     /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
     /// Used at the Conway hard fork boundary to remove pointer address stake
     /// from the distribution (per Conway spec 9.1.2).
-    async fn sum_pointer_utxos(
-        &self,
-    ) -> Result<HashMap<ShelleyAddressPointer, u64>>;
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>>;
 }
 
 /// Ledger state storage

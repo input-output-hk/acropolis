@@ -300,10 +300,7 @@ impl AccountsState {
                     // address UTxO values from utxo_value so they no longer count
                     // towards the stake distribution.
                     if block_info.is_new_era && block_info.era == Era::Conway {
-                        if let Err(e) = state
-                            .remove_pointer_address_stake(context.clone())
-                            .await
-                        {
+                        if let Err(e) = state.remove_pointer_address_stake(context.clone()).await {
                             vld.push_anyhow(anyhow!(
                                 "Error removing pointer address stake at Conway boundary: {e:#}"
                             ));

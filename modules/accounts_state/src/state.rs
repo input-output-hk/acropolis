@@ -396,8 +396,7 @@ impl State {
         context: Arc<Context<Message>>,
         pointers: Vec<ShelleyAddressPointer>,
     ) -> Result<HashMap<ShelleyAddressPointer, StakeAddress>> {
-        let query_topic =
-            get_query_topic(context.clone(), DEFAULT_STAKE_DELTAS_QUERY_TOPIC);
+        let query_topic = get_query_topic(context.clone(), DEFAULT_STAKE_DELTAS_QUERY_TOPIC);
         let msg = Arc::new(Message::StateQuery(StateQuery::StakeDeltas(
             StakeDeltaQuery::ResolvePointers { pointers },
         )));

@@ -6,7 +6,9 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
     queries::{
         errors::QueryError,
-        stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC},
+        stake_deltas::{
+            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
+        },
     },
     NetworkId,
 };
@@ -282,8 +284,7 @@ impl StakeDeltaFilter {
                         let state = state.lock().await;
                         let mut resolved = std::collections::HashMap::new();
                         for ptr in pointers {
-                            if let Some(Some(stake_addr)) =
-                                state.pointer_cache.decode_pointer(ptr)
+                            if let Some(Some(stake_addr)) = state.pointer_cache.decode_pointer(ptr)
                             {
                                 resolved.insert(ptr.clone(), stake_addr.clone());
                             }
