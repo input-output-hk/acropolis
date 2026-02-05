@@ -55,6 +55,7 @@ const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_GOVERNANCE_PROCEDURES_TOPIC: &str = "cardano.governance";
 const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
@@ -162,6 +163,7 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut governance_procedures_subscription: Box<dyn Subscription<Message>>,
         mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
@@ -536,6 +538,27 @@ impl AccountsState {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
+            let (_, message) = governance_procedures_subscription.read_ignoring_rollbacks().await?;
+            match message.as_ref() {
+                Message::Cardano((
+                    block_info,
+                    CardanoMessage::GovernanceProcedures(procedures),
+                )) => {
+                    let span = info_span!(
+                        "account_state.handle_governance_procedures",
+                        block = block_info.number
+                    );
+                    async {
+                        Self::check_sync(&current_block, block_info);
+                        state.handle_governance_procedures(procedures)
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
@@ -590,6 +613,11 @@ impl AccountsState {
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+
+        let governance_procedures_topic = config
+            .get_string("governance-procedures-topic")
+            .unwrap_or(DEFAULT_GOVERNANCE_PROCEDURES_TOPIC.to_string());
+        info!("Creating governance procedures subscriber on '{governance_procedures_topic}'");
 
         let governance_outcomes_topic = config
             .get_string("governance-outcomes-topic")
@@ -906,6 +934,8 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let governance_procedures_subscription =
+            context.subscribe(&governance_procedures_topic).await?;
         let governance_outcomes_subscription =
             context.subscribe(&governance_outcomes_topic).await?;
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
@@ -940,6 +970,7 @@ impl AccountsState {
                 withdrawals_subscription,
                 pot_deltas_subscription,
                 stake_subscription,
+                governance_procedures_subscription,
                 governance_outcomes_subscription,
                 parameters_subscription,
                 &verifier,
