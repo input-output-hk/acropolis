@@ -84,6 +84,9 @@ pub fn validate_vkey_witnesses(
     Ok(())
 }
 
+/// TODO:
+/// Validate transaction's aux data
+/// https://github.com/input-output-hk/acropolis/issues/666
 pub fn validate_aux_data(_aux_data: &[u8]) -> Result<(), Box<UTxOWValidationError>> {
     Ok(())
 }
