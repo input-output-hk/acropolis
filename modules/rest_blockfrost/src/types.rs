@@ -513,8 +513,8 @@ pub struct ProtocolParamsRest {
     pub min_fee_ref_script_cost_per_byte: Option<f64>,
 }
 
-impl From<(u64, ProtocolParams)> for ProtocolParamsRest {
-    fn from((epoch, params): (u64, ProtocolParams)) -> Self {
+impl From<(u64, ProtocolParams, Option<Nonce>)> for ProtocolParamsRest {
+    fn from((epoch, params, epoch_nonce): (u64, ProtocolParams, Option<Nonce>)) -> Self {
         let shelley = params.shelley.as_ref();
         let shelley_params = shelley.map(|s| &s.protocol_params);
         let alonzo = params.alonzo.as_ref();
@@ -562,7 +562,7 @@ impl From<(u64, ProtocolParams)> for ProtocolParamsRest {
             },
             min_pool_cost: shelley_params.map(|p| p.min_pool_cost.to_string()),
             // TODO: Calculate nonce, store in epoch state, and return here
-            nonce: Some("Not implemented".to_string()),
+            nonce: epoch_nonce.map(|nonce| nonce.to_string()),
             cost_models: Some(params.cost_models_json()),
             cost_models_raw: Some(params.cost_models_raw()),
 
