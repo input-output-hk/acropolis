@@ -239,8 +239,11 @@ pub struct DRepStateMessage {
     /// Epoch which has ended
     pub epoch: u64,
 
-    /// DRep initial deposit by id, for all active DReps.
+    /// Registered DReps with their deposits.
     pub dreps: Vec<(DRepCredential, Lovelace)>,
+
+    /// Inactive DReps which do not count towards the active voting stake.
+    pub inactive_dreps: Vec<DRepCredential>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
