@@ -256,11 +256,7 @@ pub async fn handle_epoch_params_blockfrost(
     };
 
     // Get epoch info from historical epochs state
-    let epoch_info = if param == "latest" {
-        Some(latest_epoch_info)
-    } else if epoch_number > latest_epoch_number {
-        None
-    } else if epoch_number == latest_epoch_number {
+    let epoch_info = if param == "latest" || epoch_number == latest_epoch_number {
         Some(latest_epoch_info)
     } else {
         let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
