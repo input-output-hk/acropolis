@@ -165,6 +165,7 @@ pub struct PraosParams {
     pub network_id: NetworkId,
     pub slot_length: u32,
     pub slots_per_kes_period: u32,
+    pub extra_entropy: Nonce,
 
     /// Relative slot from which data of the previous epoch can be considered stable.
     /// This value is used for all TPraos eras AND Babbage Era from Praos
@@ -187,6 +188,7 @@ impl PraosParams {
             network_id: NetworkId::Mainnet,
             slot_length: 1,
             slots_per_kes_period: 129600,
+            extra_entropy: Nonce::default(),
             stability_window: 129600,
             randomness_stabilization_window: 172800,
         }
@@ -211,6 +213,7 @@ impl From<&ShelleyParams> for PraosParams {
             network_id: params.network_id.clone(),
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
+            extra_entropy: params.protocol_params.extra_entropy.clone(),
 
             stability_window,
             randomness_stabilization_window,
@@ -417,7 +420,11 @@ impl Nonces {
         }
     }
 
-    pub fn from_candidate(candidate: &Nonce, prev_lab: &Nonce) -> Result<Nonce> {
+    pub fn from_candidate(
+        candidate: &Nonce,
+        prev_lab: &Nonce,
+        extra_entropy: &Nonce,
+    ) -> Result<Nonce> {
         let Some(candidate_hash) = candidate.hash.as_ref() else {
             return Err(anyhow::anyhow!("Candidate hash is not set"));
         };
@@ -431,7 +438,13 @@ impl Nonces {
                     return Err(anyhow::anyhow!("Prev lab hash is not set"));
                 };
                 let mut hasher = Blake2b::<U32>::new();
-                hasher.update([&(*candidate_hash)[..], &(*prev_lab_hash)[..]].concat());
+                let mut data = Vec::new();
+                data.extend_from_slice(&(*candidate_hash)[..]);
+                data.extend_from_slice(&(*prev_lab_hash)[..]);
+                if let Some(extra_entropy_hash) = extra_entropy.hash.as_ref() {
+                    data.extend_from_slice(&(*extra_entropy_hash)[..]);
+                }
+                hasher.update(data);
                 let hash: NonceHash = hasher.finalize().into();
                 Ok(Nonce::from(hash))
             }
