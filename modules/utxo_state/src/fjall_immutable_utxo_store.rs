@@ -1,11 +1,12 @@
 //! On-disk store using Fjall for immutable UTXOs
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier};
+use acropolis_common::{ShelleyAddressPointer, UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
 use fjall::{Keyspace, Partition, PartitionCreateOptions, PersistMode};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::{
@@ -141,5 +142,20 @@ impl ImmutableUTXOStore for FjallImmutableUTXOStore {
                 Ok(acc)
             }
         })
+    }
+
+    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();
+
+        for entry in self.partition.iter() {
+            let (_key_bytes, value_bytes) = entry?;
+            let utxo: UTXOValue = serde_cbor::from_slice(&value_bytes)?;
+            if let Some(ptr) = utxo.address.get_pointer() {
+                *result.entry(ptr).or_insert(0) += utxo.value.lovelace;
+            }
+        }
+
+        Ok(result)
     }
 }

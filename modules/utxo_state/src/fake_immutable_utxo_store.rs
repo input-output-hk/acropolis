@@ -1,10 +1,11 @@
 //! Fake store for immutable UTXOs
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{Address, UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{Address, ShelleyAddressPointer, UTXOValue, UTxOIdentifier, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
@@ -72,5 +73,11 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         Ok(0)
+    }
+
+    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        // Fake store doesn't track actual UTxOs
+        Ok(HashMap::new())
     }
 }

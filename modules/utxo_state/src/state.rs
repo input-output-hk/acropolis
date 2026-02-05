@@ -9,8 +9,8 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
-    UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Address, AddressDelta, Era, PoolRegistrationUpdate, ShelleyAddressPointer,
+    StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -67,6 +67,13 @@ pub trait ImmutableUTXOStore: Send + Sync {
     /// Returns the list of cancelled UTxOs (identifier and value).
     /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
     async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>>;
+
+    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
+    /// Used at the Conway hard fork boundary to remove pointer address stake
+    /// from the distribution (per Conway spec 9.1.2).
+    async fn sum_pointer_utxos(
+        &self,
+    ) -> Result<HashMap<ShelleyAddressPointer, u64>>;
 }
 
 /// Ledger state storage
@@ -102,6 +109,10 @@ pub struct State {
     /// None until cancellation happens, then Some(total_value).
     avvm_cancelled_value: Option<u64>,
 
+    /// Cached pointer address values at Conway boundary.
+    /// None until queried, then Some(map of pointer -> total lovelace).
+    pointer_address_values: Option<HashMap<ShelleyAddressPointer, u64>>,
+
     /// State History of Protocol Parameter
     protocol_parameters_history: StateHistory<ProtocolParams>,
 }
@@ -124,6 +135,7 @@ impl State {
                 StateHistoryStore::default_block_store(),
             ),
             avvm_cancelled_value: None,
+            pointer_address_values: None,
         }
     }
 
@@ -241,6 +253,40 @@ impl State {
         self.avvm_cancelled_value = Some(total_value);
 
         Ok((count, total_value))
+    }
+
+    /// Get cached pointer address values, if already computed.
+    pub fn get_pointer_address_values(&self) -> Option<&HashMap<ShelleyAddressPointer, u64>> {
+        self.pointer_address_values.as_ref()
+    }
+
+    /// Compute and cache the total lovelace held in pointer address UTxOs,
+    /// grouped by pointer. Called at the Conway hard fork boundary.
+    ///
+    /// Scans both volatile and immutable UTxO stores for Shelley addresses
+    /// with pointer delegation parts, summing lovelace by pointer.
+    pub async fn compute_pointer_address_values(
+        &mut self,
+    ) -> Result<&HashMap<ShelleyAddressPointer, u64>> {
+        // Start with immutable store values
+        let mut values = self.immutable_utxos.sum_pointer_utxos().await?;
+
+        // Add volatile UTxO pointer values
+        for utxo in self.volatile_utxos.values() {
+            if let Some(ptr) = utxo.address.get_pointer() {
+                *values.entry(ptr).or_insert(0) += utxo.value.lovelace;
+            }
+        }
+
+        let total: u64 = values.values().sum();
+        let count = values.len();
+        info!(
+            count,
+            total, "Computed pointer address UTxO values at Conway boundary"
+        );
+
+        self.pointer_address_values = Some(values);
+        Ok(self.pointer_address_values.as_ref().unwrap())
     }
 
     /// Observe a block for statistics and handle rollbacks

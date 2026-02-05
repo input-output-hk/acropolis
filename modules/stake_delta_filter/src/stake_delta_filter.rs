@@ -47,7 +47,6 @@ const DEFAULT_NETWORK: (&str, NetworkId) = ("network", NetworkId::Mainnet);
 )]
 pub struct StakeDeltaFilter;
 
-mod predefined;
 mod state;
 mod utils;
 

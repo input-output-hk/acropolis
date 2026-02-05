@@ -17,7 +17,7 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -294,6 +294,21 @@ impl AccountsState {
                 if let Some(block_info) = current_block.as_ref() {
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs();
+
+                    // At the Conway hard fork, pointer addresses lose their staking
+                    // functionality (Conway spec 9.1.2). Subtract accumulated pointer
+                    // address UTxO values from utxo_value so they no longer count
+                    // towards the stake distribution.
+                    if block_info.is_new_era && block_info.era == Era::Conway {
+                        if let Err(e) = state
+                            .remove_pointer_address_stake(context.clone())
+                            .await
+                        {
+                            vld.push_anyhow(anyhow!(
+                                "Error removing pointer address stake at Conway boundary: {e:#}"
+                            ));
+                        }
+                    }
 
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);

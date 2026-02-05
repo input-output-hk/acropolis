@@ -1,7 +1,7 @@
 //! In-memory store for immutable UTXOs using standard HashMap
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier};
+use acropolis_common::{ShelleyAddressPointer, UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
@@ -82,5 +82,19 @@ impl ImmutableUTXOStore for InMemoryImmutableUTXOStore {
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         Ok(self.utxos.read().await.values().map(|v| v.value.lovelace).sum())
+    }
+
+    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        let utxos = self.utxos.read().await;
+        let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();
+
+        for utxo in utxos.values() {
+            if let Some(ptr) = utxo.address.get_pointer() {
+                *result.entry(ptr).or_insert(0) += utxo.value.lovelace;
+            }
+        }
+
+        Ok(result)
     }
 }
