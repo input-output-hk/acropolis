@@ -11,16 +11,17 @@ use crate::{
 pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ScriptType {
-    Native,
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum ScriptLang {
     PlutusV1,
     PlutusV2,
     PlutusV3,
 }
 
 // The full CBOR bytes of a reference script
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
     Native(NativeScript),
     PlutusV1(Vec<u8>),
@@ -38,17 +39,17 @@ impl ReferenceScript {
         }
     }
 
-    pub fn get_script_type(&self) -> ScriptType {
+    pub fn get_script_lang(&self) -> Option<ScriptLang> {
         match self {
-            ReferenceScript::Native(_) => ScriptType::Native,
-            ReferenceScript::PlutusV1(_) => ScriptType::PlutusV1,
-            ReferenceScript::PlutusV2(_) => ScriptType::PlutusV2,
-            ReferenceScript::PlutusV3(_) => ScriptType::PlutusV3,
+            ReferenceScript::PlutusV1(_) => Some(ScriptLang::PlutusV1),
+            ReferenceScript::PlutusV2(_) => Some(ScriptLang::PlutusV2),
+            ReferenceScript::PlutusV3(_) => Some(ScriptLang::PlutusV3),
+            _ => None,
         }
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum NativeScript {
     ScriptPubkey(AddrKeyhash),
     ScriptAll(Vec<NativeScript>),
@@ -223,6 +224,7 @@ pub enum Datum {
     PartialEq,
     Eq,
     Clone,
+    Hash,
 )]
 pub enum RedeemerTag {
     #[n(0)]
@@ -278,6 +280,7 @@ impl Redeemer {
     PartialEq,
     Eq,
     Clone,
+    Hash,
 )]
 pub struct RedeemerPointer {
     #[n(0)]
@@ -293,20 +296,20 @@ pub struct RedeemerPointer {
 pub fn get_scripts_needed_from_inputs(
     sorted_inputs: &[UTxOIdentifier],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     for (index, input) in sorted_inputs.iter().enumerate() {
         if let Some(utxo) = utxos.get(input) {
             if let Some(ShelleyAddressPaymentPart::ScriptHash(script_hash)) =
                 utxo.address.get_payment_part()
             {
-                scripts_needed.push((
+                scripts_needed.insert(
                     RedeemerPointer {
                         tag: RedeemerTag::Spend,
                         index: index as u32,
                     },
                     script_hash,
-                ));
+                );
             }
         }
     }
@@ -320,17 +323,17 @@ pub fn get_scripts_needed_from_inputs(
 /// Withdrawals must be sorted lexicographically by address
 pub fn get_scripts_needed_from_withdrawals(
     sorted_withdrawals: &[Withdrawal],
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     for (index, withdrawal) in sorted_withdrawals.iter().enumerate() {
         if let StakeCredential::ScriptHash(script_hash) = withdrawal.address.credential {
-            scripts_needed.push((
+            scripts_needed.insert(
                 RedeemerPointer {
                     tag: RedeemerTag::Reward,
                     index: index as u32,
                 },
                 script_hash,
-            ));
+            );
         }
     }
     scripts_needed
@@ -340,17 +343,17 @@ pub fn get_scripts_needed_from_withdrawals(
 /// Return a list of (RedeemerPointer, ScriptHash) pairs
 pub fn get_scripts_needed_from_certificates(
     certificates: &[TxCertificateWithPos],
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     for (index, certificate) in certificates.iter().enumerate() {
         if let Some(script_hash) = certificate.cert.get_script_cert_author() {
-            scripts_needed.push((
+            scripts_needed.insert(
                 RedeemerPointer {
                     tag: RedeemerTag::Cert,
                     index: index as u32,
                 },
                 script_hash,
-            ));
+            );
         }
     }
 
@@ -363,16 +366,16 @@ pub fn get_scripts_needed_from_certificates(
 /// Mint-burn must be sorted lexicographically by policy id
 pub fn get_scripts_needed_from_mint_burn(
     sorted_mint_burn: &NativeAssetsDelta,
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     for (index, (policy_id, _)) in sorted_mint_burn.iter().enumerate() {
-        scripts_needed.push((
+        scripts_needed.insert(
             RedeemerPointer {
                 tag: RedeemerTag::Mint,
                 index: index as u32,
             },
             *policy_id,
-        ));
+        );
     }
 
     scripts_needed
@@ -384,20 +387,20 @@ pub fn get_scripts_needed_from_mint_burn(
 /// Voting procedures must be sorted lexicographically by voter
 pub fn get_scripts_needed_from_voting(
     voting_procedures: &VotingProcedures,
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     let mut voters = voting_procedures.votes.keys().cloned().collect::<Vec<_>>();
     voters.sort_by_key(|voter| voter.to_owned());
 
     for (index, voter) in voters.iter().enumerate() {
         if let Some(script_hash) = voter.get_voter_script_hash() {
-            scripts_needed.push((
+            scripts_needed.insert(
                 RedeemerPointer {
                     tag: RedeemerTag::Vote,
                     index: index as u32,
                 },
                 script_hash,
-            ));
+            );
         }
     }
     scripts_needed
@@ -409,17 +412,17 @@ pub fn get_scripts_needed_from_voting(
 /// Proposal procedures are sorted by its insertion order
 pub fn get_scripts_needed_from_proposal(
     proposal_procedures: &[ProposalProcedure],
-) -> Vec<(RedeemerPointer, ScriptHash)> {
-    let mut scripts_needed = Vec::new();
+) -> HashMap<RedeemerPointer, ScriptHash> {
+    let mut scripts_needed = HashMap::new();
     for (index, proposal_procedure) in proposal_procedures.iter().enumerate() {
         if let Some(script_hash) = proposal_procedure.get_proposal_script_hash() {
-            scripts_needed.push((
+            scripts_needed.insert(
                 RedeemerPointer {
                     tag: RedeemerTag::Propose,
                     index: index as u32,
                 },
                 script_hash,
-            ));
+            );
         }
     }
     scripts_needed

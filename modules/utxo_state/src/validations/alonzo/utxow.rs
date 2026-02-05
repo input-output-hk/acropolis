@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
-
-use crate::validations::shelley;
 use acropolis_common::{
-    validation::UTxOWValidationError, DatumHash, KeyHash, Redeemer, RedeemerPointer, ScriptHash,
-    UTXOValue, UTxOIdentifier,
+    validation::UTxOWValidationError, DatumHash, Redeemer, RedeemerPointer, ScriptHash, ScriptLang,
+    TxOutput, UTXOValue, UTxOIdentifier,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -46,22 +44,13 @@ pub fn validate_redeemers(
 #[allow(clippy::too_many_arguments)]
 pub fn validate(
     inputs: &[UTxOIdentifier],
-    vkey_hashes_needed: &HashSet<KeyHash>,
-    script_hashes_needed: &HashSet<ScriptHash>,
-    vkey_hashes_provided: &[KeyHash],
-    script_hashes_provided: &[ScriptHash],
-    scripts_needed: &[(RedeemerPointer, ScriptHash)],
+    outputs: &[TxOutput],
+    ref_inputs: &[UTxOIdentifier],
+    scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
+    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
+    plutus_data: &HashMap<DatumHash, Vec<u8>>,
     redeemers: &[Redeemer],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    shelley::utxow::validate(
-        vkey_hashes_needed,
-        script_hashes_needed,
-        vkey_hashes_provided,
-        script_hashes_provided,
-    )?;
-
-    let inputs = inputs.iter().map(|input| utxos.get(input).unwrap()).collect::<Vec<_>>();
-
     Ok(())
 }
