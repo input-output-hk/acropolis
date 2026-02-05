@@ -62,6 +62,11 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the total lovelace of all UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64>;
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>>;
 }
 
 /// Ledger state storage
@@ -93,6 +98,10 @@ pub struct State {
     /// Total lovelace at Shelley epoch boundary
     lovelace_at_shelley_start: Option<u64>,
 
+    /// Total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// None until cancellation happens, then Some(total_value).
+    avvm_cancelled_value: Option<u64>,
+
     /// State History of Protocol Parameter
     protocol_parameters_history: StateHistory<ProtocolParams>,
 }
@@ -114,6 +123,7 @@ impl State {
                 "utxo_state.protocol_parameters_history",
                 StateHistoryStore::default_block_store(),
             ),
+            avvm_cancelled_value: None,
         }
     }
 
@@ -127,6 +137,12 @@ impl State {
     /// Get the total lovelace at the Shelley epoch boundary
     pub fn get_lovelace_at_shelley_start(&self) -> Option<u64> {
         self.lovelace_at_shelley_start
+    }
+
+    /// Get the total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// Returns None if cancellation hasn't happened yet.
+    pub fn get_avvm_cancelled_value(&self) -> Option<u64> {
+        self.avvm_cancelled_value
     }
 
     /// Get the total value of multiple utxos
@@ -206,6 +222,25 @@ impl State {
             (immutable + (v_created - v_spent)).try_into().expect("total UTxO count went negative");
 
         total
+    }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses at the Allegra hard fork boundary.
+    /// Returns (count of cancelled UTxOs, total lovelace value).
+    ///
+    /// Only handles immutable UTxOs. By the Allegra boundary all Byron redeem UTxOs
+    /// are long-confirmed and immutable, so volatile UTxOs are not a concern.
+    ///
+    /// The total cancelled value is stored for later querying by accounts_state,
+    /// which adds it back to reserves.
+    pub async fn cancel_redeem_utxos(&mut self) -> Result<(usize, u64)> {
+        let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
+
+        let count = cancelled.len();
+        let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+
+        self.avvm_cancelled_value = Some(total_value);
+
+        Ok((count, total_value))
     }
 
     /// Observe a block for statistics and handle rollbacks

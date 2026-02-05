@@ -292,6 +292,9 @@ impl AccountsState {
                 // remove from pool registry, clear delegations
 
                 if let Some(block_info) = current_block.as_ref() {
+                    // Apply pending MIRs before generating SPDD so they're included in active stake
+                    state.apply_pending_mirs();
+
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);
                     if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
@@ -371,8 +374,7 @@ impl AccountsState {
                                 .handle_epoch_activity(
                                     context.clone(),
                                     ea_msg,
-                                    block_info.era,
-                                    block_info.is_new_era,
+                                    block_info,
                                     verifier,
                                 )
                                 .await
@@ -449,7 +451,12 @@ impl AccountsState {
                     async {
                         Self::check_sync(&current_block, block_info);
                         let stake_registration_updates = state
-                            .handle_tx_certificates(tx_certs_msg, block_info.epoch_slot, &mut vld)
+                            .handle_tx_certificates(
+                                tx_certs_msg,
+                                block_info.epoch_slot,
+                                block_info.era,
+                                &mut vld,
+                            )
                             .inspect_err(|e| {
                                 vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
                             })

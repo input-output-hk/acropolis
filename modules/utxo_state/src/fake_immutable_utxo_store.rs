@@ -62,6 +62,13 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
         Ok(42)
     }
 
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        // Fake store doesn't track actual UTxOs
+        Ok(Vec::new())
+    }
+
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         Ok(0)
