@@ -6,9 +6,10 @@ use acropolis_common::{
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse, StateTransitionMessage,
+        CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage, 
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage, 
+        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse, 
+        StateTransitionMessage,
     },
     queries::errors::QueryError,
     queries::governance::{
@@ -60,6 +61,13 @@ declare_cardano_reader!(
     "",
     SPOStakeDistribution,
     SPOStakeDistributionMessage
+);
+declare_cardano_reader!(
+    DRepStateReader,
+    "drep-state-topic",
+    "",
+    DRepState,
+    DRepStateMessage
 );
 
 const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
@@ -159,6 +167,7 @@ impl GovernanceState {
         vld: &mut ValidationContext,
         state: Arc<Mutex<State>>,
         drep_reader: &mut Option<DRepReader>,
+        drep_state_reader: &mut Option<DRepStateReader>,
         spo_reader: &mut Option<SPOReader>,
     ) {
         let Some(ref mut drep_r) = drep_reader else {
@@ -167,10 +176,18 @@ impl GovernanceState {
         let Some(ref mut spo_r) = spo_reader else {
             return;
         };
+        let Some(ref mut drep_state_r) = drep_state_reader else {
+            return;
+        };
         let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
             return;
         };
         let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
+            return;
+        };
+        let Some((_, drep_state)) = vld.consume(
+            "drep state", drep_state_r.read_skip_rollbacks().await
+        ) else {
             return;
         };
 
@@ -185,8 +202,8 @@ impl GovernanceState {
         }
 
         vld.handle(
-            "drep stake",
-            state.lock().await.handle_drep_stake(&d_drep, &d_spo).await,
+            "stakes",
+            state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
         );
     }
 
@@ -196,6 +213,7 @@ impl GovernanceState {
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         mut gov_reader: GovReader,
         mut drep_reader: Option<DRepReader>,
+        mut drep_state_reader: Option<DRepStateReader>,
         mut spo_reader: Option<SPOReader>,
         mut param_reader: ParamReader,
     ) -> Result<()> {
@@ -336,6 +354,7 @@ impl GovernanceState {
                             &mut vld,
                             state.clone(),
                             &mut drep_reader,
+                            &mut drep_state_reader,
                             &mut spo_reader,
                         )
                         .await;
@@ -363,11 +382,12 @@ impl GovernanceState {
 
         let gt = GovReader::new(&context, &config).await?;
         let dt = DRepReader::new_without_default(&context, &config).await?;
+        let dst = DRepStateReader::new_without_default(&context, &config).await?;
         let st = SPOReader::new_without_default(&context, &config).await?;
         let pt = ParamReader::new(&context, &config).await?;
 
         tokio::spawn(async move {
-            Self::run(context, cfg, snapshot_subscription, gt, dt, st, pt)
+            Self::run(context, cfg, snapshot_subscription, gt, dt, dst, st, pt)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
