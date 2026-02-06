@@ -73,3 +73,4 @@ serde_with = { version = "3.12.0", features = ["hex"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.31.0"
+uplc-turbo = { git = "https://github.com/pragma-org/uplc" }
