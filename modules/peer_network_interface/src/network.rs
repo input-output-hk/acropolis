@@ -3,14 +3,13 @@ use std::{collections::BTreeMap, time::Duration};
 use crate::{
     BlockSink,
     block_flow::BlockFlowHandler,
-    chain_state::ChainState,
     connection::{PeerChainSyncEvent, PeerConnection, PeerEvent},
 };
 use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::warn;
 
 struct PeerData {
     conn: PeerConnection,
@@ -23,6 +22,9 @@ impl PeerData {
     }
 
     fn find_intersect(&self, points: Vec<Point>) {
+        if points.is_empty() {
+            return;
+        }
         if let Err(error) = self.conn.find_intersect(points) {
             warn!("could not sync {}: {error:#}", self.conn.address);
         }
@@ -52,7 +54,6 @@ pub struct NetworkManager {
     network_magic: u32,
     next_id: u64,
     peers: BTreeMap<PeerId, PeerData>,
-    chain: ChainState,
     events: mpsc::Receiver<NetworkEvent>,
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
@@ -73,7 +74,6 @@ impl NetworkManager {
             network_magic,
             next_id: 0,
             peers: BTreeMap::new(),
-            chain: ChainState::new(),
             events,
             events_sender,
             block_sink,
@@ -95,12 +95,9 @@ impl NetworkManager {
         match event {
             NetworkEvent::PeerUpdate { peer, event } => {
                 self.handle_peer_update(peer, event);
-                self.flow_handler
-                    .publish(&mut self.chain, &mut self.block_sink, &mut self.published_blocks)
-                    .await?;
+                self.flow_handler.publish(&mut self.block_sink, &mut self.published_blocks).await?;
             }
             NetworkEvent::SyncPointUpdate { point } => {
-                self.chain = ChainState::new();
                 self.flow_handler.handle_sync_reset();
 
                 for peer in self.peers.values_mut() {
@@ -112,29 +109,22 @@ impl NetworkManager {
                     self.block_sink.last_epoch = Some(epoch);
                 }
 
-                if let Some((&peer_id, _)) = self.peers.iter().next() {
-                    self.set_preferred_upstream(peer_id);
-                } else {
-                    warn!("Sync requested but no upstream peers available");
-                }
+                // TODO: Temporary no-op for consensus mode
+                self.flow_handler
+                    .set_preferred_upstream(self.peers.iter().next().map(|(peer_id, _)| *peer_id));
 
                 self.sync_to_point(point);
             }
             NetworkEvent::BlockWanted { hash, slot } => {
-                self.handle_block_wanted(hash, slot);
+                if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
+                    self.request_block(slot, hash, announcers);
+                } else {
+                    warn!("BlockWanted for unknown block {hash} at slot {slot}");
+                }
             }
         }
 
         Ok(())
-    }
-
-    fn handle_block_wanted(&mut self, hash: BlockHash, slot: u64) {
-        let announcers = self.chain.block_announcers(slot, hash);
-        if announcers.is_empty() {
-            warn!("BlockWanted for unknown block {hash} at slot {slot}");
-            return;
-        }
-        self.request_block(slot, hash, announcers);
     }
 
     pub fn handle_new_connection(&mut self, address: String, delay: Duration) {
@@ -146,21 +136,14 @@ impl NetworkManager {
         };
         let conn = PeerConnection::new(address, self.network_magic, sender, delay);
         let peer = PeerData::new(conn);
-        let points = self.chain.choose_points_for_find_intersect();
-        if !points.is_empty() {
-            peer.find_intersect(points);
-        } else if let Some(sync_point) = self.sync_point.as_ref() {
-            peer.find_intersect(vec![sync_point.clone()]);
-        }
+        let points = self.flow_handler.handle_new_connection(id, self.sync_point.as_ref());
+        peer.find_intersect(points);
         self.peers.insert(id, peer);
-        if self.chain.preferred_upstream.is_none() {
-            self.set_preferred_upstream(id);
-        }
     }
 
     pub async fn sync_to_tip(&mut self) -> Result<()> {
         loop {
-            let Some(upstream) = self.chain.preferred_upstream else {
+            let Some(upstream) = self.flow_handler.preferred_upstream() else {
                 bail!("no peers");
             };
             let Some(peer) = self.peers.get(&upstream) else {
@@ -193,29 +176,22 @@ impl NetworkManager {
     fn handle_peer_update(&mut self, peer: PeerId, event: PeerEvent) {
         match event {
             PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(header, tip)) => {
-                self.chain.handle_tip(peer, tip);
+                self.flow_handler.handle_tip(peer, tip);
                 let slot = header.slot;
                 let hash = header.hash;
-                let announcers = self.chain.handle_roll_forward(peer, header.clone());
 
-                if let Some(peers) = self.flow_handler.handle_roll_forward(&header, announcers) {
+                // TODO: Temporary. In Direct mode returns announcers then fetches blocks, in
+                // Consensus mode: returns None, so no block fetch
+                if let Some(peers) = self.flow_handler.handle_roll_forward(peer, header) {
                     self.request_block(slot, hash, peers);
                 }
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
-                self.chain.handle_tip(peer, tip);
-
-                // Notify flow handler of rollback
-                let rollback_slot = match &point {
-                    Point::Origin => 0,
-                    Point::Specific(slot, _) => *slot,
-                };
-                self.flow_handler.handle_roll_backward(rollback_slot);
-
-                self.chain.handle_roll_backward(peer, point);
+                self.flow_handler.handle_tip(peer, tip);
+                self.flow_handler.handle_roll_backward(peer, point);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
-                self.chain.handle_tip(peer, tip.clone());
+                self.flow_handler.handle_tip(peer, tip.clone());
                 // We called find_intersect on a peer, and it didn't recognize any of the points we passed.
                 // That peer must either be behind us or on a different fork; either way, that chain should sync from its own tip
                 if let Some(peer) = self.peers.get(&peer) {
@@ -226,9 +202,7 @@ impl NetworkManager {
                 for peer in self.peers.values_mut() {
                     peer.ack_block(fetched.hash);
                 }
-                // Notify flow handler that block was fetched
-                self.flow_handler.handle_block_fetched(fetched.slot, fetched.hash);
-                self.chain.handle_body_fetched(fetched.slot, fetched.hash, fetched.body);
+                self.flow_handler.handle_block_fetched(fetched.slot, fetched.hash, fetched.body);
             }
             PeerEvent::Disconnected => {
                 self.handle_disconnect(peer);
@@ -241,17 +215,17 @@ impl NetworkManager {
             return;
         };
         warn!("disconnected from {}", peer.conn.address);
-        self.chain.handle_disconnect(id);
-        if self.chain.preferred_upstream.is_none() {
-            if let Some(new_preferred) = self.peers.keys().next().copied() {
-                self.set_preferred_upstream(new_preferred);
-            } else {
-                warn!("no upstream peers!");
-            }
-        }
+
+        // The next peer is temporary needed for Direct mode flow handler only
+        self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
+
         for (requested_hash, requested_slot) in peer.reqs {
-            let announcers = self.chain.block_announcers(requested_slot, requested_hash);
-            self.request_block(requested_slot, requested_hash, announcers);
+            if let Some(announcers) =
+                self.flow_handler.block_announcers(requested_slot, requested_hash)
+            {
+                // TODO: Temporary for direct mode.
+                self.request_block(requested_slot, requested_hash, announcers);
+            }
         }
 
         let address = peer.conn.address.clone();
@@ -270,16 +244,6 @@ impl NetworkManager {
             }
         }
     }
-
-    fn set_preferred_upstream(&mut self, id: PeerId) {
-        let Some(peer) = self.peers.get(&id) else {
-            warn!("setting preferred upstream to unrecognized node {id:?}");
-            return;
-        };
-        info!("setting preferred upstream to {}", peer.conn.address);
-        self.chain.handle_new_preferred_upstream(id);
-    }
-
 }
 
 pub enum NetworkEvent {

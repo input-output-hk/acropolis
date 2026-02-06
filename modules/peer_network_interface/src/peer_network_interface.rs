@@ -103,23 +103,32 @@ impl PeerNetworkInterface {
                     manager.sync_to_point(Point::Origin);
                     manager
                 }
-                SyncPoint::Tip => {
-                    info!("Starting sync from tip");
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                        flow_handler,
-                        events,
-                        events_sender,
-                    );
-                    if let Err(error) = manager.sync_to_tip().await {
-                        warn!("could not sync to tip: {error:#}");
+                // TODO: Temporary, only applicable in Direct mode
+                SyncPoint::Tip => match cfg.block_flow_mode {
+                    configuration::BlockFlowMode::Direct => {
+                        info!("Starting sync from tip");
+                        let mut manager = Self::init_manager(
+                            cfg.node_addresses,
+                            genesis_values.magic_number.into(),
+                            sink,
+                            command_subscription,
+                            flow_handler,
+                            events,
+                            events_sender,
+                        );
+                        if let Err(error) = manager.sync_to_tip().await {
+                            warn!("could not sync to tip: {error:#}");
+                            return;
+                        }
+                        manager
+                    }
+                    configuration::BlockFlowMode::Consensus => {
+                        warn!(
+                            "Requested sync point is Tip, which is not supported in Consensus mode."
+                        );
                         return;
                     }
-                    manager
-                }
+                },
                 SyncPoint::Cache => {
                     info!("Starting sync from cache at {:?}", cache_sync_point);
                     let mut manager = Self::init_manager(

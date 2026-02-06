@@ -1,12 +1,13 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
-    BlockOfferedMessage, BlockRescindedMessage, BlockWantedMessage, ConsensusMessage, Message,
+    BlockOfferedMessage, BlockWantedMessage, ConsensusMessage, Message,
 };
 use anyhow::{Result, bail};
 use caryatid_sdk::{Context, Subscription};
+use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
@@ -18,10 +19,12 @@ use crate::network::{NetworkEvent, PeerId};
 
 /// Block flow handling strategies.
 pub enum BlockFlowHandler {
-    /// Direct: auto-fetch blocks as announced, PNI manages chain selection
-    Direct,
-    /// Consensus-driven: publish offers, wait for wants before fetching.
+    /// Direct: auto-fetch blocks as announced, PNI manages chain selection.
+    /// Contains ChainState which tracks preferred upstream and publishes chain events.
+    Direct { chain: ChainState },
+    /// Consensus-driven: publish offers, wait for 'block wants' before fetching.
     /// Chain selection is delegated to the consensus module.
+    /// Tracks block announcers.
     Consensus(ConsensusFlowState),
 }
 
@@ -34,7 +37,9 @@ impl BlockFlowHandler {
         match config.block_flow_mode {
             BlockFlowMode::Direct => {
                 info!("Block flow mode: Direct (auto-fetch)");
-                Ok(BlockFlowHandler::Direct)
+                Ok(BlockFlowHandler::Direct {
+                    chain: ChainState::new(),
+                })
             }
             BlockFlowMode::Consensus => {
                 info!(
@@ -77,14 +82,12 @@ impl BlockFlowHandler {
         bail!("subscription closed");
     }
 
-    /// Handle a new block announcement. Returns peers to fetch from, or None if awaiting consensus.
-    pub fn handle_roll_forward(
-        &mut self,
-        header: &Header,
-        announcers: Vec<PeerId>,
-    ) -> Option<Vec<PeerId>> {
+    /// Handle a peer announcing a block (roll forward).
+    /// Returns peers to fetch immediately (Direct), or None in case of consensus mode.
+    pub fn handle_roll_forward(&mut self, peer: PeerId, header: Header) -> Option<Vec<PeerId>> {
         match self {
-            BlockFlowHandler::Direct => {
+            BlockFlowHandler::Direct { chain } => {
+                let announcers = chain.handle_roll_forward(peer, header);
                 if announcers.is_empty() {
                     None
                 } else {
@@ -92,15 +95,108 @@ impl BlockFlowHandler {
                 }
             }
             BlockFlowHandler::Consensus(state) => {
-                state.handle_roll_forward(header);
+                state.handle_roll_forward(peer, &header);
                 None
             }
         }
     }
 
-    pub fn handle_roll_backward(&mut self, rollback_to_slot: u64) {
-        if let BlockFlowHandler::Consensus(state) = self {
-            state.handle_roll_backward(rollback_to_slot);
+    /// Handle a peer rolling back.
+    pub fn handle_roll_backward(&mut self, peer: PeerId, point: Point) {
+        match self {
+            BlockFlowHandler::Direct { chain } => {
+                chain.handle_roll_backward(peer, point);
+            }
+            BlockFlowHandler::Consensus(state) => {
+                state.handle_roll_backward(peer, point);
+            }
+        }
+    }
+
+    /// Handle a peer reporting its tip.
+    pub fn handle_tip(&mut self, peer: PeerId, tip: Point) {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.handle_tip(peer, tip),
+            BlockFlowHandler::Consensus(state) => state.handle_tip(peer, tip),
+        }
+    }
+
+    /// Handle a block body being fetched.
+    pub fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash, body: Vec<u8>) {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.handle_body_fetched(slot, hash, body),
+            BlockFlowHandler::Consensus(state) => state.handle_block_fetched(slot, hash),
+        }
+    }
+
+    /// Handle a peer disconnecting.
+    pub fn handle_disconnect(&mut self, peer: PeerId, next_peer: Option<PeerId>) {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.handle_disconnect(peer, next_peer),
+            BlockFlowHandler::Consensus(state) => state.handle_disconnect(peer),
+        }
+    }
+
+    /// Set the preferred upstream peer (Direct mode only, Consensus no-op).
+    pub fn set_preferred_upstream(&mut self, peer: Option<PeerId>) {
+        if let BlockFlowHandler::Direct { chain } = self {
+            if let Some(peer_id) = peer {
+                chain.handle_new_preferred_upstream(peer_id);
+            } else {
+                warn!("Sync requested but no upstream peers available");
+            }
+        }
+    }
+
+    /// Get the preferred upstream peer (Direct mode), or None (Consensus mode).
+    pub fn preferred_upstream(&self) -> Option<PeerId> {
+        match self {
+            BlockFlowHandler::Direct { chain } => chain.preferred_upstream,
+            BlockFlowHandler::Consensus(_) => None,
+        }
+    }
+
+    /// Handle a new peer connection.
+    /// Returns the points to use for find_intersect, if any.
+    /// In Direct mode, uses chain state points (or falls back to sync_point),
+    /// and sets preferred upstream if none is set.
+    /// In Consensus mode, just uses sync_point.
+    pub fn handle_new_connection(
+        &mut self,
+        peer: PeerId,
+        sync_point: Option<&Point>,
+    ) -> Vec<Point> {
+        match self {
+            BlockFlowHandler::Direct { chain } => {
+                if chain.preferred_upstream.is_none() {
+                    chain.handle_new_preferred_upstream(peer);
+                }
+                let points = chain.choose_points_for_find_intersect();
+                if !points.is_empty() {
+                    return points;
+                }
+            }
+            BlockFlowHandler::Consensus(_) => {}
+        }
+        sync_point.map(|p| vec![p.clone()]).unwrap_or_default()
+    }
+
+    /// Get peers that announced a specific block.
+    pub fn block_announcers(&self, slot: u64, hash: BlockHash) -> Option<Vec<PeerId>> {
+        match self {
+            BlockFlowHandler::Direct { chain } => Some(chain.block_announcers(slot, hash)),
+            BlockFlowHandler::Consensus(state) => {
+                state.block_announcers(slot, hash);
+                None
+            }
+        }
+    }
+
+    /// Reset state for a new sync point.
+    pub fn handle_sync_reset(&mut self) {
+        match self {
+            BlockFlowHandler::Direct { chain } => *chain = ChainState::new(),
+            BlockFlowHandler::Consensus(state) => state.handle_sync_reset(),
         }
     }
 
@@ -110,12 +206,11 @@ impl BlockFlowHandler {
     /// - Consensus mode: publishes BlockOffered/BlockRescinded to consensus
     pub async fn publish(
         &mut self,
-        chain: &mut ChainState,
         block_sink: &mut BlockSink,
         published_blocks: &mut u64,
     ) -> Result<()> {
         match self {
-            BlockFlowHandler::Direct => {
+            BlockFlowHandler::Direct { chain } => {
                 while let Some(event) = chain.next_unpublished_event() {
                     let tip = chain.preferred_upstream_tip();
                     match event {
@@ -139,18 +234,6 @@ impl BlockFlowHandler {
         }
         Ok(())
     }
-
-    pub fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash) {
-        if let BlockFlowHandler::Consensus(state) = self {
-            state.handle_block_fetched(slot, hash);
-        }
-    }
-
-    pub fn handle_sync_reset(&mut self) {
-        if let BlockFlowHandler::Consensus(state) = self {
-            state.handle_sync_reset();
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,28 +243,44 @@ enum ConsensusEvent {
         slot: u64,
         parent_hash: BlockHash,
     },
-    BlockRescinded {
-        hash: BlockHash,
-        slot: u64,
-    },
+    // TODO: BlockRescinded would be sent when NO peers have a block anymore.
+    // TODO: This requires tracking when all announcers disconnect/rollback - not implemented yet.
 }
 
-/// Tracks block offers and generates consensus events.
+/// Tracks block announcements from peers and generates consensus events.
+///
+/// - Tracks explicit announcements and rollbacks
+/// - Tracks peers' tips to filter out peers that can no longer serve a block
 #[derive(Default)]
-struct BlockOfferTracker {
+struct BlockTracker {
+    /// (slot, hash) -> list of peers that announced it.
+    /// Ordered by slot for efficient rollbacks.
+    blocks: BTreeMap<(u64, BlockHash), Vec<PeerId>>,
+    /// Each peer's last reported chain tip.
+    tips: HashMap<PeerId, Point>,
+    /// Pending consensus events to publish.
     pending_events: Vec<ConsensusEvent>,
-    offered_blocks: BTreeMap<u64, HashSet<BlockHash>>,
 }
 
-impl BlockOfferTracker {
+impl BlockTracker {
     fn new() -> Self {
         Self::default()
     }
 
-    /// Record a new block announcement and produce BlockOffered event if this
-    /// is the first 'new block'.
-    fn roll_forward(&mut self, slot: u64, hash: BlockHash, parent_hash: BlockHash) {
-        let is_new = self.offered_blocks.entry(slot).or_default().insert(hash);
+    /// Record a block announcement from a peer.
+    /// Generates a BlockOffered event if this is the first announcement for this block.
+    fn track_announcement(
+        &mut self,
+        peer: PeerId,
+        slot: u64,
+        hash: BlockHash,
+        parent_hash: BlockHash,
+    ) {
+        let is_new = !self.blocks.contains_key(&(slot, hash));
+        let announcers = self.blocks.entry((slot, hash)).or_default();
+        if !announcers.contains(&peer) {
+            announcers.push(peer);
+        }
         if is_new {
             self.pending_events.push(ConsensusEvent::BlockOffered {
                 hash,
@@ -191,111 +290,135 @@ impl BlockOfferTracker {
         }
     }
 
-    /// Handle a rollback, produces BlockRescinded events for all blocks
-    /// at slots strictly greater than the rollback point.
-    fn roll_backward(&mut self, rollback_to_slot: u64) {
-        // Collect slots beyond the rollback point
-        let slots_to_rescind: Vec<u64> =
-            self.offered_blocks.range((rollback_to_slot + 1)..).map(|(slot, _)| *slot).collect();
+    /// Update a peer's known tip.
+    fn handle_tip(&mut self, peer: PeerId, tip: Point) {
+        self.tips.insert(peer, tip);
+    }
 
-        for slot in slots_to_rescind {
-            if let Some(hashes) = self.offered_blocks.remove(&slot) {
-                for hash in hashes {
-                    self.pending_events.push(ConsensusEvent::BlockRescinded { hash, slot });
-                }
-            }
+    /// Handle a peer rolling back — remove it from blocks beyond the rollback point.
+    fn handle_rollback(&mut self, peer: PeerId, point: &Point) {
+        let rollback_to_slot = match point {
+            Point::Origin => 0,
+            Point::Specific(slot, _) => *slot,
+        };
+        for announcers in self.blocks.range_mut((rollback_to_slot + 1, BlockHash::default())..) {
+            announcers.1.retain(|p| *p != peer);
+        }
+        self.blocks.retain(|_, announcers| !announcers.is_empty());
+    }
+
+    /// Handle a peer disconnecting — remove it from all blocks and tips.
+    fn handle_disconnect(&mut self, peer: PeerId) {
+        self.tips.remove(&peer);
+        for announcers in self.blocks.values_mut() {
+            announcers.retain(|p| *p != peer);
+        }
+        self.blocks.retain(|_, announcers| !announcers.is_empty());
+    }
+
+    /// Checks if a peer's tip is at or beyond the given slot.
+    fn peer_can_have_block(&self, peer: PeerId, slot: u64) -> bool {
+        match self.tips.get(&peer) {
+            Some(Point::Specific(peer_slot, _)) => *peer_slot >= slot,
+            Some(Point::Origin) | None => false,
         }
     }
 
-    /// A block was successfully fetched - remove it from tracking.
+    /// Get peers that announced a block and whose tip still covers it.
+    fn announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
+        self.blocks
+            .get(&(slot, hash))
+            .into_iter()
+            .flat_map(|peers| peers.iter())
+            .filter(|peer| self.peer_can_have_block(**peer, slot))
+            .copied()
+            .collect()
+    }
+
+    /// A block was successfully fetched — remove it from tracking.
     fn block_fetched(&mut self, slot: u64, hash: BlockHash) {
-        if let Some(hashes) = self.offered_blocks.get_mut(&slot) {
-            hashes.remove(&hash);
-            if hashes.is_empty() {
-                self.offered_blocks.remove(&slot);
-            }
-        }
-    }
-
-    /// Clear all state (used on sync reset).
-    fn reset(&mut self) {
-        self.offered_blocks.clear();
-        self.pending_events.clear();
+        self.blocks.remove(&(slot, hash));
     }
 
     /// Take all pending events for publishing.
     fn take_events(&mut self) -> Vec<ConsensusEvent> {
         std::mem::take(&mut self.pending_events)
     }
+
+    /// Clear all state.
+    fn reset(&mut self) {
+        self.blocks.clear();
+        self.tips.clear();
+        self.pending_events.clear();
+    }
 }
 
 pub struct ConsensusFlowState {
     context: Arc<Context<Message>>,
     topic: String,
-    tracker: BlockOfferTracker,
-    publish_failure_count: u32,
+    tracker: BlockTracker,
+    blocks_offered_count: u64,
 }
-
-const MAX_PUBLISH_FAILURES: u32 = 10;
 
 impl ConsensusFlowState {
     fn new(context: Arc<Context<Message>>, topic: String) -> Self {
         Self {
             context,
             topic,
-            tracker: BlockOfferTracker::new(),
-            publish_failure_count: 0,
+            tracker: BlockTracker::new(),
+            blocks_offered_count: 0,
         }
     }
 
-    fn handle_roll_forward(&mut self, header: &Header) {
+    fn handle_roll_forward(&mut self, peer: PeerId, header: &Header) {
         let parent_hash = header.parent_hash.unwrap_or_default();
-        self.tracker.roll_forward(header.slot, header.hash, parent_hash);
+        self.tracker.track_announcement(peer, header.slot, header.hash, parent_hash);
     }
 
-    fn handle_roll_backward(&mut self, rollback_to_slot: u64) {
-        self.tracker.roll_backward(rollback_to_slot);
+    fn handle_roll_backward(&mut self, peer: PeerId, point: Point) {
+        self.tracker.handle_rollback(peer, &point);
+    }
+
+    fn handle_tip(&mut self, peer: PeerId, tip: Point) {
+        self.tracker.handle_tip(peer, tip);
+    }
+
+    fn handle_disconnect(&mut self, peer: PeerId) {
+        self.tracker.handle_disconnect(peer);
+    }
+
+    fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
+        self.tracker.announcers(slot, hash)
     }
 
     async fn publish_pending(&mut self) -> Result<()> {
-        let events = self.tracker.take_events();
-        if events.is_empty() {
-            return Ok(());
-        }
-
-        for event in events {
-            let msg = match event {
+        for event in self.tracker.take_events() {
+            let consensus_message = match event {
                 ConsensusEvent::BlockOffered {
                     hash,
                     slot,
                     parent_hash,
-                } => ConsensusMessage::BlockOffered(BlockOfferedMessage {
-                    hash,
-                    slot,
-                    parent_hash,
-                }),
-                ConsensusEvent::BlockRescinded { hash, slot } => {
-                    ConsensusMessage::BlockRescinded(BlockRescindedMessage { hash, slot })
+                } => {
+                    self.blocks_offered_count += 1;
+                    if self.blocks_offered_count.is_multiple_of(100) {
+                        info!("Offered block (consensus) {}", hash);
+                    }
+
+                    ConsensusMessage::BlockOffered(BlockOfferedMessage {
+                        hash,
+                        slot,
+                        parent_hash,
+                    })
                 }
             };
 
-            let message = Arc::new(Message::Consensus(msg));
+            let message = Arc::new(Message::Consensus(consensus_message));
+
             if let Err(e) = self.context.publish(&self.topic, message).await {
-                self.publish_failure_count += 1;
-                if self.publish_failure_count >= MAX_PUBLISH_FAILURES {
-                    error!(
-                        "Failed to publish consensus event after {} attempts: {e}. \
-                         Consensus module may be unavailable.",
-                        self.publish_failure_count
-                    );
-                } else {
-                    warn!("Failed to publish consensus event: {e}");
-                }
-            } else {
-                self.publish_failure_count = 0;
+                error!("Failed to publish consensus event: {e}");
+                continue;
             }
         }
-
         Ok(())
     }
 
@@ -311,136 +434,179 @@ impl ConsensusFlowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain_state::ChainState;
+    use crate::network::PeerId;
 
     fn hash(n: u8) -> BlockHash {
         BlockHash::new([n; 32])
     }
 
-    mod offer_tracker {
-        use super::*;
+    #[test]
+    fn first_announcement_emits_offer() {
+        let mut tracker = BlockTracker::new();
 
-        fn has_block(tracker: &BlockOfferTracker, slot: u64, h: BlockHash) -> bool {
-            tracker.offered_blocks.get(&slot).is_some_and(|set| set.contains(&h))
-        }
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
 
-        #[test]
-        fn roll_forward_tracks_block_and_emits_offer() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-
-            assert!(has_block(&tracker, 100, hash(1)));
-            let events = tracker.take_events();
-            assert!(matches!(
-                &events[..],
-                [ConsensusEvent::BlockOffered { slot: 100, hash, parent_hash }]
-                    if *hash == self::hash(1) && *parent_hash == self::hash(0)
-            ));
-        }
-
-        #[test]
-        fn duplicate_announcement_emits_single_offer() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-            tracker.roll_forward(100, hash(1), hash(0));
-
-            assert_eq!(tracker.offered_blocks[&100].len(), 1);
-            assert_eq!(tracker.take_events().len(), 1);
-        }
-
-        #[test]
-        fn fork_at_same_slot_tracks_both_blocks() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-            tracker.roll_forward(100, hash(2), hash(0));
-
-            assert_eq!(tracker.offered_blocks[&100].len(), 2);
-            assert_eq!(tracker.take_events().len(), 2);
-        }
-
-        #[test]
-        fn rollback_rescinds_blocks_beyond_slot() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-            tracker.roll_forward(101, hash(2), hash(1));
-            tracker.roll_forward(102, hash(3), hash(2));
-            tracker.take_events();
-
-            tracker.roll_backward(100);
-
-            assert!(has_block(&tracker, 100, hash(1)));
-            assert!(!has_block(&tracker, 101, hash(2)));
-            assert!(!has_block(&tracker, 102, hash(3)));
-
-            let events = tracker.take_events();
-            assert_eq!(events.len(), 2);
-            assert!(events.iter().all(|e| matches!(e, ConsensusEvent::BlockRescinded { .. })));
-        }
-
-        #[test]
-        fn block_fetched_removes_from_tracking() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-            tracker.roll_forward(101, hash(2), hash(1));
-            tracker.block_fetched(100, hash(1));
-
-            assert!(!has_block(&tracker, 100, hash(1)));
-            assert!(has_block(&tracker, 101, hash(2)));
-        }
-
-        #[test]
-        fn reset_clears_all_state() {
-            let mut tracker = BlockOfferTracker::new();
-
-            tracker.roll_forward(100, hash(1), hash(0));
-            tracker.reset();
-
-            assert!(tracker.offered_blocks.is_empty());
-            assert!(tracker.take_events().is_empty());
-        }
+        assert!(tracker.blocks.contains_key(&(100, hash(1))));
+        let events = tracker.take_events();
+        assert!(matches!(
+            &events[..],
+            [ConsensusEvent::BlockOffered { slot: 100, hash, parent_hash }]
+                if *hash == self::hash(1) && *parent_hash == self::hash(0)
+        ));
     }
 
-    mod block_flow_handler {
-        use super::*;
-        use crate::network::PeerId;
+    #[test]
+    fn duplicate_announcement_emits_single_offer() {
+        let mut tracker = BlockTracker::new();
 
-        #[test]
-        fn direct_mode_returns_announcers() {
-            let mut handler = BlockFlowHandler::Direct;
-            let header = crate::connection::Header {
-                hash: hash(1),
-                slot: 100,
-                number: 100,
-                bytes: vec![],
-                era: acropolis_common::Era::Conway,
-                parent_hash: Some(hash(0)),
-            };
+        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
+        tracker.handle_tip(PeerId(2), Point::Specific(100, hash(1).to_vec()));
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(2), 100, hash(1), hash(0));
 
-            let peers = vec![PeerId(1), PeerId(2)];
-            let result = handler.handle_roll_forward(&header, peers.clone());
+        assert_eq!(tracker.blocks.len(), 1);
+        assert_eq!(tracker.announcers(100, hash(1)).len(), 2);
+        assert_eq!(tracker.take_events().len(), 1);
+    }
 
-            assert_eq!(result, Some(peers));
-        }
+    #[test]
+    fn fork_at_same_slot_tracks_both_blocks() {
+        let mut tracker = BlockTracker::new();
 
-        #[test]
-        fn direct_mode_returns_none_for_empty_announcers() {
-            let mut handler = BlockFlowHandler::Direct;
-            let header = crate::connection::Header {
-                hash: hash(1),
-                slot: 100,
-                number: 100,
-                bytes: vec![],
-                era: acropolis_common::Era::Conway,
-                parent_hash: Some(hash(0)),
-            };
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(2), 100, hash(2), hash(0));
 
-            let result = handler.handle_roll_forward(&header, vec![]);
+        assert_eq!(tracker.blocks.len(), 2);
+        assert_eq!(tracker.take_events().len(), 2);
+    }
 
-            assert!(result.is_none());
+    #[test]
+    fn block_fetched_removes_from_tracking() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(1), 101, hash(2), hash(1));
+        tracker.block_fetched(100, hash(1));
+
+        assert!(!tracker.blocks.contains_key(&(100, hash(1))));
+        assert!(tracker.blocks.contains_key(&(101, hash(2))));
+    }
+
+    #[test]
+    fn rollback_removes_peer_beyond_slot() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
+        tracker.handle_tip(PeerId(2), Point::Specific(200, hash(2).to_vec()));
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
+        tracker.track_announcement(PeerId(2), 200, hash(2), hash(1));
+        tracker.handle_rollback(PeerId(1), &Point::Specific(100, hash(1).to_vec()));
+        // Rollback also updates peer 1's tip
+        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
+
+        assert_eq!(tracker.announcers(100, hash(1)), vec![PeerId(1)]);
+        assert_eq!(tracker.announcers(200, hash(2)), vec![PeerId(2)]);
+    }
+
+    #[test]
+    fn disconnect_removes_peer_from_all_blocks() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
+        tracker.handle_tip(PeerId(2), Point::Specific(200, hash(2).to_vec()));
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
+        tracker.track_announcement(PeerId(2), 200, hash(2), hash(1));
+        tracker.handle_disconnect(PeerId(1));
+
+        assert!(tracker.announcers(100, hash(1)).is_empty());
+        assert_eq!(tracker.announcers(200, hash(2)), vec![PeerId(2)]);
+    }
+
+    #[test]
+    fn peer_without_tip_excluded_from_announcers() {
+        let mut tracker = BlockTracker::new();
+
+        // Peer 1 has no tip set, peer 2 has a tip covering the block
+        tracker.handle_tip(PeerId(2), Point::Specific(100, hash(1).to_vec()));
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PeerId(2), 100, hash(1), hash(0));
+
+        // Only peer 2 is returned — peer 1's tip is unknown
+        assert_eq!(tracker.announcers(100, hash(1)), vec![PeerId(2)]);
+    }
+
+    #[test]
+    fn peer_with_stale_tip_excluded_from_announcers() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
+        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
+
+        // Peer's tip silently drops below the block's slot (no rollback event)
+        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
+
+        assert!(tracker.announcers(200, hash(2)).is_empty());
+    }
+
+    #[test]
+    fn reset_clears_all_state() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
+        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.reset();
+
+        assert!(tracker.blocks.is_empty());
+        assert!(tracker.tips.is_empty());
+        assert!(tracker.take_events().is_empty());
+    }
+
+    #[test]
+    fn direct_mode_tracks_and_returns_announcers() {
+        let mut handler = BlockFlowHandler::Direct {
+            chain: ChainState::new(),
+        };
+        handler.set_preferred_upstream(Some(PeerId(1)));
+
+        let header = Header {
+            hash: hash(1),
+            slot: 100,
+            number: 100,
+            bytes: vec![],
+            era: acropolis_common::Era::Conway,
+            parent_hash: Some(hash(0)),
+        };
+
+        let result = handler.handle_roll_forward(PeerId(1), header.clone());
+        assert_eq!(result, Some(vec![PeerId(1)]));
+
+        let result = handler.handle_roll_forward(PeerId(2), header);
+        assert_eq!(result, Some(vec![PeerId(1), PeerId(2)]));
+    }
+
+    #[test]
+    fn direct_mode_block_announcers_query() {
+        let mut handler = BlockFlowHandler::Direct {
+            chain: ChainState::new(),
+        };
+
+        let header = Header {
+            hash: hash(1),
+            slot: 100,
+            number: 100,
+            bytes: vec![],
+            era: acropolis_common::Era::Conway,
+            parent_hash: Some(hash(0)),
+        };
+
+        handler.handle_roll_forward(PeerId(1), header.clone());
+        handler.handle_roll_forward(PeerId(2), header);
+
+        if let Some(announcers) = handler.block_announcers(100, hash(1)) {
+            assert_eq!(announcers, vec![PeerId(1), PeerId(2)]);
         }
     }
 }
