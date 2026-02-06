@@ -561,7 +561,6 @@ impl From<(u64, ProtocolParams, Option<Nonce>)> for ProtocolParamsRest {
                 _ => None,
             },
             min_pool_cost: shelley_params.map(|p| p.min_pool_cost.to_string()),
-            // TODO: Calculate nonce, store in epoch state, and return here
             nonce: epoch_nonce.map(|nonce| nonce.to_string()),
             cost_models: Some(params.cost_models_json()),
             cost_models_raw: Some(params.cost_models_raw()),
