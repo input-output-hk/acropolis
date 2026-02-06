@@ -9,7 +9,12 @@ pub const POINTER_CACHE: [(&str, &str); 1] = [(
         "tx_index": 1221092,
         "cert_index": 2
       },
-      null
+      {
+        "network": "Mainnet",
+        "credential": {
+          "AddrKeyHash": "1332d859dd71f5b1089052a049690d81f7367eac9fafaef80b4da395"
+        }
+      }
     ],
     [
       {
