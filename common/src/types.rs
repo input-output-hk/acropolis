@@ -47,6 +47,8 @@ use tracing::error;
     Clone,
     Default,
     PartialEq,
+    Ord,
+    PartialOrd,
     Eq,
     Hash,
     serde::Serialize,
@@ -360,7 +362,7 @@ impl PoolRegistrationOutcome {
 }
 
 /// Individual address balance change
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {
     // Address involved in delta
     pub address: Address,
@@ -745,6 +747,7 @@ pub type DataHash = Vec<u8>;
     Clone,
     Copy,
     PartialEq,
+    PartialOrd,
     Eq,
     Hash,
     serde::Serialize,

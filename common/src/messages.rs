@@ -8,6 +8,7 @@ use crate::ledger_state::SPOState;
 use crate::protocol_params::{Nonce, Nonces, PraosParams, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
+use crate::queries::stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -239,8 +240,11 @@ pub struct DRepStateMessage {
     /// Epoch which has ended
     pub epoch: u64,
 
-    /// DRep initial deposit by id, for all active DReps.
+    /// Registered DReps with their deposits.
     pub dreps: Vec<(DRepCredential, Lovelace)>,
+
+    /// Inactive DReps which do not count towards the active voting stake.
+    pub inactive_dreps: Vec<DRepCredential>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -507,6 +511,13 @@ pub struct AccountsBootstrapMessage {
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
+
+    /// DRep delegations needed to reproduce PV9 DRep deregistration bug.
+    /// Contains a map of all stake addresses that have EVER delegated to a DRep.
+    /// During PV9, if a DRep deregisters then ALL accounts that have EVER delegated
+    /// to the DRep has their delegation cleared, even if they have switched delegations
+    /// since.
+    pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
 
 /// Deltas to apply to pots at epoch boundary during snapshot bootstrap
@@ -661,6 +672,7 @@ pub enum StateQuery {
     Parameters(ParametersStateQuery),
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
+    StakeDeltas(StakeDeltaQuery),
     Transactions(TransactionsStateQuery),
     UTxOs(UTxOStateQuery),
     SPDD(SPDDStateQuery),
@@ -682,6 +694,7 @@ pub enum StateQueryResponse {
     Parameters(ParametersStateQueryResponse),
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
+    StakeDeltas(StakeDeltaQueryResponse),
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),

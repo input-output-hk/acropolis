@@ -179,7 +179,11 @@ impl State {
                 //
                 // If the epoch hasn't changed, then our active nonce is unchanged.
                 active: if new_epoch {
-                    Nonces::from_candidate(&current_nonces.candidate, &current_nonces.prev_lab)?
+                    Nonces::from_candidate(
+                        &current_nonces.candidate,
+                        &current_nonces.prev_lab,
+                        &praos_params.extra_entropy,
+                    )?
                 } else {
                     current_nonces.active.clone()
                 },

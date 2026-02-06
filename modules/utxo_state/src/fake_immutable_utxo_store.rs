@@ -1,10 +1,11 @@
 //! Fake store for immutable UTXOs
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{Address, UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{Address, ShelleyAddressPointer, UTXOValue, UTxOIdentifier, Value};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info};
@@ -62,8 +63,19 @@ impl ImmutableUTXOStore for FakeImmutableUTXOStore {
         Ok(42)
     }
 
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        // Fake store doesn't track actual UTxOs
+        Ok(Vec::new())
+    }
+
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         Ok(0)
+    }
+
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        Ok(HashMap::new())
     }
 }

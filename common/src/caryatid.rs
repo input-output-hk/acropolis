@@ -128,7 +128,7 @@ macro_rules! declare_cardano_reader {
                 ctx: &Context<Message>,
                 cfg: &Arc<Config>,
             ) -> Result<Option<Self>> {
-                match cfg.get::<&str>($param) {
+                match cfg.get::<String>($param) {
                     Ok(topic_name) => {
                         if !$def_topic.is_empty() {
                             bail!(
@@ -142,9 +142,9 @@ macro_rules! declare_cardano_reader {
                             sub: ctx.subscribe(&topic_name).await?,
                         }))
                     }
-                    Err(_) => {
+                    Err(e) => {
                         info!(
-                            "Skipping subscriber creation for '{}', no topic in config",
+                            "Skipping subscriber creation for '{}': parameter not found, get error '{e}'",
                             $param
                         );
                         Ok(None)

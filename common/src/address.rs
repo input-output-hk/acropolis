@@ -83,6 +83,22 @@ impl ByronAddress {
 
         Ok(buf)
     }
+
+    /// Check if this Byron address is a redeem (AVVM) address.
+    ///
+    /// Byron address payload is CBOR: [root_hash, attributes, addr_type]
+    /// where addr_type is:
+    /// - 0 = ATVerKey (regular verification key address)
+    /// - 2 = ATRedeem (redeem/AVVM address)
+    ///
+    /// The addr_type is the last element and CBOR-encodes small integers as
+    /// a single byte, so we can simply check if the last byte is 2.
+    ///
+    /// At the Allegra hard fork (epoch 236 on mainnet), all redeem addresses
+    /// are cancelled and their value returned to reserves.
+    pub fn is_redeem_address(&self) -> bool {
+        self.payload.last() == Some(&2)
+    }
 }
 
 /// A Shelley-era address - payment part
@@ -444,7 +460,9 @@ impl ShelleyAddress {
 }
 
 /// A stake address
-#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct StakeAddress {
     /// Network id
     pub network: NetworkId,
@@ -702,6 +720,17 @@ impl Address {
                 StakeCredential::ScriptHash(_) => true,
             },
             Address::Byron(_) | Address::None => false,
+        }
+    }
+
+    /// Check if this is a Byron redeem (AVVM) address.
+    ///
+    /// Returns true only for Byron addresses with the ATRedeem type.
+    /// These addresses were cancelled at the Allegra hard fork.
+    pub fn is_redeem(&self) -> bool {
+        match self {
+            Address::Byron(byron) => byron.is_redeem_address(),
+            _ => false,
         }
     }
 }
