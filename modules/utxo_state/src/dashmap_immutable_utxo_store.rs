@@ -3,11 +3,12 @@
 // but it takes a lot more memory than HashMap
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier};
+use acropolis_common::{ShelleyAddressPointer, UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
 use dashmap::DashMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 
@@ -82,5 +83,17 @@ impl ImmutableUTXOStore for DashMapImmutableUTXOStore {
     /// Get the total lovelace of UTXOs in the store
     async fn sum_lovelace(&self) -> Result<u64> {
         Ok(self.utxos.iter().map(|entry| entry.value().value.lovelace).sum())
+    }
+
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();
+
+        for entry in self.utxos.iter() {
+            if let Some(ptr) = entry.value().address.get_pointer() {
+                *result.entry(ptr).or_insert(0) += entry.value().value.lovelace;
+            }
+        }
+
+        Ok(result)
     }
 }

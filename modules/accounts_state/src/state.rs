@@ -19,13 +19,16 @@ use acropolis_common::{
     protocol_params::ProtocolParams,
     queries::{
         get_query_topic,
+        stake_deltas::{
+            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
+        },
         utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
     BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
     InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
     PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
-    SPORewards, StakeAddress, StakeRewardDelta, TxCertificate,
+    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
@@ -366,6 +369,127 @@ impl State {
                 "Unexpected utxo-state response for AVVM cancelled value"
             )),
         }
+    }
+
+    /// Query utxo_state for the total lovelace held in pointer address UTxOs,
+    /// grouped by pointer. Used at the Conway hard fork boundary to remove
+    /// pointer address stake from the distribution (per Conway spec 9.1.2).
+    async fn get_pointer_address_values(
+        &self,
+        context: Arc<Context<Message>>,
+    ) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        let utxos_query_topic = get_query_topic(context.clone(), DEFAULT_UTXOS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::UTxOs(
+            UTxOStateQuery::GetPointerAddressValues,
+        )));
+        let response = context.message_bus.request(&utxos_query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        match message {
+            Message::StateQueryResponse(StateQueryResponse::UTxOs(
+                UTxOStateQueryResponse::PointerAddressValues(values),
+            )) => Ok(values),
+            _ => Err(anyhow!(
+                "Unexpected utxo-state response for pointer address values"
+            )),
+        }
+    }
+
+    /// Query stake_delta_filter to resolve a set of pointers to stake addresses.
+    async fn resolve_pointers(
+        &self,
+        context: Arc<Context<Message>>,
+        pointers: Vec<ShelleyAddressPointer>,
+    ) -> Result<HashMap<ShelleyAddressPointer, StakeAddress>> {
+        let query_topic = get_query_topic(context.clone(), DEFAULT_STAKE_DELTAS_QUERY_TOPIC);
+        let msg = Arc::new(Message::StateQuery(StateQuery::StakeDeltas(
+            StakeDeltaQuery::ResolvePointers { pointers },
+        )));
+        let response = context.message_bus.request(&query_topic, msg).await?;
+        let message = Arc::try_unwrap(response).unwrap_or_else(|arc| (*arc).clone());
+
+        match message {
+            Message::StateQueryResponse(StateQueryResponse::StakeDeltas(
+                StakeDeltaQueryResponse::ResolvedPointers(resolved),
+            )) => Ok(resolved),
+            _ => Err(anyhow!(
+                "Unexpected stake-delta-filter response for pointer resolution"
+            )),
+        }
+    }
+
+    /// At the Conway hard fork boundary, pointer addresses lose their staking
+    /// functionality (Conway spec 9.1.2). This method queries utxo_state for
+    /// all unspent pointer address UTxO values, then queries stake_delta_filter
+    /// to resolve each pointer to its stake address, and subtracts those
+    /// values from the corresponding account's `utxo_value` so they no longer
+    /// count towards the stake distribution.
+    pub async fn remove_pointer_address_stake(
+        &mut self,
+        context: Arc<Context<Message>>,
+    ) -> Result<()> {
+        let pointer_values = self.get_pointer_address_values(context.clone()).await?;
+        if pointer_values.is_empty() {
+            info!("No pointer address UTxOs found at Conway boundary");
+            return Ok(());
+        }
+
+        let pointers: Vec<ShelleyAddressPointer> = pointer_values.keys().cloned().collect();
+        let resolved_pointers = self.resolve_pointers(context, pointers).await?;
+
+        let mut stake_values: HashMap<StakeAddress, u64> = HashMap::new();
+        let mut resolved_lovelace: u64 = 0;
+        for (ptr, lovelace) in &pointer_values {
+            if let Some(stake_addr) = resolved_pointers.get(ptr) {
+                *stake_values.entry(stake_addr.clone()).or_insert(0) += lovelace;
+                resolved_lovelace += lovelace;
+            }
+        }
+
+        let total_pointer_lovelace: u64 = pointer_values.values().sum();
+        let unresolved_lovelace = total_pointer_lovelace - resolved_lovelace;
+
+        info!(
+            total_pointers = pointer_values.len(),
+            resolved_accounts = stake_values.len(),
+            total_pointer_lovelace,
+            resolved_lovelace,
+            unresolved_lovelace,
+            "Removing pointer address stake at Conway boundary"
+        );
+
+        let mut stake_addresses = self.stake_addresses.lock().unwrap();
+        for (stake_addr, lovelace) in &stake_values {
+            if let Some(sas) = stake_addresses.get_mut(stake_addr) {
+                let old_value = sas.utxo_value;
+                if sas.utxo_value >= *lovelace {
+                    sas.utxo_value -= lovelace;
+                } else {
+                    warn!(
+                        stake_address = %stake_addr,
+                        utxo_value = old_value,
+                        pointer_lovelace = lovelace,
+                        "Pointer address lovelace exceeds utxo_value, setting to 0"
+                    );
+                    sas.utxo_value = 0;
+                }
+                debug!(
+                    stake_address = %stake_addr,
+                    old_value,
+                    subtracted = lovelace,
+                    new_value = sas.utxo_value,
+                    "Subtracted pointer address stake"
+                );
+            } else {
+                warn!(
+                    stake_address = %stake_addr,
+                    lovelace,
+                    "Pointer address resolves to unknown stake address, skipping"
+                );
+            }
+        }
+
+        Ok(())
     }
 
     /// Process entry into a new epoch
@@ -1101,22 +1225,18 @@ impl State {
         //   but still produced blocks because slot leader schedules use older snapshots)
         // Note: The slot leader schedule for epoch N uses the stake distribution from epoch N-2
         // (the "go" snapshot), so we must include pools from the go snapshot as well.
-        let spo_blocks: HashMap<PoolId, usize> = if block_info.era < Era::Babbage {
-            ea_msg
-                .spo_blocks
-                .iter()
-                .filter(|(hash, _)| {
-                    self.spos.contains_key(hash)
-                        || self.retiring_spos.contains(hash)
-                        || self.epoch_snapshots.mark.spos.contains_key(hash)
-                        || self.epoch_snapshots.set.spos.contains_key(hash)
-                        || self.epoch_snapshots.go.spos.contains_key(hash)
-                })
-                .map(|(hash, count)| (*hash, *count))
-                .collect()
-        } else {
-            ea_msg.spo_blocks.iter().cloned().collect()
-        };
+        let spo_blocks = ea_msg
+            .spo_blocks
+            .iter()
+            .filter(|(hash, _)| {
+                self.spos.contains_key(hash)
+                    || self.retiring_spos.contains(hash)
+                    || self.epoch_snapshots.mark.spos.contains_key(hash)
+                    || self.epoch_snapshots.set.spos.contains_key(hash)
+                    || self.epoch_snapshots.go.spos.contains_key(hash)
+            })
+            .map(|(hash, count)| (*hash, *count))
+            .collect();
 
         // Enter epoch - note the message specifies the epoch that has just *ended*
         reward_deltas.extend(
@@ -2027,11 +2147,11 @@ mod tests {
             assert_eq!(sas.rewards, 42);
         }
 
-        // Withdraw most of it
+        // Withdraw all of it (Cardano requires exact withdrawal of full balance)
         let withdrawals = WithdrawalsMessage {
             withdrawals: vec![Withdrawal {
                 address: stake_address.clone(),
-                value: 39,
+                value: 42,
                 tx_identifier: TxIdentifier::default(),
             }],
         };
@@ -2040,7 +2160,7 @@ mod tests {
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&stake_address).unwrap();
-        assert_eq!(sas.rewards, 3);
+        assert_eq!(sas.rewards, 0);
         vld.as_result().unwrap();
     }
 
