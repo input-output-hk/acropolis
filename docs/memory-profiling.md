@@ -24,6 +24,7 @@ cargo run --profile=release-with-debug
 ### **Create an SVG of usage from the dump file**
 ```
 jeprof \
+  --lines \
   --nodecount=4096 \
   --maxdegree=32 \
   --svg \
