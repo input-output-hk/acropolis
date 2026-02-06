@@ -8,9 +8,9 @@ use crate::{
     messages::{CardanoMessage::BlockValidation, Message},
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
-    Address, BlockInfo, CommitteeCredential, DataHash, Era, GenesisKeyhash, GovActionId, KeyHash,
-    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
-    VKeyWitness, Value, Voter, VrfKeyHash,
+    Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
+    KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -207,8 +207,11 @@ pub enum UTxOValidationError {
 /// UTxOW Rules Failure
 /// Shelley Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L97
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOWValidationError {
+    /// --------------------------- Shelley Era Errors
+    /// ----------------------------------------------
     /// **Cause:** The VKey witness has invalid signature
     #[error("Invalid VKey witness: key_hash={key_hash}, witness={witness}")]
     InvalidWitnessesUTxOW {
@@ -276,6 +279,43 @@ pub enum UTxOWValidationError {
         // hash of metadata included in tx body
         metadata_hash: DataHash,
     },
+
+    /// --------------------------- Alonzo Era Errors
+    /// ----------------------------------------------
+    /// **Cause:** Missing Redeemer
+    #[error("Missing Redeemers: redeemer_pointer={redeemer_pointer:?}")]
+    MissingRedeemers { redeemer_pointer: RedeemerPointer },
+
+    /// **Cause:** Extra Redeemer
+    #[error("Extra Redeemers: redeemer_pointer={redeemer_pointer:?}")]
+    ExtraRedeemers { redeemer_pointer: RedeemerPointer },
+
+    /// **Cause:** MissingRequiredDatums
+    #[error("Missing required datums: datum_hash={datum_hash:?}")]
+    MissingRequiredDatums { datum_hash: DatumHash },
+
+    /// **Cause:** Extra Datum
+    #[error("Not allowed supplemental datums: datum_hash={datum_hash}")]
+    NotAllowedSupplementalDatums { datum_hash: DatumHash },
+
+    /// **Cause:** Script integrity hash mismatch
+    #[error(
+        "Script integrity hash mismatch: expected={}, actual={}, reason={}",
+        hex::encode(expected.unwrap_or_default()),
+        hex::encode(actual.unwrap_or_default()),
+        reason
+    )]
+    ScriptIntegrityHashMismatch {
+        expected: Option<ScriptIntegrityHash>,
+        actual: Option<ScriptIntegrityHash>,
+        reason: String,
+    },
+
+    /// **Cause:** Unspendable UTxO without datum hash
+    /// To spend a UTxO locked at Plutus scripts
+    /// datum must be provided
+    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
+    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
 }
 
 /// Reference

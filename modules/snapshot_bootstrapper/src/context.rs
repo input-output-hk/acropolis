@@ -1,13 +1,14 @@
 use crate::block::{BlockContext, BlockContextError};
 use crate::configuration::{BootstrapConfig, ConfigError, Snapshot};
+use crate::drep_delegations::{DRepDelegationContext, DRepDelegationContextError};
 use crate::nonces::{NonceContext, NonceContextError};
 use crate::opcerts::{OpCertsContext, OpCertsError};
 use crate::publisher::EpochContext;
-use acropolis_common::PoolId;
 use acropolis_common::Slot;
 use acropolis_common::{
     genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
 };
+use acropolis_common::{DRepCredential, PoolId, StakeAddress};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -30,6 +31,9 @@ pub enum BootstrapContextError {
     Nonces(#[from] NonceContextError),
 
     #[error(transparent)]
+    DRepDelegations(#[from] DRepDelegationContextError),
+
+    #[error(transparent)]
     OpCerts(#[from] OpCertsError),
 
     #[error(transparent)]
@@ -44,6 +48,7 @@ pub struct BootstrapContext {
     pub nonces: Nonces,
     pub block_info: BlockInfo,
     pub ocert_counters: HashMap<PoolId, u64>,
+    pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
     network_dir: PathBuf,
 }
 
@@ -56,6 +61,7 @@ impl BootstrapContext {
         let genesis = genesis_for_network(&cfg.startup.network_name);
 
         let nonces_file = NonceContext::load(&network_dir)?;
+        let drep_delegators_file = DRepDelegationContext::load(&network_dir)?;
 
         // Validate nonces match snapshot point
         if nonces_file.slot != snapshot.point.slot() {
@@ -90,6 +96,7 @@ impl BootstrapContext {
             epoch: target_epoch,
             epoch_slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: genesis.slot_to_timestamp(slot),
             tip_slot: None,
             era: block_ctx.era,
@@ -102,6 +109,7 @@ impl BootstrapContext {
             block_info,
             ocert_counters: opcerts.counters,
             network_dir,
+            drep_delegations: drep_delegators_file.delegations,
         })
     }
 
@@ -124,6 +132,7 @@ impl BootstrapContext {
             self.block_info.epoch,
             self.block_info.era,
             &self.genesis,
+            self.drep_delegations.clone(),
         )
     }
 }

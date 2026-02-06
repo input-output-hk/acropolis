@@ -1,11 +1,12 @@
 //! On-disk store using Sled for immutable UTXOs
 
 use crate::state::ImmutableUTXOStore;
-use acropolis_common::{UTXOValue, UTxOIdentifier};
+use acropolis_common::{ShelleyAddressPointer, UTXOValue, UTxOIdentifier};
 use anyhow::Result;
 use async_trait::async_trait;
 use config::Config;
 use sled::Db;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -64,5 +65,63 @@ impl ImmutableUTXOStore for SledImmutableUTXOStore {
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize> {
         Ok(self.db.len())
+    }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>> {
+        let mut cancelled = Vec::new();
+
+        // Iterate over all UTxOs and collect redeem addresses
+        for entry in self.db.iter() {
+            let (key_bytes, value_bytes) = entry?;
+            let utxo: UTXOValue = serde_cbor::from_slice(&value_bytes)?;
+            if utxo.address.is_redeem() {
+                let key = UTxOIdentifier::from_bytes(&key_bytes)?;
+                cancelled.push((key, utxo));
+            }
+        }
+
+        // Remove them
+        for (key, _) in &cancelled {
+            self.db.remove(key.to_bytes())?;
+        }
+
+        // Flush
+        self.db.flush()?;
+
+        let total_cancelled: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+        info!(
+            count = cancelled.len(),
+            total_cancelled, "Cancelled AVVM/redeem UTxOs"
+        );
+
+        Ok(cancelled)
+    }
+
+    /// Get the total lovelace of UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64> {
+        self.db.iter().try_fold(0u64, |acc, item| {
+            let (_k, bytes) = item?;
+            if let Ok(utxo) = serde_cbor::from_slice::<UTXOValue>(&bytes) {
+                Ok(acc + utxo.value.lovelace)
+            } else {
+                Ok(acc)
+            }
+        })
+    }
+
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>> {
+        let mut result: HashMap<ShelleyAddressPointer, u64> = HashMap::new();
+
+        for entry in self.db.iter() {
+            let (_key_bytes, value_bytes) = entry?;
+            let utxo: UTXOValue = serde_cbor::from_slice(&value_bytes)?;
+            if let Some(ptr) = utxo.address.get_pointer() {
+                *result.entry(ptr).or_insert(0) += utxo.value.lovelace;
+            }
+        }
+
+        Ok(result)
     }
 }

@@ -181,14 +181,14 @@ pub async fn handle_epoch_params_blockfrost(
     let latest_epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
         EpochsStateQuery::GetLatestEpoch,
     )));
-    let latest_epoch = query_state(
+    let latest_epoch_info = query_state(
         &context,
         &handlers_config.epochs_query_topic,
         latest_epoch_info_msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::LatestEpoch(res),
-            )) => Ok(res.epoch.epoch),
+            )) => Ok(res.epoch),
             Message::StateQueryResponse(StateQueryResponse::Epochs(
                 EpochsStateQueryResponse::Error(e),
             )) => Err(e),
@@ -198,6 +198,7 @@ pub async fn handle_epoch_params_blockfrost(
         },
     )
     .await?;
+    let latest_epoch_number = latest_epoch_info.epoch;
 
     if param == "latest" {
         query = ParametersStateQuery::GetLatestEpochParameters;
@@ -225,32 +226,66 @@ pub async fn handle_epoch_params_blockfrost(
     )
     .await?;
 
-    match parameters_response {
+    let (epoch_number, params) = match parameters_response {
         ParametersStateQueryResponse::LatestEpochParameters(params) => {
-            let rest = ProtocolParamsRest::from((latest_epoch, params));
-            let json = serde_json::to_string_pretty(&rest)?;
-            Ok(RESTResponse::with_json(200, &json))
+            (latest_epoch_number, params)
         }
         ParametersStateQueryResponse::EpochParameters(params) => {
             let epoch = epoch_number.expect("epoch_number must exist for EpochParameters");
 
-            if epoch > latest_epoch {
+            if epoch > latest_epoch_number {
                 return Err(RESTError::not_found(
                     "Protocol parameters not found for requested epoch",
                 ));
             }
-            let rest = ProtocolParamsRest::from((epoch, params));
-            let json = serde_json::to_string_pretty(&rest)?;
-            Ok(RESTResponse::with_json(200, &json))
+            (epoch, params)
         }
-        ParametersStateQueryResponse::Error(QueryError::NotFound { .. }) => Err(
-            RESTError::not_found("Protocol parameters not found for requested epoch"),
-        ),
-        ParametersStateQueryResponse::Error(e) => Err(e.into()),
-        _ => Err(RESTError::unexpected_response(
-            "Unexpected message type while retrieving parameters",
-        )),
-    }
+        ParametersStateQueryResponse::Error(QueryError::NotFound { .. }) => {
+            return Err(RESTError::not_found(
+                "Protocol parameters not found for requested epoch",
+            ));
+        }
+        ParametersStateQueryResponse::Error(e) => {
+            return Err(e.into());
+        }
+        _ => {
+            return Err(RESTError::unexpected_response(
+                "Unexpected message type while retrieving parameters",
+            ));
+        }
+    };
+
+    // Get epoch info from historical epochs state
+    let epoch_info = if param == "latest" || epoch_number == latest_epoch_number {
+        Some(latest_epoch_info)
+    } else {
+        let epoch_info_msg = Arc::new(Message::StateQuery(StateQuery::Epochs(
+            EpochsStateQuery::GetEpochInfo { epoch_number },
+        )));
+        query_state(
+            &context,
+            &handlers_config.historical_epochs_query_topic,
+            epoch_info_msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    EpochsStateQueryResponse::EpochInfo(response),
+                )) => Ok(response.epoch),
+                Message::StateQueryResponse(StateQueryResponse::Epochs(
+                    EpochsStateQueryResponse::Error(e),
+                )) => Err(e),
+                _ => Err(QueryError::internal_error(
+                    "Unexpected message type while retrieving epoch info",
+                )),
+            },
+        )
+        .await
+        .ok()
+    };
+
+    let epoch_nonce = epoch_info.as_ref().and_then(|epoch_info| epoch_info.nonce.clone());
+    let rest = ProtocolParamsRest::from((epoch_number, params, epoch_nonce));
+    let json = serde_json::to_string_pretty(&rest)?;
+    Ok(RESTResponse::with_json(200, &json))
 }
 
 pub async fn handle_epoch_next_blockfrost(

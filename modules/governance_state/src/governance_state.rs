@@ -1,10 +1,9 @@
 //! Acropolis Governance State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
-use acropolis_common::configuration::StartupMode;
-use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
-    caryatid::SubscriptionExt,
+    caryatid::{RollbackWrapper, ValidationContext},
+    configuration::StartupMode,
     declare_cardano_reader,
     messages::{
         CardanoMessage, DRepStakeDistributionMessage, GovernanceProceduresMessage, Message,
@@ -34,15 +33,38 @@ mod voting_state;
 use state::State;
 use voting_state::VotingRegistrationState;
 
-const CONFIG_GOVERNANCE_TOPIC: (&str, &str) = ("subscribe-topic", "cardano.governance");
-const CONFIG_DREP_DISTRIBUTION_TOPIC: &str = "stake-drep-distribution-topic";
-const CONFIG_SPO_DISTRIBUTION_TOPIC: &str = "stake-spo-distribution-topic";
-const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
-    ("protocol-parameters-topic", "cardano.protocol.parameters");
+declare_cardano_reader!(
+    GovReader,
+    "subscribe-topic",
+    "cardano.governance",
+    GovernanceProcedures,
+    GovernanceProceduresMessage
+);
+declare_cardano_reader!(
+    ParamReader,
+    "protocol-parameters-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+declare_cardano_reader!(
+    DRepReader,
+    "stake-drep-distribution-topic",
+    "",
+    DRepStakeDistribution,
+    DRepStakeDistributionMessage
+);
+declare_cardano_reader!(
+    SPOReader,
+    "stake-spo-distribution-topic",
+    "",
+    SPOStakeDistribution,
+    SPOStakeDistributionMessage
+);
+
 const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
 const CONFIG_VALIDATION_OUTCOME_TOPIC: (&str, &str) =
     ("validation-outcome-topic", "cardano.validation.governance");
-/// Topic for receiving bootstrap data when starting from a CBOR dump snapshot
 const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
@@ -57,11 +79,7 @@ const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
 pub struct GovernanceState;
 
 pub struct GovernanceStateConfig {
-    governance_topic: String,
-    drep_distribution_topic: Option<String>,
-    spo_distribution_topic: Option<String>,
-    protocol_parameters_topic: String,
-    enact_state_topic: String,
+    enact_publish_topic: String,
     governance_query_topic: String,
     validation_outcome_topic: String,
     snapshot_subscribe_topic: String,
@@ -71,25 +89,16 @@ pub struct GovernanceStateConfig {
 impl GovernanceStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
-        info!("Creating subscriber on '{}' for {}", actual, keydef.0);
-        actual
-    }
-
-    fn conf_option(config: &Arc<Config>, key: &str) -> Option<String> {
-        let actual = config.get_string(key).ok();
-        if let Some(ref value) = actual {
-            info!("Creating subscriber on '{}' for {}", value, key);
-        }
+        info!(
+            "Creating subscriber/publisher on '{}' for {}",
+            actual, keydef.0
+        );
         actual
     }
 
     pub fn new(config: &Arc<Config>) -> Arc<Self> {
         Arc::new(Self {
-            governance_topic: Self::conf(config, CONFIG_GOVERNANCE_TOPIC),
-            drep_distribution_topic: Self::conf_option(config, CONFIG_DREP_DISTRIBUTION_TOPIC),
-            spo_distribution_topic: Self::conf_option(config, CONFIG_SPO_DISTRIBUTION_TOPIC),
-            protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
-            enact_state_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
+            enact_publish_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
             governance_query_topic: Self::conf(config, DEFAULT_GOVERNANCE_QUERY_TOPIC),
             validation_outcome_topic: Self::conf(config, CONFIG_VALIDATION_OUTCOME_TOPIC),
             snapshot_subscribe_topic: Self::conf(config, CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC),
@@ -102,19 +111,6 @@ impl GovernanceStateConfig {
 }
 
 impl GovernanceState {
-    declare_cardano_reader!(
-        read_governance,
-        GovernanceProcedures,
-        GovernanceProceduresMessage
-    );
-    declare_cardano_reader!(read_parameters, ProtocolParams, ProtocolParamsMessage);
-    declare_cardano_reader!(
-        read_drep,
-        DRepStakeDistribution,
-        DRepStakeDistributionMessage
-    );
-    declare_cardano_reader!(read_spo, SPOStakeDistribution, SPOStakeDistributionMessage);
-
     /// Wait for and process snapshot bootstrap messages
     async fn wait_for_bootstrap(
         state: Arc<Mutex<State>>,
@@ -159,18 +155,53 @@ impl GovernanceState {
         }
     }
 
+    async fn process_drep_spo(
+        vld: &mut ValidationContext,
+        state: Arc<Mutex<State>>,
+        drep_reader: &mut Option<DRepReader>,
+        spo_reader: &mut Option<SPOReader>,
+    ) {
+        let Some(ref mut drep_r) = drep_reader else {
+            return;
+        };
+        let Some(ref mut spo_r) = spo_reader else {
+            return;
+        };
+        let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
+            return;
+        };
+        let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
+            return;
+        };
+
+        if blk_spo.epoch != d_spo.epoch + 1 {
+            vld.handle_error(
+                "spo",
+                &anyhow!(
+                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                    d_spo.epoch
+                ),
+            );
+        }
+
+        vld.handle(
+            "drep stake",
+            state.lock().await.handle_drep_stake(&d_drep, &d_spo).await,
+        );
+    }
+
     async fn run(
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut governance_s: Box<dyn Subscription<Message>>,
-        mut drep_s: Option<Box<dyn Subscription<Message>>>,
-        mut spo_s: Option<Box<dyn Subscription<Message>>>,
-        mut protocol_s: Box<dyn Subscription<Message>>,
+        mut gov_reader: GovReader,
+        mut drep_reader: Option<DRepReader>,
+        mut spo_reader: Option<SPOReader>,
+        mut param_reader: ParamReader,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
             context.clone(),
-            config.enact_state_topic.clone(),
+            config.enact_publish_topic.clone(),
             config.verification_output_file.clone(),
         )));
 
@@ -260,88 +291,63 @@ impl GovernanceState {
         });
 
         loop {
-            let (_, message) = governance_s.read().await?;
-            let (blk_g, gov_procs) = match message.as_ref() {
-                Message::Cardano((blk, CardanoMessage::GovernanceProcedures(msg))) => {
-                    (blk.clone(), msg.clone())
-                }
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    let mut state = state.lock().await;
-                    state.publish_rollback(message).await?;
-                    continue;
-                }
-                _ => bail!("Unexpected message {message:?} for governance procedures topic"),
-            };
+            let mut vld = ValidationContext::new(&context, &config.validation_outcome_topic);
+            let (blk_g, gov_procs) =
+                match vld.consume_sync(gov_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal(normal) => normal,
+                    RollbackWrapper::Rollback(message) => {
+                        let mut state = state.lock().await;
+                        state.publish_rollback(message).await?;
+                        continue;
+                    }
+                };
 
-            let mut outcomes = ValidationOutcomes::default();
             let span = info_span!("governance_state.handle", block = blk_g.number);
             async {
                 if blk_g.new_epoch {
                     // New governance from new epoch means that we must prepare all governance
                     // outcome for the previous epoch.
                     let mut state = state.lock().await;
-                    let governance_outcomes = state.process_new_epoch(&blk_g)?;
-                    state.send(&blk_g, governance_outcomes).await?;
+                    if let Some(gov_outcomes) =
+                        vld.handle("process outcome", state.process_new_epoch(&blk_g).map(Some))
+                    {
+                        vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
+                    }
                 }
 
                 // Governance may present in any block -- not only in 'new epoch' blocks.
-                {
-                    outcomes.merge(&mut state.lock().await.handle_governance(&blk_g, &gov_procs).await?);
-                }
+                vld.handle(
+                    "governance",
+                    state.lock().await.handle_governance(&blk_g, &gov_procs).await,
+                );
 
                 if blk_g.new_epoch {
-                    let (blk_p, params) = Self::read_parameters(&mut protocol_s).await?;
-                    if blk_g != blk_p {
-                        outcomes.push_anyhow(anyhow!(
-                            "Governance {blk_g:?} and protocol parameters {blk_p:?} are out of sync"
-                        ));
-                    }
-
+                    if let Some((_, params)) =
+                        vld.consume("params", param_reader.read_skip_rollbacks().await)
                     {
-                        state.lock().await.handle_protocol_parameters(&params).await?;
+                        vld.handle(
+                            "params",
+                            state.lock().await.handle_protocol_parameters(&params).await,
+                        );
                     }
 
                     if blk_g.epoch > 0 {
-                        // TODO: make sync more stable
-                        if let Some(ref mut drep_s) = drep_s {
-                            if let Some(ref mut spo_s) = spo_s {
-                                let (blk_drep, d_drep) = Self::read_drep(drep_s).await?;
-                                if blk_g != blk_drep {
-                                    outcomes.push_anyhow(anyhow!(
-                                        "Governance {blk_g:?} and DRep distribution {blk_drep:?} are out of sync"
-                                    ));
-                                }
-
-                                let (blk_spo, d_spo) = Self::read_spo(spo_s).await?;
-                                if blk_g != blk_spo {
-                                    outcomes.push_anyhow(anyhow!(
-                                        "Governance {blk_g:?} and SPO distribution {blk_spo:?} are out of sync"
-                                    ));
-                                }
-
-                                if blk_spo.epoch != d_spo.epoch + 1 {
-                                    outcomes.push_anyhow(anyhow!(
-                                        "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                                        d_spo.epoch
-                                    ));
-                                }
-
-                                state.lock().await.handle_drep_stake(&d_drep, &d_spo).await?
-                            }
-                        }
+                        Self::process_drep_spo(
+                            &mut vld,
+                            state.clone(),
+                            &mut drep_reader,
+                            &mut spo_reader,
+                        )
+                        .await;
                     }
 
-                    {
-                        state.lock().await.advance_epoch(&blk_g)?;
-                    }
+                    vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
                 }
-                Ok::<(), anyhow::Error>(())
-            }.instrument(span).await?;
+            }
+            .instrument(span)
+            .await;
 
-            outcomes.publish(&context, &config.validation_outcome_topic, &blk_g).await?;
+            vld.publish().await;
         }
     }
 
@@ -355,17 +361,10 @@ impl GovernanceState {
             None
         };
 
-        let gt = context.clone().subscribe(&cfg.governance_topic).await?;
-        let dt = match cfg.drep_distribution_topic {
-            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
-            None => None,
-        };
-        let st = match cfg.spo_distribution_topic {
-            Some(ref topic) => Some(context.clone().subscribe(topic).await?),
-            None => None,
-        };
-
-        let pt = context.clone().subscribe(&cfg.protocol_parameters_topic).await?;
+        let gt = GovReader::new(&context, &config).await?;
+        let dt = DRepReader::new_without_default(&context, &config).await?;
+        let st = SPOReader::new_without_default(&context, &config).await?;
+        let pt = ParamReader::new(&context, &config).await?;
 
         tokio::spawn(async move {
             Self::run(context, cfg, snapshot_subscription, gt, dt, st, pt)

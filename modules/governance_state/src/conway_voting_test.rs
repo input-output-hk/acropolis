@@ -184,6 +184,7 @@ mod tests {
         let mut test_records = Vec::new();
         let mut reader = csv::ReaderBuilder::new().delimiter(b',').from_reader(records);
         for line in reader.records() {
+            println!("Line: {:?}", line);
             // gov_action10lty9xka3unprtvdfrqvcjgsz33sjwhv9p06afqzar8au782trtsq7dhd95,
             // 7fd6429add8f2611ad8d48c0cc49101463093aec285faea402e8cfde78ea58d7,0,,100000000000,
             // e17a094354239fd5e7b24665158ff7ee2afdfabcc947ba3b64742ffa48,521,,Information,

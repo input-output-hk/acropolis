@@ -8,6 +8,7 @@ use crate::ledger_state::SPOState;
 use crate::protocol_params::{Nonce, Nonces, PraosParams, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
+use crate::queries::stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse};
 use crate::queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse};
 use crate::queries::{
     accounts::{AccountsStateQuery, AccountsStateQueryResponse},
@@ -25,7 +26,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::AccountState;
-use crate::{Pots, TxUTxODeltas};
+use crate::{Pots, TxUTxODeltas, UTXOValue, UTxOIdentifier};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -239,8 +240,11 @@ pub struct DRepStateMessage {
     /// Epoch which has ended
     pub epoch: u64,
 
-    /// DRep initial deposit by id, for all active DReps.
+    /// Registered DReps with their deposits.
     pub dreps: Vec<(DRepCredential, Lovelace)>,
+
+    /// Inactive DReps which do not count towards the active voting stake.
+    pub inactive_dreps: Vec<DRepCredential>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -350,6 +354,43 @@ pub enum CardanoMessage {
     // Certificates deltas
     StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
     PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
+}
+
+/// A new block has been announced by some peer
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockOfferedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+    pub parent_hash: BlockHash,
+}
+
+/// A block has been rescinded by all peers (they rolled back to before it)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockRescindedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+/// A particular block has been requested (from whichever peer has announced it)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockWantedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+/// A particular block has failed validation (and all peers who offered it should be penalized)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockRejectedMessage {
+    pub hash: BlockHash,
+    pub slot: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ConsensusMessage {
+    BlockOffered(BlockOfferedMessage), // A new block has been announced (by at least one peer)
+    BlockRescinded(BlockRescindedMessage), // All peers have un-announced (rolled back to before) a block
+    BlockWanted(BlockWantedMessage),       // A particular block has been requested
+    BlockRejected(BlockRejectedMessage), // A particular block has failed validation, and all peers who offered it should be penalized
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -470,6 +511,13 @@ pub struct AccountsBootstrapMessage {
     /// Contains per-SPO delegator lists, stake totals, and block counts ready for accounts_state.
     /// Empty (default) for pre-Shelley eras.
     pub bootstrap_snapshots: SnapshotsContainer,
+
+    /// DRep delegations needed to reproduce PV9 DRep deregistration bug.
+    /// Contains a map of all stake addresses that have EVER delegated to a DRep.
+    /// During PV9, if a DRep deregisters then ALL accounts that have EVER delegated
+    /// to the DRep has their delegation cleared, even if they have switched delegations
+    /// since.
+    pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
 
 /// Deltas to apply to pots at epoch boundary during snapshot bootstrap
@@ -564,6 +612,9 @@ pub enum Message {
     // Cardano messages with attached BlockInfo
     Cardano((BlockInfo, CardanoMessage)),
 
+    // Consensus messages (without attached BlockInfo)
+    Consensus(ConsensusMessage),
+
     // Initialize state from a snapshot
     Snapshot(SnapshotMessage),
 
@@ -621,6 +672,7 @@ pub enum StateQuery {
     Parameters(ParametersStateQuery),
     Pools(PoolsStateQuery),
     Scripts(ScriptsStateQuery),
+    StakeDeltas(StakeDeltaQuery),
     Transactions(TransactionsStateQuery),
     UTxOs(UTxOStateQuery),
     SPDD(SPDDStateQuery),
@@ -642,6 +694,7 @@ pub enum StateQueryResponse {
     Parameters(ParametersStateQueryResponse),
     Pools(PoolsStateQueryResponse),
     Scripts(ScriptsStateQueryResponse),
+    StakeDeltas(StakeDeltaQueryResponse),
     Transactions(TransactionsStateQueryResponse),
     UTxOs(UTxOStateQueryResponse),
     SPDD(SPDDStateQueryResponse),
