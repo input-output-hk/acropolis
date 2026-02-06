@@ -760,6 +760,12 @@ mod tests {
         165, 162, 127, 208, 240, 199, 145, 4, 81,
     ];
 
+    fn set_params(state: &mut State) {
+        state.conway_d_rep_activity = Some(20);
+        state.conway_gov_action_lifetime = Some(0);
+        state.is_pv9 = Some(true);
+    }
+
     #[test]
     fn test_drep_process_one_certificate() {
         let mut vld = ValidationOutcomes::default();
@@ -774,6 +780,7 @@ mod tests {
             cert_index: 0,
         };
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -802,6 +809,7 @@ mod tests {
         };
 
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let bad_tx_cert = TxCertificateWithPos {
@@ -841,6 +849,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let anchor = Anchor {
@@ -884,6 +893,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let anchor = Anchor {
@@ -926,6 +936,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
@@ -953,6 +964,7 @@ mod tests {
             ..Default::default()
         };
         let mut state = State::new(config);
+        set_params(&mut state);
 
         // Register at epoch 10
         let register_cert = TxCertificateWithPos {
@@ -1034,6 +1046,7 @@ mod tests {
             cert_index: 1,
         };
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
@@ -1057,6 +1070,7 @@ mod tests {
         let drep_cred = Credential::AddrKeyHash(drep_key);
 
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
 
         // Register at epoch 10 with d_rep_activity = 20 should expiry = 30 (no dormancy).
         let register_cert = TxCertificateWithPos {
@@ -1160,6 +1174,7 @@ mod tests {
 
         // is_bootstrap = Some(true) means we're in bootstrap phase
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
         state.num_dormant_epochs = 5; // Accumulated dormant epochs
 
         let register_cert = TxCertificateWithPos {
@@ -1191,6 +1206,8 @@ mod tests {
 
         // is_bootstrap = Some(false) means we're post-bootstrap
         let mut state = State::new(DRepStorageConfig::default());
+        set_params(&mut state);
+        state.is_pv9 = Some(false);
         state.num_dormant_epochs = 5; // Accumulated dormant epochs
 
         let register_cert = TxCertificateWithPos {
