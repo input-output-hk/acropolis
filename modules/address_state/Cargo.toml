@@ -15,7 +15,7 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-fjall = "3.0.1"
+fjall = { workspace = true }
 minicbor = { workspace = true, features = ["std", "derive"] }
 tokio = { workspace = true }
 tracing = { workspace = true }

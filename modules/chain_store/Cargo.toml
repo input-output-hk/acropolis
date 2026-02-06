@@ -12,7 +12,7 @@ acropolis_common = { path = "../../common" }
 acropolis_codec = { path = "../../codec" }
 anyhow = "1.0"
 config = "0.15.11"
-fjall = "3.0.1"
+fjall = { workspace = true }
 hex = "0.4"
 minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas-traverse = { workspace = true }

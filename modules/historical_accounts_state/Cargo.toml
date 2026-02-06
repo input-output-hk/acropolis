@@ -19,7 +19,7 @@ minicbor = { workspace = true, features = ["std", "derive"] }
 hex = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-fjall = "3.0.1"
+fjall = { workspace = true }
 rayon = "1.10.0"
 
 [lib]

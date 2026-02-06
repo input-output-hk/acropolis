@@ -16,7 +16,7 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 bincode = "1"
 config = { workspace = true }
-fjall = "3.0.1"
+fjall = { workspace = true }
 futures = "0.3"
 minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas = { workspace = true}
