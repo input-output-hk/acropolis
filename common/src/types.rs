@@ -1945,6 +1945,21 @@ impl Voter {
             _ => None,
         }
     }
+
+    pub fn to_drep_credential(&self) -> Option<DRepCredential> {
+        match self {
+            Voter::DRepKey(hash) => Some(DRepCredential::AddrKeyHash(**hash)),
+            Voter::DRepScript(hash) => Some(DRepCredential::ScriptHash(**hash)),
+            _ => None,
+        }
+    }
+
+    pub fn to_pool(&self) -> Option<PoolId> {
+        match self {
+            Voter::StakePoolKey(hash) => Some(*hash),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Voter {

@@ -10,10 +10,12 @@ use acropolis_common::{
         ProtocolParamsMessage, SPOStakeDistributionMessage, SnapshotMessage, SnapshotStateMessage,
         StateQuery, StateQueryResponse, StateTransitionMessage,
     },
-    queries::errors::QueryError,
-    queries::governance::{
-        GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
-        ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
+    queries::{
+        errors::QueryError,
+        governance::{
+            GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
+            ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
+        },
     },
     BlockInfo,
 };
@@ -155,19 +157,12 @@ impl GovernanceState {
         }
     }
 
-    async fn process_drep_spo(
+    async fn process_spo(
         vld: &mut ValidationContext,
         state: Arc<Mutex<State>>,
-        drep_reader: &mut Option<DRepReader>,
         spo_reader: &mut Option<SPOReader>,
     ) {
-        let Some(ref mut drep_r) = drep_reader else {
-            return;
-        };
         let Some(ref mut spo_r) = spo_reader else {
-            return;
-        };
-        let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
             return;
         };
         let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
@@ -186,7 +181,26 @@ impl GovernanceState {
 
         vld.handle(
             "drep stake",
-            state.lock().await.handle_drep_stake(&d_drep, &d_spo).await,
+            state.lock().await.handle_spo_stake(&d_spo).await,
+        );
+    }
+
+    async fn process_drep(
+        vld: &mut ValidationContext,
+        state: Arc<Mutex<State>>,
+        drep_reader: &mut Option<DRepReader>,
+    ) {
+        let Some(ref mut drep_r) = drep_reader else {
+            return;
+        };
+
+        let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
+            return;
+        };
+
+        vld.handle(
+            "drep stake",
+            state.lock().await.handle_drep_stake(&d_drep).await,
         );
     }
 
@@ -332,13 +346,8 @@ impl GovernanceState {
                     }
 
                     if blk_g.epoch > 0 {
-                        Self::process_drep_spo(
-                            &mut vld,
-                            state.clone(),
-                            &mut drep_reader,
-                            &mut spo_reader,
-                        )
-                        .await;
+                        Self::process_spo(&mut vld, state.clone(), &mut spo_reader).await;
+                        Self::process_drep(&mut vld, state.clone(), &mut drep_reader).await;
                     }
 
                     vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));

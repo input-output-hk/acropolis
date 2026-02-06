@@ -5,7 +5,7 @@
 # ============================================================================
 [global.startup]
 network-name = "mainnet"
-startup-mode = "genesis"   # Options: "genesis" | "snapshot"
+startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
 
@@ -93,7 +93,7 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = false
+store-spdd = true
 
 [module.historical-accounts-state]
 # Clear state on start up (default true)
@@ -132,7 +132,7 @@ store-updates = false
 store-votes = false
 
 [module.drdd-state]
-store-drdd = false
+store-drdd = true
 
 [module.governance-state]
 # Listen for DRep and SPO distributions

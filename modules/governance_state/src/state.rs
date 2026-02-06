@@ -92,12 +92,19 @@ impl State {
     pub async fn handle_drep_stake(
         &mut self,
         drep_message: &DRepStakeDistributionMessage,
-        spo_message: &SPOStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
         self.drep_stake = HashMap::from_iter(drep_message.drdd.dreps.iter().cloned());
         self.drep_no_confidence = drep_message.drdd.no_confidence;
         self.drep_abstain = drep_message.drdd.abstain;
+
+        Ok(())
+    }
+
+    pub async fn handle_spo_stake(
+        &mut self,
+        spo_message: &SPOStakeDistributionMessage,
+    ) -> Result<()> {
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());
 
         Ok(())

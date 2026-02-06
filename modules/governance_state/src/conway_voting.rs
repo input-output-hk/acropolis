@@ -1,6 +1,7 @@
 use crate::voting_state::VotingRegistrationState;
 use acropolis_common::messages::GovernanceBootstrapMessage;
 use acropolis_common::protocol_params::ConwayParams;
+use acropolis_common::serialization::Bech32Conversion;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
@@ -12,9 +13,10 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::ops::Range;
+use std::path::Path;
 use tracing::{debug, error, info};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -393,6 +395,80 @@ impl ConwayVoting {
     ) -> Result<Option<VotingOutcome>> {
         let outcome =
             self.is_finally_accepted(new_epoch, voting_state, action_id, drep_stake, spo_stake)?;
+
+        if outcome.accepted {
+            let dir = Path::new("proposal_votes_dreps");
+            fs::create_dir_all(dir)?;
+
+            let votes_path = dir.join(format!("votes_{}.csv", action_id.to_bech32()?));
+
+            let mut file = OpenOptions::new().create(true).append(true).open(&votes_path)?;
+
+            if file.metadata()?.len() == 0 {
+                writeln!(file, "drep,vote,amount")?;
+            }
+
+            if let Some(votes) = self.votes.get(action_id) {
+                for (voter, (_, procedure)) in votes {
+                    let drep = match voter {
+                        Voter::DRepKey(_) | Voter::DRepScript(_) => voter,
+                        _ => continue,
+                    };
+
+                    let vote_str = match procedure.vote {
+                        Vote::Yes => "yes",
+                        Vote::No => "no",
+                        Vote::Abstain => "abstain",
+                    };
+
+                    let amount = match drep.to_drep_credential() {
+                        Some(cred) => *drep_stake.get(&cred).unwrap_or(&0),
+                        None => 0,
+                    };
+
+                    writeln!(file, "{},{},{}", drep.to_bech32()?, vote_str, amount)?;
+                }
+            }
+
+            let dir2 = Path::new("proposal_votes_pools");
+            fs::create_dir_all(dir2)?;
+            let pools_votes_path = dir2.join(format!("votes_{}.csv", action_id.to_bech32()?));
+            let mut file_2 =
+                OpenOptions::new().create(true).append(true).open(&pools_votes_path)?;
+
+            if file_2.metadata()?.len() == 0 {
+                writeln!(file_2, "pool,vote,amount")?;
+            }
+
+            if let Some(votes) = self.votes.get(action_id) {
+                for (voter, (_, procedure)) in votes {
+                    let pool = match voter {
+                        Voter::StakePoolKey(_) => voter,
+                        _ => continue,
+                    };
+
+                    let vote_str = match procedure.vote {
+                        Vote::Yes => "yes",
+                        Vote::No => "no",
+                        Vote::Abstain => "abstain",
+                    };
+
+                    let amount = match pool.to_pool() {
+                        Some(cred) => spo_stake.get(&cred).map(|s| s.active).unwrap_or(0),
+                        None => 0,
+                    };
+
+                    writeln!(
+                        file_2,
+                        "{},{},{}",
+                        pool.to_pool().unwrap().to_bech32()?,
+                        vote_str,
+                        amount
+                    )?;
+                }
+            }
+        }
+
         let expired = self.is_expired(new_epoch, action_id)?;
         if outcome.accepted || expired {
             self.end_voting(action_id);
@@ -508,13 +584,14 @@ impl ConwayVoting {
             )? {
                 None => continue,
                 Some(out) if out.accepted => {
-                    let mut action_to_perform = GovernanceOutcomeVariant::NoAction;
-
-                    if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
-                        action_to_perform = GovernanceOutcomeVariant::EnactStateElem(elem);
-                    } else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
-                        action_to_perform = GovernanceOutcomeVariant::TreasuryWithdrawal(wt);
-                    }
+                    let action_to_perform =
+                        if let Some(elem) = Self::pack_as_enact_state_elem(&out.procedure) {
+                            GovernanceOutcomeVariant::EnactStateElem(elem)
+                        } else if let Some(wt) = Self::retrieve_withdrawal(&out.procedure) {
+                            GovernanceOutcomeVariant::TreasuryWithdrawal(wt)
+                        } else {
+                            GovernanceOutcomeVariant::NoAction
+                        };
 
                     GovernanceOutcome {
                         voting: out,
@@ -528,6 +605,22 @@ impl ConwayVoting {
             };
 
             outcome.push(one_outcome);
+        }
+
+        let dir2 = Path::new("epoch_proposals");
+        fs::create_dir_all(dir2)?;
+        let pools_votes_path = dir2.join(format!("{}_accepted.csv", new_block.epoch));
+
+        let mut file_2 = OpenOptions::new().create(true).append(true).open(&pools_votes_path)?;
+        if file_2.metadata()?.len() == 0 {
+            writeln!(file_2, "proposal")?;
+        }
+
+        for proposal in outcome.clone() {
+            if proposal.voting.accepted {
+                let proposal_str = proposal.voting.procedure.gov_action_id.to_bech32()?;
+                writeln!(file_2, "{proposal_str}")?;
+            }
         }
 
         Ok(outcome)
