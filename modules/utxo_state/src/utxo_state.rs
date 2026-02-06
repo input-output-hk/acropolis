@@ -436,6 +436,21 @@ impl UTXOState {
                         }
                         UTxOStateQueryResponse::AvvmCancelledValue(state.get_avvm_cancelled_value())
                     }
+                    UTxOStateQuery::GetPointerAddressValues => {
+                        if state.get_pointer_address_values().is_none() {
+                            if let Err(e) = state.compute_pointer_address_values().await {
+                                error!("Failed to compute pointer address values: {e}");
+                            }
+                        }
+                        match state.get_pointer_address_values() {
+                            Some(values) => {
+                                UTxOStateQueryResponse::PointerAddressValues(values.clone())
+                            }
+                            None => UTxOStateQueryResponse::PointerAddressValues(
+                                std::collections::HashMap::new(),
+                            ),
+                        }
+                    }
                 };
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::UTxOs(
                     response,
