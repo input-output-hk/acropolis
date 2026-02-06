@@ -124,11 +124,11 @@ pub enum Phase1ValidationError {
     MaxTxSizeUTxO { supplied: u32, max: u32 },
 
     /// **Cause:** UTxO rules failure
-    #[error("{0}")]
+    #[error("UTxO failure: {0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
     /// **Cause:** UTxOW rules failure
-    #[error("{0}")]
+    #[error("UTxOW failure: {0}")]
     UTxOWValidationError(#[from] UTxOWValidationError),
 }
 
@@ -198,10 +198,6 @@ pub enum UTxOValidationError {
         lovelace: Lovelace,
         required_lovelace: Lovelace,
     },
-
-    /// **Cause:** Malformed UTxO
-    #[error("Malformed UTxO: era={era}, reason={reason}")]
-    MalformedUTxO { era: Era, reason: String },
 }
 
 /// UTxOW Rules Failure
@@ -299,6 +295,7 @@ pub enum UTxOWValidationError {
     NotAllowedSupplementalDatums { datum_hash: DatumHash },
 
     /// **Cause:** Script integrity hash mismatch
+    /// NOTE: This check should be considered for each era. (a bit different in each era)
     #[error(
         "Script integrity hash mismatch: expected={}, actual={}, reason={}",
         hex::encode(expected.unwrap_or_default()),
@@ -314,8 +311,23 @@ pub enum UTxOWValidationError {
     /// **Cause:** Unspendable UTxO without datum hash
     /// To spend a UTxO locked at Plutus scripts
     /// datum must be provided
-    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
-    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
+    #[error(
+        "Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}, input_index={input_index}"
+    )]
+    UnspendableUTxONoDatumHash {
+        utxo_identifier: UTxOIdentifier,
+        input_index: usize,
+    },
+
+    /// --------------------------- Babbage Era Errors
+    /// ----------------------------------------------
+    /// **Cause:** Malformed script witness
+    #[error("Malformed script witness: script_hash={script_hash}")]
+    MalformedScriptWitnesses { script_hash: ScriptHash },
+
+    /// **Cause:** Malformed reference script
+    #[error("Malformed reference script: script_hash={script_hash}")]
+    MalformedReferenceScripts { script_hash: ScriptHash },
 }
 
 /// Reference

@@ -650,23 +650,26 @@ impl State {
         let deltas = &deltas_msg.deltas;
 
         // collect utxos needed for validation
-        // NOTE:
-        // Also consider collateral inputs and reference inputs
-        let all_inputs =
+        let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
+        all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley {
-                if let Err(e) = validations::validate_tx(
-                    tx_deltas,
-                    pool_registration_updates,
-                    stake_registration_updates,
-                    &utxos,
-                    protocol_params.shelley.as_ref(),
-                ) {
-                    bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
-                }
+            if let Err(e) = validations::validate_tx(
+                tx_deltas,
+                pool_registration_updates,
+                stake_registration_updates,
+                &utxos,
+                protocol_params.shelley.as_ref(),
+                block.era,
+            ) {
+                bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
+            }
+
+            // remove this transaction's inputs from the utxos
+            for input in &tx_deltas.consumes {
+                utxos.remove(input);
             }
 
             // add this transaction's outputs to the utxos

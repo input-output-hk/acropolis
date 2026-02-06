@@ -1,10 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
-    map_mint_burn, map_native_script, map_redeemer, map_reference_script_hash, map_value,
-    witness::map_vkey_witnesses,
+    map_mint_burn, map_redeemer, map_reference_script_hash, map_value, witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
@@ -85,36 +84,35 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
-    let native = tx.native_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::Native(map_native_script(s)),
-        )
-    });
+pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, Option<ScriptLang>> {
+    let mut map_script_witnesses = HashMap::new();
 
-    let v1 = tx.plutus_v1_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV1(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.native_scripts() {
+        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), None);
+    }
 
-    let v2 = tx.plutus_v2_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV2(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.plutus_v1_scripts() {
+        map_script_witnesses.insert(
+            ScriptHash::from(*script.compute_hash()),
+            Some(ScriptLang::PlutusV1),
+        );
+    }
 
-    let v3 = tx.plutus_v3_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV3(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.plutus_v2_scripts() {
+        map_script_witnesses.insert(
+            ScriptHash::from(*script.compute_hash()),
+            Some(ScriptLang::PlutusV2),
+        );
+    }
 
-    native.chain(v1).chain(v2).chain(v3).collect()
+    for script in tx.plutus_v3_scripts() {
+        map_script_witnesses.insert(
+            ScriptHash::from(*script.compute_hash()),
+            Some(ScriptLang::PlutusV3),
+        );
+    }
+
+    map_script_witnesses
 }
 
 /// Map a Pallas Transaction
@@ -130,11 +128,13 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    let (mut consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    consumes.sort();
 
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
+    let total_collateral = tx.total_collateral().unwrap_or(0);
     let is_valid = tx.is_valid();
 
     let mut certs = Vec::new();
@@ -243,7 +243,7 @@ pub fn map_transaction(
     let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
 
-    let scripts_provided = map_scripts_provided(tx);
+    let script_witnesses = map_scripts_provided(tx);
 
     let mut redeemers = Vec::new();
     for redeemer in tx.redeemers() {
@@ -257,7 +257,7 @@ pub fn map_transaction(
         .plutus_data()
         .iter()
         .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<HashMap<_, _>>();
 
     Transaction {
         id: tx_identifier,
@@ -265,6 +265,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
+        total_collateral,
         is_valid,
         certs,
         withdrawals,
@@ -274,7 +275,7 @@ pub fn map_transaction(
         voting_procedures,
         proposal_procedures,
         vkey_witnesses,
-        scripts_provided,
+        script_witnesses,
         redeemers,
         plutus_data,
         error: if errors.is_empty() {

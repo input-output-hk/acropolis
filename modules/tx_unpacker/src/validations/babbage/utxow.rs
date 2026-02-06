@@ -19,7 +19,7 @@ use pallas::ledger::primitives::babbage;
 pub fn validate(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
+    vkey_witnesses: &HashSet<VKeyWitness>,
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
@@ -54,7 +54,7 @@ fn has_mir_certificate(mtx: &babbage::MintedTx) -> bool {
 fn shelley_wrapper(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
+    vkey_witnesses: &HashSet<VKeyWitness>,
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,

@@ -360,7 +360,7 @@ impl TxCertificate {
             }
             // Genesis delegation requires witness from genesis key
             Self::GenesisKeyDelegation(gen_deleg) => {
-                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
+                vkey_hashes.insert(gen_deleg.genesis_hash);
             }
             _ => {}
         }

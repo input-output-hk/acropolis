@@ -80,8 +80,11 @@ pub fn validate_max_tx_size_utxo(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -123,8 +126,10 @@ mod tests {
         "max_tx_size_utxo"
     )]
     #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), Phase1ValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn shelley_tx_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), Phase1ValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         validate(
             tx.size() as u32,
             tx.fee().unwrap_or(0),

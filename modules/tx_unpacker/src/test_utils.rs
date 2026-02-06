@@ -1,4 +1,5 @@
 use acropolis_common::{protocol_params::ShelleyParams, Slot};
+use pallas::ledger::traverse::Era as PallasEra;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct TestContextJson {
@@ -51,12 +52,27 @@ macro_rules! validation_fixture {
         (
             $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
             $crate::include_cbor!(concat!($era, "/", $hash, "/tx.cbor")),
+            $era,
         )
     };
     ($era:literal, $hash:literal, $variant:literal) => {
         (
             $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
             $crate::include_cbor!(concat!($era, "/", $hash, "/", $variant, ".cbor")),
+            $era,
         )
     };
+}
+
+pub fn to_pallas_era(era: &str) -> PallasEra {
+    match era {
+        "byron" => PallasEra::Byron,
+        "shelley" => PallasEra::Shelley,
+        "allegra" => PallasEra::Allegra,
+        "mary" => PallasEra::Mary,
+        "alonzo" => PallasEra::Alonzo,
+        "babbage" => PallasEra::Babbage,
+        "conway" => PallasEra::Conway,
+        _ => panic!("Invalid era: {}", era),
+    }
 }
