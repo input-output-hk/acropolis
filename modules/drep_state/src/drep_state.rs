@@ -89,8 +89,8 @@ pub struct DRepState;
 struct DRepSubscriptions {
     snapshot: Option<Box<dyn Subscription<Message>>>,
     certs: CertReader,
-    gov: Option<GovReader>,
-    params: Option<ParamReader>,
+    gov: GovReader,
+    params: ParamReader,
 }
 
 impl DRepState {
@@ -129,7 +129,7 @@ impl DRepState {
                     );
                     let block_number = drep_msg.block_number;
                     // Snapshot bootstrap: protocol parameters not known yet.
-                    let mut state = State::new(storage_config, None, None, None);
+                    let mut state = State::new(storage_config);
                     state.bootstrap(drep_msg);
                     let drep_count = state.dreps.len();
                     history.lock().await.bootstrap_init_with(state, block_number);
@@ -156,30 +156,13 @@ impl DRepState {
         validation_topic: String,
         context: Arc<Context<Message>>,
         storage_config: DRepStorageConfig,
+        is_bootstrap_mode: bool,
     ) -> Result<()> {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
-        // Initial Conway params (needed for DRep expiries calculations)
-        // and Shelly params (protocol version).
-        let mut initial_d_rep_activity: Option<u32> = None;
-        let mut initial_gov_action_lifetime: Option<u32> = None;
-        let mut initial_is_pv9: Option<bool> = None;
-
-        if let Some(params) = &mut subs.params {
-            let (_, message) = params.read_skip_rollbacks().await?;
-
-            // Snapshot may start mid-epoch, so read protocol params from genesis.
-            if let (Some(shelley), Some(conway)) = (&message.params.shelley, &message.params.conway)
-            {
-                // 'Chang' is PV9 State::update_drep_expiry_versioned() for further details.
-                initial_is_pv9 = Option::from(shelley.protocol_params.protocol_version.is_chang()?);
-                initial_d_rep_activity = Some(conway.d_rep_activity);
-                initial_gov_action_lifetime = Some(conway.gov_action_lifetime);
-            } else if message.params.conway.is_some() {
-                bail!("Invalid protocol parameters: Conway parameters require Shelley parameters.");
-            }
-            info!("Consumed initial genesis params from params_subscription");
+        if !is_bootstrap_mode {
+            subs.params.read_skip_rollbacks().await?;
         }
 
         // Main loop of synchronised messages
@@ -187,14 +170,7 @@ impl DRepState {
             // Get the current state snapshot
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(|| {
-                    State::new(
-                        storage_config,
-                        initial_d_rep_activity,
-                        initial_gov_action_lifetime,
-                        initial_is_pv9,
-                    )
-                })
+                h.get_or_init_with(|| State::new(storage_config))
             };
 
             let mut ctx = ValidationContext::new(&context, &validation_topic);
@@ -224,13 +200,11 @@ impl DRepState {
 
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
-                if let Some(params) = &mut subs.params {
-                    if let Some((_, msg)) =
-                        ctx.consume("params", params.read_skip_rollbacks().await)
-                    {
-                        ctx.handle("params", state.update_protocol_params(&msg.params));
-                        ctx.handle("params", state.update_drep_expirations(new_epoch));
-                    }
+                if let Some((_, msg)) =
+                    ctx.consume("params", subs.params.read_skip_rollbacks().await)
+                {
+                    ctx.handle("params", state.update_protocol_params(&msg.params));
+                    ctx.handle("params", state.update_drep_expirations(new_epoch));
                 }
 
                 // Publish DRep state at the end of the epoch
@@ -259,32 +233,28 @@ impl DRepState {
                 .await;
             }
 
-            if let Some(gov_sub) = subs.gov.as_mut() {
-                if let Some((blk_inf, gov)) =
-                    ctx.consume("gov", gov_sub.read_skip_rollbacks().await)
-                {
-                    let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
-                    async {
-                        // Track proposals for dormant-epoch counting, so that
-                        // they can be checked if they are active at the N+1 epoch boundary.
-                        state.record_proposals(&gov.proposal_procedures, blk_inf.epoch);
+            if let Some((blk_inf, gov)) = ctx.consume("gov", subs.gov.read_skip_rollbacks().await) {
+                let span = info_span!("drep_state.handle_votes", block = blk_inf.number);
+                async {
+                    // Track proposals for dormant-epoch counting, so that
+                    // they can be checked if they are active at the N+1 epoch boundary.
+                    state.record_proposals(&gov.proposal_procedures, blk_inf.epoch);
 
-                        if !gov.proposal_procedures.is_empty() {
-                            state.apply_dormant_expiry(blk_inf.epoch);
-                        }
-
-                        ctx.merge(
-                            "gov",
-                            state.process_votes(
-                                &gov.voting_procedures,
-                                blk_inf.epoch,
-                                state.conway_d_rep_activity,
-                            ),
-                        );
+                    if !gov.proposal_procedures.is_empty() {
+                        state.apply_dormant_expiry(blk_inf.epoch);
                     }
-                    .instrument(span)
-                    .await;
+
+                    ctx.merge(
+                        "gov",
+                        state.process_votes(
+                            &gov.voting_procedures,
+                            blk_inf.epoch,
+                            state.conway_d_rep_activity,
+                        ),
+                    );
                 }
+                .instrument(span)
+                .await;
             }
 
             // Commit the new state
@@ -314,21 +284,23 @@ impl DRepState {
             store_votes: get_bool_flag(&config, DEFAULT_STORE_VOTES),
         };
 
+        let is_bootstrap_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
+
         // Subscribe for snapshot messages if bootstrapping from snapshot
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
 
         let subscriptions = DRepSubscriptions {
-            snapshot: if StartupMode::from_config(config.as_ref()).is_snapshot() {
+            snapshot: if is_bootstrap_mode {
                 info!("Creating subscriber on '{snapshot_subscribe_topic}' for DRep bootstrap");
                 Some(context.subscribe(&snapshot_subscribe_topic).await?)
             } else {
                 None
             },
             certs: CertReader::new(&context, &config).await?,
-            gov: GovReader::new_opt(storage_config.store_votes, &context, &config).await?,
-            params: ParamReader::new_opt(storage_config.store_info, &context, &config).await?,
+            gov: GovReader::new(&context, &config).await?,
+            params: ParamReader::new(&context, &config).await?,
         };
 
         let drep_state_topic = config
@@ -564,6 +536,7 @@ impl DRepState {
                 validation_topic,
                 ctx_run,
                 storage_config,
+                is_bootstrap_mode,
             )
             .await
             .unwrap_or_else(|e| error!("Failed: {e}"));

@@ -106,12 +106,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(
-        config: DRepStorageConfig,
-        conway_d_rep_activity: Option<u32>,
-        conway_gov_action_lifetime: Option<u32>,
-        is_pv9: Option<bool>,
-    ) -> Self {
+    pub fn new(config: DRepStorageConfig) -> Self {
         Self {
             config,
             dreps: HashMap::new(),
@@ -123,9 +118,9 @@ impl State {
             } else {
                 None
             },
-            conway_d_rep_activity,
-            conway_gov_action_lifetime,
-            is_pv9,
+            conway_d_rep_activity: None,
+            conway_gov_action_lifetime: None,
+            is_pv9: None,
         }
     }
 
@@ -778,7 +773,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -806,7 +801,7 @@ mod tests {
             cert_index: 0,
         };
 
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let bad_tx_cert = TxCertificateWithPos {
@@ -845,7 +840,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let anchor = Anchor {
@@ -888,7 +883,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let anchor = Anchor {
@@ -930,7 +925,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
@@ -957,7 +952,7 @@ mod tests {
             store_info: true,
             ..Default::default()
         };
-        let mut state = State::new(config, Some(20), None, Some(false));
+        let mut state = State::new(config);
 
         // Register at epoch 10
         let register_cert = TxCertificateWithPos {
@@ -1038,7 +1033,7 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
 
         let unregister_tx_cert = TxCertificateWithPos {
@@ -1061,7 +1056,7 @@ mod tests {
         let drep_key = CRED_1.into();
         let drep_cred = Credential::AddrKeyHash(drep_key);
 
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
 
         // Register at epoch 10 with d_rep_activity = 20 should expiry = 30 (no dormancy).
         let register_cert = TxCertificateWithPos {
@@ -1106,7 +1101,7 @@ mod tests {
 
     #[test]
     fn test_update_num_dormant_epochs_tracks_active_proposals() {
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
 
         let reward_account =
             StakeAddress::new(Credential::AddrKeyHash(CRED_2.into()), NetworkId::Mainnet);
@@ -1139,7 +1134,7 @@ mod tests {
 
     #[test]
     fn test_apply_dormant_expiry_updates_and_resets_counter() {
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         let drep_cred = Credential::AddrKeyHash(CRED_1.into());
 
         state.drep_expiry.insert(drep_cred.clone(), 30);
@@ -1164,7 +1159,7 @@ mod tests {
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
 
         // is_bootstrap = Some(true) means we're in bootstrap phase
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(true));
+        let mut state = State::new(DRepStorageConfig::default());
         state.num_dormant_epochs = 5; // Accumulated dormant epochs
 
         let register_cert = TxCertificateWithPos {
@@ -1195,7 +1190,7 @@ mod tests {
         let tx_cred = Credential::AddrKeyHash(CRED_1.into());
 
         // is_bootstrap = Some(false) means we're post-bootstrap
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(false));
+        let mut state = State::new(DRepStorageConfig::default());
         state.num_dormant_epochs = 5; // Accumulated dormant epochs
 
         let register_cert = TxCertificateWithPos {
@@ -1225,7 +1220,7 @@ mod tests {
         let drep_cred = Credential::AddrKeyHash(drep_key);
 
         // Test with bootstrap=true (votes should still subtract dormant epochs)
-        let mut state = State::new(DRepStorageConfig::default(), Some(20), None, Some(true));
+        let mut state = State::new(DRepStorageConfig::default());
         state.dreps.insert(drep_cred.clone(), DRepRecord::new(500000000, None));
         state.drep_expiry.insert(drep_cred.clone(), 30);
         state.num_dormant_epochs = 3;
