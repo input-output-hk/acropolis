@@ -1711,7 +1711,7 @@ fn test_validate_transaction_phase2_empty() {
 }
 
 // =============================================================================
-// Phase 5: Configuration Tests (US3) - Not part of Phase 3
+// Phase 5: Configuration Tests (US3)
 // =============================================================================
 
 use acropolis_common::{
