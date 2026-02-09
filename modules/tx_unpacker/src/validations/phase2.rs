@@ -280,6 +280,24 @@ impl EvalResult {
     }
 }
 
+impl From<ExBudget> for uplc_turbo::machine::ExBudget {
+    fn from(budget: ExBudget) -> Self {
+        uplc_turbo::machine::ExBudget {
+            cpu: budget.cpu,
+            mem: budget.mem,
+        }
+    }
+}
+
+impl From<uplc_turbo::machine::ExBudget> for ExBudget {
+    fn from(budget: uplc_turbo::machine::ExBudget) -> Self {
+        Self {
+            cpu: budget.cpu,
+            mem: budget.mem,
+        }
+    }
+}
+
 // =============================================================================
 // T007: Phase2Error enum
 // =============================================================================
