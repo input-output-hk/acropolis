@@ -494,6 +494,40 @@ fn evaluate_script_inner(
     cost_model: &[i64],
     budget: ExUnits,
 ) -> Result<EvalResult, Phase2Error> {
+    // Copy inputs for thread-safe evaluation
+    let script_bytes = script_bytes.to_vec();
+    let datum = datum.map(|d| d.to_vec());
+    let redeemer = redeemer.to_vec();
+    let script_context = script_context.to_vec();
+    let cost_model = cost_model.to_vec();
+
+    // Run evaluation on the dedicated thread pool with larger stack
+    evaluator_pool().install(|| {
+        evaluate_script_inner(
+            &script_bytes,
+            plutus_version,
+            datum.as_deref(),
+            &redeemer,
+            &script_context,
+            &cost_model,
+            budget,
+        )
+    })
+}
+
+/// Inner evaluation function that runs on the evaluator thread pool.
+///
+/// This is separated from the public API to allow the recursive evaluation
+/// to run on threads with larger stacks (16MB vs default 2MB).
+fn evaluate_script_inner(
+    script_bytes: &[u8],
+    plutus_version: PlutusVersion,
+    datum: Option<&[u8]>,
+    redeemer: &[u8],
+    script_context: &[u8],
+    cost_model: &[i64],
+    budget: ExBudget,
+) -> Result<EvalResult, Phase2Error> {
     // Start timing
     let start = Instant::now();
 
