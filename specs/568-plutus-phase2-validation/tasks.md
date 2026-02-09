@@ -15,11 +15,11 @@
 
 **Purpose**: Project initialization and dependency configuration
 
-- [ ] T001 Add `uplc-turbo` dependency to workspace Cargo.toml under `[workspace.dependencies]`
-- [ ] T002 Add `uplc-turbo = { workspace = true }` and `rayon = "1.10"` to modules/tx_unpacker/Cargo.toml
-- [ ] T003 [P] Create validations/phase2.rs module file with stub exports in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T004 [P] Add `pub mod phase2;` to modules/tx_unpacker/src/validations/mod.rs
-- [ ] T005 [P] Create phase2_test.rs integration test file with inline test script constants in modules/tx_unpacker/tests/phase2_test.rs
+- [X] T001 Add `uplc-turbo` dependency to workspace Cargo.toml under `[workspace.dependencies]`
+- [X] T002 Add `uplc-turbo = { workspace = true }` and `rayon = "1.10"` to modules/tx_unpacker/Cargo.toml
+- [X] T003 [P] Create validations/phase2.rs module file with stub exports in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T004 [P] Add `pub mod phase2;` to modules/tx_unpacker/src/validations/mod.rs
+- [X] T005 [P] Create phase2_test.rs integration test file with inline test script constants in modules/tx_unpacker/tests/phase2_test.rs
 
 ---
 
