@@ -38,6 +38,8 @@
 //! );
 //! ```
 
+use std::time::{Duration, Instant};
+
 use acropolis_common::{DatumHash, PolicyId, ScriptHash, StakeAddress, UTxOIdentifier, Voter};
 use thiserror::Error;
 use uplc_turbo::{
@@ -96,6 +98,45 @@ impl From<uplc_turbo::machine::ExBudget> for ExBudget {
             cpu: budget.cpu,
             mem: budget.mem,
         }
+    }
+}
+
+// =============================================================================
+// EvalResult: Script evaluation result with timing
+// =============================================================================
+
+/// Result of a successful script evaluation including timing metrics.
+///
+/// This struct captures both the execution budget consumed and the wall-clock
+/// time taken for evaluation, enabling performance monitoring and SC-001
+/// compliance verification (<0.1s per script at p95).
+#[derive(Debug, Clone, Copy)]
+pub struct EvalResult {
+    /// Execution budget consumed by the script
+    pub consumed_budget: ExBudget,
+    /// Wall-clock time taken for evaluation
+    pub elapsed: Duration,
+}
+
+impl EvalResult {
+    /// Create a new evaluation result.
+    pub fn new(consumed_budget: ExBudget, elapsed: Duration) -> Self {
+        Self {
+            consumed_budget,
+            elapsed,
+        }
+    }
+
+    /// Check if the evaluation completed within the performance target.
+    ///
+    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
+    pub fn within_target(&self) -> bool {
+        self.elapsed < Duration::from_millis(100)
+    }
+
+    /// Get elapsed time in milliseconds.
+    pub fn elapsed_ms(&self) -> f64 {
+        self.elapsed.as_secs_f64() * 1000.0
     }
 }
 
@@ -221,7 +262,10 @@ pub fn evaluate_script(
     script_context: &[u8],
     cost_model: &[i64],
     budget: ExBudget,
-) -> Result<ExBudget, Phase2Error> {
+) -> Result<EvalResult, Phase2Error> {
+    // Start timing
+    let start = Instant::now();
+
     // Create arena for memory allocation (1MB capacity)
     let arena = Arena::new();
 
@@ -272,8 +316,9 @@ pub fn evaluate_script(
     // Handle the evaluation result
     match result.term {
         Ok(_) => {
-            // Script succeeded - return consumed budget
-            Ok(result.info.consumed_budget.into())
+            // Script succeeded - return consumed budget and timing
+            let elapsed = start.elapsed();
+            Ok(EvalResult::new(result.info.consumed_budget.into(), elapsed))
         }
         Err(MachineError::ExplicitErrorTerm) => {
             // Script explicitly failed via `error` builtin
@@ -373,8 +418,10 @@ pub struct ScriptInput<'a> {
 pub struct Phase2ValidationResult {
     /// Total budget consumed by all scripts
     pub total_consumed: ExBudget,
-    /// Individual script results (script_hash -> consumed budget)
-    pub script_results: Vec<(ScriptHash, ExBudget)>,
+    /// Total wall-clock time for all script evaluations
+    pub total_elapsed: Duration,
+    /// Individual script results (script_hash -> consumed budget, elapsed time)
+    pub script_results: Vec<(ScriptHash, EvalResult)>,
 }
 
 /// Validate all Plutus scripts in a transaction.
@@ -410,6 +457,7 @@ pub fn validate_transaction_phase2(
     script_context: &[u8],
 ) -> Result<Phase2ValidationResult, Phase2Error> {
     let mut total_consumed = ExBudget::default();
+    let mut total_elapsed = Duration::ZERO;
     let mut script_results = Vec::with_capacity(scripts.len());
 
     for script_input in scripts {
@@ -421,7 +469,7 @@ pub fn validate_transaction_phase2(
         };
 
         // Evaluate the script
-        let consumed = evaluate_script(
+        let eval_result = evaluate_script(
             script_input.script_bytes,
             script_input.plutus_version,
             script_input.datum,
@@ -447,13 +495,15 @@ pub fn validate_transaction_phase2(
         })?;
 
         // Accumulate results
-        total_consumed.cpu += consumed.cpu;
-        total_consumed.mem += consumed.mem;
-        script_results.push((script_input.script_hash, consumed));
+        total_consumed.cpu += eval_result.consumed_budget.cpu;
+        total_consumed.mem += eval_result.consumed_budget.mem;
+        total_elapsed += eval_result.elapsed;
+        script_results.push((script_input.script_hash, eval_result));
     }
 
     Ok(Phase2ValidationResult {
         total_consumed,
+        total_elapsed,
         script_results,
     })
 }

@@ -329,10 +329,28 @@ fn test_eval_always_succeeds() {
 
     assert!(result.is_ok(), "Script should succeed: {:?}", result.err());
 
-    let consumed = result.unwrap();
+    let eval_result = result.unwrap();
     // Script should consume some budget
-    assert!(consumed.cpu >= 0, "CPU consumed should be non-negative");
-    assert!(consumed.mem >= 0, "Memory consumed should be non-negative");
+    assert!(
+        eval_result.consumed_budget.cpu >= 0,
+        "CPU consumed should be non-negative"
+    );
+    assert!(
+        eval_result.consumed_budget.mem >= 0,
+        "Memory consumed should be non-negative"
+    );
+    // Script should complete within performance target (SC-001: <100ms)
+    assert!(
+        eval_result.within_target(),
+        "Script took {:.2}ms, should be < 100ms",
+        eval_result.elapsed_ms()
+    );
+    println!(
+        "  evaluate_script elapsed: {:.3}ms (cpu: {}, mem: {})",
+        eval_result.elapsed_ms(),
+        eval_result.consumed_budget.cpu,
+        eval_result.consumed_budget.mem
+    );
 }
 
 /// T013: Test that a script calling `error` fails with ScriptFailed
@@ -585,6 +603,163 @@ fn test_eval_plutus_v3_script() {
         result.is_ok(),
         "V3 script should succeed: {:?}",
         result.err()
+    );
+}
+
+// =============================================================================
+// SC-001 Benchmark: Script Evaluation Performance
+// =============================================================================
+
+/// Benchmark test to verify SC-001: individual script evaluation completes
+/// in under 0.1 seconds (100ms) at the 95th percentile.
+///
+/// This test runs multiple iterations and calculates the p95 timing.
+#[test]
+fn test_sc001_eval_performance_p95() {
+    const ITERATIONS: usize = 100;
+    const P95_TARGET_MS: f64 = 100.0;
+
+    let script_bytes = create_unit_program();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    // Warmup run
+    let _ = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    // Collect timing samples
+    let mut timings_ms: Vec<f64> = Vec::with_capacity(ITERATIONS);
+
+    for _ in 0..ITERATIONS {
+        let result = evaluate_script(
+            &script_bytes,
+            PlutusVersion::V3,
+            None,
+            &redeemer,
+            &context,
+            &cost_model,
+            budget,
+        );
+
+        assert!(result.is_ok(), "Script should succeed");
+        timings_ms.push(result.unwrap().elapsed_ms());
+    }
+
+    // Sort for percentile calculation
+    timings_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let min = timings_ms[0];
+    let max = timings_ms[ITERATIONS - 1];
+    let median = timings_ms[ITERATIONS / 2];
+    let p95_idx = (ITERATIONS as f64 * 0.95) as usize;
+    let p95 = timings_ms[p95_idx];
+    let mean: f64 = timings_ms.iter().sum::<f64>() / ITERATIONS as f64;
+
+    println!("\n=== SC-001 Performance Benchmark ===");
+    println!("Iterations: {}", ITERATIONS);
+    println!("Min:    {:.3}ms", min);
+    println!("Max:    {:.3}ms", max);
+    println!("Mean:   {:.3}ms", mean);
+    println!("Median: {:.3}ms", median);
+    println!("P95:    {:.3}ms", p95);
+    println!("Target: <{:.1}ms", P95_TARGET_MS);
+    println!(
+        "Result: {} (p95 {:.3}ms vs target {:.1}ms)",
+        if p95 < P95_TARGET_MS {
+            "PASS ✓"
+        } else {
+            "FAIL ✗"
+        },
+        p95,
+        P95_TARGET_MS
+    );
+    println!("====================================\n");
+
+    assert!(
+        p95 < P95_TARGET_MS,
+        "SC-001 FAILED: P95 {:.3}ms exceeds target {:.1}ms",
+        p95,
+        P95_TARGET_MS
+    );
+}
+
+/// Benchmark test for spending validators (3-arg scripts).
+/// These are typically more complex than minting policies.
+#[test]
+fn test_sc001_spending_validator_performance() {
+    const ITERATIONS: usize = 50;
+    const P95_TARGET_MS: f64 = 100.0;
+
+    let script_bytes = create_spending_validator_succeeds();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let datum = create_empty_plutus_data();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    // Warmup
+    let _ = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        Some(&datum),
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    // Collect timing samples
+    let mut timings_ms: Vec<f64> = Vec::with_capacity(ITERATIONS);
+
+    for _ in 0..ITERATIONS {
+        let result = evaluate_script(
+            &script_bytes,
+            PlutusVersion::V3,
+            Some(&datum),
+            &redeemer,
+            &context,
+            &cost_model,
+            budget,
+        );
+
+        assert!(result.is_ok(), "Spending validator should succeed");
+        timings_ms.push(result.unwrap().elapsed_ms());
+    }
+
+    timings_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let p95_idx = (ITERATIONS as f64 * 0.95) as usize;
+    let p95 = timings_ms[p95_idx];
+    let mean: f64 = timings_ms.iter().sum::<f64>() / ITERATIONS as f64;
+
+    println!("\n=== SC-001 Spending Validator Benchmark ===");
+    println!("Iterations: {}", ITERATIONS);
+    println!("Mean:   {:.3}ms", mean);
+    println!("P95:    {:.3}ms", p95);
+    println!(
+        "Result: {}",
+        if p95 < P95_TARGET_MS {
+            "PASS ✓"
+        } else {
+            "FAIL ✗"
+        }
+    );
+    println!("==========================================\n");
+
+    assert!(
+        p95 < P95_TARGET_MS,
+        "SC-001 FAILED: Spending validator P95 {:.3}ms exceeds target {:.1}ms",
+        p95,
+        P95_TARGET_MS
     );
 }
 
