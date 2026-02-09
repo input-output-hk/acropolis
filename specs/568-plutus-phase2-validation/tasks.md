@@ -83,12 +83,13 @@
 
 ### Implementation for User Story 2
 
-- [ ] T031 [US2] Write `test_parallel_multi_script_block` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
-- [ ] T032 [US2] Implement parallel evaluation using `rayon::par_iter()` in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T033 [US2] Ensure arena allocation is per-thread for thread safety (FR-009: constant memory) in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T034 [US2] Handle early-exit on first script failure with proper error aggregation in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T031 [US2] Write `test_parallel_multi_script_block` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
+- [X] T032 [US2] Implement parallel evaluation using `rayon::par_iter()` in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T033 [US2] Ensure arena allocation is per-thread for thread safety (FR-009: constant memory) in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T034 [US2] Handle early-exit on first script failure with proper error aggregation in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T035 [US2] Write `test_sc001_parallel_performance` benchmark: run 5 different scripts in parallel, measure individual and total elapsed time, assert total < 100ms in modules/tx_unpacker/tests/phase2_test.rs
 
-**Checkpoint**: Multi-script blocks validate efficiently in parallel
+**Checkpoint**: Multi-script blocks validate efficiently in parallel ✓
 
 ---
 
@@ -100,10 +101,10 @@
 
 ### Implementation for User Story 3
 
-- [X] T035 [US3] Write `test_phase2_disabled_skips_scripts` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
-- [X] T036 [US3] Add config flag check in `state.rs::validate()` to conditionally call Phase 2 in modules/tx_unpacker/src/state.rs
-- [X] T037 [US3] Refactor state.rs to respect phase2_enabled configuration flag (default: disabled)
-- [X] T038 [US3] Add configuration documentation to omnibus.toml template or README
+- [X] T036 [US3] Write `test_phase2_disabled_skips_scripts` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
+- [X] T037 [US3] Add config flag check in `state.rs::validate()` to conditionally call Phase 2 in modules/tx_unpacker/src/state.rs
+- [X] T038 [US3] Refactor state.rs to respect phase2_enabled configuration flag (default: disabled)
+- [X] T039 [US3] Add configuration documentation to omnibus.toml template or README
 
 **Checkpoint**: Phase 2 validation can be toggled on/off via config
 
@@ -113,14 +114,14 @@
 
 **Purpose**: Documentation, edge cases, final validation, and benchmark preparation
 
-- [ ] T039 [P] Add integration test with real Conway mainnet transaction fixture in modules/tx_unpacker/tests/phase2_test.rs
-- [ ] T040 [P] Handle malformed script bytes gracefully returning `Phase2Error::DecodeFailed` in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T041 [P] Handle missing datum with `Phase2Error::MissingDatum` in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T042 [P] Handle missing redeemer with `Phase2Error::MissingRedeemer` in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T043 Create initial "Plutus Phase 2 Golden Corpus v1" test fixtures from mainnet samples in tests/fixtures/phase2_corpus/ (for SC-001..SC-005)
-- [ ] T044 Run `cargo test -p acropolis_module_tx_unpacker phase2` and verify all tests pass
-- [ ] T045 Run `cargo clippy -p acropolis_module_tx_unpacker` and fix any warnings
-- [ ] T046 Validate quickstart.md examples compile and work
+- [ ] T040 [P] Add integration test with real Conway mainnet transaction fixture in modules/tx_unpacker/tests/phase2_test.rs
+- [ ] T041 [P] Handle malformed script bytes gracefully returning `Phase2Error::DecodeFailed` in modules/tx_unpacker/src/validations/phase2.rs
+- [ ] T042 [P] Handle missing datum with `Phase2Error::MissingDatum` in modules/tx_unpacker/src/validations/phase2.rs
+- [ ] T043 [P] Handle missing redeemer with `Phase2Error::MissingRedeemer` in modules/tx_unpacker/src/validations/phase2.rs
+- [ ] T044 Create initial "Plutus Phase 2 Golden Corpus v1" test fixtures from mainnet samples in tests/fixtures/phase2_corpus/ (for SC-001..SC-005)
+- [ ] T045 Run `cargo test -p acropolis_module_tx_unpacker phase2` and verify all tests pass
+- [ ] T046 Run `cargo clippy -p acropolis_module_tx_unpacker` and fix any warnings
+- [ ] T047 Validate quickstart.md examples compile and work
 
 ---
 
@@ -201,10 +202,10 @@ Multi-Script Parallel                             Configuration Toggle
 | Setup | 5 | 3 |
 | Foundational | 5 | 0 |
 | US1 (P1) | 20 | 0 (TDD sequence) |
-| US2 (P2) | 4 | 0 (TDD sequence) |
+| US2 (P2) | 5 | 0 (TDD sequence) |
 | US3 (P3) | 4 | 0 (TDD sequence) |
 | Polish | 8 | 4 |
-| **Total** | **46** | **7** |
+| **Total** | **47** | **7** |
 
 ---
 

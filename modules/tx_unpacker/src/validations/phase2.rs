@@ -41,6 +41,7 @@
 use std::time::{Duration, Instant};
 
 use acropolis_common::{DatumHash, PolicyId, ScriptHash, StakeAddress, UTxOIdentifier, Voter};
+use rayon::prelude::*;
 use thiserror::Error;
 use uplc_turbo::{
     arena::Arena, binder::DeBruijn, data::PlutusData, flat, machine::MachineError,
@@ -447,8 +448,9 @@ pub struct Phase2ValidationResult {
 ///
 /// # Note
 ///
-/// Currently executes scripts sequentially. Parallel execution (US2) will be
-/// added in a future phase using `rayon::par_iter()`.
+/// Executes scripts in parallel using rayon for improved performance on
+/// multi-script transactions (US2). Each script gets its own arena allocator
+/// for thread safety (FR-009: constant memory per script).
 pub fn validate_transaction_phase2(
     scripts: &[ScriptInput<'_>],
     cost_model_v1: &[i64],
@@ -456,49 +458,62 @@ pub fn validate_transaction_phase2(
     cost_model_v3: &[i64],
     script_context: &[u8],
 ) -> Result<Phase2ValidationResult, Phase2Error> {
+    // Start timing the overall parallel execution
+    let overall_start = Instant::now();
+
+    // Execute all scripts in parallel using rayon
+    // Each thread gets its own arena allocator for memory safety
+    let results: Vec<Result<(ScriptHash, EvalResult), Phase2Error>> = scripts
+        .par_iter()
+        .map(|script_input| {
+            // Select appropriate cost model based on Plutus version
+            let cost_model = match script_input.plutus_version {
+                PlutusVersion::V1 => cost_model_v1,
+                PlutusVersion::V2 => cost_model_v2,
+                PlutusVersion::V3 => cost_model_v3,
+            };
+
+            // Evaluate the script (arena is created inside evaluate_script per-thread)
+            evaluate_script(
+                script_input.script_bytes,
+                script_input.plutus_version,
+                script_input.datum,
+                script_input.redeemer,
+                script_context,
+                cost_model,
+                script_input.ex_units,
+            )
+            .map(|eval_result| (script_input.script_hash, eval_result))
+            .map_err(|e| {
+                // Enrich error with correct script hash
+                match e {
+                    Phase2Error::ScriptFailed(_, msg) => {
+                        Phase2Error::ScriptFailed(script_input.script_hash, msg)
+                    }
+                    Phase2Error::BudgetExceeded(_, cpu, mem) => {
+                        Phase2Error::BudgetExceeded(script_input.script_hash, cpu, mem)
+                    }
+                    Phase2Error::DecodeFailed(_, msg) => {
+                        Phase2Error::DecodeFailed(script_input.script_hash, msg)
+                    }
+                    other => other,
+                }
+            })
+        })
+        .collect();
+
+    // Total wall-clock time for the parallel execution
+    let total_elapsed = overall_start.elapsed();
+
+    // Check for any failures and collect successful results
     let mut total_consumed = ExBudget::default();
-    let mut total_elapsed = Duration::ZERO;
     let mut script_results = Vec::with_capacity(scripts.len());
 
-    for script_input in scripts {
-        // Select appropriate cost model based on Plutus version
-        let cost_model = match script_input.plutus_version {
-            PlutusVersion::V1 => cost_model_v1,
-            PlutusVersion::V2 => cost_model_v2,
-            PlutusVersion::V3 => cost_model_v3,
-        };
-
-        // Evaluate the script
-        let eval_result = evaluate_script(
-            script_input.script_bytes,
-            script_input.plutus_version,
-            script_input.datum,
-            script_input.redeemer,
-            script_context,
-            cost_model,
-            script_input.ex_units,
-        )
-        .map_err(|e| {
-            // Enrich error with correct script hash
-            match e {
-                Phase2Error::ScriptFailed(_, msg) => {
-                    Phase2Error::ScriptFailed(script_input.script_hash, msg)
-                }
-                Phase2Error::BudgetExceeded(_, cpu, mem) => {
-                    Phase2Error::BudgetExceeded(script_input.script_hash, cpu, mem)
-                }
-                Phase2Error::DecodeFailed(_, msg) => {
-                    Phase2Error::DecodeFailed(script_input.script_hash, msg)
-                }
-                other => other,
-            }
-        })?;
-
-        // Accumulate results
+    for result in results {
+        let (script_hash, eval_result) = result?;
         total_consumed.cpu += eval_result.consumed_budget.cpu;
         total_consumed.mem += eval_result.consumed_budget.mem;
-        total_elapsed += eval_result.elapsed;
-        script_results.push((script_input.script_hash, eval_result));
+        script_results.push((script_hash, eval_result));
     }
 
     Ok(Phase2ValidationResult {
