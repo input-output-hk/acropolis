@@ -84,31 +84,31 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, Option<ScriptLang>> {
+pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, ScriptLang> {
     let mut map_script_witnesses = HashMap::new();
 
     for script in tx.native_scripts() {
-        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), None);
+        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), ScriptLang::Native);
     }
 
     for script in tx.plutus_v1_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            Some(ScriptLang::PlutusV1),
+            ScriptLang::PlutusV1,
         );
     }
 
     for script in tx.plutus_v2_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            Some(ScriptLang::PlutusV2),
+            ScriptLang::PlutusV2,
         );
     }
 
     for script in tx.plutus_v3_scripts() {
         map_script_witnesses.insert(
             ScriptHash::from(*script.compute_hash()),
-            Some(ScriptLang::PlutusV3),
+            ScriptLang::PlutusV3,
         );
     }
 

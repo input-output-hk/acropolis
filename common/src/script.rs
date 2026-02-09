@@ -15,6 +15,7 @@ pub type DatumHash = Hash<32>;
     Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum ScriptLang {
+    Native,
     PlutusV1,
     PlutusV2,
     PlutusV3,
@@ -41,10 +42,10 @@ impl ReferenceScript {
 
     pub fn get_script_lang(&self) -> Option<ScriptLang> {
         match self {
+            ReferenceScript::Native(_) => Some(ScriptLang::Native),
             ReferenceScript::PlutusV1(_) => Some(ScriptLang::PlutusV1),
             ReferenceScript::PlutusV2(_) => Some(ScriptLang::PlutusV2),
             ReferenceScript::PlutusV3(_) => Some(ScriptLang::PlutusV3),
-            _ => None,
         }
     }
 }

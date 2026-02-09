@@ -148,7 +148,7 @@ pub fn get_scripts_needed(
 pub fn get_scripts_provided(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-) -> HashMap<ScriptHash, Option<ScriptLang>> {
+) -> HashMap<ScriptHash, ScriptLang> {
     let mut scripts_provided = HashMap::new();
 
     if let Some(script_witnesses) = tx_deltas.script_witnesses.as_ref() {
@@ -165,7 +165,7 @@ pub fn get_scripts_provided(
             if let Some(reference_script_hash) = utxo.reference_script_hash {
                 // TODO:
                 // Using PlutusV2 as a placeholder for now
-                scripts_provided.insert(reference_script_hash, Some(ScriptLang::PlutusV2));
+                scripts_provided.insert(reference_script_hash, ScriptLang::PlutusV2);
             }
         }
     }

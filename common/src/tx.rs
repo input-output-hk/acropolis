@@ -54,7 +54,7 @@ pub struct Transaction {
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: HashSet<VKeyWitness>,
-    pub script_witnesses: HashMap<ScriptHash, Option<ScriptLang>>,
+    pub script_witnesses: HashMap<ScriptHash, ScriptLang>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: HashMap<DatumHash, Vec<u8>>,
     pub error: Option<Phase1ValidationError>,
@@ -186,7 +186,7 @@ pub struct TxUTxODeltas {
     pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
 
     // Scripts Witnesses Provided
-    pub script_witnesses: Option<HashMap<ScriptHash, Option<ScriptLang>>>,
+    pub script_witnesses: Option<HashMap<ScriptHash, ScriptLang>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,
