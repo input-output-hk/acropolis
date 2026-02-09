@@ -195,7 +195,7 @@ pub enum Phase2ValidationError {
 }
 ```
 
-This follows the existing pattern where `TransactionValidationError` wraps both Phase 1 and Phase 2 errors.
+This establishes a clear error type for Phase 2 so that `TransactionValidationError` can be extended (or a new wrapper introduced) to include both Phase 1 and Phase 2 validation errors.
 
 ---
 
