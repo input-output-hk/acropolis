@@ -17,7 +17,7 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -55,6 +55,7 @@ const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_GOVERNANCE_PROCEDURES_TOPIC: &str = "cardano.governance";
 const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
@@ -162,6 +163,7 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut governance_procedures_subscription: Box<dyn Subscription<Message>>,
         mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
@@ -294,6 +296,20 @@ impl AccountsState {
                 if let Some(block_info) = current_block.as_ref() {
                     // Apply pending MIRs before generating SPDD so they're included in active stake
                     state.apply_pending_mirs();
+
+                    // At the Conway hard fork, pointer addresses lose their staking
+                    // functionality (Conway spec 9.1.2). Subtract accumulated pointer
+                    // address UTxO values from utxo_value so they no longer count
+                    // towards the stake distribution.
+                    // Skip in snapshot mode: the snapshot already reflects post-Conway
+                    // state, so applying the subtraction again would double-count.
+                    if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
+                        if let Err(e) = state.remove_pointer_address_stake(context.clone()).await {
+                            vld.push_anyhow(anyhow!(
+                                "Error removing pointer address stake at Conway boundary: {e:#}"
+                            ));
+                        }
+                    }
 
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);
@@ -536,6 +552,27 @@ impl AccountsState {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
+            let (_, message) = governance_procedures_subscription.read_ignoring_rollbacks().await?;
+            match message.as_ref() {
+                Message::Cardano((
+                    block_info,
+                    CardanoMessage::GovernanceProcedures(procedures),
+                )) => {
+                    let span = info_span!(
+                        "account_state.handle_governance_procedures",
+                        block = block_info.number
+                    );
+                    async {
+                        Self::check_sync(&current_block, block_info);
+                        state.handle_governance_procedures(procedures)
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
@@ -590,6 +627,11 @@ impl AccountsState {
             .get_string("stake-deltas-topic")
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
+
+        let governance_procedures_topic = config
+            .get_string("governance-procedures-topic")
+            .unwrap_or(DEFAULT_GOVERNANCE_PROCEDURES_TOPIC.to_string());
+        info!("Creating governance procedures subscriber on '{governance_procedures_topic}'");
 
         let governance_outcomes_topic = config
             .get_string("governance-outcomes-topic")
@@ -906,6 +948,8 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let governance_procedures_subscription =
+            context.subscribe(&governance_procedures_topic).await?;
         let governance_outcomes_subscription =
             context.subscribe(&governance_outcomes_topic).await?;
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
@@ -940,6 +984,7 @@ impl AccountsState {
                 withdrawals_subscription,
                 pot_deltas_subscription,
                 stake_subscription,
+                governance_procedures_subscription,
                 governance_outcomes_subscription,
                 parameters_subscription,
                 &verifier,

@@ -74,7 +74,7 @@ impl HistoricalEpochsState {
         loop {
             let mut current_block: Option<BlockInfo> = None;
 
-            // Use certs_message as the synchroniser
+            // Use blocks_message as the synchroniser
             let (_, blocks_message) = blocks_subscription.read_ignoring_rollbacks().await?;
             let new_epoch = match blocks_message.as_ref() {
                 Message::Cardano((block_info, CardanoMessage::BlockAvailable(_))) => {
