@@ -18,6 +18,7 @@ pub mod parameters;
 pub mod pools;
 pub mod scripts;
 pub mod spdd;
+pub mod stake_deltas;
 pub mod transactions;
 pub mod utils;
 pub mod utxos;
