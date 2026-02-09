@@ -24,7 +24,7 @@ use tracing::{debug, error, info, info_span, Instrument};
 use crate::state::State;
 mod crypto;
 mod state;
-mod validations;
+pub mod validations;
 
 #[cfg(test)]
 mod test_utils;

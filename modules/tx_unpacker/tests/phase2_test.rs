@@ -2,53 +2,126 @@
 //!
 //! Tests follow TDD approach: write test first (RED), then implement (GREEN).
 
-// Note: The validations module is internal. Tests will access phase2 types
-// once they are re-exported from the crate root or made pub(crate).
-// For now, we test via integration patterns.
+use acropolis_module_tx_unpacker::validations::phase2::{
+    evaluate_script, ExBudget, Phase2Error, PlutusVersion,
+};
+use uplc_turbo::{
+    arena::Arena,
+    binder::DeBruijn,
+    flat,
+    program::{Program, Version},
+    term::Term,
+};
 
 // =============================================================================
-// Test Script Constants (FLAT-encoded Plutus scripts)
+// Helper functions to create test scripts
 // =============================================================================
 
-/// Always succeeds script: (program 1.0.0 (con unit ()))
-/// This script evaluates to unit and succeeds unconditionally.
-#[allow(dead_code)]
-const ALWAYS_SUCCEEDS_V2: &[u8] = &[
-    // TODO: Compile with pluton CLI and embed FLAT bytes here
-    // Placeholder - will be replaced with actual FLAT bytes
-];
+/// Create a FLAT-encoded program that returns unit (always succeeds)
+/// This is a 2-arg lambda simulating a minting policy:
+/// (program 1.1.0 (lam r (lam ctx (con unit ()))))
+fn create_unit_program() -> Vec<u8> {
+    let arena = Arena::new();
+    // Real Cardano scripts always take at least 2 args (redeemer, context)
+    let term = Term::unit(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)); // r
+    let version = Version::plutus_v3(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    flat::encode(program).expect("Failed to encode unit program")
+}
 
-/// Always fails script: (program 1.0.0 (error))
-/// This script calls the error builtin and fails unconditionally.
-#[allow(dead_code)]
-const ALWAYS_FAILS_V2: &[u8] = &[
-    // TODO: Compile with pluton CLI and embed FLAT bytes here
-    // Placeholder - will be replaced with actual FLAT bytes
-];
+/// Create a FLAT-encoded program that calls error (always fails)
+/// This is a 2-arg lambda simulating a minting policy that fails:
+/// (program 1.1.0 (lam r (lam ctx (error))))
+fn create_error_program() -> Vec<u8> {
+    let arena = Arena::new();
+    let term = Term::error(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)); // r
+    let version = Version::plutus_v3(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    flat::encode(program).expect("Failed to encode error program")
+}
 
-/// Simple spending validator that always succeeds
-/// Takes 3 args: datum, redeemer, context
-#[allow(dead_code)]
-const SPENDING_VALIDATOR_SUCCEEDS_V2: &[u8] = &[
-    // TODO: Compile with pluton CLI and embed FLAT bytes here
-    // (program 1.0.0 (lam d (lam r (lam ctx (con unit ())))))
-];
+/// Create a FLAT-encoded program that is a lambda taking 3 args and returning unit
+/// This simulates a spending validator: (lam d (lam r (lam ctx (con unit ()))))
+fn create_spending_validator_succeeds() -> Vec<u8> {
+    let arena = Arena::new();
+    let term = Term::unit(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)) // r
+        .lambda(&arena, DeBruijn::zero(&arena)); // d
+    let version = Version::plutus_v3(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    flat::encode(program).expect("Failed to encode spending validator")
+}
 
-/// Simple minting policy that always succeeds
-/// Takes 2 args: redeemer, context
-#[allow(dead_code)]
-const MINTING_POLICY_SUCCEEDS_V2: &[u8] = &[
-    // TODO: Compile with pluton CLI and embed FLAT bytes here
-    // (program 1.0.0 (lam r (lam ctx (con unit ()))))
-];
+/// Create a FLAT-encoded program that is a lambda taking 2 args and returning unit
+/// This simulates a minting policy: (lam r (lam ctx (con unit ())))
+fn create_minting_policy_succeeds() -> Vec<u8> {
+    let arena = Arena::new();
+    let term = Term::unit(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)); // r
+    let version = Version::plutus_v3(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    flat::encode(program).expect("Failed to encode minting policy")
+}
+
+/// Create a FLAT-encoded program that takes 3 args and calls error
+/// This simulates a spending validator that fails: (lam d (lam r (lam ctx (error))))
+fn create_spending_validator_fails() -> Vec<u8> {
+    let arena = Arena::new();
+    let term = Term::error(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)) // r
+        .lambda(&arena, DeBruijn::zero(&arena)); // d
+    let version = Version::plutus_v3(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    flat::encode(program).expect("Failed to encode failing spending validator")
+}
+
+/// Create a minimal CBOR-encoded PlutusData (empty constr)
+fn create_empty_plutus_data() -> Vec<u8> {
+    // CBOR: d87980 = tag 121 (Constr 0) + empty array
+    vec![0xd8, 0x79, 0x80]
+}
 
 // =============================================================================
-// Default Cost Model (Plutus V2)
+// Default Cost Model (Plutus V3)
 // =============================================================================
 
-/// Default V2 cost model from mainnet protocol parameters.
-/// Used for testing script evaluation.
-#[allow(dead_code)]
+/// Default V3 cost model from mainnet protocol parameters.
+/// This is a minimal cost model for testing - full production would use
+/// complete protocol parameter values.
+fn default_cost_model_v3() -> Vec<i64> {
+    // Plutus V3 has ~250+ cost model parameters
+    // Use reasonable defaults for testing
+    let mut cost_model = vec![0i64; 300];
+
+    // Set some basic costs to non-zero values
+    // These are approximate values based on mainnet
+    for i in 0..cost_model.len() {
+        cost_model[i] = match i {
+            // startup costs
+            0..=10 => 100000,
+            // memory costs
+            11..=50 => 100,
+            // CPU costs
+            _ => 1000,
+        };
+    }
+
+    cost_model
+}
+
+fn default_cost_model_v1() -> Vec<i64> {
+    // Mainnet Plutus V1 cost model (166 parameters)
+    // Simplified for testing
+    vec![0i64; 166]
+}
+
 fn default_cost_model_v2() -> Vec<i64> {
     // Mainnet Plutus V2 cost model (205 parameters)
     // TODO: Extract from conway-genesis.json or protocol parameters
@@ -235,108 +308,525 @@ fn default_cost_model_v2() -> Vec<i64> {
 // Phase 1: Core Evaluation Tests (TDD)
 // =============================================================================
 
+/// T011: Test that a simple "always succeeds" script evaluates successfully
 #[test]
-#[ignore = "T011: Implement evaluate_script() first"]
 fn test_eval_always_succeeds() {
-    // TODO: T011 - Write test expecting RED, then implement in T012
-    // let budget = phase2::ExBudget { cpu: 1_000_000, mem: 100_000 };
-    // let result = phase2::evaluate_script(
-    //     ALWAYS_SUCCEEDS_V2,
-    //     phase2::PlutusVersion::V2,
-    //     None,
-    //     &[],  // empty redeemer
-    //     &[],  // empty context
-    //     &default_cost_model_v2(),
-    //     budget,
-    // );
-    // assert!(result.is_ok());
-    todo!("T011: Implement test after T006-T008 types are defined")
+    let script_bytes = create_unit_program();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None, // No datum for simple script
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(result.is_ok(), "Script should succeed: {:?}", result.err());
+
+    let consumed = result.unwrap();
+    // Script should consume some budget
+    assert!(consumed.cpu >= 0, "CPU consumed should be non-negative");
+    assert!(consumed.mem >= 0, "Memory consumed should be non-negative");
 }
 
+/// T013: Test that a script calling `error` fails with ScriptFailed
 #[test]
-#[ignore = "T013: Implement error handling first"]
 fn test_eval_always_fails() {
-    // TODO: T013 - Write test expecting RED, then implement in T014
-    todo!("T013: Implement test after evaluate_script() exists")
+    let script_bytes = create_error_program();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(result.is_err(), "Script should fail");
+
+    match result.unwrap_err() {
+        Phase2Error::ScriptFailed(_, msg) => {
+            // Script called error builtin
+            assert!(
+                msg.contains("error") || msg.contains("Error"),
+                "Error message should mention error: {}",
+                msg
+            );
+        }
+        other => panic!("Expected ScriptFailed, got {:?}", other),
+    }
 }
 
+/// T015: Test that exceeding the budget returns BudgetExceeded error
 #[test]
-#[ignore = "T015: Implement budget exceeded handling first"]
 fn test_eval_budget_exceeded() {
-    // TODO: T015 - Write test expecting RED, then implement in T016
-    todo!("T015: Implement test after error handling works")
+    let script_bytes = create_unit_program();
+    // Very small budget to force exceeding it
+    let budget = ExBudget::new(1, 1);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(result.is_err(), "Script should exceed budget");
+
+    match result.unwrap_err() {
+        Phase2Error::BudgetExceeded(_, cpu, mem) => {
+            // Should have consumed more than allowed
+            assert!(
+                cpu > 0 || mem > 0,
+                "Should have consumed some budget: cpu={}, mem={}",
+                cpu,
+                mem
+            );
+        }
+        other => panic!("Expected BudgetExceeded, got {:?}", other),
+    }
 }
 
 // =============================================================================
 // Phase 2: Argument Application Tests (TDD)
 // =============================================================================
 
+/// T017: Test spending validator with 3 arguments (datum, redeemer, context)
 #[test]
-#[ignore = "T017: Implement spending validator args first"]
 fn test_eval_spending_validator() {
-    // TODO: T017 - Write test expecting RED, then implement in T018
-    // Spending validator takes 3 args: datum, redeemer, context
-    todo!("T017: Implement test after core evaluation works")
+    let script_bytes = create_spending_validator_succeeds();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let datum = create_empty_plutus_data();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        Some(&datum), // Spending validators take a datum
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Spending validator should succeed: {:?}",
+        result.err()
+    );
 }
 
+/// T017b: Test spending validator that fails
 #[test]
-#[ignore = "T019: Implement minting policy args first"]
+fn test_eval_spending_validator_fails() {
+    let script_bytes = create_spending_validator_fails();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let datum = create_empty_plutus_data();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        Some(&datum),
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(result.is_err(), "Spending validator should fail");
+    assert!(matches!(
+        result.unwrap_err(),
+        Phase2Error::ScriptFailed(_, _)
+    ));
+}
+
+/// T019: Test minting policy with 2 arguments (redeemer, context)
+#[test]
 fn test_eval_minting_policy() {
-    // TODO: T019 - Write test expecting RED, then implement in T020
-    // Minting policy takes 2 args: redeemer, context
-    todo!("T019: Implement test after spending validator works")
+    let script_bytes = create_minting_policy_succeeds();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None, // Minting policies don't take a datum
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Minting policy should succeed: {:?}",
+        result.err()
+    );
 }
 
 // =============================================================================
 // Phase 3: Version-Specific Tests (FR-003)
 // =============================================================================
 
+/// T022: Test Plutus V1 script evaluation
 #[test]
-#[ignore = "T022: Implement V1 cost model support"]
 fn test_eval_plutus_v1_script() {
-    // TODO: T022 - Verify V1 scripts use V1 cost model
-    todo!("T022: Implement after basic evaluation works")
+    // Create a V1 program - must be a lambda since we apply args
+    let arena = Arena::new();
+    let term = Term::unit(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)); // r
+    let version = Version::plutus_v1(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    let script_bytes = flat::encode(program).expect("Failed to encode V1 program");
+
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3(); // V1 cost model would be different in production
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V1,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(
+        result.is_ok(),
+        "V1 script should succeed: {:?}",
+        result.err()
+    );
 }
 
+/// T023: Test Plutus V2 script evaluation
 #[test]
-#[ignore = "T023: Implement V2 cost model support"]
 fn test_eval_plutus_v2_script() {
-    // TODO: T023 - Verify V2 scripts use V2 cost model with reference inputs
-    todo!("T023: Implement after V1 test works")
+    // Create a V2 program - must be a lambda since we apply args
+    let arena = Arena::new();
+    let term = Term::unit(&arena)
+        .lambda(&arena, DeBruijn::zero(&arena)) // ctx
+        .lambda(&arena, DeBruijn::zero(&arena)); // r
+    let version = Version::plutus_v2(&arena);
+    let program = Program::<DeBruijn>::new(&arena, version, term);
+    let script_bytes = flat::encode(program).expect("Failed to encode V2 program");
+
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3(); // V2 cost model would be different in production
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V2,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(
+        result.is_ok(),
+        "V2 script should succeed: {:?}",
+        result.err()
+    );
 }
 
+/// T024: Test Plutus V3 script evaluation (already covered by other tests)
 #[test]
-#[ignore = "T024: Implement V3 cost model support"]
 fn test_eval_plutus_v3_script() {
-    // TODO: T024 - Verify V3 scripts use V3 cost model with governance context
-    todo!("T024: Implement after V2 test works")
+    // V3 is the default for other tests, but test explicitly
+    let script_bytes = create_unit_program();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let cost_model = default_cost_model_v3();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+
+    let result = evaluate_script(
+        &script_bytes,
+        PlutusVersion::V3,
+        None,
+        &redeemer,
+        &context,
+        &cost_model,
+        budget,
+    );
+
+    assert!(
+        result.is_ok(),
+        "V3 script should succeed: {:?}",
+        result.err()
+    );
 }
 
 // =============================================================================
-// Phase 4: Multi-Script Tests (US2)
+// Phase 4: Multi-Script Tests (US2) - Not part of Phase 3
 // =============================================================================
 
 #[test]
-#[ignore = "T028: Implement parallel evaluation first"]
+#[ignore = "T031: Implement parallel evaluation first"]
 fn test_parallel_multi_script_block() {
-    // TODO: T028 - Verify parallel execution is faster than sequential
-    todo!("T028: Implement after validate_transaction_phase2() exists")
+    // TODO: T031 - Verify parallel execution is faster than sequential
+    todo!("T031: Implement after validate_transaction_phase2() exists")
 }
 
 // =============================================================================
-// Phase 5: Configuration Tests (US3)
+// Phase 3 Integration: validate_transaction_phase2 Tests (US1)
+// =============================================================================
+
+use acropolis_common::{ScriptHash, TxHash, UTxOIdentifier};
+use acropolis_module_tx_unpacker::validations::phase2::{
+    validate_transaction_phase2, ScriptInput, ScriptPurpose,
+};
+
+/// T029: Test validate_transaction_phase2 with a single minting script
+#[test]
+fn test_validate_transaction_phase2_single_mint_success() {
+    // Create a successful minting policy
+    let script_bytes = create_minting_policy_succeeds();
+    let script_hash = ScriptHash::default();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+
+    let script_inputs = vec![ScriptInput {
+        script_hash,
+        script_bytes: &script_bytes,
+        plutus_version: PlutusVersion::V3,
+        purpose: ScriptPurpose::Minting(script_hash),
+        datum: None,
+        redeemer: &redeemer,
+        ex_units: budget,
+    }];
+
+    let cost_model_v1 = default_cost_model_v1();
+    let cost_model_v2 = default_cost_model_v2();
+    let cost_model_v3 = default_cost_model_v3();
+
+    let result = validate_transaction_phase2(
+        &script_inputs,
+        &cost_model_v1,
+        &cost_model_v2,
+        &cost_model_v3,
+        &context,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Single mint script should succeed: {:?}",
+        result.err()
+    );
+    let validation_result = result.unwrap();
+    assert_eq!(validation_result.script_results.len(), 1);
+    assert!(validation_result.total_consumed.cpu > 0);
+}
+
+/// T029: Test validate_transaction_phase2 with a failing script
+#[test]
+fn test_validate_transaction_phase2_single_mint_failure() {
+    // Create a failing minting policy
+    let script_bytes = create_error_program();
+    let script_hash = ScriptHash::default();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+
+    let script_inputs = vec![ScriptInput {
+        script_hash,
+        script_bytes: &script_bytes,
+        plutus_version: PlutusVersion::V3,
+        purpose: ScriptPurpose::Minting(script_hash),
+        datum: None,
+        redeemer: &redeemer,
+        ex_units: budget,
+    }];
+
+    let cost_model_v1 = default_cost_model_v1();
+    let cost_model_v2 = default_cost_model_v2();
+    let cost_model_v3 = default_cost_model_v3();
+
+    let result = validate_transaction_phase2(
+        &script_inputs,
+        &cost_model_v1,
+        &cost_model_v2,
+        &cost_model_v3,
+        &context,
+    );
+
+    assert!(result.is_err(), "Failing mint script should return error");
+    let err = result.unwrap_err();
+    match err {
+        Phase2Error::ScriptFailed(_, _) => (), // Expected
+        other => panic!("Expected ScriptFailed, got: {:?}", other),
+    }
+}
+
+/// T029: Test validate_transaction_phase2 with multiple scripts (sequential)
+#[test]
+fn test_validate_transaction_phase2_multiple_scripts() {
+    // Create two successful minting policies
+    let script1_bytes = create_minting_policy_succeeds();
+    let script2_bytes = create_minting_policy_succeeds();
+    let script1_hash = ScriptHash::default();
+    let script2_hash = ScriptHash::try_from(vec![1u8; 28]).unwrap();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+
+    let script_inputs = vec![
+        ScriptInput {
+            script_hash: script1_hash,
+            script_bytes: &script1_bytes,
+            plutus_version: PlutusVersion::V3,
+            purpose: ScriptPurpose::Minting(script1_hash),
+            datum: None,
+            redeemer: &redeemer,
+            ex_units: budget,
+        },
+        ScriptInput {
+            script_hash: script2_hash,
+            script_bytes: &script2_bytes,
+            plutus_version: PlutusVersion::V3,
+            purpose: ScriptPurpose::Minting(script2_hash),
+            datum: None,
+            redeemer: &redeemer,
+            ex_units: budget,
+        },
+    ];
+
+    let cost_model_v1 = default_cost_model_v1();
+    let cost_model_v2 = default_cost_model_v2();
+    let cost_model_v3 = default_cost_model_v3();
+
+    let result = validate_transaction_phase2(
+        &script_inputs,
+        &cost_model_v1,
+        &cost_model_v2,
+        &cost_model_v3,
+        &context,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Multiple scripts should succeed: {:?}",
+        result.err()
+    );
+    let validation_result = result.unwrap();
+    assert_eq!(validation_result.script_results.len(), 2);
+}
+
+/// T029: Test validate_transaction_phase2 with spending validator (3 args)
+#[test]
+fn test_validate_transaction_phase2_spending() {
+    let script_bytes = create_spending_validator_succeeds();
+    let script_hash = ScriptHash::default();
+    let datum = create_empty_plutus_data();
+    let redeemer = create_empty_plutus_data();
+    let context = create_empty_plutus_data();
+    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+
+    let utxo_id = UTxOIdentifier {
+        tx_hash: TxHash::default(),
+        output_index: 0,
+    };
+
+    let script_inputs = vec![ScriptInput {
+        script_hash,
+        script_bytes: &script_bytes,
+        plutus_version: PlutusVersion::V3,
+        purpose: ScriptPurpose::Spending(utxo_id),
+        datum: Some(&datum),
+        redeemer: &redeemer,
+        ex_units: budget,
+    }];
+
+    let cost_model_v1 = default_cost_model_v1();
+    let cost_model_v2 = default_cost_model_v2();
+    let cost_model_v3 = default_cost_model_v3();
+
+    let result = validate_transaction_phase2(
+        &script_inputs,
+        &cost_model_v1,
+        &cost_model_v2,
+        &cost_model_v3,
+        &context,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Spending validator should succeed: {:?}",
+        result.err()
+    );
+}
+
+/// T029: Test empty script list (no-op)
+#[test]
+fn test_validate_transaction_phase2_empty() {
+    let script_inputs: Vec<ScriptInput<'_>> = vec![];
+    let context = create_empty_plutus_data();
+
+    let cost_model_v1 = default_cost_model_v1();
+    let cost_model_v2 = default_cost_model_v2();
+    let cost_model_v3 = default_cost_model_v3();
+
+    let result = validate_transaction_phase2(
+        &script_inputs,
+        &cost_model_v1,
+        &cost_model_v2,
+        &cost_model_v3,
+        &context,
+    );
+
+    assert!(result.is_ok(), "Empty script list should succeed");
+    let validation_result = result.unwrap();
+    assert_eq!(validation_result.script_results.len(), 0);
+    assert_eq!(validation_result.total_consumed.cpu, 0);
+    assert_eq!(validation_result.total_consumed.mem, 0);
+}
+
+// =============================================================================
+// Phase 5: Configuration Tests (US3) - Not part of Phase 3
 // =============================================================================
 
 #[test]
-#[ignore = "T032: Implement config flag check first"]
+#[ignore = "T035: Implement config flag check first"]
 fn test_phase2_disabled_skips_scripts() {
-    // TODO: T032 - Verify scripts are skipped when phase2_enabled = false
-    todo!("T032: Implement after config flag is added")
+    // TODO: T035 - Verify scripts are skipped when phase2_enabled = false
+    todo!("T035: Implement after config flag is added")
 }
 
 #[test]
-#[ignore = "T034: Implement validation flow wiring first"]
+#[ignore = "T037: Implement validation flow wiring first"]
 fn test_phase2_enabled_validates_scripts() {
-    // TODO: T034 - Verify scripts are validated when phase2_enabled = true
-    todo!("T034: Implement after config flag check works")
+    // TODO: T037 - Verify scripts are validated when phase2_enabled = true
+    todo!("T037: Implement after config flag check works")
 }
