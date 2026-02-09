@@ -299,6 +299,45 @@ impl From<uplc_turbo::machine::ExBudget> for ExBudget {
 }
 
 // =============================================================================
+// EvalResult: Script evaluation result with timing
+// =============================================================================
+
+/// Result of a successful script evaluation including timing metrics.
+///
+/// This struct captures both the execution budget consumed and the wall-clock
+/// time taken for evaluation, enabling performance monitoring and SC-001
+/// compliance verification (<0.1s per script at p95).
+#[derive(Debug, Clone, Copy)]
+pub struct EvalResult {
+    /// Execution budget consumed by the script
+    pub consumed_budget: ExBudget,
+    /// Wall-clock time taken for evaluation
+    pub elapsed: Duration,
+}
+
+impl EvalResult {
+    /// Create a new evaluation result.
+    pub fn new(consumed_budget: ExBudget, elapsed: Duration) -> Self {
+        Self {
+            consumed_budget,
+            elapsed,
+        }
+    }
+
+    /// Check if the evaluation completed within the performance target.
+    ///
+    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
+    pub fn within_target(&self) -> bool {
+        self.elapsed < Duration::from_millis(100)
+    }
+
+    /// Get elapsed time in milliseconds.
+    pub fn elapsed_ms(&self) -> f64 {
+        self.elapsed.as_secs_f64() * 1000.0
+    }
+}
+
+// =============================================================================
 // T007: Phase2Error enum
 // =============================================================================
 
