@@ -357,3 +357,126 @@ cargo test -p acropolis_module_tx_unpacker test_eval_always_succeeds
 ## Complexity Tracking
 
 > No violations - complexity tracking not required.
+
+---
+
+## Implementation Task Sequence
+
+This section provides a concrete, ordered sequence of implementation tasks with explicit cross-references to supporting documentation.
+
+### Pre-Implementation Setup
+
+| # | Task | Reference | Output |
+|---|------|-----------|--------|
+| 0.1 | Add `uplc-turbo` dependency to workspace `Cargo.toml` | [research.md § UPLC Crate Dependency](research.md#uplc-crate-dependency) | Modified `Cargo.toml` |
+| 0.2 | Add `uplc-turbo = { workspace = true }` to `modules/tx_unpacker/Cargo.toml` | [quickstart.md § Add Module Dependency](quickstart.md#1-add-module-dependency) | Modified `Cargo.toml` |
+| 0.3 | Create test fixture directory structure | [plan.md § Test Fixture Structure](#test-fixture-structure) | `tests/data/phase2/` tree |
+| 0.4 | Create minimal test scripts (`always_succeeds.uplc`, etc.) | [plan.md § Initial Test Scripts to Create](#initial-test-scripts-to-create) | `.uplc` and `.flat` files |
+| 0.5 | Compile test scripts to FLAT format | [plan.md § Compiling Test Scripts](#compiling-test-scripts) | `.flat` bytecode files |
+
+### Phase 1: Core Evaluator Types (TDD)
+
+| # | Task | Reference | Test First |
+|---|------|-----------|------------|
+| 1.1 | Define `PlutusScript` struct | [data-model.md § 1. PlutusScript](data-model.md#1-plutusscript) | N/A (type only) |
+| 1.2 | Define `PlutusVersion` enum | [data-model.md § 1. PlutusScript](data-model.md#1-plutusscript) | N/A (type only) |
+| 1.3 | Define `ExBudget` struct | [data-model.md § 5. ExBudget](data-model.md#5-exbudget) | N/A (type only) |
+| 1.4 | Define `ScriptError` enum | [contracts/phase2-validation-api.md § ScriptError](contracts/phase2-validation-api.md#scripterror) | N/A (type only) |
+| 1.5 | Define `EvalOutcome` enum | [data-model.md § 7. EvalOutcome](data-model.md#7-evaloutcome) | N/A (type only) |
+| 1.6 | Create `validations/phase2/mod.rs` with type exports | [plan.md § Project Structure](#source-code-repository-root) | N/A |
+
+### Phase 2: Script Decoding (TDD)
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 2.1 | Write `test_decode_valid_script` | ✅ RED first | [plan.md § TDD Phase 1 #1](#phase-1-core-evaluator-red-green-refactor) |
+| 2.2 | Implement `decode_script()` in `evaluator.rs` | GREEN | [research.md § Script Decoding (FLAT format)](research.md#script-decoding-flat-format) |
+| 2.3 | Write `test_decode_invalid_bytes` | ✅ RED first | [plan.md § TDD Phase 1 #2](#phase-1-core-evaluator-red-green-refactor) |
+| 2.4 | Add error handling for invalid bytes | GREEN | [contracts/phase2-validation-api.md § ScriptError::DeserializationFailed](contracts/phase2-validation-api.md#scripterror) |
+
+### Phase 3: Script Evaluation (TDD)
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 3.1 | Write `test_eval_always_succeeds` | ✅ RED first | [plan.md § TDD Phase 1 #3](#phase-1-core-evaluator-red-green-refactor) |
+| 3.2 | Implement `evaluate_script()` basic flow | GREEN | [research.md § Script Evaluation](research.md#script-evaluation) |
+| 3.3 | Write `test_eval_always_fails` | ✅ RED first | [plan.md § TDD Phase 1 #4](#phase-1-core-evaluator-red-green-refactor) |
+| 3.4 | Handle `MachineError::ExplicitErrorTerm` | GREEN | [research.md § Result Handling](research.md#result-handling) |
+| 3.5 | Write `test_eval_budget_exceeded` | ✅ RED first | [plan.md § TDD Phase 1 #5](#phase-1-core-evaluator-red-green-refactor) |
+| 3.6 | Handle `MachineError::OutOfExError` | GREEN | [research.md § Result Handling](research.md#result-handling) |
+
+### Phase 4: Argument Application (TDD)
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 4.1 | Define `ScriptPurpose` enum | N/A | [data-model.md § 2. ScriptPurpose](data-model.md#2-scriptpurpose) |
+| 4.2 | Write `test_apply_validator_arguments` | ✅ RED first | [plan.md § TDD Phase 2 #6](#phase-2-argument-application) |
+| 4.3 | Implement datum/redeemer/context application | GREEN | [research.md § Applying Script Arguments](research.md#applying-script-arguments) |
+| 4.4 | Write `test_apply_policy_arguments` | ✅ RED first | [plan.md § TDD Phase 2 #7](#phase-2-argument-application) |
+| 4.5 | Handle minting policy (2 args) vs spending (3 args) | GREEN | [quickstart.md § Evaluating a Minting Policy](quickstart.md#evaluating-a-minting-policy) |
+
+### Phase 5: ScriptContext Builder
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 5.1 | Define `ScriptContext` struct | N/A | [data-model.md § 3. ScriptContext](data-model.md#3-scriptcontext) |
+| 5.2 | Define `TxInfo` struct with version variants | N/A | [data-model.md § 4. TxInfo](data-model.md#4-txinfo) |
+| 5.3 | Implement `TxInfo::to_plutus_data()` for V1 | ✅ Test | [research.md § Question 8: How to build ScriptContext?](research.md#question-8-how-to-build-scriptcontext) |
+| 5.4 | Implement V2 additions (reference inputs, etc.) | ✅ Test | [data-model.md § 4. TxInfo](data-model.md#4-txinfo) - V2 column |
+| 5.5 | Implement V3 additions (governance fields) | ✅ Test | [data-model.md § 4. TxInfo](data-model.md#4-txinfo) - V3 column |
+
+### Phase 6: Configuration & Integration (TDD)
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 6.1 | Define `Phase2Config` struct | N/A | [contracts/phase2-validation-api.md § Phase2Config](contracts/phase2-validation-api.md#phase2config) |
+| 6.2 | Write `test_phase2_validation_disabled` | ✅ RED first | [plan.md § TDD Phase 3 #8](#phase-3-integration) |
+| 6.3 | Add config flag check in `state.rs::validate()` | GREEN | [research.md § Question 6: Configuration flag](research.md#question-6-how-to-handle-configuration-flag) |
+| 6.4 | Write `test_phase2_validation_enabled` | ✅ RED first | [plan.md § TDD Phase 3 #9](#phase-3-integration) |
+| 6.5 | Wire `validate_transaction_scripts()` into `state.rs` | GREEN | [research.md § Question 3: Integration point](research.md#question-3-where-should-phase-2-validation-be-integrated) |
+
+### Phase 7: Transaction-Level Validation
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 7.1 | Define `Phase2ValidationError` enum | N/A | [research.md § Question 5: Error types](research.md#question-5-what-error-types-are-needed-for-phase-2) |
+| 7.2 | Implement `validate_transaction_scripts()` | ✅ Test | [contracts/phase2-validation-api.md § validate_transaction_scripts](contracts/phase2-validation-api.md#validate_transaction_scripts) |
+| 7.3 | Extract scripts from transaction witnesses | ✅ Test | [research.md § Question 4: Required Data](research.md#question-4-what-data-is-needed-for-phase-2-validation) |
+| 7.4 | Map redeemers to script purposes | ✅ Test | [data-model.md § 2. ScriptPurpose](data-model.md#2-scriptpurpose) |
+| 7.5 | Collect all `ScriptEvaluation` results | ✅ Test | [contracts/phase2-validation-api.md § ScriptEvaluation](contracts/phase2-validation-api.md#scriptevaluation) |
+
+### Phase 8: Parallel Execution & Memory (TDD)
+
+| # | Task | Test | Reference |
+|---|------|------|-----------|
+| 8.1 | Write `test_parallel_script_evaluation` | ✅ RED first | [plan.md § TDD Phase 3 #10](#phase-3-integration) |
+| 8.2 | Implement parallel evaluation with `rayon` or `tokio::spawn` | GREEN | [spec.md § FR-008](spec.md) |
+| 8.3 | Write `test_memory_constant_across_scripts` | ✅ RED first | [spec.md § SC-002](spec.md) |
+| 8.4 | Implement arena reset between scripts | GREEN | [research.md § Memory Management](research.md#memory-management) |
+
+### Phase 9: Integration Tests & Benchmarks
+
+| # | Task | Reference |
+|---|------|-----------|
+| 9.1 | Create mainnet transaction fixtures | [plan.md § Source 3: Mainnet Transaction Samples](#source-3-mainnet-transaction-samples) |
+| 9.2 | Write integration test with real Conway tx | [plan.md § Test Data Sources](#test-data-sources) |
+| 9.3 | Benchmark script evaluation time (SC-001) | [spec.md § SC-001](spec.md) |
+| 9.4 | Benchmark memory usage (SC-002) | [spec.md § SC-002](spec.md) |
+| 9.5 | Benchmark parallel vs sequential (SC-003) | [spec.md § SC-003](spec.md) |
+
+---
+
+## Cross-Reference Index
+
+Quick lookup for implementation details:
+
+| Topic | Primary Source | Supporting Sources |
+|-------|---------------|-------------------|
+| **uplc-turbo API** | [research.md § Question 7](research.md#question-7-how-does-the-uplc-turbo-crate-api-work) | [quickstart.md](quickstart.md) |
+| **Type definitions** | [data-model.md](data-model.md) | [contracts/phase2-validation-api.md](contracts/phase2-validation-api.md) |
+| **Function signatures** | [contracts/phase2-validation-api.md](contracts/phase2-validation-api.md) | [research.md § Summary](research.md#summary-integration-code-pattern) |
+| **Integration point** | [research.md § Question 3](research.md#question-3-where-should-phase-2-validation-be-integrated) | [research.md § Architecture diagram](research.md#summary-of-integration-architecture) |
+| **Test fixtures** | [plan.md § Test Data Sources](#test-data-sources) | [plan.md § Test Fixture Structure](#test-fixture-structure) |
+| **Error handling** | [data-model.md § 8-9](data-model.md#8-scripterror) | [contracts/phase2-validation-api.md § Error Types](contracts/phase2-validation-api.md#error-types) |
+| **Configuration** | [research.md § Question 6](research.md#question-6-how-to-handle-configuration-flag) | [contracts/phase2-validation-api.md § Phase2Config](contracts/phase2-validation-api.md#phase2config) |
+| **ScriptContext building** | [research.md § Question 8](research.md#question-8-how-to-build-scriptcontext) | [data-model.md § 3-4](data-model.md#3-scriptcontext) |
