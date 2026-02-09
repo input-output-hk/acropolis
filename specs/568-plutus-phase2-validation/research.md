@@ -7,6 +7,12 @@
 
 Acropolis currently implements **Phase 1 validation only**. Phase 2 (Plutus script execution) is not implemented. The integration point for Phase 2 validation is well-defined and will fit naturally after existing Phase 1 validation in the `tx_unpacker` module.
 
+The `uplc-turbo` crate from pragma-org provides an arena-based Plutus evaluator with the following key characteristics:
+- Arena allocator (`bumpalo`) for constant-memory execution
+- Support for Plutus V1, V2, V3 via `PlutusVersion` enum
+- Cost model support via `eval_with_params()` for protocol parameter integration
+- FLAT encoding/decoding for script bytecode
+
 ---
 
 ## Question 1: Where is Phase 1 validation implemented?
@@ -236,4 +242,233 @@ Access via `Config` in module initialization, similar to how other modules handl
 ├─────────────────────────────────────────────────────────────┤
 │  Configuration: phase2_validation_enabled (default: false)  │
 └─────────────────────────────────────────────────────────────┘
+```
+---
+
+## Question 7: How does the uplc-turbo crate API work?
+
+### Decision: Use arena-based evaluation with `Program::eval_with_params()`
+
+### Rationale
+
+The `uplc-turbo` crate (dependency name in Cargo.toml) provides a high-performance Plutus evaluator with the following key API components:
+
+#### Core Types
+
+```rust
+// Arena allocator for all script data (from bumpalo)
+use uplc_turbo::arena::Arena;
+use uplc_turbo::bumpalo::Bump;
+
+// Program representation
+use uplc_turbo::program::Program;
+use uplc_turbo::binder::DeBruijn;
+
+// Plutus version selection
+use uplc_turbo::machine::PlutusVersion; // V1, V2, V3
+
+// Execution budget
+use uplc_turbo::machine::ExBudget;
+
+// Evaluation result
+use uplc_turbo::machine::EvalResult;
+```
+
+#### Script Decoding (FLAT format)
+
+Scripts on Cardano are CBOR-wrapped FLAT-encoded bytecode. The decode flow:
+
+```rust
+use uplc_turbo::flat;
+
+// Create arena with pre-allocated capacity (1MB recommended)
+let bump = Bump::with_capacity(1_024_000);
+let arena = Arena::from_bump(bump);
+
+// CBOR-unwrap to get FLAT bytes (scripts are double-wrapped)
+let flat_bytes: &[u8] = unwrap_cbor_script(&cbor_script_bytes);
+
+// Decode FLAT to Program
+let program: &Program<DeBruijn> = flat::decode(&arena, flat_bytes)?;
+```
+
+#### Script Evaluation
+
+The `Program` type provides several evaluation methods:
+
+```rust
+// Simple evaluation (uses V3, unlimited budget)
+let result: EvalResult = program.eval(&arena);
+
+// Evaluation with explicit Plutus version
+let result = program.eval_version(&arena, PlutusVersion::V2);
+
+// Evaluation with version and initial budget limit
+let result = program.eval_version_budget(
+    &arena,
+    PlutusVersion::V2,
+    ExBudget { cpu: 10_000_000_000, mem: 10_000_000 }
+);
+
+// Evaluation with protocol parameters cost model (RECOMMENDED)
+let result = program.eval_with_params(
+    &arena,
+    PlutusVersion::V2,
+    &cost_model_params,  // &[i64] from protocol parameters
+    ExBudget { cpu: max_cpu, mem: max_mem }
+);
+```
+
+#### Result Handling
+
+```rust
+pub struct EvalResult<'a, V> {
+    pub term: Result<&'a Term<'a, V>, MachineError<'a, V>>,
+    pub info: MachineInfo,
+}
+
+pub struct MachineInfo {
+    pub consumed_budget: ExBudget,  // Actual CPU/mem used
+    pub logs: Vec<String>,          // Debug trace output
+}
+
+// Check if script succeeded
+match result.term {
+    Ok(term) => {
+        // Script succeeded - check if it returned unit or expected value
+        // For validators, success means returning () unit
+    }
+    Err(MachineError::ExplicitErrorTerm) => {
+        // Script explicitly failed via `error` builtin
+    }
+    Err(MachineError::OutOfExError(budget)) => {
+        // Script exceeded execution budget
+    }
+    Err(e) => {
+        // Other evaluation error
+    }
+}
+```
+
+#### Memory Management
+
+The arena allocator is key to constant memory:
+
+```rust
+// Create arena once per block (or reuse with reset)
+let mut arena = Arena::from_bump(Bump::with_capacity(1_024_000));
+
+for script in block_scripts {
+    let program = flat::decode(&arena, &script.bytes)?;
+    let result = program.eval_with_params(&arena, ...);
+    // Process result...
+    
+    // Reset arena between scripts for constant memory
+    arena.reset();
+}
+```
+
+### Applying Script Arguments
+
+For Plutus validators, the script must be applied to its arguments (datum, redeemer, script context) before evaluation:
+
+```rust
+// Build datum, redeemer, context as PlutusData
+let datum_term = Term::constant(&arena, Constant::data(&arena, datum_data));
+let redeemer_term = Term::constant(&arena, Constant::data(&arena, redeemer_data));
+let context_term = Term::constant(&arena, Constant::data(&arena, script_context));
+
+// Apply arguments to script program
+let applied = program
+    .apply(&arena, datum_term)
+    .apply(&arena, redeemer_term)
+    .apply(&arena, context_term);
+
+// Now evaluate
+let result = applied.eval_with_params(&arena, plutus_version, &cost_model, budget);
+```
+
+### Cost Model Parameters
+
+The cost model is a `&[i64]` array from protocol parameters. Map Acropolis `ProtocolParams` fields:
+
+- `plutus_v1_cost_model` → V1 scripts
+- `plutus_v2_cost_model` → V2 scripts  
+- `plutus_v3_cost_model` → V3 scripts
+
+Each is a vector of ~150-200 integers defining operation costs.
+
+---
+
+## Question 8: How to build ScriptContext?
+
+### Decision: Construct PlutusData representation of transaction context
+
+### Rationale
+
+The ScriptContext is a PlutusData structure containing:
+
+1. **TxInfo**: Transaction body info (inputs, outputs, mint, fee, etc.)
+2. **ScriptPurpose**: Why the script is running (Spending, Minting, Certifying, Rewarding, Voting, Proposing)
+
+For spending scripts:
+```rust
+let script_context = PlutusData::constr(&arena, 0, &[
+    tx_info_data,      // Full transaction context
+    script_purpose,    // Constr for purpose type
+]);
+```
+
+The tx_info structure varies by Plutus version:
+- V1: Limited fields, basic tx info
+- V2: Adds reference inputs, inline datums
+- V3: Adds governance fields, voting
+
+### Key Implementation Tasks
+
+1. **TxInfo builder**: Convert pallas `TransactionBody` to PlutusData
+2. **ScriptPurpose builder**: Map redeemer pointer to purpose type
+3. **Version dispatcher**: Select correct structure based on PlutusVersion
+
+---
+
+## Summary: Integration Code Pattern
+
+```rust
+/// Evaluate a single Plutus script
+pub fn evaluate_script(
+    arena: &Arena,
+    script_bytes: &[u8],
+    plutus_version: PlutusVersion,
+    datum: Option<&PlutusData>,
+    redeemer: &PlutusData,
+    script_context: &PlutusData,
+    cost_model: &[i64],
+    budget: ExBudget,
+) -> Result<EvalResult, Phase2ValidationError> {
+    // Decode script
+    let program: &Program<DeBruijn> = uplc_turbo::flat::decode(arena, script_bytes)
+        .map_err(|e| Phase2ValidationError::ScriptDeserializationError {
+            reason: e.to_string(),
+        })?;
+    
+    // Apply arguments based on script type
+    let applied = if let Some(datum) = datum {
+        // Spending script: datum, redeemer, context
+        program
+            .apply(arena, Term::constant(arena, Constant::data(arena, datum)))
+            .apply(arena, Term::constant(arena, Constant::data(arena, redeemer)))
+            .apply(arena, Term::constant(arena, Constant::data(arena, script_context)))
+    } else {
+        // Minting/other script: redeemer, context
+        program
+            .apply(arena, Term::constant(arena, Constant::data(arena, redeemer)))
+            .apply(arena, Term::constant(arena, Constant::data(arena, script_context)))
+    };
+    
+    // Evaluate with budget limit
+    let result = applied.eval_with_params(arena, plutus_version, cost_model, budget);
+    
+    Ok(result)
+}
 ```

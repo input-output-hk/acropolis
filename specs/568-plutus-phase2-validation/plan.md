@@ -1,102 +1,85 @@
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Plutus Phase 2 Script Validation
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
-
-**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
+**Branch**: `568-plutus-phase2-validation` | **Date**: 2026-02-06 | **Spec**: [spec.md](spec.md)
+**Input**: Feature specification from `/specs/568-plutus-phase2-validation/spec.md`
 
 ## Summary
 
-[Extract from feature spec: primary requirement + technical approach from research]
+Integrate the pragma-org/uplc Plutus script evaluator into Acropolis to provide Phase 2 validation for blocks containing smart contract transactions. The integration will occur in the `tx_unpacker` module after existing Phase 1 validation, using the `uplc-turbo` crate's arena-based execution model for efficient, constant-memory script evaluation.
 
 ## Technical Context
 
-<!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
--->
-
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: Rust 2024 Edition  
+**Primary Dependencies**: `uplc-turbo` (pragma-org/uplc), pallas, tokio  
+**Storage**: N/A (stateless validation)  
+**Testing**: cargo test, integration tests with fixture blocks  
+**Target Platform**: Linux server (amd64/arm64)  
+**Project Type**: Single module integration into existing monorepo  
+**Performance Goals**: <0.1s per script evaluation, parallel multi-script execution  
+**Constraints**: Constant memory usage across script evaluations, no modifications to uplc crate  
+**Scale/Scope**: Handle blocks with 10+ scripts, mainnet-compatible validation
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+| Gate | Status | Notes |
+|------|--------|-------|
+| Rust 2024 Edition | ✅ PASS | Project uses Rust 2024 Edition |
+| Tokio async runtime | ✅ PASS | Integration uses existing Tokio runtime |
+| thiserror/anyhow errors | ✅ PASS | New error types use thiserror |
+| Serde/CBOR serialization | ✅ PASS | Script bytecode is CBOR, using existing codec |
+| Modular architecture | ✅ PASS | Integration in existing tx_unpacker module |
+| No unwrap() | ✅ PASS | All error paths use Result with ? |
+| Doc comments required | ✅ PASS | All public API will be documented |
+| TDD workflow | ✅ PASS | Will write tests first for evaluator wrapper |
+| Integration tests | ✅ PASS | Fixture-based block tests for CI |
+
+**No violations - all gates pass.**
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/[###-feature]/
-├── plan.md              # This file (/speckit.plan command output)
-├── research.md          # Phase 0 output (/speckit.plan command)
-├── data-model.md        # Phase 1 output (/speckit.plan command)
-├── quickstart.md        # Phase 1 output (/speckit.plan command)
-├── contracts/           # Phase 1 output (/speckit.plan command)
-└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
+specs/568-plutus-phase2-validation/
+├── plan.md              # This file
+├── research.md          # Codebase analysis + uplc API research
+├── data-model.md        # Phase 2 validation types
+├── quickstart.md        # Integration guide
+├── contracts/           # Internal API contracts
+│   └── phase2-validation-api.md
+└── tasks.md             # Implementation tasks (created by /speckit.tasks)
 ```
 
 ### Source Code (repository root)
-<!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
--->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
+modules/tx_unpacker/
 ├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
+│   ├── lib.rs                    # Module entry point
+│   ├── state.rs                  # Integration point: validate() method
+│   ├── validations/
+│   │   ├── mod.rs               # Phase 1 validation entry
+│   │   └── phase2/              # NEW: Phase 2 validation
+│   │       ├── mod.rs           # Phase 2 public API
+│   │       ├── evaluator.rs     # uplc wrapper
+│   │       ├── context.rs       # ScriptContext builder
+│   │       └── error.rs         # Phase2ValidationError
+│   └── ...
+├── Cargo.toml                    # Add uplc-turbo dependency
 └── tests/
+    └── phase2_validation_test.rs # Integration tests
 
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+common/src/
+└── validation.rs                 # Existing: add Phase2ValidationError
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: Integrate within existing tx_unpacker module to avoid message bus complexity. New `validations/phase2/` subdirectory mirrors existing Phase 1 structure.
 
 ## Complexity Tracking
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
+> No violations - complexity tracking not required.
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
