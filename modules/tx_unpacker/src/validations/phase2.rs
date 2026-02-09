@@ -66,9 +66,7 @@ const EVALUATOR_STACK_SIZE: usize = 16 * 1024 * 1024;
 
 /// Number of threads in the evaluator pool (matches CPU cores by default)
 fn evaluator_thread_count() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
 }
 
 /// Global thread pool with large stacks for script evaluation.
@@ -503,6 +501,74 @@ fn evaluate_raw_flat_program_inner(flat_bytes: &[u8]) -> Result<RawEvalResult, S
     Ok(RawEvalResult::new(elapsed))
 }
 
+/// Result of parallel raw program evaluation.
+#[derive(Debug, Clone)]
+pub struct ParallelRawEvalResult {
+    /// Individual results for each program (index, result or error)
+    pub results: Vec<Result<RawEvalResult, String>>,
+    /// Total wall-clock time for parallel evaluation
+    pub total_elapsed: Duration,
+}
+
+impl ParallelRawEvalResult {
+    /// Get elapsed time in milliseconds.
+    pub fn total_elapsed_ms(&self) -> f64 {
+        self.total_elapsed.as_secs_f64() * 1000.0
+    }
+
+    /// Count successful evaluations.
+    pub fn success_count(&self) -> usize {
+        self.results.iter().filter(|r| r.is_ok()).count()
+    }
+
+    /// Count failed evaluations.
+    pub fn failure_count(&self) -> usize {
+        self.results.iter().filter(|r| r.is_err()).count()
+    }
+}
+
+/// Evaluate multiple raw FLAT-encoded Plutus programs in parallel.
+///
+/// This function uses the same evaluator thread pool and parallel execution
+/// strategy as `validate_transaction_phase2`. Programs are evaluated
+/// concurrently using rayon's parallel iterator on threads with 16MB stacks.
+///
+/// # Arguments
+///
+/// * `programs` - Slice of FLAT-encoded Plutus program bytecodes
+///
+/// # Returns
+///
+/// * `ParallelRawEvalResult` containing individual results and total timing
+///
+/// # Example
+///
+/// ```ignore
+/// let programs: Vec<Vec<u8>> = load_benchmark_scripts();
+/// let refs: Vec<&[u8]> = programs.iter().map(|p| p.as_slice()).collect();
+/// let result = evaluate_raw_flat_programs_parallel(&refs);
+/// println!("Evaluated {} scripts in {:.3}ms",
+///          result.success_count(), result.total_elapsed_ms());
+/// ```
+pub fn evaluate_raw_flat_programs_parallel(programs: &[&[u8]]) -> ParallelRawEvalResult {
+    // Copy all program bytes for thread-safe parallel evaluation
+    let programs: Vec<Vec<u8>> = programs.iter().map(|p| p.to_vec()).collect();
+
+    let start = Instant::now();
+
+    // Run parallel evaluation on the dedicated thread pool with larger stacks
+    let results: Vec<Result<RawEvalResult, String>> = evaluator_pool().install(|| {
+        programs.par_iter().map(|flat_bytes| evaluate_raw_flat_program_inner(flat_bytes)).collect()
+    });
+
+    let total_elapsed = start.elapsed();
+
+    ParallelRawEvalResult {
+        results,
+        total_elapsed,
+    }
+}
+
 // =============================================================================
 // T021: build_script_context helper
 // =============================================================================
@@ -639,46 +705,49 @@ pub fn validate_transaction_phase2(
 
     // Execute all scripts in parallel on the evaluator thread pool
     // This pool has 16MB stacks to handle large mainnet scripts
-    let results: Vec<Result<(ScriptHash, EvalResult), Phase2Error>> = evaluator_pool().install(|| {
-        script_data
-            .par_iter()
-            .map(|(script_hash, script_bytes, plutus_version, datum, redeemer, ex_units)| {
-                // Select appropriate cost model based on Plutus version
-                let cost_model = match plutus_version {
-                    PlutusVersion::V1 => &cost_model_v1,
-                    PlutusVersion::V2 => &cost_model_v2,
-                    PlutusVersion::V3 => &cost_model_v3,
-                };
+    let results: Vec<Result<(ScriptHash, EvalResult), Phase2Error>> =
+        evaluator_pool().install(|| {
+            script_data
+                .par_iter()
+                .map(
+                    |(script_hash, script_bytes, plutus_version, datum, redeemer, ex_units)| {
+                        // Select appropriate cost model based on Plutus version
+                        let cost_model = match plutus_version {
+                            PlutusVersion::V1 => &cost_model_v1,
+                            PlutusVersion::V2 => &cost_model_v2,
+                            PlutusVersion::V3 => &cost_model_v3,
+                        };
 
-                // Evaluate the script directly (we're already on the large-stack pool)
-                evaluate_script_inner(
-                    script_bytes,
-                    *plutus_version,
-                    datum.as_deref(),
-                    redeemer,
-                    &script_context,
-                    cost_model,
-                    *ex_units,
+                        // Evaluate the script directly (we're already on the large-stack pool)
+                        evaluate_script_inner(
+                            script_bytes,
+                            *plutus_version,
+                            datum.as_deref(),
+                            redeemer,
+                            &script_context,
+                            cost_model,
+                            *ex_units,
+                        )
+                        .map(|eval_result| (*script_hash, eval_result))
+                        .map_err(|e| {
+                            // Enrich error with correct script hash
+                            match e {
+                                Phase2Error::ScriptFailed(_, msg) => {
+                                    Phase2Error::ScriptFailed(*script_hash, msg)
+                                }
+                                Phase2Error::BudgetExceeded(_, cpu, mem) => {
+                                    Phase2Error::BudgetExceeded(*script_hash, cpu, mem)
+                                }
+                                Phase2Error::DecodeFailed(_, msg) => {
+                                    Phase2Error::DecodeFailed(*script_hash, msg)
+                                }
+                                other => other,
+                            }
+                        })
+                    },
                 )
-                .map(|eval_result| (*script_hash, eval_result))
-                .map_err(|e| {
-                    // Enrich error with correct script hash
-                    match e {
-                        Phase2Error::ScriptFailed(_, msg) => {
-                            Phase2Error::ScriptFailed(*script_hash, msg)
-                        }
-                        Phase2Error::BudgetExceeded(_, cpu, mem) => {
-                            Phase2Error::BudgetExceeded(*script_hash, cpu, mem)
-                        }
-                        Phase2Error::DecodeFailed(_, msg) => {
-                            Phase2Error::DecodeFailed(*script_hash, msg)
-                        }
-                        other => other,
-                    }
-                })
-            })
-            .collect()
-    });
+                .collect()
+        });
 
     // Total wall-clock time for the parallel execution
     let total_elapsed = overall_start.elapsed();

@@ -3,7 +3,8 @@
 //! Tests follow TDD approach: write test first (RED), then implement (GREEN).
 
 use acropolis_module_tx_unpacker::validations::phase2::{
-    evaluate_raw_flat_program, evaluate_script, ExBudget, Phase2Error, PlutusVersion,
+    evaluate_raw_flat_program, evaluate_raw_flat_programs_parallel, evaluate_script, ExBudget,
+    Phase2Error, PlutusVersion,
 };
 use uplc_turbo::{
     arena::Arena,
@@ -1680,19 +1681,20 @@ fn test_eval_benchmark_stablecoin() {
 }
 
 /// Generic test runner for all .flat scripts in the plutus_scripts directory.
+/// Runs scripts in parallel using our production evaluator pool, exactly like
+/// validate_transaction_phase2 does for real transactions.
 /// Reports timing for each script and validates against SC-001 target.
 #[test]
 fn test_all_benchmark_scripts() {
     let scripts_dir = get_plutus_scripts_dir();
 
-    println!("\n=== All Benchmark Scripts Performance ===");
+    println!("\n=== All Benchmark Scripts Performance (Parallel) ===");
     println!("Directory: {}", scripts_dir.display());
     println!();
 
-    let mut results: Vec<(String, usize, f64)> = Vec::new();
-    let mut failures: Vec<(String, String)> = Vec::new();
+    // Load all .flat files
+    let mut script_data: Vec<(String, Vec<u8>)> = Vec::new();
 
-    // Read all .flat files in the directory
     let entries = std::fs::read_dir(&scripts_dir).expect("Failed to read plutus_scripts directory");
 
     for entry in entries {
@@ -1702,21 +1704,34 @@ fn test_all_benchmark_scripts() {
         if path.extension().and_then(|e| e.to_str()) == Some("flat") {
             let name = path.file_name().unwrap().to_str().unwrap().to_string();
             let script_bytes = std::fs::read(&path).expect("Failed to read script");
-            let size = script_bytes.len();
-
-            match eval_benchmark_script(&script_bytes) {
-                Ok(elapsed_ms) => {
-                    results.push((name.clone(), size, elapsed_ms));
-                }
-                Err(e) => {
-                    failures.push((name.clone(), e));
-                }
-            }
+            script_data.push((name, script_bytes));
         }
     }
 
-    // Sort by size for nice output
-    results.sort_by_key(|(_, size, _)| *size);
+    // Sort by size for consistent output
+    script_data.sort_by_key(|(_, bytes)| bytes.len());
+
+    // Prepare slices for parallel evaluation
+    let program_refs: Vec<&[u8]> = script_data.iter().map(|(_, bytes)| bytes.as_slice()).collect();
+
+    // Run parallel evaluation using our production evaluator pool
+    let parallel_result = evaluate_raw_flat_programs_parallel(&program_refs);
+
+    // Collect results with names and sizes
+    let mut results: Vec<(String, usize, f64)> = Vec::new();
+    let mut failures: Vec<(String, String)> = Vec::new();
+
+    for (i, (name, bytes)) in script_data.iter().enumerate() {
+        let size = bytes.len();
+        match &parallel_result.results[i] {
+            Ok(eval_result) => {
+                results.push((name.clone(), size, eval_result.elapsed_ms()));
+            }
+            Err(e) => {
+                failures.push((name.clone(), e.clone()));
+            }
+        }
+    }
 
     // Print results table
     println!("{:<30} {:>10} {:>12}", "Script", "Size", "Time (ms)");
@@ -1744,15 +1759,24 @@ fn test_all_benchmark_scripts() {
     // Summary statistics
     if !results.is_empty() {
         let total_size: usize = results.iter().map(|(_, s, _)| s).sum();
-        let total_time: f64 = results.iter().map(|(_, _, t)| t).sum();
+        let sum_individual_ms: f64 = results.iter().map(|(_, _, t)| t).sum();
         let max_time = results.iter().map(|(_, _, t)| *t).fold(0.0, f64::max);
+        let parallel_elapsed_ms = parallel_result.total_elapsed_ms();
 
         println!();
         println!("Summary:");
-        println!("  Scripts evaluated: {}", results.len());
+        println!("  Scripts evaluated: {} (in parallel)", results.len());
         println!("  Total size: {:.1}KB", total_size as f64 / 1024.0);
-        println!("  Total time: {:.3}ms", total_time);
-        println!("  Max time: {:.3}ms (SC-001 target: <100ms)", max_time);
+        println!("  Sum of individual times: {:.3}ms", sum_individual_ms);
+        println!("  Total parallel elapsed:  {:.3}ms", parallel_elapsed_ms);
+        println!(
+            "  Speedup factor:          {:.2}x",
+            sum_individual_ms / parallel_elapsed_ms
+        );
+        println!(
+            "  Max individual time: {:.3}ms (SC-001 target: <100ms)",
+            max_time
+        );
         println!(
             "  Result: {}",
             if max_time < 100.0 {
@@ -1763,7 +1787,7 @@ fn test_all_benchmark_scripts() {
         );
     }
 
-    println!("==========================================\n");
+    println!("=====================================================\n");
 
     // Assert all scripts pass SC-001
     for (name, _, elapsed_ms) in &results {
