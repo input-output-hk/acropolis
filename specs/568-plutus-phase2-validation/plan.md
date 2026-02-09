@@ -148,268 +148,53 @@ Following the constitution's TDD requirement, implementation proceeds in this cy
 5. **Refactor** - Clean up while keeping tests green
 6. **Repeat** - Next test case
 
-### Test Data Sources
+### Test Data
 
-#### Source 1: Plutus Conformance Tests (pragma-org/uplc)
+We need only two categories of test data:
 
-The `uplc` crate includes a comprehensive conformance test suite from the official Plutus repository:
+#### 1. Minimal Hand-Crafted Scripts (inline in tests)
 
-```bash
-# Download official Plutus test cases into uplc repo
-just download-plutus-tests
+```rust
+// In phase2_test.rs - no external files needed
+const ALWAYS_SUCCEEDS: &[u8] = &[/* FLAT bytes for (program 1.0.0 (con unit ())) */];
+const ALWAYS_FAILS: &[u8] = &[/* FLAT bytes for (program 1.0.0 (error)) */];
 ```
 
-These are `.uplc` text format files with expected outputs. We can compile them to FLAT bytecode for our tests.
+Compile these once using `pluton` CLI and embed as byte arrays.
 
-**Location**: `https://github.com/IntersectMBO/plutus/tree/master/plutus-conformance/test-cases/uplc/evaluation`
+#### 2. One Real Mainnet Transaction
 
-**Examples**:
-- `example/fibonacci/fibonacci.uplc` - Compute fibonacci(15) = 610
-- `example/DivideByZero/DivideByZero.uplc` - Triggers evaluation failure
-- `builtin/semantics/addInteger/*` - Arithmetic operations
+Use an existing Conway transaction fixture from `tests/data/conway/` that contains Plutus scripts. This validates end-to-end integration.
 
-#### Source 2: Hand-Crafted Minimal Scripts
+### Test Implementation Order (TDD)
 
-Create minimal scripts that test specific validation paths:
+**Phase 1: Core Evaluation (3 tests)**
 
-| Script | Behavior | Expected Result |
-|--------|----------|-----------------|
-| `always_succeeds.flat` | `(program 1.0.0 (con unit ()))` | ✅ Success |
-| `always_fails.flat` | `(program 1.0.0 (error))` | ❌ ExplicitError |
-| `add_one.flat` | `(lam x [(builtin addInteger) x (con integer 1)])` | ✅ Returns x+1 |
-| `budget_hog.flat` | Deep recursion exceeding budget | ❌ BudgetExceeded |
+| # | Test | Implementation |
+|---|------|----------------|
+| 1 | `test_eval_always_succeeds` | Basic `evaluate_script()` function |
+| 2 | `test_eval_always_fails` | Handle `MachineError::ExplicitErrorTerm` |
+| 3 | `test_eval_budget_exceeded` | Handle `MachineError::OutOfExError` |
 
-#### Source 3: Mainnet Transaction Samples
+**Phase 2: Argument Application (2 tests)**
 
-Extract real scripts from mainnet transactions in the existing test fixtures:
+| # | Test | Implementation |
+|---|------|----------------|
+| 4 | `test_eval_spending_validator` | Apply 3 args: datum, redeemer, context |
+| 5 | `test_eval_minting_policy` | Apply 2 args: redeemer, context |
 
-```text
-modules/tx_unpacker/tests/data/
-├── conway/
-│   └── <tx_hash>/
-│       ├── context.json      # Slot, protocol params
-│       ├── tx.cbor           # Full transaction
-│       └── scripts/          # NEW: extracted scripts
-│           ├── spend_0.flat
-│           └── mint_0.flat
-```
+**Phase 3: Integration (3 tests)**
 
-**Extraction process**:
-1. Parse transaction CBOR with pallas
-2. Extract witness set scripts
-3. CBOR-unwrap to get FLAT bytes
-4. Save with known validation result from mainnet
-
-#### Source 4: Blockfrost API Queries
-
-For additional real-world scripts:
-
-```bash
-# Get scripts from a specific transaction
-curl -H "project_id: $BLOCKFROST_KEY" \
-  "https://cardano-mainnet.blockfrost.io/api/v0/txs/<hash>/scripts"
-```
-
-### Test Fixture Structure
-
-```text
-modules/tx_unpacker/tests/data/phase2/
-├── fixtures.json                    # Index of all test cases
-├── minimal/
-│   ├── always_succeeds/
-│   │   ├── script.flat              # FLAT-encoded script bytes (hex)
-│   │   ├── script.uplc              # Human-readable source
-│   │   └── expected.json            # { "result": "success", "budget": {...} }
-│   ├── always_fails/
-│   │   └── ...
-│   └── budget_exceeded/
-│       └── ...
-├── validators/                      # Scripts requiring arguments
-│   ├── simple_spend/
-│   │   ├── script.flat
-│   │   ├── datum.cbor
-│   │   ├── redeemer.cbor
-│   │   ├── context.cbor
-│   │   └── expected.json
-│   └── ...
-└── mainnet/                         # Real mainnet samples
-    └── <tx_hash>/
-        └── ...
-```
-
-### Test Case Format (fixtures.json)
-
-```json
-{
-  "test_cases": [
-    {
-      "name": "always_succeeds",
-      "description": "Trivial script that returns unit",
-      "script_path": "minimal/always_succeeds/script.flat",
-      "plutus_version": "V3",
-      "arguments": null,
-      "expected": {
-        "result": "success",
-        "consumed_budget": { "cpu": 100, "mem": 100 }
-      }
-    },
-    {
-      "name": "always_fails",
-      "description": "Script that calls error builtin",
-      "script_path": "minimal/always_fails/script.flat",
-      "plutus_version": "V3",
-      "arguments": null,
-      "expected": {
-        "result": "failure",
-        "error_type": "ExplicitError"
-      }
-    },
-    {
-      "name": "simple_spend_valid",
-      "description": "Spending validator with valid datum/redeemer",
-      "script_path": "validators/simple_spend/script.flat",
-      "plutus_version": "V2",
-      "arguments": {
-        "datum": "validators/simple_spend/datum.cbor",
-        "redeemer": "validators/simple_spend/redeemer.cbor",
-        "context": "validators/simple_spend/context.cbor"
-      },
-      "expected": {
-        "result": "success"
-      }
-    }
-  ]
-}
-```
-
-### Initial Test Scripts to Create
-
-Before writing any implementation code, create these minimal test scripts:
-
-#### 1. `always_succeeds.uplc`
-```uplc
--- Returns unit, always passes
-(program 1.0.0 (con unit ()))
-```
-
-#### 2. `always_fails.uplc`
-```uplc
--- Calls error builtin, always fails
-(program 1.0.0 (error))
-```
-
-#### 3. `add_integers.uplc`
-```uplc
--- Adds two integers: (1 + 3) = 4
-(program 1.0.0 
-  [[(builtin addInteger) (con integer 1)] (con integer 3)]
-)
-```
-
-#### 4. `check_datum_redeemer.uplc` (Validator pattern)
-```uplc
--- Spending validator: succeeds if datum == redeemer
-(program 1.0.0
-  (lam datum 
-    (lam redeemer 
-      (lam ctx 
-        [[(builtin equalsData) datum] redeemer]
-      )
-    )
-  )
-)
-```
-
-### Compiling Test Scripts
-
-Use the `pluton` CLI from pragma-org/uplc to compile:
-
-```bash
-# Parse and encode to FLAT
-cargo run -p pluton -- encode --flat < always_succeeds.uplc > always_succeeds.flat
-
-# Or use the Rust API directly in a build script
-```
-
-### Test Implementation Order (TDD Progression)
-
-#### Phase 1: Core Evaluator (Red-Green-Refactor)
-
-1. **Test**: `test_decode_valid_script` - Can decode FLAT bytes to Program
-   - Write test expecting successful decode
-   - Run → RED (no implementation)
-   - Implement `decode_script()`
-   - Run → GREEN
-
-2. **Test**: `test_decode_invalid_bytes` - Fails gracefully on garbage
-   - Write test expecting `ScriptDeserializationError`
-   - Run → RED
-   - Add error handling
-   - Run → GREEN
-
-3. **Test**: `test_eval_always_succeeds` - Evaluate trivial success
-   - Write test expecting `EvalOutcome::Success`
-   - Run → RED
-   - Implement `evaluate_script()`
-   - Run → GREEN
-
-4. **Test**: `test_eval_always_fails` - Evaluate explicit error
-   - Write test expecting `EvalOutcome::Failure { error: ExplicitError }`
-   - Run → RED
-   - Add error case handling
-   - Run → GREEN
-
-5. **Test**: `test_eval_budget_exceeded` - Budget enforcement
-   - Write test with small budget
-   - Run → RED
-   - Implement budget limit checking
-   - Run → GREEN
-
-#### Phase 2: Argument Application
-
-6. **Test**: `test_apply_validator_arguments` - Apply datum/redeemer/context
-   - Write test for spending validator
-   - Run → RED
-   - Implement argument application
-   - Run → GREEN
-
-7. **Test**: `test_apply_policy_arguments` - Apply redeemer/context only
-   - Write test for minting policy
-   - Run → RED
-   - Refine argument handling
-   - Run → GREEN
-
-#### Phase 3: Integration
-
-8. **Test**: `test_phase2_validation_disabled` - Config flag respects disabled
-   - Write test expecting Phase 1 only
-   - Run → RED
-   - Implement config flag check
-   - Run → GREEN
-
-9. **Test**: `test_phase2_validation_enabled` - Full validation flow
-   - Write integration test with real transaction
-   - Run → RED
-   - Wire up to state.rs::validate()
-   - Run → GREEN
-
-10. **Test**: `test_parallel_script_evaluation` - Multiple scripts
-    - Write test with multi-script block
-    - Run → RED
-    - Implement parallel execution
-    - Run → GREEN
+| # | Test | Implementation |
+|---|------|----------------|
+| 6 | `test_phase2_disabled_skips_scripts` | Config flag check in `state.rs` |
+| 7 | `test_phase2_enabled_validates_scripts` | Wire into validation flow |
+| 8 | `test_parallel_multi_script_block` | Use `rayon::par_iter()` for concurrency |
 
 ### Running Tests
 
 ```bash
-# Run only Phase 2 validation tests
 cargo test -p acropolis_module_tx_unpacker phase2
-
-# Run with verbose output to see red/green cycle
-cargo test -p acropolis_module_tx_unpacker phase2 -- --nocapture
-
-# Run specific test
-cargo test -p acropolis_module_tx_unpacker test_eval_always_succeeds
 ```
 
 ## Complexity Tracking
