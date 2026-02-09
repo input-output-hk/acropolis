@@ -96,9 +96,15 @@ As a node operator, I want to enable or disable Phase 2 validation via a configu
 
 ### Measurable Outcomes
 
-- **SC-001**: Individual script evaluation completes in under 0.1 seconds (100ms) for typical scripts.
-- **SC-002**: Memory usage remains constant (within 10% variance) when processing 1000 consecutive scripts.
-- **SC-003**: Multi-script blocks validate faster than sequential single-threaded execution (demonstrating parallelism benefit).
-- **SC-004**: 100% of scripts that validate on reference Cardano nodes also validate correctly in Acropolis.
-- **SC-005**: 100% of scripts that fail on reference Cardano nodes also fail with equivalent error semantics in Acropolis.
-- **SC-006**: Node operators can enable/disable the feature with a single configuration change and node restart.
+- **SC-001**: On the reference benchmark environment (see below), individual script evaluation of the *Plutus Phase 2 Golden Corpus v1* completes in under 0.1 seconds (100 ms) per script at the 95th percentile.
+- **SC-002**: On the reference benchmark environment, resident memory usage (RSS) of the Acropolis node remains within ±10% of the baseline measurement when processing a batch of 1,000 consecutive scripts from the *Plutus Phase 2 Golden Corpus v1*.
+- **SC-003**: For a fixed multi-script test block derived from the *Plutus Phase 2 Golden Corpus v1*, end-to-end Phase 2 validation wall-clock time with parallel validation enabled is strictly less than the time to validate the same scripts sequentially in a single thread on the reference benchmark environment.
+- **SC-004**: 100% of scripts that validate successfully on a reference Cardano node (same protocol parameters and ledger state) also validate successfully in Acropolis when using the same inputs and protocol parameters.
+- **SC-005**: 100% of scripts that fail on a reference Cardano node (same protocol parameters and ledger state) also fail in Acropolis with the same failure classification (e.g., deserialization error, evaluation error, execution budget exhaustion) and, where an error code is provided, the same error code.
+- **SC-006**: Node operators can enable or disable Phase 2 validation with a single configuration change and node restart, verified via an automated acceptance test that toggles the feature flag and observes changes in validation behavior.
+
+**Benchmark Definitions**:
+
+- **Reference benchmark environment**: A dedicated machine with a documented hardware and software profile (CPU model and core count, RAM size, storage type, operating system and version, and Acropolis build version). All latency and memory measurements for SC-001, SC-002, and SC-003 are taken on this environment under no other significant system load.
+- **Plutus Phase 2 Golden Corpus v1**: A fixed, version-controlled set of Plutus scripts and associated transaction contexts, derived from mainnet and regression cases, used consistently across SC-001 through SC-005. “Typical scripts” in this specification refers exactly to the scripts in this corpus.
+- **Failure classification semantics**: For SC-005, “equivalent error semantics” means that, for each failing script, Acropolis reports the same high-level failure category as the reference Cardano node (deserialization error vs. evaluation error vs. execution budget exhaustion vs. forbidden operation, etc.) and, where applicable, the same error code or tag, even if the free-form error message text differs.
