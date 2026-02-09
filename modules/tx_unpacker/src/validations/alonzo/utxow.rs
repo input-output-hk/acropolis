@@ -5,8 +5,9 @@
 
 use crate::validations::shelley;
 use acropolis_common::{
-    crypto::keyhash_256, hash::Hash, validation::UTxOWValidationError, GenesisDelegates,
-    NativeScript, ScriptIntegrityHash, TxHash, VKeyWitness,
+    crypto::keyhash_256, hash::Hash, protocol_params::ProtocolVersion,
+    validation::UTxOWValidationError, GenesisDelegates, NativeScript, ScriptIntegrityHash, TxHash,
+    VKeyWitness,
 };
 use pallas::{
     codec::{
@@ -117,6 +118,7 @@ pub fn validate(
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     shelley::utxow::validate(
         mtx,
@@ -125,6 +127,7 @@ pub fn validate(
         native_scripts,
         genesis_delegs,
         update_quorum,
+        protocol_version,
     )?;
 
     validate_script_integrity_hash(mtx)?;

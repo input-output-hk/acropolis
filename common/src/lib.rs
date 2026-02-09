@@ -27,6 +27,7 @@ pub mod rest_helper;
 pub mod script;
 pub mod serialization;
 pub mod snapshot;
+pub mod soft_fork;
 pub mod stake_addresses;
 pub mod state_history;
 pub mod tx;
