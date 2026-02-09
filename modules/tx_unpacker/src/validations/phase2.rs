@@ -38,10 +38,12 @@
 //! );
 //! ```
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use acropolis_common::{DatumHash, PolicyId, ScriptHash, StakeAddress, UTxOIdentifier, Voter};
 use rayon::prelude::*;
+use rayon::ThreadPool;
 use thiserror::Error;
 use uplc_turbo::{
     arena::Arena, binder::DeBruijn, data::PlutusData, flat, machine::MachineError,
@@ -50,6 +52,43 @@ use uplc_turbo::{
 
 // Re-export PlutusVersion for use in tests and by consumers
 pub use uplc_turbo::machine::PlutusVersion;
+
+// =============================================================================
+// Evaluator Thread Pool
+// =============================================================================
+// Real Plutus scripts (4-12KB) can have deep AST structures that cause stack
+// overflow with the default 2MB stack. We use a dedicated thread pool with
+// larger stacks (16MB) for script evaluation.
+
+/// Stack size for evaluator threads: 16MB
+/// This is sufficient for real mainnet scripts up to ~13KB.
+const EVALUATOR_STACK_SIZE: usize = 16 * 1024 * 1024;
+
+/// Number of threads in the evaluator pool (matches CPU cores by default)
+fn evaluator_thread_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+}
+
+/// Global thread pool with large stacks for script evaluation.
+///
+/// This pool is lazily initialized on first use and shared across all
+/// script evaluations. Each thread has a 16MB stack to handle deep
+/// recursion in the uplc-turbo evaluator.
+static EVALUATOR_POOL: OnceLock<ThreadPool> = OnceLock::new();
+
+/// Get (or create) the evaluator thread pool.
+fn evaluator_pool() -> &'static ThreadPool {
+    EVALUATOR_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(evaluator_thread_count())
+            .stack_size(EVALUATOR_STACK_SIZE)
+            .thread_name(|i| format!("plutus-eval-{}", i))
+            .build()
+            .expect("Failed to create evaluator thread pool")
+    })
+}
 
 // =============================================================================
 // T006: ExBudget struct
@@ -264,6 +303,40 @@ pub fn evaluate_script(
     cost_model: &[i64],
     budget: ExBudget,
 ) -> Result<EvalResult, Phase2Error> {
+    // Copy inputs for thread-safe evaluation
+    let script_bytes = script_bytes.to_vec();
+    let datum = datum.map(|d| d.to_vec());
+    let redeemer = redeemer.to_vec();
+    let script_context = script_context.to_vec();
+    let cost_model = cost_model.to_vec();
+
+    // Run evaluation on the dedicated thread pool with larger stack
+    evaluator_pool().install(|| {
+        evaluate_script_inner(
+            &script_bytes,
+            plutus_version,
+            datum.as_deref(),
+            &redeemer,
+            &script_context,
+            &cost_model,
+            budget,
+        )
+    })
+}
+
+/// Inner evaluation function that runs on the evaluator thread pool.
+///
+/// This is separated from the public API to allow the recursive evaluation
+/// to run on threads with larger stacks (16MB vs default 2MB).
+fn evaluate_script_inner(
+    script_bytes: &[u8],
+    plutus_version: PlutusVersion,
+    datum: Option<&[u8]>,
+    redeemer: &[u8],
+    script_context: &[u8],
+    cost_model: &[i64],
+    budget: ExBudget,
+) -> Result<EvalResult, Phase2Error> {
     // Start timing
     let start = Instant::now();
 
@@ -345,6 +418,89 @@ pub fn evaluate_script(
             ))
         }
     }
+}
+
+// =============================================================================
+// Raw Program Evaluation (for benchmarks and pre-applied scripts)
+// =============================================================================
+
+/// Result of raw program evaluation.
+///
+/// Similar to `EvalResult` but without budget tracking (raw evaluation
+/// doesn't use cost model budgets).
+#[derive(Debug, Clone)]
+pub struct RawEvalResult {
+    /// Wall-clock time taken for evaluation
+    pub elapsed: Duration,
+}
+
+impl RawEvalResult {
+    /// Create a new raw evaluation result.
+    pub fn new(elapsed: Duration) -> Self {
+        Self { elapsed }
+    }
+
+    /// Check if the evaluation completed within the performance target.
+    ///
+    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
+    pub fn within_target(&self) -> bool {
+        self.elapsed < Duration::from_millis(100)
+    }
+
+    /// Get elapsed time in milliseconds.
+    pub fn elapsed_ms(&self) -> f64 {
+        self.elapsed.as_secs_f64() * 1000.0
+    }
+}
+
+/// Evaluate a raw FLAT-encoded Plutus program without argument application.
+///
+/// This function is intended for benchmark testing with pre-applied programs
+/// (like those from the uplc-turbo benchmark suite). It uses the same evaluator
+/// thread pool with large stacks as the main `evaluate_script()` function.
+///
+/// # Arguments
+///
+/// * `flat_bytes` - FLAT-encoded Plutus program bytecode
+///
+/// # Returns
+///
+/// * `Ok(RawEvalResult)` - Evaluation timing on success
+/// * `Err(String)` - Error message on failure
+///
+/// # Example
+///
+/// ```ignore
+/// let script_bytes = std::fs::read("benchmark.flat")?;
+/// let result = evaluate_raw_flat_program(&script_bytes)?;
+/// println!("Evaluated in {:.3}ms", result.elapsed_ms());
+/// ```
+pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<RawEvalResult, String> {
+    let flat_bytes = flat_bytes.to_vec();
+
+    // Run evaluation on the dedicated thread pool with larger stack
+    evaluator_pool().install(|| evaluate_raw_flat_program_inner(&flat_bytes))
+}
+
+/// Inner evaluation function for raw FLAT programs.
+///
+/// Runs on the evaluator thread pool with 16MB stacks.
+fn evaluate_raw_flat_program_inner(flat_bytes: &[u8]) -> Result<RawEvalResult, String> {
+    let arena = Arena::new();
+
+    // Decode the FLAT-encoded program
+    let program: &Program<DeBruijn> =
+        flat::decode(&arena, flat_bytes).map_err(|e| format!("Decode failed: {:?}", e))?;
+
+    // Evaluate the program directly (no argument application)
+    let start = Instant::now();
+    let result = program.eval(&arena);
+    let elapsed = start.elapsed();
+
+    // Check if evaluation succeeded
+    result.term.map_err(|e| format!("Evaluation failed: {:?}", e))?;
+
+    Ok(RawEvalResult::new(elapsed))
 }
 
 // =============================================================================
@@ -448,9 +604,9 @@ pub struct Phase2ValidationResult {
 ///
 /// # Note
 ///
-/// Executes scripts in parallel using rayon for improved performance on
-/// multi-script transactions (US2). Each script gets its own arena allocator
-/// for thread safety (FR-009: constant memory per script).
+/// Executes scripts in parallel using a dedicated thread pool with larger stacks
+/// (16MB) to handle deep recursion in the uplc-turbo evaluator. Each script gets
+/// its own arena allocator for thread safety (FR-009: constant memory per script).
 pub fn validate_transaction_phase2(
     scripts: &[ScriptInput<'_>],
     cost_model_v1: &[i64],
@@ -461,46 +617,68 @@ pub fn validate_transaction_phase2(
     // Start timing the overall parallel execution
     let overall_start = Instant::now();
 
-    // Execute all scripts in parallel using rayon
-    // Each thread gets its own arena allocator for memory safety
-    let results: Vec<Result<(ScriptHash, EvalResult), Phase2Error>> = scripts
-        .par_iter()
-        .map(|script_input| {
-            // Select appropriate cost model based on Plutus version
-            let cost_model = match script_input.plutus_version {
-                PlutusVersion::V1 => cost_model_v1,
-                PlutusVersion::V2 => cost_model_v2,
-                PlutusVersion::V3 => cost_model_v3,
-            };
-
-            // Evaluate the script (arena is created inside evaluate_script per-thread)
-            evaluate_script(
-                script_input.script_bytes,
-                script_input.plutus_version,
-                script_input.datum,
-                script_input.redeemer,
-                script_context,
-                cost_model,
-                script_input.ex_units,
+    // Prepare owned copies of script data for thread-safe parallel execution
+    let script_data: Vec<_> = scripts
+        .iter()
+        .map(|s| {
+            (
+                s.script_hash,
+                s.script_bytes.to_vec(),
+                s.plutus_version,
+                s.datum.map(|d| d.to_vec()),
+                s.redeemer.to_vec(),
+                s.ex_units,
             )
-            .map(|eval_result| (script_input.script_hash, eval_result))
-            .map_err(|e| {
-                // Enrich error with correct script hash
-                match e {
-                    Phase2Error::ScriptFailed(_, msg) => {
-                        Phase2Error::ScriptFailed(script_input.script_hash, msg)
-                    }
-                    Phase2Error::BudgetExceeded(_, cpu, mem) => {
-                        Phase2Error::BudgetExceeded(script_input.script_hash, cpu, mem)
-                    }
-                    Phase2Error::DecodeFailed(_, msg) => {
-                        Phase2Error::DecodeFailed(script_input.script_hash, msg)
-                    }
-                    other => other,
-                }
-            })
         })
         .collect();
+
+    let cost_model_v1 = cost_model_v1.to_vec();
+    let cost_model_v2 = cost_model_v2.to_vec();
+    let cost_model_v3 = cost_model_v3.to_vec();
+    let script_context = script_context.to_vec();
+
+    // Execute all scripts in parallel on the evaluator thread pool
+    // This pool has 16MB stacks to handle large mainnet scripts
+    let results: Vec<Result<(ScriptHash, EvalResult), Phase2Error>> = evaluator_pool().install(|| {
+        script_data
+            .par_iter()
+            .map(|(script_hash, script_bytes, plutus_version, datum, redeemer, ex_units)| {
+                // Select appropriate cost model based on Plutus version
+                let cost_model = match plutus_version {
+                    PlutusVersion::V1 => &cost_model_v1,
+                    PlutusVersion::V2 => &cost_model_v2,
+                    PlutusVersion::V3 => &cost_model_v3,
+                };
+
+                // Evaluate the script directly (we're already on the large-stack pool)
+                evaluate_script_inner(
+                    script_bytes,
+                    *plutus_version,
+                    datum.as_deref(),
+                    redeemer,
+                    &script_context,
+                    cost_model,
+                    *ex_units,
+                )
+                .map(|eval_result| (*script_hash, eval_result))
+                .map_err(|e| {
+                    // Enrich error with correct script hash
+                    match e {
+                        Phase2Error::ScriptFailed(_, msg) => {
+                            Phase2Error::ScriptFailed(*script_hash, msg)
+                        }
+                        Phase2Error::BudgetExceeded(_, cpu, mem) => {
+                            Phase2Error::BudgetExceeded(*script_hash, cpu, mem)
+                        }
+                        Phase2Error::DecodeFailed(_, msg) => {
+                            Phase2Error::DecodeFailed(*script_hash, msg)
+                        }
+                        other => other,
+                    }
+                })
+            })
+            .collect()
+    });
 
     // Total wall-clock time for the parallel execution
     let total_elapsed = overall_start.elapsed();

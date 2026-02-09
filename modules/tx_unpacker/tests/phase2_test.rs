@@ -3,7 +3,7 @@
 //! Tests follow TDD approach: write test first (RED), then implement (GREEN).
 
 use acropolis_module_tx_unpacker::validations::phase2::{
-    evaluate_script, ExBudget, Phase2Error, PlutusVersion,
+    evaluate_raw_flat_program, evaluate_script, ExBudget, Phase2Error, PlutusVersion,
 };
 use uplc_turbo::{
     arena::Arena,
@@ -804,8 +804,8 @@ fn test_script_sizes_report() {
     println!();
 
     // Create scripts with some complexity (limited by recursive encoder/evaluator)
-    let script_50 = create_large_realistic_script(100);   // 50 force/delay pairs
-    let script_100 = create_large_realistic_script(200);  // 100 pairs (max safe)
+    let script_50 = create_large_realistic_script(100); // 50 force/delay pairs
+    let script_100 = create_large_realistic_script(200); // 100 pairs (max safe)
 
     println!("Scaled-up scripts (force/delay chains):");
     println!("  50 pairs:  {} bytes", script_50.len());
@@ -1560,5 +1560,225 @@ fn test_state_with_phase2_enabled_constructor() {
     assert!(
         !state_disabled.phase2_enabled,
         "with_phase2_enabled(false) should set phase2_enabled = false"
+    );
+}
+
+// =============================================================================
+// Real Mainnet Script Tests (from uplc benchmark fixtures)
+// =============================================================================
+// These tests use REAL Plutus scripts from the uplc-turbo benchmark suite.
+// They provide realistic performance data for actual DeFi contracts.
+
+/// Helper to get the path to the plutus_scripts fixtures directory.
+fn get_plutus_scripts_dir() -> std::path::PathBuf {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    // Navigate from modules/tx_unpacker to tests/fixtures/plutus_scripts
+    manifest_dir
+        .parent() // modules/
+        .unwrap()
+        .parent() // acropolis/
+        .unwrap()
+        .join("tests/fixtures/plutus_scripts")
+}
+
+/// Load a FLAT-encoded script from the plutus_scripts fixtures directory.
+fn load_plutus_script(name: &str) -> Vec<u8> {
+    let script_path = get_plutus_scripts_dir().join(name);
+    std::fs::read(&script_path)
+        .unwrap_or_else(|e| panic!("Failed to read script {}: {}", script_path.display(), e))
+}
+
+/// Decode and evaluate a real Plutus script from the benchmark fixtures.
+/// These scripts are self-contained (no redeemer/context needed) - they
+/// represent complete evaluation traces.
+///
+/// Uses our production evaluator pool with 16MB stacks.
+fn eval_benchmark_script(script_bytes: &[u8]) -> Result<f64, String> {
+    let result = evaluate_raw_flat_program(script_bytes)?;
+    Ok(result.elapsed_ms())
+}
+
+/// Test that we can decode and evaluate the auction_1-1 benchmark script.
+/// This is a ~3.7KB real Plutus script from the uplc benchmark suite.
+#[test]
+fn test_eval_benchmark_auction() {
+    let script_bytes = load_plutus_script("auction_1-1.flat");
+
+    println!("\n=== Benchmark: auction_1-1.flat ===");
+    println!(
+        "Script size: {} bytes ({:.1}KB)",
+        script_bytes.len(),
+        script_bytes.len() as f64 / 1024.0
+    );
+
+    let elapsed_ms = eval_benchmark_script(&script_bytes)
+        .expect("auction_1-1.flat should evaluate successfully");
+
+    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!("=====================================\n");
+
+    // SC-001: Must complete in <100ms
+    assert!(
+        elapsed_ms < 100.0,
+        "auction_1-1 took {:.3}ms, expected <100ms",
+        elapsed_ms
+    );
+}
+
+/// Test that we can decode and evaluate the uniswap-3 benchmark script.
+/// This is a ~12.7KB real Plutus script - close to mainnet maximum size.
+#[test]
+fn test_eval_benchmark_uniswap() {
+    let script_bytes = load_plutus_script("uniswap-3.flat");
+
+    println!("\n=== Benchmark: uniswap-3.flat ===");
+    println!(
+        "Script size: {} bytes ({:.1}KB)",
+        script_bytes.len(),
+        script_bytes.len() as f64 / 1024.0
+    );
+
+    let elapsed_ms =
+        eval_benchmark_script(&script_bytes).expect("uniswap-3.flat should evaluate successfully");
+
+    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!("=================================\n");
+
+    // SC-001: Must complete in <100ms
+    assert!(
+        elapsed_ms < 100.0,
+        "uniswap-3 took {:.3}ms, expected <100ms",
+        elapsed_ms
+    );
+}
+
+/// Test that we can decode and evaluate the stablecoin_1-1 benchmark script.
+/// This is a ~12.9KB real Plutus script - the largest in our test suite.
+#[test]
+fn test_eval_benchmark_stablecoin() {
+    let script_bytes = load_plutus_script("stablecoin_1-1.flat");
+
+    println!("\n=== Benchmark: stablecoin_1-1.flat ===");
+    println!(
+        "Script size: {} bytes ({:.1}KB)",
+        script_bytes.len(),
+        script_bytes.len() as f64 / 1024.0
+    );
+
+    let elapsed_ms = eval_benchmark_script(&script_bytes)
+        .expect("stablecoin_1-1.flat should evaluate successfully");
+
+    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!("======================================\n");
+
+    // SC-001: Must complete in <100ms
+    assert!(
+        elapsed_ms < 100.0,
+        "stablecoin_1-1 took {:.3}ms, expected <100ms",
+        elapsed_ms
+    );
+}
+
+/// Generic test runner for all .flat scripts in the plutus_scripts directory.
+/// Reports timing for each script and validates against SC-001 target.
+#[test]
+fn test_all_benchmark_scripts() {
+    let scripts_dir = get_plutus_scripts_dir();
+
+    println!("\n=== All Benchmark Scripts Performance ===");
+    println!("Directory: {}", scripts_dir.display());
+    println!();
+
+    let mut results: Vec<(String, usize, f64)> = Vec::new();
+    let mut failures: Vec<(String, String)> = Vec::new();
+
+    // Read all .flat files in the directory
+    let entries = std::fs::read_dir(&scripts_dir).expect("Failed to read plutus_scripts directory");
+
+    for entry in entries {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+
+        if path.extension().and_then(|e| e.to_str()) == Some("flat") {
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let script_bytes = std::fs::read(&path).expect("Failed to read script");
+            let size = script_bytes.len();
+
+            match eval_benchmark_script(&script_bytes) {
+                Ok(elapsed_ms) => {
+                    results.push((name.clone(), size, elapsed_ms));
+                }
+                Err(e) => {
+                    failures.push((name.clone(), e));
+                }
+            }
+        }
+    }
+
+    // Sort by size for nice output
+    results.sort_by_key(|(_, size, _)| *size);
+
+    // Print results table
+    println!("{:<30} {:>10} {:>12}", "Script", "Size", "Time (ms)");
+    println!("{:-<30} {:-<10} {:-<12}", "", "", "");
+
+    for (name, size, elapsed_ms) in &results {
+        let status = if *elapsed_ms < 100.0 { "✓" } else { "✗" };
+        println!(
+            "{:<30} {:>10} {:>11.3} {}",
+            name.replace(".flat", ""),
+            format!("{:.1}KB", *size as f64 / 1024.0),
+            elapsed_ms,
+            status
+        );
+    }
+
+    if !failures.is_empty() {
+        println!();
+        println!("Failures:");
+        for (name, error) in &failures {
+            println!("  {}: {}", name, error);
+        }
+    }
+
+    // Summary statistics
+    if !results.is_empty() {
+        let total_size: usize = results.iter().map(|(_, s, _)| s).sum();
+        let total_time: f64 = results.iter().map(|(_, _, t)| t).sum();
+        let max_time = results.iter().map(|(_, _, t)| *t).fold(0.0, f64::max);
+
+        println!();
+        println!("Summary:");
+        println!("  Scripts evaluated: {}", results.len());
+        println!("  Total size: {:.1}KB", total_size as f64 / 1024.0);
+        println!("  Total time: {:.3}ms", total_time);
+        println!("  Max time: {:.3}ms (SC-001 target: <100ms)", max_time);
+        println!(
+            "  Result: {}",
+            if max_time < 100.0 {
+                "PASS ✓"
+            } else {
+                "FAIL ✗"
+            }
+        );
+    }
+
+    println!("==========================================\n");
+
+    // Assert all scripts pass SC-001
+    for (name, _, elapsed_ms) in &results {
+        assert!(
+            *elapsed_ms < 100.0,
+            "Script {} took {:.3}ms, expected <100ms",
+            name,
+            elapsed_ms
+        );
+    }
+
+    // Assert no failures
+    assert!(
+        failures.is_empty(),
+        "Some scripts failed to evaluate: {:?}",
+        failures.iter().map(|(n, _)| n).collect::<Vec<_>>()
     );
 }
