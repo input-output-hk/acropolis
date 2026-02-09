@@ -29,11 +29,11 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 Define `ExBudget` struct in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T007 Define `Phase2Error` enum with thiserror derives in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T008 Define `ScriptPurpose` enum for spending/minting/certifying/rewarding/voting/proposing in modules/tx_unpacker/src/validations/phase2.rs
-- [ ] T009 Add `phase2_enabled: bool` field to tx_unpacker module configuration struct
-- [ ] T010 Add `Phase2(Phase2Error)` variant to `ValidationError` enum in common/src/validation.rs
+- [X] T006 Define `ExBudget` struct in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T007 Define `Phase2Error` enum with thiserror derives in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T008 Define `ScriptPurpose` enum for spending/minting/certifying/rewarding/voting/proposing in modules/tx_unpacker/src/validations/phase2.rs
+- [X] T009 Add `phase2_enabled: bool` field to tx_unpacker module configuration struct
+- [X] T010 Add `Phase2(Phase2Error)` variant to `ValidationError` enum in common/src/validation.rs
 
 **Checkpoint**: Foundation ready - user story implementation can now begin
 

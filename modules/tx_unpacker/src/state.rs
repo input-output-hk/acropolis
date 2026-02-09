@@ -10,12 +10,23 @@ use anyhow::Result;
 #[derive(Default, Clone)]
 pub struct State {
     pub protocol_params: ProtocolParams,
+    /// Whether Phase 2 script validation is enabled (default: false)
+    pub phase2_enabled: bool,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
             protocol_params: ProtocolParams::default(),
+            phase2_enabled: false,
+        }
+    }
+
+    /// Create a new State with Phase 2 validation enabled/disabled
+    pub fn with_phase2_enabled(phase2_enabled: bool) -> Self {
+        Self {
+            protocol_params: ProtocolParams::default(),
+            phase2_enabled,
         }
     }
 
