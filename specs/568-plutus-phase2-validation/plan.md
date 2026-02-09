@@ -227,14 +227,20 @@ pub enum Phase2Error {
     #[error("Script {0} failed: {1}")]
     ScriptFailed(ScriptHash, String),
     
-    #[error("Script {0} exceeded budget")]
-    BudgetExceeded(ScriptHash),
+    #[error("Script {0} exceeded budget (cpu: {1}, mem: {2})")]
+    BudgetExceeded(ScriptHash, i64, i64),
     
     #[error("Could not decode script {0}: {1}")]
     DecodeFailed(ScriptHash, String),
     
-    #[error("Missing script for redeemer")]
-    MissingScript,
+    #[error("Missing script for redeemer at index {0}")]
+    MissingScript(u32),
+    
+    #[error("Missing datum {0}")]
+    MissingDatum(DatumHash),
+    
+    #[error("Missing redeemer for script {0}")]
+    MissingRedeemer(ScriptHash),
 }
 
 /// Execution budget (re-export from uplc or define simply)
