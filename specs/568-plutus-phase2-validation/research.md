@@ -7,7 +7,18 @@
 
 Acropolis currently implements **Phase 1 validation only**. Phase 2 (Plutus script execution) is not implemented. The integration point for Phase 2 validation is well-defined and will fit naturally after existing Phase 1 validation in the `tx_unpacker` module.
 
-The `uplc-turbo` crate from pragma-org provides an arena-based Plutus evaluator with the following key characteristics:
+### UPLC Crate Dependency
+
+We will use the `uplc` crate from **https://github.com/pragma-org/uplc** for Plutus script evaluation.
+
+**Required Cargo.toml addition** (in `modules/tx_unpacker/Cargo.toml`):
+
+```toml
+[dependencies]
+uplc-turbo = { git = "https://github.com/pragma-org/uplc", package = "uplc" }
+```
+
+The crate provides an arena-based Plutus evaluator with the following key characteristics:
 - Arena allocator (`bumpalo`) for constant-memory execution
 - Support for Plutus V1, V2, V3 via `PlutusVersion` enum
 - Cost model support via `eval_with_params()` for protocol parameter integration
