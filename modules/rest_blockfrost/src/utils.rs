@@ -74,7 +74,7 @@ pub fn verify_pool_metadata_hash(
     let mut hash = vec![0; 32];
     hasher.finalize_variable(&mut hash).map_err(invalid_size_desc)?;
 
-    if hash == expected_hash.to_vec() {
+    if hash.as_slice() == expected_hash.as_ref() {
         return Ok(());
     }
 
