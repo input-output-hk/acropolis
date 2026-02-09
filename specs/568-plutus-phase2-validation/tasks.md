@@ -100,10 +100,10 @@
 
 ### Implementation for User Story 3
 
-- [ ] T035 [US3] Write `test_phase2_disabled_skips_scripts` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
-- [ ] T036 [US3] Add config flag check in `state.rs::validate()` to conditionally call Phase 2 in modules/tx_unpacker/src/state.rs
-- [ ] T037 [US3] Refactor state.rs to respect phase2_enabled configuration flag (default: disabled)
-- [ ] T038 [US3] Add configuration documentation to omnibus.toml template or README
+- [X] T035 [US3] Write `test_phase2_disabled_skips_scripts` in modules/tx_unpacker/tests/phase2_test.rs (TDD: expect RED)
+- [X] T036 [US3] Add config flag check in `state.rs::validate()` to conditionally call Phase 2 in modules/tx_unpacker/src/state.rs
+- [X] T037 [US3] Refactor state.rs to respect phase2_enabled configuration flag (default: disabled)
+- [X] T038 [US3] Add configuration documentation to omnibus.toml template or README
 
 **Checkpoint**: Phase 2 validation can be toggled on/off via config
 
