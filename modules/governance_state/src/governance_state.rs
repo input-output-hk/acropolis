@@ -201,6 +201,15 @@ impl GovernanceState {
             );
         }
 
+        if d_spo.epoch != drep_state.epoch {
+            vld.handle_error(
+                "drep state",
+                &anyhow!(
+                    "DRep state {} epoch != DRep epoch ({})", drep_state.epoch, d_drep.epoch
+                ),
+            );
+        }
+
         vld.handle(
             "stakes",
             state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
