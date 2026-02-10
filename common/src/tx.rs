@@ -255,7 +255,7 @@ impl TxUTxODeltas {
     /// When transaction is failed
     /// Produced =
     /// - Before Babbage: Collater Inputs (this is just moved to fee pot)
-    /// - Since Babbage: Collateral Outputs + Total Collateral
+    /// - Since Babbage: Either Collateral Outputs + Total Collateral or just Collateral Inputs (this is just moved to fee pot)
     pub fn calculate_total_produced(
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
@@ -273,12 +273,11 @@ impl TxUTxODeltas {
             // total_collateral is only set since Babbage era.
             match self.total_collateral {
                 Some(total_collateral) => {
-                    // since babbage
                     total_produced += &Value::new(total_collateral, vec![]);
                     return total_produced;
                 }
                 None => {
-                    // before babbage
+                    // if there is no total_collateral set, then collateral inputs are just moved to fee pot
                     let mut total_collateral = Value::new(0, vec![]);
 
                     // Add Inputs UTxO values
