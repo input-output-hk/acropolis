@@ -1,6 +1,6 @@
 use crate::validations;
 use crate::validations::phase2::{
-    validate_transaction_phase2, ExBudget, PlutusVersion, ScriptInput, ScriptPurpose,
+    validate_transaction_phase2, ExUnits, PlutusVersion, ScriptInput, ScriptPurpose,
 };
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawTxsMessage},
@@ -301,10 +301,10 @@ impl State {
                     purpose,
                     datum: None, // TODO: Resolve datum for spending validators
                     redeemer: redeemer.data.clone(),
-                    ex_units: ExBudget::new(
-                        redeemer.ex_units.steps as i64,
-                        redeemer.ex_units.mem as i64,
-                    ),
+                    ex_units: ExUnits {
+                        steps: redeemer.ex_units.steps,
+                        mem: redeemer.ex_units.mem,
+                    },
                 });
             }
         }
@@ -344,5 +344,5 @@ struct OwnedScriptInput {
     purpose: ScriptPurpose,
     datum: Option<Vec<u8>>,
     redeemer: Vec<u8>,
-    ex_units: ExBudget,
+    ex_units: ExUnits,
 }

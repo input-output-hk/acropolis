@@ -21,10 +21,10 @@
 //!
 //! ```ignore
 //! use acropolis_module_tx_unpacker::validations::phase2::{
-//!     evaluate_script, ExBudget, PlutusVersion,
+//!     evaluate_script, ExUnits, PlutusVersion,
 //! };
 //!
-//! let budget = ExBudget::new(10_000_000_000, 10_000_000);
+//! let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
 //! let cost_model: &[i64] = &[/* V3 cost model params */];
 //!
 //! let result = evaluate_script(
@@ -52,7 +52,8 @@ use uplc_turbo::{
     program::Program, term::Term,
 };
 
-// Re-export PlutusVersion for use in tests and by consumers
+// Re-export PlutusVersion and ExUnits for use in tests and by consumers
+pub use acropolis_common::ExUnits;
 pub use uplc_turbo::machine::PlutusVersion;
 
 // =============================================================================
@@ -220,53 +221,27 @@ fn arena_pool() -> &'static ArenaPool {
 }
 
 // =============================================================================
-// T006: ExBudget struct
+// ExUnits <-> uplc_turbo::machine::ExBudget conversions
 // =============================================================================
 
-/// Execution budget tracking for Plutus script evaluation.
+/// Convert ExUnits to uplc_turbo's ExBudget for script evaluation.
 ///
-/// Tracks CPU steps and memory units consumed during script execution.
-/// Used to verify scripts don't exceed their allocated budgets.
-///
-/// # Fields
-///
-/// * `cpu` - CPU steps consumed or available
-/// * `mem` - Memory units consumed or available
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ExBudget {
-    /// CPU steps consumed
-    pub cpu: i64,
-    /// Memory units consumed
-    pub mem: i64,
-}
-
-impl ExBudget {
-    /// Create a new execution budget with the given CPU and memory limits.
-    ///
-    /// # Arguments
-    ///
-    /// * `cpu` - Maximum CPU steps allowed
-    /// * `mem` - Maximum memory units allowed
-    pub fn new(cpu: i64, mem: i64) -> Self {
-        Self { cpu, mem }
+/// ExUnits uses (steps: u64, mem: u64) while ExBudget uses (cpu: i64, mem: i64).
+/// The conversion maps steps -> cpu and mem -> mem.
+fn ex_units_to_budget(ex_units: ExUnits) -> uplc_turbo::machine::ExBudget {
+    uplc_turbo::machine::ExBudget {
+        cpu: ex_units.steps as i64,
+        mem: ex_units.mem as i64,
     }
 }
 
-impl From<ExBudget> for uplc_turbo::machine::ExBudget {
-    fn from(budget: ExBudget) -> Self {
-        uplc_turbo::machine::ExBudget {
-            cpu: budget.cpu,
-            mem: budget.mem,
-        }
-    }
-}
-
-impl From<uplc_turbo::machine::ExBudget> for ExBudget {
-    fn from(budget: uplc_turbo::machine::ExBudget) -> Self {
-        Self {
-            cpu: budget.cpu,
-            mem: budget.mem,
-        }
+/// Convert uplc_turbo's ExBudget back to ExUnits.
+///
+/// Negative values are clamped to 0.
+fn budget_to_ex_units(budget: uplc_turbo::machine::ExBudget) -> ExUnits {
+    ExUnits {
+        steps: budget.cpu.max(0) as u64,
+        mem: budget.mem.max(0) as u64,
     }
 }
 
@@ -282,14 +257,14 @@ impl From<uplc_turbo::machine::ExBudget> for ExBudget {
 #[derive(Debug, Clone, Copy)]
 pub struct EvalResult {
     /// Execution budget consumed by the script
-    pub consumed_budget: ExBudget,
+    pub consumed_budget: ExUnits,
     /// Wall-clock time taken for evaluation
     pub elapsed: Duration,
 }
 
 impl EvalResult {
     /// Create a new evaluation result.
-    pub fn new(consumed_budget: ExBudget, elapsed: Duration) -> Self {
+    pub fn new(consumed_budget: ExUnits, elapsed: Duration) -> Self {
         Self {
             consumed_budget,
             elapsed,
@@ -401,7 +376,7 @@ pub enum ScriptPurpose {
 ///
 /// # Returns
 ///
-/// * `Ok(ExBudget)` - Consumed budget on successful script execution
+/// * `Ok(EvalResult)` - Consumed budget on successful script execution
 /// * `Err(Phase2Error)` - Error if script fails or exceeds budget
 ///
 /// # Script Arguments
@@ -420,7 +395,7 @@ pub enum ScriptPurpose {
 ///     &redeemer_cbor,
 ///     &context_cbor,
 ///     &cost_model_params,
-///     ExBudget::new(10_000_000_000, 10_000_000),
+///     ExUnits { steps: 10_000_000_000, mem: 10_000_000 },
 /// );
 /// ```
 pub fn evaluate_script(
@@ -430,7 +405,7 @@ pub fn evaluate_script(
     redeemer: &[u8],
     script_context: &[u8],
     cost_model: &[i64],
-    budget: ExBudget,
+    budget: ExUnits,
 ) -> Result<EvalResult, Phase2Error> {
     // Copy inputs for thread-safe evaluation
     let script_bytes = script_bytes.to_vec();
@@ -464,7 +439,7 @@ fn evaluate_script_inner(
     redeemer: &[u8],
     script_context: &[u8],
     cost_model: &[i64],
-    budget: ExBudget,
+    budget: ExUnits,
 ) -> Result<EvalResult, Phase2Error> {
     // Start timing
     let start = Instant::now();
@@ -514,14 +489,14 @@ fn evaluate_script_inner(
     };
 
     // Evaluate the script with cost model and budget
-    let result = applied.eval_with_params(&arena, plutus_version, cost_model, budget.into());
+    let result = applied.eval_with_params(&arena, plutus_version, cost_model, ex_units_to_budget(budget));
 
     // Handle the evaluation result
     match result.term {
         Ok(_) => {
             // Script succeeded - return consumed budget and timing
             let elapsed = start.elapsed();
-            Ok(EvalResult::new(result.info.consumed_budget.into(), elapsed))
+            Ok(EvalResult::new(budget_to_ex_units(result.info.consumed_budget), elapsed))
         }
         Err(MachineError::ExplicitErrorTerm) => {
             // Script explicitly failed via `error` builtin
@@ -532,11 +507,15 @@ fn evaluate_script_inner(
         }
         Err(MachineError::OutOfExError(remaining)) => {
             // Script exceeded execution budget
-            let consumed = ExBudget::new(budget.cpu - remaining.cpu, budget.mem - remaining.mem);
+            let budget_i64 = ex_units_to_budget(budget);
+            let consumed = ExUnits {
+                steps: (budget_i64.cpu - remaining.cpu).max(0) as u64,
+                mem: (budget_i64.mem - remaining.mem).max(0) as u64,
+            };
             Err(Phase2Error::BudgetExceeded(
                 ScriptHash::default(),
-                consumed.cpu,
-                consumed.mem,
+                consumed.steps as i64,
+                consumed.mem as i64,
             ))
         }
         Err(e) => {
@@ -765,14 +744,14 @@ pub struct ScriptInput<'a> {
     /// CBOR-encoded redeemer data
     pub redeemer: &'a [u8],
     /// Execution units allocated for this script
-    pub ex_units: ExBudget,
+    pub ex_units: ExUnits,
 }
 
 /// Result of validating a transaction's Phase 2 scripts.
 #[derive(Debug)]
 pub struct Phase2ValidationResult {
     /// Total budget consumed by all scripts
-    pub total_consumed: ExBudget,
+    pub total_consumed: ExUnits,
     /// Total wall-clock time for all script evaluations
     pub total_elapsed: Duration,
     /// Individual script results (script_hash -> consumed budget, elapsed time)
@@ -885,12 +864,12 @@ pub fn validate_transaction_phase2(
     let total_elapsed = overall_start.elapsed();
 
     // Check for any failures and collect successful results
-    let mut total_consumed = ExBudget::default();
+    let mut total_consumed = ExUnits::default();
     let mut script_results = Vec::with_capacity(scripts.len());
 
     for result in results {
         let (script_hash, eval_result) = result?;
-        total_consumed.cpu += eval_result.consumed_budget.cpu;
+        total_consumed.steps += eval_result.consumed_budget.steps;
         total_consumed.mem += eval_result.consumed_budget.mem;
         script_results.push((script_hash, eval_result));
     }
