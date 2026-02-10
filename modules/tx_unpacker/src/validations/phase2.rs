@@ -147,11 +147,7 @@ impl ArenaPool {
                 break arena;
             }
 
-            guard = self
-                .inner
-                .condvar
-                .wait(guard)
-                .unwrap_or_else(|p| p.into_inner());
+            guard = self.inner.condvar.wait(guard).unwrap_or_else(|p| p.into_inner());
         };
 
         PooledArena {
@@ -489,14 +485,22 @@ fn evaluate_script_inner(
     };
 
     // Evaluate the script with cost model and budget
-    let result = applied.eval_with_params(&arena, plutus_version, cost_model, ex_units_to_budget(budget));
+    let result = applied.eval_with_params(
+        &arena,
+        plutus_version,
+        cost_model,
+        ex_units_to_budget(budget),
+    );
 
     // Handle the evaluation result
     match result.term {
         Ok(_) => {
             // Script succeeded - return consumed budget and timing
             let elapsed = start.elapsed();
-            Ok(EvalResult::new(budget_to_ex_units(result.info.consumed_budget), elapsed))
+            Ok(EvalResult::new(
+                budget_to_ex_units(result.info.consumed_budget),
+                elapsed,
+            ))
         }
         Err(MachineError::ExplicitErrorTerm) => {
             // Script explicitly failed via `error` builtin

@@ -313,7 +313,10 @@ fn default_cost_model_v2() -> Vec<i64> {
 #[test]
 fn test_eval_always_succeeds() {
     let script_bytes = create_unit_program();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -359,7 +362,10 @@ fn test_eval_always_succeeds() {
 #[test]
 fn test_eval_always_fails() {
     let script_bytes = create_error_program();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -433,7 +439,10 @@ fn test_eval_budget_exceeded() {
 #[test]
 fn test_eval_spending_validator() {
     let script_bytes = create_spending_validator_succeeds();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let datum = create_empty_plutus_data();
     let redeemer = create_empty_plutus_data();
@@ -460,7 +469,10 @@ fn test_eval_spending_validator() {
 #[test]
 fn test_eval_spending_validator_fails() {
     let script_bytes = create_spending_validator_fails();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let datum = create_empty_plutus_data();
     let redeemer = create_empty_plutus_data();
@@ -487,7 +499,10 @@ fn test_eval_spending_validator_fails() {
 #[test]
 fn test_eval_minting_policy() {
     let script_bytes = create_minting_policy_succeeds();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -525,7 +540,10 @@ fn test_eval_plutus_v1_script() {
     let program = Program::<DeBruijn>::new(&arena, version, term);
     let script_bytes = flat::encode(program).expect("Failed to encode V1 program");
 
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3(); // V1 cost model would be different in production
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -559,7 +577,10 @@ fn test_eval_plutus_v2_script() {
     let program = Program::<DeBruijn>::new(&arena, version, term);
     let script_bytes = flat::encode(program).expect("Failed to encode V2 program");
 
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3(); // V2 cost model would be different in production
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -586,7 +607,10 @@ fn test_eval_plutus_v2_script() {
 fn test_eval_plutus_v3_script() {
     // V3 is the default for other tests, but test explicitly
     let script_bytes = create_unit_program();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -622,7 +646,10 @@ fn test_sc001_eval_performance_p95() {
     const P95_TARGET_MS: f64 = 100.0;
 
     let script_bytes = create_unit_program();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -702,7 +729,10 @@ fn test_sc001_spending_validator_performance() {
     const P95_TARGET_MS: f64 = 100.0;
 
     let script_bytes = create_spending_validator_succeeds();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let datum = create_empty_plutus_data();
     let redeemer = create_empty_plutus_data();
@@ -889,7 +919,10 @@ fn test_sc001_large_script_performance() {
     println!("      encoder/evaluator. Real mainnet scripts (~4-12KB) have");
     println!("      complex but flatter AST structure (branches, constants).");
 
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
     let cost_model = default_cost_model_v3();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
@@ -1024,7 +1057,10 @@ fn test_parallel_multi_script_block() {
 
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     let script_inputs = vec![
         ScriptInput {
@@ -1146,7 +1182,10 @@ fn test_sc001_parallel_performance() {
 
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     // Build script inputs
     let script_inputs: Vec<ScriptInput<'_>> = scripts
@@ -1248,7 +1287,10 @@ fn test_validate_transaction_phase2_single_mint_success() {
     let script_hash = ScriptHash::default();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     let script_inputs = vec![ScriptInput {
         script_hash,
@@ -1290,7 +1332,10 @@ fn test_validate_transaction_phase2_single_mint_failure() {
     let script_hash = ScriptHash::default();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     let script_inputs = vec![ScriptInput {
         script_hash,
@@ -1332,7 +1377,10 @@ fn test_validate_transaction_phase2_multiple_scripts() {
     let script2_hash = ScriptHash::try_from(vec![1u8; 28]).unwrap();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     let script_inputs = vec![
         ScriptInput {
@@ -1384,7 +1432,10 @@ fn test_validate_transaction_phase2_spending() {
     let datum = create_empty_plutus_data();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
+    let budget = ExUnits {
+        steps: 10_000_000_000,
+        mem: 10_000_000,
+    };
 
     let utxo_id = UTxOIdentifier {
         tx_hash: TxHash::default(),

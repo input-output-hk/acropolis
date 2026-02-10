@@ -1,16 +1,17 @@
 use crate::validations;
 use crate::validations::phase2::{
-    validate_transaction_phase2, ExUnits, PlutusVersion, ScriptInput, ScriptPurpose,
+    validate_transaction_phase2, PlutusVersion, ScriptInput, ScriptPurpose,
 };
+use acropolis_codec::map_transaction;
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawTxsMessage},
     protocol_params::ProtocolParams,
-    script::{Redeemer, RedeemerTag, ScriptType},
+    script::{RedeemerTag, ReferenceScript},
     validation::{Phase2ValidationError, TransactionValidationError, ValidationError},
-    BlockInfo, DRepScriptHash, GenesisDelegates, ScriptHash, Voter,
+    BlockInfo, DRepScriptHash, GenesisDelegates, NetworkId, ScriptHash, Transaction, TxIdentifier,
+    Voter,
 };
 use anyhow::Result;
-use pallas::codec::minicbor;
 use pallas::ledger::traverse::MultiEraTx;
 
 #[derive(Default, Clone)]
@@ -109,31 +110,48 @@ impl State {
         raw_tx: &[u8],
         block_info: &BlockInfo,
     ) -> Result<(), Box<TransactionValidationError>> {
-        // Decode transaction to extract scripts and redeemers
-        let tx = MultiEraTx::decode(raw_tx).map_err(|e| {
+        // Decode transaction using pallas
+        let multi_era_tx = MultiEraTx::decode(raw_tx).map_err(|e| {
             TransactionValidationError::CborDecodeError {
                 era: block_info.era,
                 reason: e.to_string(),
             }
         })?;
 
-        // Extract Plutus scripts from witness set
-        let scripts = self.extract_plutus_scripts(&tx);
-        if scripts.is_empty() {
+        // Map to acropolis_common::Transaction using codec
+        // This gives us redeemers, plutus_data (datums), scripts_provided, etc.
+        let tx_id = TxIdentifier::new(block_info.number as u32, 0); // tx_index not available here
+        let tx = map_transaction(
+            &multi_era_tx,
+            raw_tx,
+            tx_id,
+            NetworkId::Mainnet, // TODO: Get network_id from configuration
+            block_info.era,
+        );
+
+        // Check if there are any Plutus scripts to validate
+        let has_plutus_scripts = tx.scripts_provided.iter().any(|(_, script)| {
+            matches!(
+                script,
+                ReferenceScript::PlutusV1(_)
+                    | ReferenceScript::PlutusV2(_)
+                    | ReferenceScript::PlutusV3(_)
+            )
+        });
+
+        if !has_plutus_scripts {
             // No Plutus scripts to validate
             return Ok(());
         }
 
-        // Extract redeemers from witness set
-        let redeemers = self.extract_redeemers(&tx);
-        if redeemers.is_empty() && !scripts.is_empty() {
+        if tx.redeemers.is_empty() {
             // Scripts present but no redeemers - this is a Phase 1 error
             // but we catch it here for safety
             return Ok(());
         }
 
-        // Build script inputs by matching scripts with redeemers
-        let script_inputs = self.build_script_inputs(&scripts, &redeemers)?;
+        // Build script inputs from the Transaction
+        let script_inputs = self.build_script_inputs_from_tx(&tx)?;
         if script_inputs.is_empty() {
             return Ok(());
         }
@@ -141,8 +159,9 @@ impl State {
         // Get cost models from protocol parameters
         let (cost_model_v1, cost_model_v2, cost_model_v3) = self.get_cost_models();
 
-        // Build a minimal script context (placeholder - full implementation needed)
-        let script_context = self.build_script_context_bytes(&tx);
+        // Build script context bytes from Transaction
+        // TODO: Implement proper ScriptContext construction from Transaction
+        let script_context = self.build_script_context_bytes_from_tx(&tx);
 
         // Convert script inputs to the format expected by validate_transaction_phase2
         let inputs: Vec<ScriptInput<'_>> = script_inputs
@@ -176,140 +195,120 @@ impl State {
         Ok(())
     }
 
-    /// Extract Plutus scripts from a transaction's witness set.
-    fn extract_plutus_scripts(&self, tx: &MultiEraTx) -> Vec<(ScriptHash, Vec<u8>, ScriptType)> {
-        let mut scripts = Vec::new();
-
-        // Extract V1 scripts from witness set
-        for script in tx.plutus_v1_scripts() {
-            let script_bytes: &[u8] = script.as_ref();
-            let hash = acropolis_common::crypto::keyhash_224_tagged(1, script_bytes);
-            scripts.push((hash, script_bytes.to_vec(), ScriptType::PlutusV1));
-        }
-
-        // Extract V2 scripts from witness set
-        for script in tx.plutus_v2_scripts() {
-            let script_bytes: &[u8] = script.as_ref();
-            let hash = acropolis_common::crypto::keyhash_224_tagged(2, script_bytes);
-            scripts.push((hash, script_bytes.to_vec(), ScriptType::PlutusV2));
-        }
-
-        // Extract V3 scripts from witness set
-        for script in tx.plutus_v3_scripts() {
-            let script_bytes: &[u8] = script.as_ref();
-            let hash = acropolis_common::crypto::keyhash_224_tagged(3, script_bytes);
-            scripts.push((hash, script_bytes.to_vec(), ScriptType::PlutusV3));
-        }
-
-        scripts
-    }
-
-    /// Extract redeemers from a transaction's witness set.
-    fn extract_redeemers(&self, tx: &MultiEraTx) -> Vec<Redeemer> {
-        tx.redeemers()
-            .iter()
-            .map(|r| {
-                // Encode PlutusData to CBOR bytes
-                let mut data_bytes = Vec::new();
-                minicbor::encode(r.data(), &mut data_bytes).unwrap_or_default();
-
-                Redeemer {
-                    tag: match r.tag() {
-                        pallas::ledger::primitives::conway::RedeemerTag::Spend => {
-                            RedeemerTag::Spend
-                        }
-                        pallas::ledger::primitives::conway::RedeemerTag::Mint => RedeemerTag::Mint,
-                        pallas::ledger::primitives::conway::RedeemerTag::Cert => RedeemerTag::Cert,
-                        pallas::ledger::primitives::conway::RedeemerTag::Reward => {
-                            RedeemerTag::Reward
-                        }
-                        pallas::ledger::primitives::conway::RedeemerTag::Vote => RedeemerTag::Vote,
-                        pallas::ledger::primitives::conway::RedeemerTag::Propose => {
-                            RedeemerTag::Propose
-                        }
-                    },
-                    index: r.index(),
-                    data: data_bytes,
-                    ex_units: acropolis_common::ExUnits {
-                        mem: r.ex_units().mem,
-                        steps: r.ex_units().steps,
-                    },
-                }
-            })
-            .collect()
-    }
-
-    /// Build script inputs by matching scripts with redeemers.
+    /// Build script inputs from a Transaction.
     ///
-    /// This is a simplified implementation that matches scripts to redeemers
-    /// by tag and index. A full implementation would need to resolve:
-    /// - Which UTxO input corresponds to which spending script
-    /// - Which minting policy corresponds to which mint redeemer
-    /// - Datum lookup for spending validators
-    fn build_script_inputs(
+    /// Uses the Transaction's redeemers, scripts_provided, and plutus_data
+    /// to construct the inputs needed for Phase 2 validation.
+    fn build_script_inputs_from_tx(
         &self,
-        scripts: &[(ScriptHash, Vec<u8>, ScriptType)],
-        redeemers: &[Redeemer],
+        tx: &Transaction,
     ) -> Result<Vec<OwnedScriptInput>, Box<TransactionValidationError>> {
         let mut inputs = Vec::new();
 
-        // For now, match scripts to redeemers in order
-        // A full implementation would need proper script-to-redeemer resolution
-        for (idx, (script_hash, script_bytes, script_type)) in scripts.iter().enumerate() {
-            // Find corresponding redeemer
-            let redeemer = redeemers.get(idx);
-
-            if let Some(redeemer) = redeemer {
-                let plutus_version = match script_type {
-                    ScriptType::PlutusV1 => PlutusVersion::V1,
-                    ScriptType::PlutusV2 => PlutusVersion::V2,
-                    ScriptType::PlutusV3 => PlutusVersion::V3,
-                    ScriptType::Native => continue, // Skip native scripts
+        // Build a map of script hash -> (script_bytes, plutus_version)
+        let scripts: std::collections::HashMap<ScriptHash, (Vec<u8>, PlutusVersion)> = tx
+            .scripts_provided
+            .iter()
+            .filter_map(|(hash, script)| {
+                let (bytes, version) = match script {
+                    ReferenceScript::PlutusV1(b) => (b.clone(), PlutusVersion::V1),
+                    ReferenceScript::PlutusV2(b) => (b.clone(), PlutusVersion::V2),
+                    ReferenceScript::PlutusV3(b) => (b.clone(), PlutusVersion::V3),
+                    ReferenceScript::Native(_) => return None,
                 };
+                Some((*hash, (bytes, version)))
+            })
+            .collect();
 
-                let purpose = match redeemer.tag {
-                    RedeemerTag::Spend => {
-                        // For spending, we'd need the actual UTxO identifier
-                        // Using a placeholder for now
-                        ScriptPurpose::Spending(acropolis_common::UTxOIdentifier {
-                            tx_hash: acropolis_common::TxHash::default(),
-                            output_index: redeemer.index as u16,
-                        })
-                    }
-                    RedeemerTag::Mint => ScriptPurpose::Minting(*script_hash),
-                    RedeemerTag::Cert => ScriptPurpose::Certifying {
-                        index: redeemer.index,
-                    },
-                    RedeemerTag::Reward => {
-                        // For rewards, we'd need the actual stake address
-                        ScriptPurpose::Rewarding(acropolis_common::StakeAddress::default())
-                    }
-                    RedeemerTag::Vote => {
-                        // For voting, we use the script hash as a DRepScript voter
-                        // A full implementation would resolve the actual voter
-                        ScriptPurpose::Voting(Voter::DRepScript(DRepScriptHash::from(*script_hash)))
-                    }
-                    RedeemerTag::Propose => ScriptPurpose::Proposing {
-                        index: redeemer.index,
-                    },
-                };
+        // Process each redeemer
+        for redeemer in &tx.redeemers {
+            // Determine the script hash for this redeemer based on tag and index
+            // This is a simplified version - full implementation would need UTxO resolution
+            let script_hash = match redeemer.tag {
+                RedeemerTag::Mint => {
+                    // For minting, the index refers to the sorted policy IDs
+                    tx.mint_burn_deltas
+                        .get(redeemer.index as usize)
+                        .map(|(policy_id, _)| *policy_id)
+                }
+                RedeemerTag::Spend => {
+                    // For spending, would need to look up the script at the input
+                    // For now, try to match by index in scripts_provided
+                    scripts.keys().nth(redeemer.index as usize).copied()
+                }
+                _ => {
+                    // For other tags, skip for now
+                    // Full implementation would handle certs, rewards, voting, etc.
+                    None
+                }
+            };
 
-                inputs.push(OwnedScriptInput {
-                    script_hash: *script_hash,
-                    script_bytes: script_bytes.clone(),
-                    plutus_version,
-                    purpose,
-                    datum: None, // TODO: Resolve datum for spending validators
-                    redeemer: redeemer.data.clone(),
-                    ex_units: ExUnits {
-                        steps: redeemer.ex_units.steps,
-                        mem: redeemer.ex_units.mem,
-                    },
-                });
-            }
+            let Some(script_hash) = script_hash else {
+                continue;
+            };
+
+            let Some((script_bytes, plutus_version)) = scripts.get(&script_hash) else {
+                continue;
+            };
+
+            let purpose = match redeemer.tag {
+                RedeemerTag::Spend => ScriptPurpose::Spending(acropolis_common::UTxOIdentifier {
+                    tx_hash: acropolis_common::TxHash::default(),
+                    output_index: redeemer.index as u16,
+                }),
+                RedeemerTag::Mint => ScriptPurpose::Minting(script_hash),
+                RedeemerTag::Cert => ScriptPurpose::Certifying {
+                    index: redeemer.index,
+                },
+                RedeemerTag::Reward => {
+                    ScriptPurpose::Rewarding(acropolis_common::StakeAddress::default())
+                }
+                RedeemerTag::Vote => {
+                    ScriptPurpose::Voting(Voter::DRepScript(DRepScriptHash::from(script_hash)))
+                }
+                RedeemerTag::Propose => ScriptPurpose::Proposing {
+                    index: redeemer.index,
+                },
+            };
+
+            // Look up datum if this is a spending script
+            // The datum would be in tx.plutus_data or inline in the UTxO
+            let datum = None; // TODO: Resolve datum from tx.plutus_data or UTxO
+
+            inputs.push(OwnedScriptInput {
+                script_hash,
+                script_bytes: script_bytes.clone(),
+                plutus_version: *plutus_version,
+                purpose,
+                datum,
+                redeemer: redeemer.data.clone(),
+                ex_units: redeemer.ex_units,
+            });
         }
 
         Ok(inputs)
+    }
+
+    /// Build script context bytes from Transaction.
+    ///
+    /// The Transaction contains all the information needed to construct
+    /// a proper ScriptContext (TxInfo + ScriptPurpose).
+    fn build_script_context_bytes_from_tx(&self, _tx: &Transaction) -> Vec<u8> {
+        // TODO: Build proper ScriptContext from Transaction
+        // Transaction has:
+        // - consumes/produces for inputs/outputs
+        // - fee
+        // - mint_burn_deltas for minting
+        // - certs for certificates
+        // - withdrawals for rewards
+        // - voting_procedures for governance
+        // - required_signers
+        // - plutus_data for datums
+        // - redeemers
+        //
+        // For now, return minimal CBOR-encoded ScriptContext
+        // Constr 0 with empty fields: d87980
+        vec![0xd8, 0x79, 0x80]
     }
 
     /// Get cost models from protocol parameters.
@@ -323,16 +322,6 @@ impl State {
         let v3 = vec![0i64; 300]; // V3 has ~300 params
         (v1, v2, v3)
     }
-
-    /// Build script context bytes for script evaluation.
-    ///
-    /// This is a placeholder that returns a minimal valid ScriptContext.
-    /// A full implementation would construct the proper TxInfo and ScriptPurpose.
-    fn build_script_context_bytes(&self, _tx: &MultiEraTx) -> Vec<u8> {
-        // Return minimal CBOR-encoded ScriptContext
-        // Constr 0 with empty fields: d87980
-        vec![0xd8, 0x79, 0x80]
-    }
 }
 
 /// Owned version of ScriptInput for internal use.
@@ -344,5 +333,5 @@ struct OwnedScriptInput {
     purpose: ScriptPurpose,
     datum: Option<Vec<u8>>,
     redeemer: Vec<u8>,
-    ex_units: ExUnits,
+    ex_units: acropolis_common::ExUnits,
 }
