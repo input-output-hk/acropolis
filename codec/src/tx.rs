@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
@@ -84,35 +82,35 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> HashMap<ScriptHash, ScriptLang> {
-    let mut map_script_witnesses = HashMap::new();
+pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
+    let mut scripts_provided = Vec::new();
 
     for script in tx.native_scripts() {
-        map_script_witnesses.insert(ScriptHash::from(*script.compute_hash()), ScriptLang::Native);
+        scripts_provided.push((ScriptHash::from(*script.compute_hash()), ScriptLang::Native));
     }
 
     for script in tx.plutus_v1_scripts() {
-        map_script_witnesses.insert(
+        scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
             ScriptLang::PlutusV1,
-        );
+        ));
     }
 
     for script in tx.plutus_v2_scripts() {
-        map_script_witnesses.insert(
+        scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
             ScriptLang::PlutusV2,
-        );
+        ));
     }
 
     for script in tx.plutus_v3_scripts() {
-        map_script_witnesses.insert(
+        scripts_provided.push((
             ScriptHash::from(*script.compute_hash()),
             ScriptLang::PlutusV3,
-        );
+        ));
     }
 
-    map_script_witnesses
+    scripts_provided
 }
 
 /// Map a Pallas Transaction
@@ -257,7 +255,7 @@ pub fn map_transaction(
         .plutus_data()
         .iter()
         .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
-        .collect::<HashMap<_, _>>();
+        .collect::<Vec<_>>();
 
     Transaction {
         id: tx_identifier,

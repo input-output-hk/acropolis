@@ -47,7 +47,7 @@ pub fn validate(
     outputs: &[TxOutput],
     ref_inputs: &[UTxOIdentifier],
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
-    scripts_provided: &HashMap<ScriptHash, Option<ScriptLang>>,
+    scripts_provided: &HashMap<ScriptHash, ScriptLang>,
     plutus_data: &HashMap<DatumHash, Vec<u8>>,
     redeemers: &[Redeemer],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
