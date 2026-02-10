@@ -1779,7 +1779,7 @@ fn test_all_benchmark_scripts() {
         );
         println!(
             "  Result: {}",
-            if max_time < 100.0 {
+            if max_time < 50.0 {
                 "PASS ✓"
             } else {
                 "FAIL ✗"
@@ -1792,8 +1792,8 @@ fn test_all_benchmark_scripts() {
     // Assert all scripts pass SC-001
     for (name, _, elapsed_ms) in &results {
         assert!(
-            *elapsed_ms < 100.0,
-            "Script {} took {:.3}ms, expected <100ms",
+            *elapsed_ms < 50.0,
+            "Script {} took {:.3}ms, expected <50ms",
             name,
             elapsed_ms
         );

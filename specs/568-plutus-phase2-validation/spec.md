@@ -96,7 +96,7 @@ As a node operator, I want to enable or disable Phase 2 validation via a configu
 
 ### Measurable Outcomes
 
-- **SC-001**: On the reference benchmark environment (see below), individual script evaluation of the *Plutus Phase 2 Golden Corpus v1* completes in under 0.1 seconds (100 ms) per script at the 95th percentile.
+- **SC-001**: On the reference benchmark environment (see below), individual script evaluation of the *Plutus Phase 2 Golden Corpus v1* completes in under 0.05 seconds (50 ms) per script at the 95th percentile.
 - **SC-002**: On the reference benchmark environment, resident memory usage (RSS) of the Acropolis node remains within ±10% of the baseline measurement when processing a batch of 1,000 consecutive scripts from the *Plutus Phase 2 Golden Corpus v1*.
 - **SC-003**: For a fixed multi-script test block derived from the *Plutus Phase 2 Golden Corpus v1*, end-to-end Phase 2 validation wall-clock time with parallel validation enabled is strictly less than the time to validate the same scripts sequentially in a single thread on the reference benchmark environment.
 - **SC-004**: 100% of scripts that validate successfully on a reference Cardano node (same protocol parameters and ledger state) also validate successfully in Acropolis when using the same inputs and protocol parameters.

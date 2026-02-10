@@ -87,7 +87,7 @@
 - [X] T032 [US2] Implement parallel evaluation using `rayon::par_iter()` in modules/tx_unpacker/src/validations/phase2.rs
 - [X] T033 [US2] Ensure arena allocation is per-thread for thread safety (FR-009: constant memory) in modules/tx_unpacker/src/validations/phase2.rs
 - [X] T034 [US2] Handle early-exit on first script failure with proper error aggregation in modules/tx_unpacker/src/validations/phase2.rs
-- [X] T035 [US2] Write `test_sc001_parallel_performance` benchmark: run 5 different scripts in parallel, measure individual and total elapsed time, assert total < 100ms in modules/tx_unpacker/tests/phase2_test.rs
+- [X] T035 [US2] Write `test_sc001_parallel_performance` benchmark: run 5 different scripts in parallel, measure individual and total elapsed time, assert total < 50msec in modules/tx_unpacker/tests/phase2_test.rs
 
 **Checkpoint**: Multi-script blocks validate efficiently in parallel ✓
 
