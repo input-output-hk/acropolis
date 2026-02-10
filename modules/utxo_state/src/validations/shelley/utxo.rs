@@ -65,7 +65,7 @@ mod tests {
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -76,7 +76,7 @@ mod tests {
         if bad_input == UTxOIdentifier::new(
             TxHash::from_str("e7075bff082ee708dfe49a366717dd4c6d51e9b3a7e5a070dcee253affda0999").unwrap(), 1)
             && bad_input_index == 0;
-        "bad_inputs_utxo"
+        "shelley - bad_inputs_utxo"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
@@ -91,7 +91,68 @@ mod tests {
         );
         let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
         let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
-        let total_produced = tx_delta.calculate_total_produced(&[], &[]);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
+
+        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
+    }
+
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "f9ed2fef27cdcf60c863ba03f27d0e38f39c5047cf73ffdf2428b48edbe83234"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - failed transaction"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Alonzo, &raw_tx).unwrap();
+        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            Era::Alonzo,
+        );
+        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
+
+        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
+    }
+
+    #[test_case(validation_fixture!(
+        "babbage",
+        "b2d01aec0fc605e699b1145d8ff9fce132a9108c8e026177ce648ddbe79473b5"
+    ) =>
+        matches Ok(());
+        "babbage - valid transaction 1 - failed transaction with collateral return"
+    )]
+    #[test_case(validation_fixture!(
+        "babbage",
+        "0104b80dd6061ee0a452d612fb608c43149033ef34c622ae634d579bd4fc3892"
+    ) =>
+        matches Ok(());
+        "babbage - valid transaction 2 - failed transaction without collateral return"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn babbage_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(PallasEra::Babbage, &raw_tx).unwrap();
+        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            Era::Babbage,
+        );
+        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
+
+        println!("tx_delta: {:?}", tx_delta);
+        println!("total_consumed: {:?}", total_consumed);
+        println!("total_produced: {:?}", total_produced);
 
         validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }

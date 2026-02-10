@@ -134,7 +134,7 @@ pub fn map_transaction(
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
-    let total_collateral = tx.total_collateral().unwrap_or(0);
+    let total_collateral = tx.total_collateral();
     let is_valid = tx.is_valid();
 
     let mut certs = Vec::new();

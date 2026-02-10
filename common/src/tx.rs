@@ -44,7 +44,9 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
-    pub total_collateral: u64,
+    // Transaction total collateral that is moved to fee pot
+    // only added since Babbage era
+    pub total_collateral: Option<u64>,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
@@ -149,7 +151,7 @@ pub struct TxUTxODeltas {
     pub fee: u64,
 
     // Transaction total collateral
-    pub total_collateral: u64,
+    pub total_collateral: Option<u64>,
 
     // Tx validity flag
     pub is_valid: bool,
@@ -216,6 +218,8 @@ impl TxUTxODeltas {
 
     /// This functions returns the total consumed value of the transaction
     /// Consumed = Inputs + Refund + Withrawals + Value Minted
+    /// When transaction is failed
+    /// Consumed = Collateral Inputs
     pub fn calculate_total_consumed(
         &self,
         stake_registration_updates: &[StakeRegistrationUpdate],
@@ -248,10 +252,15 @@ impl TxUTxODeltas {
 
     /// This functions returns the total produced value of the transaction
     /// Produced = Outputs + Fee + Deposits + Value Burnt
+    /// When transaction is failed
+    /// Produced =
+    /// - Before Babbage: Collater Inputs (this is just moved to fee pot)
+    /// - Since Babbage: Collateral Outputs + Total Collateral
     pub fn calculate_total_produced(
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
+        utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> Value {
         let mut total_produced = Value::new(0, vec![]);
 
@@ -261,10 +270,26 @@ impl TxUTxODeltas {
         }
 
         if !self.is_valid {
-            // If the transaction is invalid, it only produces
-            // collateral outputs plus total collateral
-            total_produced += &Value::new(self.total_collateral, vec![]);
-            return total_produced;
+            // total_collateral is only set since Babbage era.
+            match self.total_collateral {
+                Some(total_collateral) => {
+                    // since babbage
+                    total_produced += &Value::new(total_collateral, vec![]);
+                    return total_produced;
+                }
+                None => {
+                    // before babbage
+                    let mut total_collateral = Value::new(0, vec![]);
+
+                    // Add Inputs UTxO values
+                    for input in self.consumes.iter() {
+                        if let Some(utxo) = utxos.get(input) {
+                            total_collateral += &utxo.value;
+                        }
+                    }
+                    return total_collateral;
+                }
+            }
         }
 
         let total_deposit =

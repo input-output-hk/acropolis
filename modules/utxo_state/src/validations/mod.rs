@@ -21,8 +21,11 @@ pub fn validate_tx(
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
     let total_consumed = tx_deltas.calculate_total_consumed(stake_registration_updates, utxos);
-    let total_produced =
-        tx_deltas.calculate_total_produced(pool_registration_updates, stake_registration_updates);
+    let total_produced = tx_deltas.calculate_total_produced(
+        pool_registration_updates,
+        stake_registration_updates,
+        utxos,
+    );
 
     let vkey_hashes_needed = utils::get_vkeys_needed(tx_deltas, utxos, shelley_params);
     let scripts_needed = utils::get_scripts_needed(tx_deltas, utxos);
