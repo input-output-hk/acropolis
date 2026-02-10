@@ -280,21 +280,13 @@ impl EvalResult {
     }
 }
 
-impl From<ExBudget> for uplc_turbo::machine::ExBudget {
-    fn from(budget: ExBudget) -> Self {
-        uplc_turbo::machine::ExBudget {
-            cpu: budget.cpu,
-            mem: budget.mem,
-        }
-    }
-}
-
-impl From<uplc_turbo::machine::ExBudget> for ExBudget {
-    fn from(budget: uplc_turbo::machine::ExBudget) -> Self {
-        Self {
-            cpu: budget.cpu,
-            mem: budget.mem,
-        }
+/// Convert uplc_turbo's ExBudget back to ExUnits.
+///
+/// Negative values are clamped to 0.
+fn budget_to_ex_units(budget: uplc_turbo::machine::ExBudget) -> ExUnits {
+    ExUnits {
+        steps: budget.cpu.max(0) as u64,
+        mem: budget.mem.max(0) as u64,
     }
 }
 
@@ -310,14 +302,14 @@ impl From<uplc_turbo::machine::ExBudget> for ExBudget {
 #[derive(Debug, Clone, Copy)]
 pub struct EvalResult {
     /// Execution budget consumed by the script
-    pub consumed_budget: ExBudget,
+    pub consumed_budget: ExUnits,
     /// Wall-clock time taken for evaluation
     pub elapsed: Duration,
 }
 
 impl EvalResult {
     /// Create a new evaluation result.
-    pub fn new(consumed_budget: ExBudget, elapsed: Duration) -> Self {
+    pub fn new(consumed_budget: ExUnits, elapsed: Duration) -> Self {
         Self {
             consumed_budget,
             elapsed,
@@ -526,7 +518,7 @@ fn evaluate_script_inner(
     redeemer: &[u8],
     script_context: &[u8],
     cost_model: &[i64],
-    budget: ExBudget,
+    budget: ExUnits,
 ) -> Result<EvalResult, Phase2Error> {
     // Start timing
     let start = Instant::now();

@@ -1544,7 +1544,7 @@ fn test_validate_transaction_phase2_single_mint_success() {
     );
     let validation_result = result.unwrap();
     assert_eq!(validation_result.script_results.len(), 1);
-    assert!(validation_result.total_consumed.cpu > 0);
+    assert!(validation_result.total_consumed.steps > 0);
 }
 
 /// T029: Test validate_transaction_phase2 with a failing script
@@ -1555,7 +1555,7 @@ fn test_validate_transaction_phase2_single_mint_failure() {
     let script_hash = ScriptHash::default();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
 
     let script_inputs = vec![ScriptInput {
         script_hash,
@@ -1597,7 +1597,7 @@ fn test_validate_transaction_phase2_multiple_scripts() {
     let script2_hash = ScriptHash::try_from(vec![1u8; 28]).unwrap();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
 
     let script_inputs = vec![
         ScriptInput {
@@ -1649,7 +1649,7 @@ fn test_validate_transaction_phase2_spending() {
     let datum = create_empty_plutus_data();
     let redeemer = create_empty_plutus_data();
     let context = create_empty_plutus_data();
-    let budget = ExBudget::new(10_000_000_000, 10_000_000);
+    let budget = ExUnits { steps: 10_000_000_000, mem: 10_000_000 };
 
     let utxo_id = UTxOIdentifier {
         tx_hash: TxHash::default(),
@@ -1706,7 +1706,7 @@ fn test_validate_transaction_phase2_empty() {
     assert!(result.is_ok(), "Empty script list should succeed");
     let validation_result = result.unwrap();
     assert_eq!(validation_result.script_results.len(), 0);
-    assert_eq!(validation_result.total_consumed.cpu, 0);
+    assert_eq!(validation_result.total_consumed.steps, 0);
     assert_eq!(validation_result.total_consumed.mem, 0);
 }
 
