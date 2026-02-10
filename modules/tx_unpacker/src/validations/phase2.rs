@@ -38,7 +38,9 @@
 //! );
 //! ```
 
-use std::sync::OnceLock;
+use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use acropolis_common::{DatumHash, PolicyId, ScriptHash, StakeAddress, UTxOIdentifier, Voter};
@@ -46,7 +48,7 @@ use rayon::prelude::*;
 use rayon::ThreadPool;
 use thiserror::Error;
 use uplc_turbo::{
-    arena::Arena, binder::DeBruijn, data::PlutusData, flat, machine::MachineError,
+    arena::Arena, binder::DeBruijn, bumpalo::Bump, data::PlutusData, flat, machine::MachineError,
     program::Program, term::Term,
 };
 
@@ -86,6 +88,135 @@ fn evaluator_pool() -> &'static ThreadPool {
             .build()
             .expect("Failed to create evaluator thread pool")
     })
+}
+
+// =============================================================================
+// Arena Pool (following Amaru's design)
+// =============================================================================
+// Pre-allocated pool of arenas to reduce allocation contention during parallel
+// script evaluation. Each arena is reset and returned to the pool after use.
+// Design based on: https://github.com/pragma-org/amaru/blob/main/crates/amaru-plutus/src/arena_pool.rs
+
+/// Initial capacity of each arena in the pool: 1MB
+/// This is sufficient for scripts up to ~13KB with headroom for evaluation.
+const ARENA_INITIAL_CAPACITY: usize = 1024 * 1024;
+
+/// A bounded pool of uplc-turbo Arenas.
+///
+/// All arenas are pre-allocated at creation time with a fixed initial capacity.
+/// When all arenas are in use, `acquire()` will block until one becomes available.
+/// The pool can be cheaply cloned for use across threads.
+#[derive(Clone)]
+pub struct ArenaPool {
+    inner: Arc<ArenaPoolInner>,
+}
+
+struct ArenaPoolInner {
+    arenas: Mutex<VecDeque<Arena>>,
+    condvar: Condvar,
+}
+
+impl ArenaPool {
+    /// Create a new arena pool with a fixed number of pre-allocated arenas.
+    ///
+    /// All `size` arenas are created immediately with `initial_capacity` bytes each.
+    /// If all arenas are in use, `acquire()` will block.
+    pub fn new(size: usize, initial_capacity: usize) -> Self {
+        let mut arenas = VecDeque::with_capacity(size);
+        for _ in 0..size {
+            arenas.push_back(Arena::from_bump(Bump::with_capacity(initial_capacity)));
+        }
+
+        Self {
+            inner: Arc::new(ArenaPoolInner {
+                arenas: Mutex::new(arenas),
+                condvar: Condvar::new(),
+            }),
+        }
+    }
+
+    /// Acquire an arena from the pool.
+    ///
+    /// Blocks if all arenas are in use, waiting for one to be returned.
+    pub fn acquire(&self) -> PooledArena {
+        let arena = loop {
+            let mut guard = self.inner.arenas.lock().unwrap_or_else(|p| p.into_inner());
+
+            if let Some(arena) = guard.pop_front() {
+                break arena;
+            }
+
+            guard = self
+                .inner
+                .condvar
+                .wait(guard)
+                .unwrap_or_else(|p| p.into_inner());
+        };
+
+        PooledArena {
+            arena: ManuallyDrop::new(arena),
+            pool: self.inner.clone(),
+        }
+    }
+
+    /// Try to acquire an arena from the pool (non-blocking).
+    ///
+    /// Returns None if all arenas are in use.
+    #[allow(dead_code)]
+    pub fn try_acquire(&self) -> Option<PooledArena> {
+        let mut guard = self.inner.arenas.lock().unwrap_or_else(|p| p.into_inner());
+
+        guard.pop_front().map(|arena| PooledArena {
+            arena: ManuallyDrop::new(arena),
+            pool: self.inner.clone(),
+        })
+    }
+}
+
+/// RAII guard for a pooled arena.
+///
+/// Returns the arena to the pool when dropped, after calling `reset()` to
+/// clear all allocations. This allows arena reuse without repeated allocations.
+pub struct PooledArena {
+    arena: ManuallyDrop<Arena>,
+    pool: Arc<ArenaPoolInner>,
+}
+
+impl AsRef<Arena> for PooledArena {
+    fn as_ref(&self) -> &Arena {
+        &self.arena
+    }
+}
+
+impl std::ops::Deref for PooledArena {
+    type Target = Arena;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_ref()
+    }
+}
+
+impl Drop for PooledArena {
+    fn drop(&mut self) {
+        // SAFETY: We only take the arena once, here in drop
+        let mut arena = unsafe { ManuallyDrop::take(&mut self.arena) };
+        arena.reset();
+
+        let mut pool = self.pool.arenas.lock().unwrap_or_else(|p| p.into_inner());
+        pool.push_back(arena);
+
+        self.pool.condvar.notify_one();
+    }
+}
+
+/// Global arena pool for script evaluation.
+///
+/// Lazily initialized with one arena per evaluator thread, each with 1MB capacity.
+static ARENA_POOL: OnceLock<ArenaPool> = OnceLock::new();
+
+/// Get (or create) the global arena pool.
+fn arena_pool() -> &'static ArenaPool {
+    ARENA_POOL.get_or_init(|| ArenaPool::new(evaluator_thread_count(), ARENA_INITIAL_CAPACITY))
 }
 
 // =============================================================================
@@ -338,8 +469,8 @@ fn evaluate_script_inner(
     // Start timing
     let start = Instant::now();
 
-    // Create arena for memory allocation (1MB capacity)
-    let arena = Arena::new();
+    // Acquire arena from the pool (will be reset and returned on drop)
+    let arena = arena_pool().acquire();
 
     // Decode the FLAT-encoded script
     let program: &Program<DeBruijn> = flat::decode(&arena, script_bytes)
@@ -482,9 +613,10 @@ pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<RawEvalResult, Str
 
 /// Inner evaluation function for raw FLAT programs.
 ///
-/// Runs on the evaluator thread pool with 16MB stacks.
+/// Runs on the evaluator thread pool with 16MB stacks and uses the arena pool.
 fn evaluate_raw_flat_program_inner(flat_bytes: &[u8]) -> Result<RawEvalResult, String> {
-    let arena = Arena::new();
+    // Acquire arena from the pool (will be reset and returned on drop)
+    let arena = arena_pool().acquire();
 
     // Decode the FLAT-encoded program
     let program: &Program<DeBruijn> =
