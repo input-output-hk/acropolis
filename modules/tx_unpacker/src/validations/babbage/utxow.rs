@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use crate::validations::shelley;
 use acropolis_common::{
     protocol_params::ProtocolVersion, validation::UTxOWValidationError, DataHash, GenesisDelegates,
-    NativeScript, TxHash, VKeyWitness,
+    Metadata, NativeScript, TxHash, VKeyWitness,
 };
 use pallas::{codec::utils::Nullable, ledger::primitives::babbage};
 
@@ -38,11 +38,13 @@ fn get_aux_data(mtx: &babbage::MintedTx) -> Option<Vec<u8>> {
 ///
 /// 1. MalformedScriptWitnesses
 /// 2. MalformedReferenceScripts
+#[allow(clippy::too_many_arguments)]
 pub fn validate(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     protocol_version: &ProtocolVersion,
@@ -52,6 +54,7 @@ pub fn validate(
         tx_hash,
         vkey_witnesses,
         native_scripts,
+        metadata,
         genesis_delegs,
         update_quorum,
         protocol_version,
@@ -75,11 +78,13 @@ fn has_mir_certificate(mtx: &babbage::MintedTx) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn shelley_wrapper(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     protocol_version: &ProtocolVersion,
@@ -104,6 +109,7 @@ fn shelley_wrapper(
     shelley::utxow::validate_metadata(
         get_aux_data_hash(mtx)?,
         get_aux_data(mtx),
+        metadata,
         protocol_version,
     )?;
 

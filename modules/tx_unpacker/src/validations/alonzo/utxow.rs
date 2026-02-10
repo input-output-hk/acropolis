@@ -6,8 +6,8 @@
 use crate::validations::shelley;
 use acropolis_common::{
     crypto::keyhash_256, hash::Hash, protocol_params::ProtocolVersion,
-    validation::UTxOWValidationError, GenesisDelegates, NativeScript, ScriptIntegrityHash, TxHash,
-    VKeyWitness,
+    validation::UTxOWValidationError, GenesisDelegates, Metadata, NativeScript,
+    ScriptIntegrityHash, TxHash, VKeyWitness,
 };
 use pallas::{
     codec::{
@@ -111,11 +111,13 @@ pub fn validate_script_integrity_hash(
 /// Since Alonzo introduces **Plutus Scripts** (phase 2), this requires new UTxOW validation rules.
 ///
 /// 1. ScriptIntegrityHashMismatch
+#[allow(clippy::too_many_arguments)]
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     protocol_version: &ProtocolVersion,
@@ -125,6 +127,7 @@ pub fn validate(
         tx_hash,
         vkey_witnesses,
         native_scripts,
+        metadata,
         genesis_delegs,
         update_quorum,
         protocol_version,
