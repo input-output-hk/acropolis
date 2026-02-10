@@ -134,7 +134,7 @@ pub fn map_transaction(
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
-    let total_collateral = tx.total_collateral();
+    let stated_total_collateral = tx.total_collateral();
     let is_valid = tx.is_valid();
 
     let mut certs = Vec::new();
@@ -265,7 +265,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
-        total_collateral,
+        stated_total_collateral,
         is_valid,
         certs,
         withdrawals,

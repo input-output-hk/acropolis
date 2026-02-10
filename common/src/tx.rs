@@ -46,7 +46,7 @@ pub struct Transaction {
     pub fee: u64,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
-    pub total_collateral: Option<u64>,
+    pub stated_total_collateral: Option<u64>,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
@@ -78,7 +78,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
-            total_collateral,
+            stated_total_collateral,
             is_valid,
             certs,
             withdrawals,
@@ -99,7 +99,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
-            total_collateral,
+            stated_total_collateral,
             is_valid,
             withdrawals: None,
             certs: None,
@@ -151,7 +151,7 @@ pub struct TxUTxODeltas {
     pub fee: u64,
 
     // Transaction total collateral
-    pub total_collateral: Option<u64>,
+    pub stated_total_collateral: Option<u64>,
 
     // Tx validity flag
     pub is_valid: bool,
@@ -271,9 +271,9 @@ impl TxUTxODeltas {
 
         if !self.is_valid {
             // total_collateral is only set since Babbage era.
-            match self.total_collateral {
-                Some(total_collateral) => {
-                    total_produced += &Value::new(total_collateral, vec![]);
+            match self.stated_total_collateral {
+                Some(stated_total_collateral) => {
+                    total_produced += &Value::new(stated_total_collateral, vec![]);
                     return total_produced;
                 }
                 None => {
