@@ -7,7 +7,8 @@ use std::collections::HashSet;
 
 use crate::validations::shelley;
 use acropolis_common::{
-    validation::UTxOWValidationError, GenesisDelegates, NativeScript, TxHash, VKeyWitness,
+    protocol_params::ProtocolVersion, validation::UTxOWValidationError, GenesisDelegates,
+    NativeScript, TxHash, VKeyWitness,
 };
 use pallas::ledger::primitives::alonzo;
 
@@ -40,6 +41,7 @@ pub fn validate(
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     shelley::utxow::validate(
         mtx,
@@ -48,6 +50,7 @@ pub fn validate(
         native_scripts,
         genesis_delegs,
         update_quorum,
+        protocol_version,
     )?;
 
     validate_script_integrity_hash(mtx)?;

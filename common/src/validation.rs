@@ -270,6 +270,10 @@ pub enum UTxOWValidationError {
     #[error("Invalid metadata: reason={reason}")]
     InvalidMetadata { reason: String },
 
+    /// **Cause:** Invalid metadata hash
+    #[error("Invalid metadata hash: reason={reason}")]
+    InvalidMetadataHash { reason: String },
+
     /// **Cause:** Metadata hash without actual metadata
     #[error(
         "Metadata hash without actual metadata: hash={}",

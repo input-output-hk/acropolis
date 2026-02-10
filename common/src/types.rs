@@ -737,8 +737,8 @@ declare_hash_type_with_bech32!(ConstitutionalCommitteeScriptHash, 28, "cc_hot_sc
 declare_hash_type_with_bech32!(DRepKeyHash, 28, "drep");
 declare_hash_type_with_bech32!(DRepScriptHash, 28, "drep_script");
 
-/// Data hash used for metadata, anchors (SHA256)
-pub type DataHash = Vec<u8>;
+/// Data hash used for metadata, anchors (blake2b 256)
+pub type DataHash = Hash<32>;
 
 /// Compact transaction identifier (block_number, tx_index).
 #[derive(

@@ -7,9 +7,31 @@ use std::collections::HashSet;
 
 use crate::validations::shelley;
 use acropolis_common::{
-    validation::UTxOWValidationError, GenesisDelegates, NativeScript, TxHash, VKeyWitness,
+    protocol_params::ProtocolVersion, validation::UTxOWValidationError, DataHash, GenesisDelegates,
+    NativeScript, TxHash, VKeyWitness,
 };
-use pallas::ledger::primitives::babbage;
+use pallas::{codec::utils::Nullable, ledger::primitives::babbage};
+
+fn get_aux_data_hash(
+    mtx: &babbage::MintedTx,
+) -> Result<Option<DataHash>, Box<UTxOWValidationError>> {
+    let aux_data_hash = match mtx.transaction_body.auxiliary_data_hash.as_ref() {
+        Some(x) => Some(DataHash::try_from(x.to_vec()).map_err(|_| {
+            Box::new(UTxOWValidationError::InvalidMetadataHash {
+                reason: "invalid metadata hash".to_string(),
+            })
+        })?),
+        None => None,
+    };
+    Ok(aux_data_hash)
+}
+
+fn get_aux_data(mtx: &babbage::MintedTx) -> Option<Vec<u8>> {
+    match &mtx.auxiliary_data {
+        Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
+        _ => None,
+    }
+}
 
 /// NEW Babbage Validation Rules
 /// Since Babbage introduces **reference scripts** and **inline datums**, this requires new UTxOW validation rules.
@@ -23,6 +45,7 @@ pub fn validate(
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     shelley_wrapper(
         mtx,
@@ -31,6 +54,7 @@ pub fn validate(
         native_scripts,
         genesis_delegs,
         update_quorum,
+        protocol_version,
     )?;
 
     // TODO:
@@ -58,6 +82,7 @@ fn shelley_wrapper(
     native_scripts: &[NativeScript],
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;
 
@@ -74,6 +99,13 @@ fn shelley_wrapper(
 
     // validate vkey witnesses signatures
     shelley::utxow::validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
+
+    // validate metadata
+    shelley::utxow::validate_metadata(
+        get_aux_data_hash(mtx)?,
+        get_aux_data(mtx),
+        protocol_version,
+    )?;
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
