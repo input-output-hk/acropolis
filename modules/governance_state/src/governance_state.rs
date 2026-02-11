@@ -94,6 +94,14 @@ pub struct GovernanceStateConfig {
     verification_output_file: Option<String>,
 }
 
+struct Readers {
+    pub gov_reader: GovReader,
+    pub drep_reader: Option<DRepReader>,
+    pub drep_state_reader: Option<DRepStateReader>,
+    pub spo_reader: Option<SPOReader>,
+    pub param_reader: ParamReader,
+}
+
 impl GovernanceStateConfig {
     fn conf(config: &Arc<Config>, keydef: (&str, &str)) -> String {
         let actual = config.get_string(keydef.0).unwrap_or(keydef.1.to_string());
@@ -166,17 +174,15 @@ impl GovernanceState {
     async fn process_drep_spo(
         vld: &mut ValidationContext,
         state: Arc<Mutex<State>>,
-        drep_reader: &mut Option<DRepReader>,
-        drep_state_reader: &mut Option<DRepStateReader>,
-        spo_reader: &mut Option<SPOReader>,
+        readers: &mut Box<Readers>,
     ) {
-        let Some(ref mut drep_r) = drep_reader else {
+        let Some(ref mut drep_r) = readers.drep_reader else {
             return;
         };
-        let Some(ref mut spo_r) = spo_reader else {
+        let Some(ref mut spo_r) = readers.spo_reader else {
             return;
         };
-        let Some(ref mut drep_state_r) = drep_state_reader else {
+        let Some(ref mut drep_state_r) = readers.drep_state_reader else {
             return;
         };
         let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
@@ -222,11 +228,7 @@ impl GovernanceState {
         context: Arc<Context<Message>>,
         config: Arc<GovernanceStateConfig>,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut gov_reader: GovReader,
-        mut drep_reader: Option<DRepReader>,
-        mut drep_state_reader: Option<DRepStateReader>,
-        mut spo_reader: Option<SPOReader>,
-        mut param_reader: ParamReader,
+        mut readers: Box<Readers>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
             context.clone(),
@@ -322,7 +324,7 @@ impl GovernanceState {
         loop {
             let mut vld = ValidationContext::new(&context, &config.validation_outcome_topic);
             let (blk_g, gov_procs) =
-                match vld.consume_sync(gov_reader.read_with_rollbacks().await)? {
+                match vld.consume_sync(readers.gov_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(normal) => normal,
                     RollbackWrapper::Rollback(message) => {
                         let mut state = state.lock().await;
@@ -352,7 +354,7 @@ impl GovernanceState {
 
                 if blk_g.new_epoch {
                     if let Some((_, params)) =
-                        vld.consume("params", param_reader.read_skip_rollbacks().await)
+                        vld.consume("params", readers.param_reader.read_skip_rollbacks().await)
                     {
                         vld.handle(
                             "params",
@@ -361,14 +363,7 @@ impl GovernanceState {
                     }
 
                     if blk_g.epoch > 0 {
-                        Self::process_drep_spo(
-                            &mut vld,
-                            state.clone(),
-                            &mut drep_reader,
-                            &mut drep_state_reader,
-                            &mut spo_reader,
-                        )
-                        .await;
+                        Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await;
                     }
 
                     vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
@@ -391,14 +386,16 @@ impl GovernanceState {
             None
         };
 
-        let gt = GovReader::new(&context, &config).await?;
-        let dt = DRepReader::new_without_default(&context, &config).await?;
-        let dst = DRepStateReader::new_without_default(&context, &config).await?;
-        let st = SPOReader::new_without_default(&context, &config).await?;
-        let pt = ParamReader::new(&context, &config).await?;
+        let readers = Box::new(Readers {
+            gov_reader: GovReader::new(&context, &config).await?,
+            drep_reader: DRepReader::new_without_default(&context, &config).await?,
+            drep_state_reader: DRepStateReader::new_without_default(&context, &config).await?,
+            spo_reader: SPOReader::new_without_default(&context, &config).await?,
+            param_reader: ParamReader::new(&context, &config).await?,
+        });
 
         tokio::spawn(async move {
-            Self::run(context, cfg, snapshot_subscription, gt, dt, dst, st, pt)
+            Self::run(context, cfg, snapshot_subscription, readers)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
