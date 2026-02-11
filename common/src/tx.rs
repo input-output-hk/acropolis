@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ReferenceScript, ScriptHash, StakeRegistrationUpdate, TxCertificateWithPos,
-    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
+    UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -44,6 +44,9 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
+    // Transaction total collateral that is moved to fee pot
+    // only added since Babbage era
+    pub stated_total_collateral: Option<u64>,
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
@@ -52,10 +55,10 @@ pub struct Transaction {
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
-    pub vkey_witnesses: Vec<VKeyWitness>,
-    pub scripts_provided: Vec<(ScriptHash, ReferenceScript)>,
+    pub vkey_witnesses: HashSet<VKeyWitness>,
+    pub script_witnesses: Vec<(ScriptHash, ScriptLang)>,
     pub redeemers: Vec<Redeemer>,
-    pub plutus_data: BTreeMap<DatumHash, Vec<u8>>,
+    pub plutus_data: Vec<(DatumHash, Vec<u8>)>,
     pub error: Option<Phase1ValidationError>,
 }
 
@@ -73,7 +76,9 @@ impl Transaction {
             id,
             consumes,
             produces,
+            reference_inputs,
             fee,
+            stated_total_collateral,
             is_valid,
             certs,
             withdrawals,
@@ -83,7 +88,7 @@ impl Transaction {
             voting_procedures,
             proposal_procedures,
             vkey_witnesses,
-            scripts_provided,
+            script_witnesses,
             redeemers,
             plutus_data,
             ..
@@ -92,7 +97,9 @@ impl Transaction {
             tx_identifier: id,
             consumes,
             produces,
+            reference_inputs,
             fee,
+            stated_total_collateral,
             is_valid,
             withdrawals: None,
             certs: None,
@@ -102,7 +109,7 @@ impl Transaction {
             voting_procedures: None,
             proposal_procedures: None,
             vkey_witnesses: None,
-            scripts_provided: None,
+            script_witnesses: None,
             redeemers: None,
             plutus_data: None,
         };
@@ -116,7 +123,7 @@ impl Transaction {
             utxo_deltas.voting_procedures = voting_procedures;
             utxo_deltas.proposal_procedures = proposal_procedures;
             utxo_deltas.vkey_witnesses = Some(vkey_witnesses);
-            utxo_deltas.scripts_provided = Some(scripts_provided);
+            utxo_deltas.script_witnesses = Some(script_witnesses);
             utxo_deltas.redeemers = Some(redeemers);
             utxo_deltas.plutus_data = Some(plutus_data);
         }
@@ -137,8 +144,14 @@ pub struct TxUTxODeltas {
     pub consumes: Vec<UTxOIdentifier>,
     pub produces: Vec<TxOutput>,
 
+    // Reference inputs (introduced in Alonzo)
+    pub reference_inputs: Vec<UTxOIdentifier>,
+
     // Transaction fee
     pub fee: u64,
+
+    // Transaction total collateral
+    pub stated_total_collateral: Option<u64>,
 
     // Tx validity flag
     pub is_valid: bool,
@@ -172,47 +185,47 @@ pub struct TxUTxODeltas {
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
 
     // VKey Witnesses
-    pub vkey_witnesses: Option<Vec<VKeyWitness>>,
+    pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
 
-    // Scripts Provided
-    pub scripts_provided: Option<Vec<(ScriptHash, ReferenceScript)>>,
+    // Scripts Witnesses Provided
+    pub script_witnesses: Option<Vec<(ScriptHash, ScriptLang)>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,
 
     // Plutus data
-    pub plutus_data: Option<BTreeMap<DatumHash, Vec<u8>>>,
+    pub plutus_data: Option<Vec<(DatumHash, Vec<u8>)>>,
 }
 
 impl TxUTxODeltas {
     /// This function returns VKey hashes provided
     /// from Vkey witnesses
-    pub fn get_vkey_hashes_provided(&self) -> Vec<KeyHash> {
+    pub fn get_vkey_witness_hashes(&self) -> HashSet<KeyHash> {
         let Some(vkey_witnesses) = self.vkey_witnesses.as_ref() else {
-            return vec![];
+            return HashSet::new();
         };
-        vkey_witnesses.iter().map(|w| w.key_hash()).collect::<Vec<_>>()
+        vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>()
     }
 
     /// This function returns script hashes provided
-    /// from scripts provided
-    pub fn get_script_hashes_provided(&self) -> Vec<ScriptHash> {
-        let Some(scripts_provided) = self.scripts_provided.as_ref() else {
-            return vec![];
+    /// from scripts witnesses provided
+    pub fn get_script_witness_hashes(&self) -> HashSet<ScriptHash> {
+        let Some(script_witnesses) = self.script_witnesses.as_ref() else {
+            return HashSet::new();
         };
-        scripts_provided.iter().map(|(script_hash, _)| *script_hash).collect::<Vec<_>>()
+        script_witnesses.iter().map(|(hash, _)| *hash).collect::<HashSet<_>>()
     }
 
     /// This functions returns the total consumed value of the transaction
     /// Consumed = Inputs + Refund + Withrawals + Value Minted
+    /// When transaction is failed
+    /// Consumed = Collateral Inputs
     pub fn calculate_total_consumed(
         &self,
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> Value {
-        let total_refund = self.calculate_total_refund(stake_registration_updates);
-        let total_withdrawals = self.calculate_total_withdrawals();
-        let mut total_consumed = Value::new(total_refund + total_withdrawals, vec![]);
+        let mut total_consumed = Value::new(0, vec![]);
 
         // Add Inputs UTxO values
         for input in self.consumes.iter() {
@@ -220,6 +233,16 @@ impl TxUTxODeltas {
                 total_consumed += &utxo.value;
             }
         }
+
+        if !self.is_valid {
+            // If the transaction is invalid, it only consumes
+            // collateral inputs
+            return total_consumed;
+        }
+
+        let total_refund = self.calculate_total_refund(stake_registration_updates);
+        let total_withdrawals = self.calculate_total_withdrawals();
+        total_consumed += &Value::new(total_refund + total_withdrawals, vec![]);
 
         // Add Value Minted
         total_consumed += &self.get_minted_value();
@@ -229,19 +252,48 @@ impl TxUTxODeltas {
 
     /// This functions returns the total produced value of the transaction
     /// Produced = Outputs + Fee + Deposits + Value Burnt
+    /// When transaction is failed
+    /// Produced =
+    /// - Before Babbage: Collater Inputs (this is just moved to fee pot)
+    /// - Since Babbage: Either Collateral Outputs + Total Collateral or just Collateral Inputs (this is just moved to fee pot)
     pub fn calculate_total_produced(
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
+        utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> Value {
-        let total_deposit =
-            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
-        let mut total_produced = Value::new(total_deposit + self.fee, vec![]);
+        let mut total_produced = Value::new(0, vec![]);
 
         // Add Outputs UTxO values
         for output in &self.produces {
             total_produced += &output.value;
         }
+
+        if !self.is_valid {
+            // total_collateral is only set since Babbage era.
+            match self.stated_total_collateral {
+                Some(stated_total_collateral) => {
+                    total_produced += &Value::new(stated_total_collateral, vec![]);
+                    return total_produced;
+                }
+                None => {
+                    // if there is no total_collateral set, then collateral inputs are just moved to fee pot
+                    let mut total_collateral = Value::new(0, vec![]);
+
+                    // Add Inputs UTxO values
+                    for input in self.consumes.iter() {
+                        if let Some(utxo) = utxos.get(input) {
+                            total_collateral += &utxo.value;
+                        }
+                    }
+                    return total_collateral;
+                }
+            }
+        }
+
+        let total_deposit =
+            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
+        total_produced += &Value::new(total_deposit + self.fee, vec![]);
 
         // Add Value Burnt
         total_produced += &self.get_burnt_value();

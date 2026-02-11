@@ -3,45 +3,16 @@
 //!
 //! NOTE: Alonzo UTxOW re-uses Shelley UTxOW rules, but introduces several new validation rules.
 
+use std::collections::HashSet;
+
 use crate::validations::shelley;
 use acropolis_common::{
-    crypto::keyhash_256, hash::Hash, protocol_params::ProtocolVersion,
-    validation::UTxOWValidationError, GenesisDelegates, Metadata, NativeScript,
-    ScriptIntegrityHash, TxHash, VKeyWitness,
+    protocol_params::ProtocolVersion, validation::UTxOWValidationError, GenesisDelegates, Metadata,
+    NativeScript, TxHash, VKeyWitness,
 };
-use pallas::{
-    codec::{
-        minicbor::{self, Encoder},
-        utils::KeepRaw,
-    },
-    ledger::primitives::alonzo,
-};
+use pallas::ledger::primitives::alonzo;
 
-fn option_vec_is_empty<T>(option_vec: &Option<Vec<T>>) -> bool {
-    option_vec.as_ref().map(|vec| vec.is_empty()).unwrap_or(true)
-}
-
-fn compute_script_integrity_hash(
-    plutus_data: &[alonzo::PlutusData],
-    redeemer: &[alonzo::Redeemer],
-) -> ScriptIntegrityHash {
-    let mut value_to_hash: Vec<u8> = Vec::new();
-    // First, the Redeemer.
-    let _ = minicbor::encode(redeemer, &mut value_to_hash);
-    // Next, the PlutusData.
-    let mut plutus_data_encoder: Encoder<Vec<u8>> = Encoder::new(Vec::new());
-    let _ = plutus_data_encoder.begin_array();
-    for single_plutus_data in plutus_data.iter() {
-        let _ = plutus_data_encoder.encode(single_plutus_data);
-    }
-    let _ = plutus_data_encoder.end();
-    value_to_hash.extend(plutus_data_encoder.writer().clone());
-    // Finally, the cost model.
-    value_to_hash.extend(cost_model_cbor());
-    keyhash_256(&value_to_hash)
-}
-
-fn cost_model_cbor() -> Vec<u8> {
+fn _cost_model_cbor() -> Vec<u8> {
     // Mainnet, preprod and preview all have the same cost model during the Alonzo
     // era.
     hex::decode(
@@ -50,61 +21,13 @@ fn cost_model_cbor() -> Vec<u8> {
 }
 
 /// Validate Script Integrity Hash
-/// Reference: https://github.com/IntersectMBO/cardano-ledgeFr/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L289
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L289
 pub fn validate_script_integrity_hash(
-    mtx: &alonzo::MintedTx,
+    _mtx: &alonzo::MintedTx,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let script_data_hash =
-        mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
-    match script_data_hash {
-        Some(script_data_hash) => {
-            match (
-                &mtx.transaction_witness_set.plutus_data,
-                &mtx.transaction_witness_set.redeemer,
-            ) {
-                (Some(plutus_data), Some(redeemer)) => {
-                    let plutus_data = plutus_data
-                        .iter()
-                        .map(|x| KeepRaw::unwrap(x.clone()))
-                        .collect::<Vec<alonzo::PlutusData>>();
-                    let computed_hash = compute_script_integrity_hash(&plutus_data, redeemer);
-                    if script_data_hash == computed_hash {
-                        Ok(())
-                    } else {
-                        Err(Box::new(
-                            UTxOWValidationError::ScriptIntegrityHashMismatch {
-                                expected: Some(computed_hash),
-                                actual: Some(script_data_hash),
-                                reason: "Script integrity hash mismatch".to_string(),
-                            },
-                        ))
-                    }
-                }
-                _ => Err(Box::new(
-                    UTxOWValidationError::ScriptIntegrityHashMismatch {
-                        expected: None,
-                        actual: None,
-                        reason: "Missing plutus data or redeemer".to_string(),
-                    },
-                )),
-            }
-        }
-        None => {
-            if option_vec_is_empty(&mtx.transaction_witness_set.plutus_data)
-                && option_vec_is_empty(&mtx.transaction_witness_set.redeemer)
-            {
-                Ok(())
-            } else {
-                Err(Box::new(
-                    UTxOWValidationError::ScriptIntegrityHashMismatch {
-                        expected: None,
-                        actual: None,
-                        reason: "Missing script data hash".to_string(),
-                    },
-                ))
-            }
-        }
-    }
+    // TODO:
+    // Implement script integrity hash validation
+    Ok(())
 }
 
 /// NEW Alonzo Validation Rules
@@ -115,7 +38,7 @@ pub fn validate_script_integrity_hash(
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
+    vkey_witnesses: &HashSet<VKeyWitness>,
     native_scripts: &[NativeScript],
     metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,

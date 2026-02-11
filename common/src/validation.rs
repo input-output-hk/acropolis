@@ -124,11 +124,11 @@ pub enum Phase1ValidationError {
     MaxTxSizeUTxO { supplied: u32, max: u32 },
 
     /// **Cause:** UTxO rules failure
-    #[error("{0}")]
+    #[error("UTxOValidationError: {0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
     /// **Cause:** UTxOW rules failure
-    #[error("{0}")]
+    #[error("UTxOWValidationError: {0}")]
     UTxOWValidationError(#[from] UTxOWValidationError),
 }
 
