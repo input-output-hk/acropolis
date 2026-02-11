@@ -201,7 +201,7 @@ impl GovernanceState {
             );
         }
 
-        if d_spo.epoch != drep_state.epoch {
+        if drep_state.epoch != d_drep.epoch {
             vld.handle_error(
                 "drep state",
                 &anyhow!(
