@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package acropolis.indexer.v1;
+
+// A point on the Cardano blockchain.
+message ChainPoint {
+  uint64 slot = 1;
+  bytes block_hash = 2;
+}
+
+// Describes a new block applied to the chain.
+message BlockEvent {
+  ChainPoint point = 1;
+  uint64 block_number = 2;
+  uint32 tx_count = 3;
+}
+
+// Describes a chain rollback.
+message RollbackEvent {
+  ChainPoint point = 1;
+}
+
+// A tip change event (either roll-forward or roll-backward).
+message TipEvent {
+  oneof event {
+    BlockEvent roll_forward = 1;
+    RollbackEvent roll_backward = 2;
+  }
+}
+
+message GetTipRequest {}
+
+message GetTipResponse {
+  ChainPoint tip = 1;
+}
+
+message FollowTipRequest {}
+
+// Block metadata, returned by GetBlockByHash.
+message BlockInfo {
+  uint64 block_number = 1;
+  bytes hash = 2;
+  uint64 epoch = 3;
+  uint64 slot = 4;
+  uint64 timestamp = 5;
+  uint32 tx_count = 6;
+}
+
+message GetBlockByHashRequest {
+  bytes hash = 1;
+}
+
+message GetBlockByHashResponse {
+  BlockInfo block = 1;
+}
+
+// Chain-sync gRPC service: query and stream chain tip events.
+service ChainSyncService {
+  // Returns the current chain tip.
+  rpc GetTip(GetTipRequest) returns (GetTipResponse);
+
+  // Streams tip events (new blocks and rollbacks) as they occur.
+  rpc FollowTip(FollowTipRequest) returns (stream TipEvent);
+
+  // Returns block metadata for a given block hash.
+  rpc GetBlockByHash(GetBlockByHashRequest) returns (GetBlockByHashResponse);
+}
