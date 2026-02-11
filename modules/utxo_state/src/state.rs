@@ -664,6 +664,7 @@ impl State {
                     stake_registration_updates,
                     &utxos,
                     protocol_params.shelley.as_ref(),
+                    block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }

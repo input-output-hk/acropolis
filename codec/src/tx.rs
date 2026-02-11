@@ -1,10 +1,7 @@
-use std::collections::BTreeMap;
-
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
-    map_mint_burn, map_native_script, map_redeemer, map_reference_script_hash, map_value,
-    witness::map_vkey_witnesses,
+    map_mint_burn, map_redeemer, map_reference_script_hash, map_value, witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
@@ -85,36 +82,35 @@ pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ReferenceScript)> {
-    let native = tx.native_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::Native(map_native_script(s)),
-        )
-    });
+pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
+    let mut scripts_provided = Vec::new();
 
-    let v1 = tx.plutus_v1_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV1(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.native_scripts() {
+        scripts_provided.push((ScriptHash::from(*script.compute_hash()), ScriptLang::Native));
+    }
 
-    let v2 = tx.plutus_v2_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV2(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.plutus_v1_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV1,
+        ));
+    }
 
-    let v3 = tx.plutus_v3_scripts().iter().map(|s| {
-        (
-            ScriptHash::from(*s.compute_hash()),
-            ReferenceScript::PlutusV3(s.as_ref().to_vec()),
-        )
-    });
+    for script in tx.plutus_v2_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV2,
+        ));
+    }
 
-    native.chain(v1).chain(v2).chain(v3).collect()
+    for script in tx.plutus_v3_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV3,
+        ));
+    }
+
+    scripts_provided
 }
 
 /// Map a Pallas Transaction
@@ -130,11 +126,13 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    let (mut consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    consumes.sort();
 
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
+    let stated_total_collateral = tx.total_collateral();
     let is_valid = tx.is_valid();
 
     let mut certs = Vec::new();
@@ -243,7 +241,7 @@ pub fn map_transaction(
     let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
 
-    let scripts_provided = map_scripts_provided(tx);
+    let script_witnesses = map_scripts_provided(tx);
 
     let mut redeemers = Vec::new();
     for redeemer in tx.redeemers() {
@@ -257,7 +255,7 @@ pub fn map_transaction(
         .plutus_data()
         .iter()
         .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<Vec<_>>();
 
     Transaction {
         id: tx_identifier,
@@ -265,6 +263,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
+        stated_total_collateral,
         is_valid,
         certs,
         withdrawals,
@@ -274,7 +273,7 @@ pub fn map_transaction(
         voting_procedures,
         proposal_procedures,
         vkey_witnesses,
-        scripts_provided,
+        script_witnesses,
         redeemers,
         plutus_data,
         error: if errors.is_empty() {
