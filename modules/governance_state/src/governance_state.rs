@@ -6,9 +6,9 @@ use acropolis_common::{
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage, 
-        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage, 
-        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse, 
+        CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage,
+        GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
+        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
         StateTransitionMessage,
     },
     queries::errors::QueryError,
@@ -185,9 +185,9 @@ impl GovernanceState {
         let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
             return;
         };
-        let Some((_, drep_state)) = vld.consume(
-            "drep state", drep_state_r.read_skip_rollbacks().await
-        ) else {
+        let Some((_, drep_state)) =
+            vld.consume("drep state", drep_state_r.read_skip_rollbacks().await)
+        else {
             return;
         };
 
@@ -205,7 +205,9 @@ impl GovernanceState {
             vld.handle_error(
                 "drep state",
                 &anyhow!(
-                    "DRep state {} epoch != DRep epoch ({})", drep_state.epoch, d_drep.epoch
+                    "DRep state {} epoch != DRep epoch ({})",
+                    drep_state.epoch,
+                    d_drep.epoch
                 ),
             );
         }

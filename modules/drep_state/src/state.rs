@@ -360,7 +360,7 @@ impl State {
         let vld = ValidationOutcomes::new();
         let cfg = self.config;
 
-        let Some (drep_activity) = drep_activity else {
+        let Some(drep_activity) = drep_activity else {
             if !total_voting_procedures.is_empty() {
                 bail!("Missing drep activity, epoch {epoch}, voting {total_voting_procedures:?}");
             }
