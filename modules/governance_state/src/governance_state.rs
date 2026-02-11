@@ -48,24 +48,27 @@ declare_cardano_reader!(
     ProtocolParams,
     ProtocolParamsMessage
 );
+
 declare_cardano_reader!(
     DRepReader,
     "stake-drep-distribution-topic",
-    "",
+    "cardano.drep.distribution",
     DRepStakeDistribution,
     DRepStakeDistributionMessage
 );
+
 declare_cardano_reader!(
     SPOReader,
     "stake-spo-distribution-topic",
-    "",
+    "cardano.spo.distribution",
     SPOStakeDistribution,
     SPOStakeDistributionMessage
 );
+
 declare_cardano_reader!(
     DRepStateReader,
     "drep-state-topic",
-    "",
+    "cardano.drep.state",
     DRepState,
     DRepStateMessage
 );
@@ -96,9 +99,9 @@ pub struct GovernanceStateConfig {
 
 struct Readers {
     pub gov_reader: GovReader,
-    pub drep_reader: Option<DRepReader>,
-    pub drep_state_reader: Option<DRepStateReader>,
-    pub spo_reader: Option<SPOReader>,
+    pub drep_reader: DRepReader,
+    pub drep_state_reader: DRepStateReader,
+    pub spo_reader: SPOReader,
     pub param_reader: ParamReader,
 }
 
@@ -176,24 +179,22 @@ impl GovernanceState {
         state: Arc<Mutex<State>>,
         readers: &mut Box<Readers>,
     ) {
-        let Some(ref mut drep_r) = readers.drep_reader else {
-            return;
-        };
-        let Some(ref mut spo_r) = readers.spo_reader else {
-            return;
-        };
-        let Some(ref mut drep_state_r) = readers.drep_state_reader else {
-            return;
-        };
-        let Some((_, d_drep)) = vld.consume("drep", drep_r.read_skip_rollbacks().await) else {
-            return;
-        };
-        let Some((blk_spo, d_spo)) = vld.consume("spo", spo_r.read_skip_rollbacks().await) else {
-            return;
-        };
-        let Some((_, drep_state)) =
-            vld.consume("drep state", drep_state_r.read_skip_rollbacks().await)
+        let Some((_, d_drep)) =
+            vld.consume("drep", readers.drep_reader.read_skip_rollbacks().await)
         else {
+            return;
+        };
+
+        let Some((blk_spo, d_spo)) =
+            vld.consume("spo", readers.spo_reader.read_skip_rollbacks().await)
+        else {
+            return;
+        };
+
+        let Some((_, drep_state)) = vld.consume(
+            "drep state",
+            readers.drep_state_reader.read_skip_rollbacks().await,
+        ) else {
             return;
         };
 
@@ -388,9 +389,9 @@ impl GovernanceState {
 
         let readers = Box::new(Readers {
             gov_reader: GovReader::new(&context, &config).await?,
-            drep_reader: DRepReader::new_without_default(&context, &config).await?,
-            drep_state_reader: DRepStateReader::new_without_default(&context, &config).await?,
-            spo_reader: SPOReader::new_without_default(&context, &config).await?,
+            drep_reader: DRepReader::new(&context, &config).await?,
+            drep_state_reader: DRepStateReader::new(&context, &config).await?,
+            spo_reader: SPOReader::new(&context, &config).await?,
             param_reader: ParamReader::new(&context, &config).await?,
         });
 
