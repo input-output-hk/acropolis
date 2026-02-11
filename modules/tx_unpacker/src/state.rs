@@ -96,6 +96,23 @@ impl State {
     /// scripts from the transaction, matches them with their redeemers, and
     /// evaluates each script.
     ///
+    /// # Current Limitations
+    ///
+    /// This implementation has limitations that prevent full script validation:
+    ///
+    /// 1. **Datum Resolution**: Spending validators require the datum from the UTxO
+    ///    being spent. This module only receives raw transaction bytes, not resolved
+    ///    UTxO state. Full implementation requires either:
+    ///    - Passing resolved UTxOs to this function
+    ///    - Giving State access to a UTxO store
+    ///
+    /// 2. **ScriptContext**: Real Plutus scripts receive a ScriptContext containing
+    ///    full TxInfo (inputs with their UTxO data, outputs, minting, certs, etc.).
+    ///    Without resolved inputs, we cannot build a complete ScriptContext.
+    ///
+    /// The current implementation uses placeholder values that work for benchmark
+    /// testing but would fail for production validators that access these fields.
+    ///
     /// # Arguments
     ///
     /// * `raw_tx` - Raw CBOR-encoded transaction bytes
@@ -271,9 +288,13 @@ impl State {
                 },
             };
 
-            // Look up datum if this is a spending script
-            // The datum would be in tx.plutus_data or inline in the UTxO
-            let datum = None; // TODO: Resolve datum from tx.plutus_data or UTxO
+            // LIMITATION: Datum resolution requires UTxO state access.
+            // For spending validators, the datum is either:
+            // - Inline in the UTxO being spent (need to look up UTxO by tx.consumes[index])
+            // - A hash in the UTxO, resolved via tx.plutus_data BTreeMap
+            // Since this module doesn't have UTxO state, we cannot resolve datums.
+            // Real spending validators will fail if they access the datum argument.
+            let datum = None;
 
             inputs.push(OwnedScriptInput {
                 script_hash,
@@ -291,22 +312,32 @@ impl State {
 
     /// Build script context bytes from Transaction.
     ///
-    /// The Transaction contains all the information needed to construct
-    /// a proper ScriptContext (TxInfo + ScriptPurpose).
+    /// # Current Limitation
+    ///
+    /// Building a proper ScriptContext requires resolved input UTxOs, which this
+    /// module doesn't have access to. The TxInfo structure (per CIP-0035/CIP-0069)
+    /// requires:
+    /// - Inputs as (TxOutRef, TxOut) pairs - we only have TxOutRef (consumes)
+    /// - Reference inputs with their full TxOut data
+    /// - Full output data (we have this via produces)
+    ///
+    /// The Transaction struct has partial data:
+    /// - consumes: UTxO identifiers only (no values/addresses/datums)
+    /// - produces: Full output data ✓
+    /// - fee ✓
+    /// - mint_burn_deltas ✓
+    /// - certs ✓
+    /// - withdrawals ✓
+    /// - voting_procedures ✓
+    /// - required_signers ✓
+    /// - plutus_data (witness datums) ✓
+    /// - redeemers ✓
+    ///
+    /// Without resolved inputs, scripts that access txInfoInputs will get
+    /// incorrect data. This returns a minimal placeholder for testing.
     fn build_script_context_bytes_from_tx(&self, _tx: &Transaction) -> Vec<u8> {
-        // TODO: Build proper ScriptContext from Transaction
-        // Transaction has:
-        // - consumes/produces for inputs/outputs
-        // - fee
-        // - mint_burn_deltas for minting
-        // - certs for certificates
-        // - withdrawals for rewards
-        // - voting_procedures for governance
-        // - required_signers
-        // - plutus_data for datums
-        // - redeemers
-        //
-        // For now, return minimal CBOR-encoded ScriptContext
+        // Minimal CBOR-encoded ScriptContext placeholder
+        // Real implementation needs UTxO state to resolve inputs
         // Constr 0 with empty fields: d87980
         vec![0xd8, 0x79, 0x80]
     }
