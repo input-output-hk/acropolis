@@ -1,3 +1,5 @@
+// This file and other proto files would need to go to a separate interface repo (crate)
+// so that it could be shared with other repos
 syntax = "proto3";
 
 package acropolis.indexer.v1;
