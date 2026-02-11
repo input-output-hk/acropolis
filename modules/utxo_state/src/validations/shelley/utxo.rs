@@ -54,9 +54,12 @@ pub fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use acropolis_common::{Era, NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_era, to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use acropolis_common::{NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
     use std::str::FromStr;
     use test_case::test_case;
 
@@ -78,24 +81,6 @@ mod tests {
             && bad_input_index == 0;
         "shelley - bad_inputs_utxo"
     )]
-    #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
-        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
-        let mapped_tx = acropolis_codec::map_transaction(
-            &tx,
-            &raw_tx,
-            TxIdentifier::default(),
-            NetworkId::Mainnet,
-            Era::Shelley,
-        );
-        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
-        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
-        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
-
-        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
-    }
-
     #[test_case(validation_fixture!(
         "alonzo",
         "f9ed2fef27cdcf60c863ba03f27d0e38f39c5047cf73ffdf2428b48edbe83234"
@@ -103,24 +88,6 @@ mod tests {
         matches Ok(());
         "alonzo - valid transaction 1 - failed transaction"
     )]
-    #[allow(clippy::result_large_err)]
-    fn alonzo_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Alonzo, &raw_tx).unwrap();
-        let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
-        let mapped_tx = acropolis_codec::map_transaction(
-            &tx,
-            &raw_tx,
-            TxIdentifier::default(),
-            NetworkId::Mainnet,
-            Era::Alonzo,
-        );
-        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
-        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
-        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
-
-        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
-    }
-
     #[test_case(validation_fixture!(
         "babbage",
         "b2d01aec0fc605e699b1145d8ff9fce132a9108c8e026177ce648ddbe79473b5"
@@ -136,23 +103,21 @@ mod tests {
         "babbage - valid transaction 2 - failed transaction without collateral return"
     )]
     #[allow(clippy::result_large_err)]
-    fn babbage_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Babbage, &raw_tx).unwrap();
+    fn shelley_utxo_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
         let mapped_tx = acropolis_codec::map_transaction(
             &tx,
             &raw_tx,
             TxIdentifier::default(),
             NetworkId::Mainnet,
-            Era::Babbage,
+            to_era(era),
         );
         let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
         let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
         let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
-
-        println!("tx_delta: {:?}", tx_delta);
-        println!("total_consumed: {:?}", total_consumed);
-        println!("total_produced: {:?}", total_produced);
 
         validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }

@@ -193,8 +193,11 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -276,8 +279,10 @@ mod tests {
         "allegra - mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
     #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOWValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn shelley_utxow_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOWValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());

@@ -175,9 +175,12 @@ pub fn validate_output_too_small_utxo(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
+    use crate::{
+        test_utils::{to_pallas_era, TestContext},
+        validation_fixture,
+    };
     use acropolis_common::{ShelleyAddress, StakeAddress};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
@@ -239,8 +242,10 @@ mod tests {
         "wrong_network_withdrawal"
     )]
     #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn shelley_utxo_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let mtx = tx.as_alonzo().unwrap();
         validate(mtx, &ctx.shelley_params).map_err(|e| *e)
     }
