@@ -15,6 +15,7 @@
 - Idiomatic Rust: Use clippy suggestions.
 - Unsafe: Avoid if possible.
 - Error Handling: No `unwrap()`. Use `Result` and `?` operator.
+- No use of panic()
 
 ## 4. Documentation
 - All public types/functions must have doc comments.
