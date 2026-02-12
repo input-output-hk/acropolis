@@ -373,7 +373,7 @@ impl GovernanceState {
             .instrument(span)
             .await;
 
-            vld.publish().await;
+            vld.publish("governance_state").await;
         }
     }
 

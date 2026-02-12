@@ -576,9 +576,15 @@ impl AccountsState {
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
-                vld.publish(&context, &validation_outcomes_topic, &block_info).await?;
+                vld.publish(
+                    &context,
+                    "accounts_state",
+                    &validation_outcomes_topic,
+                    &block_info,
+                )
+                .await?;
             } else {
-                vld.print_errors(None);
+                vld.print_errors("accounts_state", None);
             }
         }
     }
