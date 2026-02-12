@@ -5,7 +5,9 @@ use crate::{
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
-use pallas_traverse::{ComputeHash, Era as PallasEra, MultiEraInput, MultiEraSigners, MultiEraTx};
+use pallas_traverse::{
+    ComputeHash, Era as PallasEra, MultiEraInput, MultiEraMeta, MultiEraSigners, MultiEraTx,
+};
 
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
     inputs
@@ -70,15 +72,28 @@ pub fn map_transaction_consumes_produces(
     (parsed_consumes, parsed_produces, errors)
 }
 
-pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
-    match metadata {
-        PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadata::Int(MetadataInt(*i)),
-        PallasMetadatum::Bytes(b) => Metadata::Bytes(b.to_vec()),
-        PallasMetadatum::Text(s) => Metadata::Text(s.clone()),
-        PallasMetadatum::Array(a) => Metadata::Array(a.iter().map(map_metadata).collect()),
+pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
+    match metadatum {
+        PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadatum::Int(i128::from(*i)),
+        PallasMetadatum::Bytes(b) => Metadatum::Bytes(b.to_vec()),
+        PallasMetadatum::Text(s) => Metadatum::Text(s.clone()),
+        PallasMetadatum::Array(a) => Metadatum::Array(a.iter().map(map_metadatum).collect()),
         PallasMetadatum::Map(m) => {
-            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(k), map_metadata(v))).collect())
+            Metadatum::Map(m.iter().map(|(k, v)| (map_metadatum(k), map_metadatum(v))).collect())
         }
+    }
+}
+
+pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
+    match metadata {
+        MultiEraMeta::AlonzoCompatible(m) => {
+            let mut metadata = Metadata::default();
+            for (label, datum) in m.iter() {
+                metadata.as_mut().push((*label, map_metadatum(datum)));
+            }
+            Some(metadata)
+        }
+        _ => None,
     }
 }
 

@@ -1157,7 +1157,7 @@ impl ChainStore {
             for (label, datum) in &metadata.clone().to_vec() {
                 items.push(TransactionMetadataItem {
                     label: label.to_string(),
-                    json_metadata: acropolis_codec::map_metadata(datum),
+                    json_metadata: acropolis_codec::map_metadatum(datum),
                 });
             }
         }

@@ -6,11 +6,13 @@ use std::collections::HashSet;
 use crate::crypto::verify_ed25519_signature;
 use acropolis_common::{
     crypto::keyhash_256, protocol_params::ProtocolVersion, soft_fork,
-    validation::UTxOWValidationError, DataHash, GenesisDelegates, KeyHash, NativeScript, TxHash,
-    VKeyWitness,
+    validation::UTxOWValidationError, DataHash, GenesisDelegates, KeyHash, Metadata, Metadatum,
+    NativeScript, TxHash, VKeyWitness,
 };
 use anyhow::Result;
 use pallas::{codec::utils::Nullable, ledger::primitives::alonzo};
+
+const METADATUM_MAX_BYTES: usize = 64;
 
 fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
     mtx.transaction_body
@@ -42,6 +44,16 @@ fn get_aux_data(mtx: &alonzo::MintedTx) -> Option<Vec<u8>> {
     match &mtx.auxiliary_data {
         Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
         _ => None,
+    }
+}
+
+fn validate_metadatum(metadatum: &Metadatum) -> bool {
+    match metadatum {
+        Metadatum::Int(_) => true,
+        Metadatum::Bytes(b) => b.len() <= METADATUM_MAX_BYTES,
+        Metadatum::Text(s) => s.len() <= METADATUM_MAX_BYTES,
+        Metadatum::Array(a) => a.iter().all(validate_metadatum),
+        Metadatum::Map(m) => m.iter().all(|(k, v)| validate_metadatum(k) && validate_metadatum(v)),
     }
 }
 
@@ -84,11 +96,23 @@ pub fn validate_vkey_witnesses(
     Ok(())
 }
 
-/// TODO:
-/// Validate transaction's aux data
-/// https://github.com/input-output-hk/acropolis/issues/666
-pub fn validate_aux_data(_aux_data: &[u8]) -> Result<(), Box<UTxOWValidationError>> {
-    Ok(())
+/// Validate transaction's aux metadata
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-ledger-core/src/Cardano/Ledger/Metadata.hs#L75
+pub fn validate_tx_aux_metadata(
+    metadata: &Option<Metadata>,
+) -> Result<(), Box<UTxOWValidationError>> {
+    match metadata.as_ref() {
+        Some(metadata) => {
+            if metadata.as_ref().iter().all(|(_, v)| validate_metadatum(v)) {
+                Ok(())
+            } else {
+                Err(Box::new(UTxOWValidationError::InvalidMetadata {
+                    reason: "metadatum value-size exceeds 64 bytes".to_string(),
+                }))
+            }
+        }
+        None => Ok(()),
+    }
 }
 
 /// Validate metadata (hash must match with computed one, check metadatum value-size when pv > 2.0)
@@ -96,6 +120,7 @@ pub fn validate_aux_data(_aux_data: &[u8]) -> Result<(), Box<UTxOWValidationErro
 pub fn validate_metadata(
     aux_data_hash: Option<DataHash>,
     aux_data: Option<Vec<u8>>,
+    metadata: &Option<Metadata>,
     protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     match (aux_data_hash, aux_data) {
@@ -110,7 +135,7 @@ pub fn validate_metadata(
             }
 
             if soft_fork::should_check_metadata(protocol_version) {
-                validate_aux_data(aux_data.as_slice())?;
+                validate_tx_aux_metadata(metadata)?;
             }
 
             Ok(())
@@ -152,11 +177,13 @@ pub fn validate_mir_genesis_sigs(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &HashSet<VKeyWitness>,
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     protocol_version: &ProtocolVersion,
@@ -178,7 +205,12 @@ pub fn validate(
     validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
     // validate metadata
-    validate_metadata(get_aux_data_hash(mtx)?, get_aux_data(mtx), protocol_version)?;
+    validate_metadata(
+        get_aux_data_hash(mtx)?,
+        get_aux_data(mtx),
+        metadata,
+        protocol_version,
+    )?;
 
     // validate mir certificate genesis sig
     if has_mir_certificate(mtx) {
@@ -286,11 +318,13 @@ mod tests {
         let mtx = tx.as_alonzo().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+        let metadata = acropolis_codec::map_metadata(&tx.metadata());
         validate(
             mtx,
             TxHash::from(*tx.hash()),
             &vkey_witnesses,
             &native_scripts,
+            &metadata,
             &ctx.shelley_params.gen_delegs,
             ctx.shelley_params.update_quorum,
             &ctx.shelley_params.protocol_params.protocol_version,

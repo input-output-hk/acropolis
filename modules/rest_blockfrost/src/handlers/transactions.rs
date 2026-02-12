@@ -1,6 +1,7 @@
 //! REST handlers for Acropolis Blockfrost /txs endpoints
 use acropolis_cardano::transaction::calculate_deposit;
 use acropolis_common::rest_error::RESTError;
+use acropolis_common::Metadatum;
 use acropolis_common::{
     messages::{Message, RESTResponse, StateQuery, StateQueryResponse},
     queries::{
@@ -14,7 +15,7 @@ use acropolis_common::{
         },
         utils::{query_state, rest_query_state_async},
     },
-    Lovelace, Metadata, Relay, TxHash,
+    Lovelace, Relay, TxHash,
 };
 use caryatid_sdk::Context;
 use hex::FromHex;
@@ -546,7 +547,7 @@ async fn handle_transaction_pool_retires_query(
     .await
 }
 
-struct TxMetadata(Metadata);
+struct TxMetadata(Metadatum);
 
 impl Serialize for TxMetadata {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -554,30 +555,30 @@ impl Serialize for TxMetadata {
         S: Serializer,
     {
         match &self.0 {
-            Metadata::Int(i) => i.serialize(serializer),
-            Metadata::Bytes(b) => {
+            Metadatum::Int(i) => i.serialize(serializer),
+            Metadatum::Bytes(b) => {
                 let h = hex::encode(b);
                 serializer.serialize_str(&h)
             }
-            Metadata::Text(s) => s.serialize(serializer),
-            Metadata::Array(a) => {
+            Metadatum::Text(s) => s.serialize(serializer),
+            Metadatum::Array(a) => {
                 let mut state = serializer.serialize_seq(Some(a.len()))?;
                 for i in a {
                     state.serialize_element(&TxMetadata(i.clone()))?;
                 }
                 state.end()
             }
-            Metadata::Map(m) => {
+            Metadatum::Map(m) => {
                 let mut state = serializer.serialize_map(Some(m.len()))?;
                 for (k, v) in m {
                     match k {
-                        Metadata::Int(i) => {
+                        Metadatum::Int(i) => {
                             state.serialize_entry(&i.to_string(), &TxMetadata(v.clone()))?
                         }
-                        Metadata::Bytes(b) => {
+                        Metadatum::Bytes(b) => {
                             state.serialize_entry(&hex::encode(b), &TxMetadata(v.clone()))?
                         }
-                        Metadata::Text(s) => state.serialize_entry(&s, &TxMetadata(v.clone()))?,
+                        Metadatum::Text(s) => state.serialize_entry(&s, &TxMetadata(v.clone()))?,
                         _ => return Err(S::Error::custom("Invalid key type in map")),
                     }
                 }
