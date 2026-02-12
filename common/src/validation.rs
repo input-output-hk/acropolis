@@ -94,9 +94,53 @@ pub enum TransactionValidationError {
     #[error("Phase 1 Validation Failed: {0}")]
     Phase1ValidationError(#[from] Phase1ValidationError),
 
+    /// **Cause**: Phase 2 Script Validation Error
+    #[error("Phase 2 Validation Failed: {0}")]
+    Phase2ValidationError(#[from] Phase2ValidationError),
+
     /// **Cause:** Other errors (e.g. Invalid shelley params)
     #[error("{0}")]
     Other(String),
+}
+
+/// Phase 2 (Plutus script execution) validation errors.
+///
+/// These errors occur during script evaluation after Phase 1 validation passes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum Phase2ValidationError {
+    /// Script explicitly called the `error` builtin
+    #[error("Script {script_hash} failed: {message}")]
+    ScriptFailed {
+        script_hash: ScriptHash,
+        message: String,
+    },
+
+    /// Script exceeded CPU or memory budget
+    #[error("Script {script_hash} exceeded budget (cpu: {cpu}, mem: {mem})")]
+    BudgetExceeded {
+        script_hash: ScriptHash,
+        cpu: i64,
+        mem: i64,
+    },
+
+    /// Could not decode FLAT bytecode
+    #[error("Script {script_hash} decode failed: {reason}")]
+    DecodeFailed {
+        script_hash: ScriptHash,
+        reason: String,
+    },
+
+    /// Missing script referenced by redeemer
+    #[error("Missing script for redeemer at index {index}")]
+    MissingScript { index: u32 },
+
+    /// Missing datum for spending input
+    #[error("Missing datum {datum_hash}")]
+    MissingDatum { datum_hash: DatumHash },
+
+    /// Missing redeemer for script
+    #[error("Missing redeemer for script {script_hash}")]
+    MissingRedeemer { script_hash: ScriptHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
