@@ -280,55 +280,6 @@ impl EvalResult {
     }
 }
 
-/// Convert uplc_turbo's ExBudget back to ExUnits.
-///
-/// Negative values are clamped to 0.
-fn budget_to_ex_units(budget: uplc_turbo::machine::ExBudget) -> ExUnits {
-    ExUnits {
-        steps: budget.cpu.max(0) as u64,
-        mem: budget.mem.max(0) as u64,
-    }
-}
-
-// =============================================================================
-// EvalResult: Script evaluation result with timing
-// =============================================================================
-
-/// Result of a successful script evaluation including timing metrics.
-///
-/// This struct captures both the execution budget consumed and the wall-clock
-/// time taken for evaluation, enabling performance monitoring and SC-001
-/// compliance verification (<0.1s per script at p95).
-#[derive(Debug, Clone, Copy)]
-pub struct EvalResult {
-    /// Execution budget consumed by the script
-    pub consumed_budget: ExUnits,
-    /// Wall-clock time taken for evaluation
-    pub elapsed: Duration,
-}
-
-impl EvalResult {
-    /// Create a new evaluation result.
-    pub fn new(consumed_budget: ExUnits, elapsed: Duration) -> Self {
-        Self {
-            consumed_budget,
-            elapsed,
-        }
-    }
-
-    /// Check if the evaluation completed within the performance target.
-    ///
-    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
-    pub fn within_target(&self) -> bool {
-        self.elapsed < Duration::from_millis(100)
-    }
-
-    /// Get elapsed time in milliseconds.
-    pub fn elapsed_ms(&self) -> f64 {
-        self.elapsed.as_secs_f64() * 1000.0
-    }
-}
-
 // =============================================================================
 // T007: Phase2Error enum
 // =============================================================================
@@ -444,40 +395,6 @@ pub enum ScriptPurpose {
 /// );
 /// ```
 pub fn evaluate_script(
-    script_bytes: &[u8],
-    plutus_version: PlutusVersion,
-    datum: Option<&[u8]>,
-    redeemer: &[u8],
-    script_context: &[u8],
-    cost_model: &[i64],
-    budget: ExUnits,
-) -> Result<EvalResult, Phase2Error> {
-    // Copy inputs for thread-safe evaluation
-    let script_bytes = script_bytes.to_vec();
-    let datum = datum.map(|d| d.to_vec());
-    let redeemer = redeemer.to_vec();
-    let script_context = script_context.to_vec();
-    let cost_model = cost_model.to_vec();
-
-    // Run evaluation on the dedicated thread pool with larger stack
-    evaluator_pool().install(|| {
-        evaluate_script_inner(
-            &script_bytes,
-            plutus_version,
-            datum.as_deref(),
-            &redeemer,
-            &script_context,
-            &cost_model,
-            budget,
-        )
-    })
-}
-
-/// Inner evaluation function that runs on the evaluator thread pool.
-///
-/// This is separated from the public API to allow the recursive evaluation
-/// to run on threads with larger stacks (16MB vs default 2MB).
-fn evaluate_script_inner(
     script_bytes: &[u8],
     plutus_version: PlutusVersion,
     datum: Option<&[u8]>,
@@ -968,17 +885,17 @@ pub fn validate_transaction_phase2(
     })
 }
 
-/// Convert from acropolis_common ScriptType to uplc PlutusVersion.
+/// Convert from acropolis_common ScriptLang to uplc PlutusVersion.
 ///
 /// Returns None for native scripts (which don't need Phase 2 validation).
-pub fn script_type_to_plutus_version(
-    script_type: &acropolis_common::ScriptType,
+pub fn script_lang_to_plutus_version(
+    script_lang: &acropolis_common::script::ScriptLang,
 ) -> Option<PlutusVersion> {
-    match script_type {
-        acropolis_common::ScriptType::PlutusV1 => Some(PlutusVersion::V1),
-        acropolis_common::ScriptType::PlutusV2 => Some(PlutusVersion::V2),
-        acropolis_common::ScriptType::PlutusV3 => Some(PlutusVersion::V3),
-        acropolis_common::ScriptType::Native => None,
+    match script_lang {
+        acropolis_common::script::ScriptLang::PlutusV1 => Some(PlutusVersion::V1),
+        acropolis_common::script::ScriptLang::PlutusV2 => Some(PlutusVersion::V2),
+        acropolis_common::script::ScriptLang::PlutusV3 => Some(PlutusVersion::V3),
+        acropolis_common::script::ScriptLang::Native => None,
     }
 }
 

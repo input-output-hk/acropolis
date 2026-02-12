@@ -6,7 +6,7 @@ use acropolis_codec::map_transaction;
 use acropolis_common::{
     messages::{ProtocolParamsMessage, RawTxsMessage},
     protocol_params::ProtocolParams,
-    script::{RedeemerTag, ReferenceScript},
+    script::{RedeemerTag, ScriptLang},
     validation::{Phase2ValidationError, TransactionValidationError, ValidationError},
     BlockInfo, DRepScriptHash, GenesisDelegates, NetworkId, ScriptHash, Transaction, TxIdentifier,
     Voter,
@@ -136,7 +136,7 @@ impl State {
         })?;
 
         // Map to acropolis_common::Transaction using codec
-        // This gives us redeemers, plutus_data (datums), scripts_provided, etc.
+        // This gives us redeemers, plutus_data (datums), script_witnesses, etc.
         let tx_id = TxIdentifier::new(block_info.number as u32, 0); // tx_index not available here
         let tx = map_transaction(
             &multi_era_tx,
@@ -147,12 +147,10 @@ impl State {
         );
 
         // Check if there are any Plutus scripts to validate
-        let has_plutus_scripts = tx.scripts_provided.iter().any(|(_, script)| {
+        let has_plutus_scripts = tx.script_witnesses.iter().any(|(_, lang)| {
             matches!(
-                script,
-                ReferenceScript::PlutusV1(_)
-                    | ReferenceScript::PlutusV2(_)
-                    | ReferenceScript::PlutusV3(_)
+                lang,
+                ScriptLang::PlutusV1 | ScriptLang::PlutusV2 | ScriptLang::PlutusV3
             )
         });
 
@@ -167,8 +165,8 @@ impl State {
             return Ok(());
         }
 
-        // Build script inputs from the Transaction
-        let script_inputs = self.build_script_inputs_from_tx(&tx)?;
+        // Build script inputs from the Transaction and MultiEraTx
+        let script_inputs = self.build_script_inputs_from_tx(&tx, &multi_era_tx)?;
         if script_inputs.is_empty() {
             return Ok(());
         }
@@ -212,30 +210,37 @@ impl State {
         Ok(())
     }
 
-    /// Build script inputs from a Transaction.
+    /// Build script inputs from a Transaction and its raw MultiEraTx.
     ///
-    /// Uses the Transaction's redeemers, scripts_provided, and plutus_data
-    /// to construct the inputs needed for Phase 2 validation.
+    /// Uses the Transaction's redeemers and script_witnesses for script hashes/versions,
+    /// and extracts actual script bytes from the MultiEraTx witness set.
     fn build_script_inputs_from_tx(
         &self,
         tx: &Transaction,
+        multi_era_tx: &MultiEraTx,
     ) -> Result<Vec<OwnedScriptInput>, Box<TransactionValidationError>> {
         let mut inputs = Vec::new();
 
         // Build a map of script hash -> (script_bytes, plutus_version)
-        let scripts: std::collections::HashMap<ScriptHash, (Vec<u8>, PlutusVersion)> = tx
-            .scripts_provided
-            .iter()
-            .filter_map(|(hash, script)| {
-                let (bytes, version) = match script {
-                    ReferenceScript::PlutusV1(b) => (b.clone(), PlutusVersion::V1),
-                    ReferenceScript::PlutusV2(b) => (b.clone(), PlutusVersion::V2),
-                    ReferenceScript::PlutusV3(b) => (b.clone(), PlutusVersion::V3),
-                    ReferenceScript::Native(_) => return None,
-                };
-                Some((*hash, (bytes, version)))
-            })
-            .collect();
+        // Extract actual script bytes from the pallas transaction
+        let mut scripts: std::collections::HashMap<ScriptHash, (Vec<u8>, PlutusVersion)> =
+            std::collections::HashMap::new();
+
+        for script in multi_era_tx.plutus_v1_scripts() {
+            let script_bytes: &[u8] = script.as_ref();
+            let hash = acropolis_common::crypto::keyhash_224_tagged(1, script_bytes);
+            scripts.insert(hash, (script_bytes.to_vec(), PlutusVersion::V1));
+        }
+        for script in multi_era_tx.plutus_v2_scripts() {
+            let script_bytes: &[u8] = script.as_ref();
+            let hash = acropolis_common::crypto::keyhash_224_tagged(2, script_bytes);
+            scripts.insert(hash, (script_bytes.to_vec(), PlutusVersion::V2));
+        }
+        for script in multi_era_tx.plutus_v3_scripts() {
+            let script_bytes: &[u8] = script.as_ref();
+            let hash = acropolis_common::crypto::keyhash_224_tagged(3, script_bytes);
+            scripts.insert(hash, (script_bytes.to_vec(), PlutusVersion::V3));
+        }
 
         // Process each redeemer
         for redeemer in &tx.redeemers {
