@@ -103,8 +103,8 @@ fn default_cost_model_v3() -> Vec<i64> {
 
     // Set some basic costs to non-zero values
     // These are approximate values based on mainnet
-    for i in 0..cost_model.len() {
-        cost_model[i] = match i {
+    for (i, cost) in cost_model.iter_mut().enumerate() {
+        *cost = match i {
             // startup costs
             0..=10 => 100000,
             // memory costs
