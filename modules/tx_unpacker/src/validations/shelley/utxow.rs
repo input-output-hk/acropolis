@@ -96,9 +96,8 @@ pub fn validate_vkey_witnesses(
     Ok(())
 }
 
-/// TODO:
-/// Validate transaction's aux data
-/// https://github.com/input-output-hk/acropolis/issues/666
+/// Validate transaction's aux metadata
+/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/libs/cardano-ledger-core/src/Cardano/Ledger/Metadata.hs#L75
 pub fn validate_tx_aux_metadata(
     metadata: &Option<Metadata>,
 ) -> Result<(), Box<UTxOWValidationError>> {
