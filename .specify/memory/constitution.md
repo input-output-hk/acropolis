@@ -23,3 +23,4 @@
 ## 5. Testing
 - Prefer to follow a Test Driven Development (TDD) workflow
 - Produce integration tests that can be run in CI/CD to identify regressions in nightly builds
+- After updating code, run the associated unit tests to confirm correctness

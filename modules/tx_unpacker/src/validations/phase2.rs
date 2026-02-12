@@ -885,17 +885,17 @@ pub fn validate_transaction_phase2(
     })
 }
 
-/// Convert from acropolis_common ScriptType to uplc PlutusVersion.
+/// Convert from acropolis_common ScriptLang to uplc PlutusVersion.
 ///
 /// Returns None for native scripts (which don't need Phase 2 validation).
-pub fn script_type_to_plutus_version(
-    script_type: &acropolis_common::ScriptType,
+pub fn script_lang_to_plutus_version(
+    script_lang: &acropolis_common::script::ScriptLang,
 ) -> Option<PlutusVersion> {
-    match script_type {
-        acropolis_common::ScriptType::PlutusV1 => Some(PlutusVersion::V1),
-        acropolis_common::ScriptType::PlutusV2 => Some(PlutusVersion::V2),
-        acropolis_common::ScriptType::PlutusV3 => Some(PlutusVersion::V3),
-        acropolis_common::ScriptType::Native => None,
+    match script_lang {
+        acropolis_common::script::ScriptLang::PlutusV1 => Some(PlutusVersion::V1),
+        acropolis_common::script::ScriptLang::PlutusV2 => Some(PlutusVersion::V2),
+        acropolis_common::script::ScriptLang::PlutusV3 => Some(PlutusVersion::V3),
+        acropolis_common::script::ScriptLang::Native => None,
     }
 }
 

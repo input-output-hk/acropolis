@@ -135,6 +135,68 @@ Use an existing Conway transaction fixture from `tests/data/conway/` that contai
 cargo test -p acropolis_module_tx_unpacker phase2
 ```
 
+## TDD Approach
+
+### Workflow
+
+Following the constitution's TDD requirement, implementation proceeds in this cycle:
+
+1. **Write failing test** - Define expected behavior before implementation
+2. **Run test, observe red** - Confirm the test fails for the right reason
+3. **Write minimal code** - Implement just enough to pass the test
+4. **Run test, observe green** - Confirm the implementation works
+5. **Refactor** - Clean up while keeping tests green
+6. **Repeat** - Next test case
+
+### Test Data
+
+We need only two categories of test data:
+
+#### 1. Minimal Hand-Crafted Scripts (inline in tests)
+
+```rust
+// In phase2_test.rs - no external files needed
+const ALWAYS_SUCCEEDS: &[u8] = &[/* FLAT bytes for (program 1.0.0 (con unit ())) */];
+const ALWAYS_FAILS: &[u8] = &[/* FLAT bytes for (program 1.0.0 (error)) */];
+```
+
+Compile these once using `pluton` CLI and embed as byte arrays.
+
+#### 2. One Real Mainnet Transaction
+
+Use an existing Conway transaction fixture from `tests/data/conway/` that contains Plutus scripts. This validates end-to-end integration.
+
+### Test Implementation Order (TDD)
+
+**Phase 1: Core Evaluation (3 tests)**
+
+| # | Test | Implementation |
+|---|------|----------------|
+| 1 | `test_eval_always_succeeds` | Basic `evaluate_script()` function |
+| 2 | `test_eval_always_fails` | Handle `MachineError::ExplicitErrorTerm` |
+| 3 | `test_eval_budget_exceeded` | Handle `MachineError::OutOfExError` |
+
+**Phase 2: Argument Application (2 tests)**
+
+| # | Test | Implementation |
+|---|------|----------------|
+| 4 | `test_eval_spending_validator` | Apply 3 args: datum, redeemer, context |
+| 5 | `test_eval_minting_policy` | Apply 2 args: redeemer, context |
+
+**Phase 3: Integration (3 tests)**
+
+| # | Test | Implementation |
+|---|------|----------------|
+| 6 | `test_phase2_disabled_skips_scripts` | Config flag check in `state.rs` |
+| 7 | `test_phase2_enabled_validates_scripts` | Wire into validation flow |
+| 8 | `test_parallel_multi_script_block` | Use `rayon::par_iter()` for concurrency |
+
+### Running Tests
+
+```bash
+cargo test -p acropolis_module_tx_unpacker phase2
+```
+
 ## Complexity Tracking
 
 > No violations - complexity tracking not required.
