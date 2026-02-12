@@ -23,8 +23,8 @@ use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::state::State;
 mod crypto;
-mod state;
-mod validations;
+pub mod state;
+pub mod validations;
 
 #[cfg(test)]
 mod test_utils;
@@ -49,6 +49,7 @@ impl TxUnpacker {
         context: Arc<Context<Message>>,
         network_id: NetworkId,
         history: Arc<Mutex<StateHistory<State>>>,
+        phase2_enabled: bool,
         // publishers
         publish_utxo_deltas_topic: Option<String>,
         publish_asset_deltas_topic: Option<String>,
@@ -79,7 +80,10 @@ impl TxUnpacker {
         };
 
         loop {
-            let mut state = history.lock().await.get_or_init_with(State::new);
+            let mut state = history
+                .lock()
+                .await
+                .get_or_init_with(|| State::with_phase2_enabled(phase2_enabled));
             let mut current_block: Option<BlockInfo> = None;
 
             let Ok((_, message)) = txs_sub.read().await else {
@@ -425,6 +429,12 @@ impl TxUnpacker {
         let network_id: NetworkId =
             config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
 
+        // Phase 2 script validation (disabled by default)
+        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
+        if phase2_enabled {
+            info!("Phase 2 script validation enabled");
+        }
+
         // Initialize State
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "tx_unpacker",
@@ -437,6 +447,7 @@ impl TxUnpacker {
                 context_run,
                 network_id,
                 history,
+                phase2_enabled,
                 publish_utxo_deltas_topic,
                 publish_asset_deltas_topic,
                 publish_withdrawals_topic,

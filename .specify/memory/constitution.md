@@ -15,6 +15,11 @@
 - Idiomatic Rust: Use clippy suggestions.
 - Unsafe: Avoid if possible.
 - Error Handling: No `unwrap()`. Use `Result` and `?` operator.
+- No use of panic()
 
 ## 4. Documentation
 - All public types/functions must have doc comments.
+
+## 5. Testing
+- Prefer to follow a Test Driven Development (TDD) workflow
+- Produce integration tests that can be run in CI/CD to identify regressions in nightly builds

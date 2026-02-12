@@ -8,6 +8,7 @@ use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
 mod alonzo;
 mod babbage;
 mod conway;
+pub mod phase2;
 mod shelley;
 
 pub fn validate_tx(
