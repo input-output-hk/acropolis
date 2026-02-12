@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
@@ -89,9 +87,9 @@ pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
 pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
     match metadata {
         MultiEraMeta::AlonzoCompatible(m) => {
-            let mut metadata = HashMap::new();
+            let mut metadata = Metadata::default();
             for (label, datum) in m.iter() {
-                metadata.insert(*label, map_metadatum(datum));
+                metadata.as_mut().push((*label, map_metadatum(datum)));
             }
             Some(metadata)
         }

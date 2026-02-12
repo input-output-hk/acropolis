@@ -104,7 +104,7 @@ pub fn validate_tx_aux_metadata(
 ) -> Result<(), Box<UTxOWValidationError>> {
     match metadata.as_ref() {
         Some(metadata) => {
-            if metadata.values().all(validate_metadatum) {
+            if metadata.as_ref().iter().all(|(_, v)| validate_metadatum(v)) {
                 Ok(())
             } else {
                 Err(Box::new(UTxOWValidationError::InvalidMetadata {
