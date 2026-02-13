@@ -437,22 +437,29 @@ mod tests {
     use crate::chain_state::ChainState;
     use crate::network::PeerId;
 
-    fn hash(n: u8) -> BlockHash {
-        BlockHash::new([n; 32])
+    const PEER_1: PeerId = PeerId(1);
+    const PEER_2: PeerId = PeerId(2);
+
+    const GENESIS_HASH: BlockHash = BlockHash::new([0; 32]);
+    const BLOCK_HASH_A: BlockHash = BlockHash::new([1; 32]);
+    const BLOCK_HASH_B: BlockHash = BlockHash::new([2; 32]);
+
+    fn point(slot: u64, hash: BlockHash) -> Point {
+        Point::Specific(slot, hash.to_vec())
     }
 
     #[test]
     fn first_announcement_emits_offer() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
 
-        assert!(tracker.blocks.contains_key(&(100, hash(1))));
+        assert!(tracker.blocks.contains_key(&(100, BLOCK_HASH_A)));
         let events = tracker.take_events();
         assert!(matches!(
             &events[..],
             [ConsensusEvent::BlockOffered { slot: 100, hash, parent_hash }]
-                if *hash == self::hash(1) && *parent_hash == self::hash(0)
+                if *hash == BLOCK_HASH_A && *parent_hash == GENESIS_HASH
         ));
     }
 
@@ -460,13 +467,13 @@ mod tests {
     fn duplicate_announcement_emits_single_offer() {
         let mut tracker = BlockTracker::new();
 
-        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
-        tracker.handle_tip(PeerId(2), Point::Specific(100, hash(1).to_vec()));
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(2), 100, hash(1), hash(0));
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_A, GENESIS_HASH);
 
         assert_eq!(tracker.blocks.len(), 1);
-        assert_eq!(tracker.announcers(100, hash(1)).len(), 2);
+        assert_eq!(tracker.announcers(100, BLOCK_HASH_A).len(), 2);
         assert_eq!(tracker.take_events().len(), 1);
     }
 
@@ -474,8 +481,8 @@ mod tests {
     fn fork_at_same_slot_tracks_both_blocks() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(2), 100, hash(2), hash(0));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_B, GENESIS_HASH);
 
         assert_eq!(tracker.blocks.len(), 2);
         assert_eq!(tracker.take_events().len(), 2);
@@ -485,78 +492,73 @@ mod tests {
     fn block_fetched_removes_from_tracking() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(1), 101, hash(2), hash(1));
-        tracker.block_fetched(100, hash(1));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 101, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.block_fetched(100, BLOCK_HASH_A);
 
-        assert!(!tracker.blocks.contains_key(&(100, hash(1))));
-        assert!(tracker.blocks.contains_key(&(101, hash(2))));
+        assert!(!tracker.blocks.contains_key(&(100, BLOCK_HASH_A)));
+        assert!(tracker.blocks.contains_key(&(101, BLOCK_HASH_B)));
     }
 
     #[test]
     fn rollback_removes_peer_beyond_slot() {
         let mut tracker = BlockTracker::new();
 
-        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
-        tracker.handle_tip(PeerId(2), Point::Specific(200, hash(2).to_vec()));
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
-        tracker.track_announcement(PeerId(2), 200, hash(2), hash(1));
-        tracker.handle_rollback(PeerId(1), &Point::Specific(100, hash(1).to_vec()));
-        // Rollback also updates peer 1's tip
-        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
+        tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
+        tracker.handle_tip(PEER_2, point(200, BLOCK_HASH_B));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_2, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.handle_rollback(PEER_1, &point(100, BLOCK_HASH_A));
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
 
-        assert_eq!(tracker.announcers(100, hash(1)), vec![PeerId(1)]);
-        assert_eq!(tracker.announcers(200, hash(2)), vec![PeerId(2)]);
+        assert_eq!(tracker.announcers(100, BLOCK_HASH_A), vec![PEER_1]);
+        assert_eq!(tracker.announcers(200, BLOCK_HASH_B), vec![PEER_2]);
     }
 
     #[test]
     fn disconnect_removes_peer_from_all_blocks() {
         let mut tracker = BlockTracker::new();
 
-        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
-        tracker.handle_tip(PeerId(2), Point::Specific(200, hash(2).to_vec()));
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
-        tracker.track_announcement(PeerId(2), 200, hash(2), hash(1));
-        tracker.handle_disconnect(PeerId(1));
+        tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
+        tracker.handle_tip(PEER_2, point(200, BLOCK_HASH_B));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_2, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.handle_disconnect(PEER_1);
 
-        assert!(tracker.announcers(100, hash(1)).is_empty());
-        assert_eq!(tracker.announcers(200, hash(2)), vec![PeerId(2)]);
+        assert!(tracker.announcers(100, BLOCK_HASH_A).is_empty());
+        assert_eq!(tracker.announcers(200, BLOCK_HASH_B), vec![PEER_2]);
     }
 
     #[test]
     fn peer_without_tip_excluded_from_announcers() {
         let mut tracker = BlockTracker::new();
 
-        // Peer 1 has no tip set, peer 2 has a tip covering the block
-        tracker.handle_tip(PeerId(2), Point::Specific(100, hash(1).to_vec()));
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
-        tracker.track_announcement(PeerId(2), 100, hash(1), hash(0));
+        tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_A, GENESIS_HASH);
 
-        // Only peer 2 is returned — peer 1's tip is unknown
-        assert_eq!(tracker.announcers(100, hash(1)), vec![PeerId(2)]);
+        assert_eq!(tracker.announcers(100, BLOCK_HASH_A), vec![PEER_2]);
     }
 
     #[test]
     fn peer_with_stale_tip_excluded_from_announcers() {
         let mut tracker = BlockTracker::new();
 
-        tracker.handle_tip(PeerId(1), Point::Specific(200, hash(2).to_vec()));
-        tracker.track_announcement(PeerId(1), 200, hash(2), hash(1));
+        tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
+        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
 
-        // Peer's tip silently drops below the block's slot (no rollback event)
-        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
-
-        assert!(tracker.announcers(200, hash(2)).is_empty());
+        assert!(tracker.announcers(200, BLOCK_HASH_B).is_empty());
     }
 
     #[test]
     fn reset_clears_all_state() {
         let mut tracker = BlockTracker::new();
 
-        tracker.handle_tip(PeerId(1), Point::Specific(100, hash(1).to_vec()));
-        tracker.track_announcement(PeerId(1), 100, hash(1), hash(0));
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
         tracker.reset();
 
         assert!(tracker.blocks.is_empty());
@@ -569,22 +571,22 @@ mod tests {
         let mut handler = BlockFlowHandler::Direct {
             chain: ChainState::new(),
         };
-        handler.set_preferred_upstream(Some(PeerId(1)));
+        handler.set_preferred_upstream(Some(PEER_1));
 
         let header = Header {
-            hash: hash(1),
+            hash: BLOCK_HASH_A,
             slot: 100,
             number: 100,
             bytes: vec![],
             era: acropolis_common::Era::Conway,
-            parent_hash: Some(hash(0)),
+            parent_hash: Some(GENESIS_HASH),
         };
 
-        let result = handler.handle_roll_forward(PeerId(1), header.clone());
-        assert_eq!(result, Some(vec![PeerId(1)]));
+        let result = handler.handle_roll_forward(PEER_1, header.clone());
+        assert_eq!(result, Some(vec![PEER_1]));
 
-        let result = handler.handle_roll_forward(PeerId(2), header);
-        assert_eq!(result, Some(vec![PeerId(1), PeerId(2)]));
+        let result = handler.handle_roll_forward(PEER_2, header);
+        assert_eq!(result, Some(vec![PEER_1, PEER_2]));
     }
 
     #[test]
@@ -594,19 +596,19 @@ mod tests {
         };
 
         let header = Header {
-            hash: hash(1),
+            hash: BLOCK_HASH_A,
             slot: 100,
             number: 100,
             bytes: vec![],
             era: acropolis_common::Era::Conway,
-            parent_hash: Some(hash(0)),
+            parent_hash: Some(GENESIS_HASH),
         };
 
-        handler.handle_roll_forward(PeerId(1), header.clone());
-        handler.handle_roll_forward(PeerId(2), header);
+        handler.handle_roll_forward(PEER_1, header.clone());
+        handler.handle_roll_forward(PEER_2, header);
 
-        if let Some(announcers) = handler.block_announcers(100, hash(1)) {
-            assert_eq!(announcers, vec![PeerId(1), PeerId(2)]);
+        if let Some(announcers) = handler.block_announcers(100, BLOCK_HASH_A) {
+            assert_eq!(announcers, vec![PEER_1, PEER_2]);
         }
     }
 }
