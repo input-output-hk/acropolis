@@ -43,6 +43,10 @@ const SANCHONET_SHELLEY_GENESIS: &[u8] =
     include_bytes!("../downloads/sanchonet-shelley-genesis.json");
 const SANCHONET_SHELLEY_START_EPOCH: u64 = 0;
 
+const MAINNET_FIRST_BLOCK_ERA: Era = Era::Byron;
+const PREVIEW_FIRST_BLOCK_ERA: Era = Era::Shelley;
+const SANCHONET_FIRST_BLOCK_ERA: Era = Era::Conway;
+
 // Initial reserves (=maximum ever Lovelace supply)
 const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
 
@@ -88,22 +92,25 @@ impl GenesisBootstrapper {
                     .get_string("startup.network-name")
                     .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
-                let (byron_genesis, shelley_genesis, shelley_start_epoch) =
+                let (byron_genesis, shelley_genesis, shelley_start_epoch, first_block_era) =
                     match network_name.as_ref() {
                         "mainnet" => (
                             MAINNET_BYRON_GENESIS,
                             MAINNET_SHELLEY_GENESIS,
                             MAINNET_SHELLEY_START_EPOCH,
+                            MAINNET_FIRST_BLOCK_ERA,
                         ),
                         "preview" => (
                             PREVIEW_BYRON_GENESIS,
                             PREVIEW_SHELLEY_GENESIS,
                             PREVIEW_SHELLEY_START_EPOCH,
+                            PREVIEW_FIRST_BLOCK_ERA,
                         ),
                         "sanchonet" => (
                             SANCHONET_BYRON_GENESIS,
                             SANCHONET_SHELLEY_GENESIS,
                             SANCHONET_SHELLEY_START_EPOCH,
+                            SANCHONET_FIRST_BLOCK_ERA,
                         ),
                         _ => {
                             error!("Cannot find genesis for {network_name}");
@@ -131,7 +138,7 @@ impl GenesisBootstrapper {
                     new_epoch: false,
                     is_new_era: true,
                     timestamp: byron_genesis.start_time,
-                    era: Era::Byron,
+                    era: first_block_era,
                     tip_slot: None,
                 };
 
