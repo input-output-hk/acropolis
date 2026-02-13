@@ -1,0 +1,19 @@
+services:
+  omnibus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app/processes/omnibus
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    command: ["--config", "${OMNIBUS_CONFIG:-omnibus-preview.toml}"]
+    ports:
+      - "${OMNIBUS_REST_PORT:-4340}:4340"
+      - "${OMNIBUS_MCP_PORT:-4341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR:-./modules/mithril_snapshot_fetcher/downloads}:/app/processes/omnibus/downloads
+      - omnibus_spdd:/app/processes/omnibus/fjall-spdd
+    restart: unless-stopped
+
+volumes:
+  omnibus_spdd:

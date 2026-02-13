@@ -28,3 +28,22 @@ systems this can be done with the ulimit command:
 ```
 $ ulimit -n 4096
 ```
+
+## Docker Compose
+
+Build and run with preview config (default):
+
+```shell
+docker compose up --build
+```
+
+Choose another omnibus config at runtime:
+
+```shell
+OMNIBUS_CONFIG=omnibus.toml docker compose up --build
+OMNIBUS_CONFIG=omnibus-preview.toml docker compose up --build
+```
+
+Notes:
+- Relative paths in config resolve from `/app/processes/omnibus` in the container.
+- Mithril downloads persist in the named volume `omnibus_downloads`.
