@@ -368,9 +368,18 @@ impl MithrilSnapshotFetcher {
                         // Check profile constraint
                         #[cfg(not(target_env = "msvc"))]
                         if profile_constraint.should_pause(&block_info) {
-                            info!("Triggering profile dump...");
-                            let _ =
-                                tikv_jemalloc_ctl::raw::write_str(b"prof.dump\0", b"jeprof.out\0");
+                            let filename = format!(
+                                "jeprof-{}.out",
+                                profile_constraint.get_filename_part(&block_info)
+                            );
+                            info!("Dumping jemalloc profile to {} ...", filename);
+                            let cfn = std::ffi::CString::new(filename)?;
+                            unsafe {
+                                let _ = tikv_jemalloc_ctl::raw::write(
+                                    b"prof.dump\0",
+                                    cfn.as_ptr() as *const _,
+                                );
+                            }
                         }
 
                         // Check pause constraint

@@ -529,6 +529,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_stats"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "tikv-jemalloc-ctl",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_tx_submitter"
 version = "0.1.0"
 dependencies = [
@@ -685,6 +697,7 @@ dependencies = [
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
+ "acropolis_module_stats",
  "acropolis_module_tx_unpacker",
  "acropolis_module_utxo_state",
  "anyhow",
