@@ -49,6 +49,7 @@ const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "downloads";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 
 /// Mithril feedback receiver
@@ -118,6 +119,18 @@ impl FeedbackReceiver for FeedbackLogger {
 pub struct MithrilSnapshotFetcher;
 
 impl MithrilSnapshotFetcher {
+    /// Resolve the download directory, namespaced by network to avoid cross-network collisions.
+    /// Uses `downloads/{network-name}` by default (e.g. `downloads/mainnet`, `downloads/preview`).
+    /// Can be overridden with the `directory` config key.
+    fn resolve_directory(config: &Config) -> String {
+        config.get_string("directory").unwrap_or_else(|_| {
+            let network = config
+                .get_string("startup.network-name")
+                .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+            format!("{DEFAULT_DIRECTORY}/{network}")
+        })
+    }
+
     fn load_snapshot_metadata(path: &Path) -> Result<Snapshot> {
         let snapshot_metadata_file = File::open(path)?;
         let snapshot_metadata = serde_json::from_reader::<_, Snapshot>(snapshot_metadata_file)?;
@@ -181,7 +194,7 @@ impl MithrilSnapshotFetcher {
             config.get_string("aggregator-url").unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
         let genesis_key =
             config.get_string("genesis-key").unwrap_or(DEFAULT_GENESIS_KEY.to_string());
-        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let directory = Self::resolve_directory(&config);
         let snapshot_metadata_path = Path::new(&directory).join(SNAPSHOT_METADATA_FILE);
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
@@ -254,7 +267,7 @@ impl MithrilSnapshotFetcher {
             .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
         info!("Publishing completion on '{sync_command_topic}'");
 
-        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let directory = Self::resolve_directory(&config);
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
         let stop_constraint =
