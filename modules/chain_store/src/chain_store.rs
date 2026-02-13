@@ -193,13 +193,13 @@ impl ChainStore {
             if let Some(existing) = store.get_block_by_number(block_info.number)? {
                 if existing.bytes != raw_block.body {
                     return Err(anyhow::anyhow!(
-                        "Stored block {} does not match. Set clear-store to true",
+                        "Stored block {} does not match. Set clear-on-start to true",
                         block_info.number
                     ));
                 }
             } else {
                 return Err(anyhow::anyhow!(
-                    "Unable to retrieve block {}. Set clear-store to true",
+                    "Unable to retrieve block {}. Set clear-on-start to true",
                     block_info.number
                 ));
             }
