@@ -657,7 +657,7 @@ impl State {
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley {
+            if block.era == Era::Shelley && block.status != BlockStatus::Bootstrap {
                 if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
