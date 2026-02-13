@@ -63,30 +63,11 @@ impl FjallStore {
     }
 
     fn network_scope_from_config(config: &Config) -> String {
-        let network = config
+        config
             .get_string("startup.network-name")
             .or_else(|_| config.get_string("network-name"))
             .or_else(|_| config.get_string("network-id"))
-            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string());
-
-        let normalized = network
-            .trim()
-            .to_ascii_lowercase()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-
-        if normalized.is_empty() {
-            DEFAULT_NETWORK_NAME.to_string()
-        } else {
-            normalized
-        }
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
     }
 }
 
