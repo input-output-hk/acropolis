@@ -262,7 +262,7 @@ impl DRepState {
                 history.lock().await.commit(block_info.number, state);
             }
 
-            ctx.publish().await;
+            ctx.publish("drep_state").await;
         }
     }
 
