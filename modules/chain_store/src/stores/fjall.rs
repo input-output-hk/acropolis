@@ -41,15 +41,9 @@ impl FjallStore {
         let txs = FjallTXStore::new(&database)?;
 
         let last_persisted_block = if !clear {
-            blocks
-                .block_hashes_by_number
-                .iter()
-                .next_back()
-                .and_then(|res| {
-                    res.key()
-                        .ok()
-                        .and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-                })
+            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
+                res.key().ok().and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
+            })
         } else {
             None
         };
