@@ -234,7 +234,12 @@ impl BlockVrfValidator {
                         }
 
                         validation_outcomes
-                            .publish(&context, &publish_vrf_validation_topic, block_info)
+                            .publish(
+                                &context,
+                                "block_vrf_validator",
+                                &publish_vrf_validation_topic,
+                                block_info,
+                            )
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
                     }

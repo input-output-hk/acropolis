@@ -854,12 +854,9 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
-    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+    pub fn print_errors(&mut self, module: &str, block: Option<&BlockInfo>) {
         if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+            error!("{module}: block {block:?}, outcomes {:?}", self.outcomes);
             self.outcomes.clear();
         }
     }
@@ -867,6 +864,7 @@ impl ValidationOutcomes {
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
+        module: &str,
         topic_field: &str,
         block: &BlockInfo,
     ) -> anyhow::Result<()> {
@@ -882,7 +880,7 @@ impl ValidationOutcomes {
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
         } else {
-            self.print_errors(Some(block));
+            self.print_errors(module, Some(block));
         }
         self.outcomes.clear();
         Ok(())

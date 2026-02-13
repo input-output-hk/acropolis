@@ -257,7 +257,7 @@ impl EpochsState {
                 history.lock().await.commit(block_info.number, state);
             }
 
-            ctx.publish().await;
+            ctx.publish("epochs_state").await;
         }
     }
 

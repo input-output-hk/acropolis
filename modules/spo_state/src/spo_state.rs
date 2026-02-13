@@ -135,13 +135,15 @@ impl SPOStateImpl {
 
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
-            if let Err(e) =
-                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            if let Err(e) = self
+                .validation
+                .publish(&self.context, "spo_state", &self.validation_topic, blk)
+                .await
             {
                 error!("Publish failed: {:?}", e);
             }
         } else {
-            self.validation.print_errors(None);
+            self.validation.print_errors("spo_state", None);
         }
     }
 
