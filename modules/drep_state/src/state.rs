@@ -360,6 +360,11 @@ impl State {
         let vld = ValidationOutcomes::new();
         let cfg = self.config;
 
+        // Nothing to process for pre-Conway blocks (empty voting procedures)
+        if total_voting_procedures.is_empty() {
+            return Ok(vld);
+        }
+
         let drep_activity = drep_activity.ok_or_else(|| {
             anyhow!("Missing Conway parameter d_rep_activity (required to compute drepExpiry)")
         })?;

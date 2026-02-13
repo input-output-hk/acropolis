@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
     protocol_params::{Nonce, Nonces, PraosParams},
-    BlockHash, BlockInfo, PoolId,
+    BlockHash, BlockInfo, Era, PoolId,
 };
 use anyhow::{bail, Result};
 use imbl::HashMap;
@@ -133,7 +133,9 @@ impl State {
         let new_epoch = block_info.new_epoch;
 
         // update nonces starting from Shelley Era
-        if block_info.epoch >= genesis.shelley_epoch {
+        // On networks like preview where shelley_epoch=0, Byron-era blocks still exist
+        // briefly at startup and must be skipped since they have no VRF nonces.
+        if block_info.epoch >= genesis.shelley_epoch && block_info.era != Era::Byron {
             let Some(praos_params) = self.praos_params.as_ref() else {
                 bail!("Praos Param is not set");
             };

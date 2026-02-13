@@ -161,8 +161,14 @@ impl DRepState {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
+        // Consume and apply initial protocol parameters (only needed for genesis bootstrap)
+        // On networks like preview where Conway is active early, d_rep_activity must
+        // be set before processing certificates that require it for expiry computation.
         if !is_bootstrap_mode {
-            subs.params.read_skip_rollbacks().await?;
+            let (_, initial_params) = subs.params.read_skip_rollbacks().await?;
+            let mut state = history.lock().await.get_or_init_with(|| State::new(storage_config));
+            state.update_protocol_params(&initial_params.params)?;
+            history.lock().await.commit(0, state);
         }
 
         // Main loop of synchronised messages
