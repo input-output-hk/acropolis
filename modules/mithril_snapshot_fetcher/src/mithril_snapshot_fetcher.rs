@@ -48,7 +48,7 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
-const DEFAULT_DIRECTORY: &str = "downloads";
+const DEFAULT_DIRECTORY: &str = "../../modules/mithril_snapshot_fetcher/downloads";
 const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 
@@ -120,7 +120,8 @@ pub struct MithrilSnapshotFetcher;
 
 impl MithrilSnapshotFetcher {
     /// Resolve the download directory, namespaced by network to avoid cross-network collisions.
-    /// Uses `downloads/{network-name}` by default (e.g. `downloads/mainnet`, `downloads/preview`).
+    /// Uses `../../modules/mithril_snapshot_fetcher/downloads/{network-name}` by default
+    /// (e.g. `.../downloads/mainnet`, `.../downloads/preview`).
     /// Can be overridden with the `directory` config key.
     fn resolve_directory(config: &Config) -> String {
         config.get_string("directory").unwrap_or_else(|_| {
