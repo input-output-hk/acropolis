@@ -22,8 +22,8 @@ modules/accounts_state/test-data/**
 **/db/**
 **/*.db
 **/*.sqlite
-**/fjall-*/
-**/fjall*/
+**/fjall-*/**
+**/fjall*/**
 
 # Local tooling/metadata
 .git/**
