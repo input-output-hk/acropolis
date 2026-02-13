@@ -146,6 +146,7 @@ store-drdd = false
 # Listen for DRep and SPO distributions
 stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
+verification-output-file = "verification.csv"
 
 [module.parameters-state]
 # Listen for governance actions
