@@ -132,20 +132,27 @@ impl State {
     ) -> Result<()> {
         let new_epoch = block_info.new_epoch;
 
-        // update nonces starting from Shelley Era
-        // On networks like preview where shelley_epoch=0, Byron-era blocks still exist
-        // briefly at startup and must be skipped since they have no VRF nonces.
-        if block_info.epoch >= genesis.shelley_epoch && block_info.era != Era::Byron {
+        // Skip blocks that don't participate in nonce evolution:
+        // - Genesis block (number 0): no parent hash or VRF output to evolve from
+        // - Pre-Shelley epochs: nonce evolution starts at shelley_epoch
+        // - Byron-era blocks: no VRF nonces (relevant on preview where shelley_epoch=0)
+        if block_info.number > 0
+            && block_info.epoch >= genesis.shelley_epoch
+            && block_info.era != Era::Byron
+        {
             let Some(praos_params) = self.praos_params.as_ref() else {
                 bail!("Praos Param is not set");
             };
 
-            // if Shelley Era's first epoch
-            if new_epoch && block_info.epoch == genesis.shelley_epoch {
+            // Initialize nonces from genesis if not yet set. This covers:
+            // - The normal case: first block of shelley_epoch with new_epoch=true
+            // - Preview-like networks: shelley_epoch=0, module starts mid-epoch
+            //   so new_epoch is false but nonces still need initialization.
+            if self.nonces.is_none() {
                 self.nonces = Some(Nonces::shelley_genesis_nonces(genesis));
             }
 
-            // current nonces must be set
+            // current nonces must be set (guaranteed by the block above)
             let Some(current_nonces) = self.nonces.as_ref() else {
                 bail!("Current Nonces are not set after Shelley Era");
             };

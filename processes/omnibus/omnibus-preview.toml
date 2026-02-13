@@ -157,9 +157,9 @@ store-addresses = false
 # Enables /assets/{asset} endpoint (requires store-assets to be enabled)
 index-by-policy = false
 
-[module.chain-store]
+#[module.chain-store]
 # Clear state on start up (default true)
-clear-on-start = true
+#clear-on-start = true
 
 [module.address-state]
 # Clear state on start up (default true)

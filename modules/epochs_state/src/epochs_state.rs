@@ -156,9 +156,11 @@ impl EpochsState {
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis.values).await?;
 
-        // Consume and apply initial protocol parameters and txs (only needed for genesis bootstrap)
-        // On networks like preview where shelley_epoch=0, praos_params must be set before
-        // processing the very first block, since evolve_nonces requires them immediately.
+        // Consume initial protocol parameters and block txs published at epoch 0.
+        // These messages are published when the first new_epoch block flows through the
+        // pipeline (governance_state → parameters_state, utxo_state → block_txs).
+        // Without consuming them here, they desync the readers in the main loop
+        // (epoch N boundary reads epoch N-1 params instead of epoch N params).
         if !is_snapshot_mode {
             let (_, initial_params) = params_reader.read_skip_rollbacks().await?;
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
