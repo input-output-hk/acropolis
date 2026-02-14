@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tracing::info;
 
 const DEFAULT_DATABASE_PATH: &str = "sled-immutable-utxos";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 pub struct SledImmutableUTXOStore {
     /// Sled database instance
@@ -21,7 +22,12 @@ pub struct SledImmutableUTXOStore {
 
 impl SledImmutableUTXOStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or_else(|_| {
+            format!(
+                "{DEFAULT_DATABASE_PATH}-{}",
+                Self::network_scope_from_config(config.as_ref())
+            )
+        });
         info!("Storing immutable UTXOs with Sled (sync) on disk ({path})");
 
         let path = Path::new(&path);
@@ -33,6 +39,14 @@ impl SledImmutableUTXOStore {
 
         let db = sled::open(path)?;
         Ok(Self { db })
+    }
+
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
     }
 }
 

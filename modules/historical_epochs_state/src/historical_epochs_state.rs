@@ -35,6 +35,7 @@ const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
 
 const DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH: (&str, &str) = ("db-path", "./fjall-epochs");
 const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Historical Epochs State module
 #[module(
@@ -167,6 +168,24 @@ impl HistoricalEpochsState {
         }
     }
 
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
+    }
+
+    fn resolve_db_path(config: &Config) -> String {
+        config.get_string(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.0).unwrap_or_else(|_| {
+            format!(
+                "{}-{}",
+                DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.1,
+                Self::network_scope_from_config(config)
+            )
+        })
+    }
+
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
@@ -195,17 +214,15 @@ impl HistoricalEpochsState {
         info!("Creating query handler on '{historical_epochs_query_topic}'");
 
         // Configuration
-        let config = HistoricalEpochsStateConfig {
-            db_path: config
-                .get_string(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.0)
-                .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.1.to_string()),
+        let storage_config = HistoricalEpochsStateConfig {
+            db_path: Self::resolve_db_path(config.as_ref()),
             clear_on_start: config
                 .get_bool(DEFAULT_CLEAR_ON_START.0)
                 .unwrap_or(DEFAULT_CLEAR_ON_START.1),
         };
 
         // Initalize state
-        let state = State::new(&config)?;
+        let state = State::new(&storage_config)?;
         let state_mutex = Arc::new(Mutex::new(state));
         let state_query = state_mutex.clone();
 

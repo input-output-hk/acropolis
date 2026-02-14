@@ -25,11 +25,17 @@ pub struct FjallImmutableUTXOStore {
 const DEFAULT_FLUSH_EVERY: i64 = 1000;
 const DEFAULT_DATABASE_PATH: &str = "fjall-immutable-utxos";
 const KEYSPACE_NAME: &str = "utxos";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 impl FjallImmutableUTXOStore {
     /// Create a new Fjall-backed UTXO store with default flush threshold (1000)
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or_else(|_| {
+            format!(
+                "{DEFAULT_DATABASE_PATH}-{}",
+                Self::network_scope_from_config(config.as_ref())
+            )
+        });
         info!("Storing immutable UTXOs with Fjall (sync) on disk ({path})");
         let path = Path::new(&path);
 
@@ -49,6 +55,14 @@ impl FjallImmutableUTXOStore {
             write_counter: AtomicUsize::new(0),
             flush_every: AtomicUsize::new(flush_every as usize),
         })
+    }
+
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
     }
 
     /// Check if a flush is needed

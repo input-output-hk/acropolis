@@ -39,6 +39,7 @@ const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
 const DEFAULT_STORE_INFO: (&str, bool) = ("store-info", false);
 const DEFAULT_STORE_TOTALS: (&str, bool) = ("store-totals", false);
 const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Address State module
 #[module(
@@ -49,6 +50,24 @@ const DEFAULT_STORE_TRANSACTIONS: (&str, bool) = ("store-transactions", false);
 pub struct AddressState;
 
 impl AddressState {
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
+    }
+
+    fn resolve_db_path(config: &Config) -> String {
+        config.get_string(DEFAULT_ADDRESS_DB_PATH.0).unwrap_or_else(|_| {
+            format!(
+                "{}-{}",
+                DEFAULT_ADDRESS_DB_PATH.1,
+                Self::network_scope_from_config(config)
+            )
+        })
+    }
+
     async fn run(
         state_mutex: Arc<Mutex<State>>,
         mut address_deltas_subscription: Box<dyn Subscription<Message>>,
@@ -183,7 +202,7 @@ impl AddressState {
 
         // Get configuration flags and query topic
         let storage_config = AddressStorageConfig {
-            db_path: get_string_flag(&config, DEFAULT_ADDRESS_DB_PATH),
+            db_path: Self::resolve_db_path(config.as_ref()),
             clear_on_start: get_bool_flag(&config, DEFAULT_CLEAR_ON_START),
             skip_until: None,
             store_info: get_bool_flag(&config, DEFAULT_STORE_INFO),
