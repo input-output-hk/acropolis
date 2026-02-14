@@ -47,6 +47,7 @@ const DEFAULT_STORE_MIR_HISTORY: (&str, bool) = ("store-mir-history", false);
 const DEFAULT_STORE_WITHDRAWAL_HISTORY: (&str, bool) = ("store-withdrawal-history", false);
 const DEFAULT_STORE_ADDRESSES: (&str, bool) = ("store-addresses", false);
 const DEFAULT_STORE_TX_COUNT: (&str, bool) = ("store-tx-count", false);
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Historical Accounts State module
 #[module(
@@ -57,6 +58,24 @@ const DEFAULT_STORE_TX_COUNT: (&str, bool) = ("store-tx-count", false);
 pub struct HistoricalAccountsState;
 
 impl HistoricalAccountsState {
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
+    }
+
+    fn resolve_db_path(config: &Config) -> String {
+        config.get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0).unwrap_or_else(|_| {
+            format!(
+                "{}-{}",
+                DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1,
+                Self::network_scope_from_config(config)
+            )
+        })
+    }
+
     /// Async run loop
     async fn run(
         state_mutex: Arc<Mutex<State>>,
@@ -269,9 +288,7 @@ impl HistoricalAccountsState {
         );
 
         let storage_config = HistoricalAccountsConfig {
-            db_path: config
-                .get_string(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.0)
-                .unwrap_or(DEFAULT_HISTORICAL_ACCOUNTS_DB_PATH.1.to_string()),
+            db_path: Self::resolve_db_path(config.as_ref()),
             clear_on_start: config
                 .get_bool(DEFAULT_CLEAR_ON_START.0)
                 .unwrap_or(DEFAULT_CLEAR_ON_START.1),

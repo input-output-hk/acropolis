@@ -73,6 +73,7 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 const DEFAULT_SPDD_DB_PATH: (&str, &str) = ("spdd-db-path", "./fjall-spdd");
 const DEFAULT_SPDD_RETENTION_EPOCHS: (&str, u64) = ("spdd-retention-epochs", 0);
 const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Accounts State module
 #[module(
@@ -83,6 +84,24 @@ const DEFAULT_SPDD_CLEAR_ON_START: (&str, bool) = ("spdd-clear-on-start", true);
 pub struct AccountsState;
 
 impl AccountsState {
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
+    }
+
+    fn resolve_spdd_db_path(config: &Config) -> String {
+        config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or_else(|_| {
+            format!(
+                "{}-{}",
+                DEFAULT_SPDD_DB_PATH.1,
+                Self::network_scope_from_config(config)
+            )
+        })
+    }
+
     /// Handle bootstrap message from snapshot
     fn handle_bootstrap(state: &mut State, accounts_data: AccountsBootstrapMessage) -> Result<()> {
         let epoch = accounts_data.epoch;
@@ -687,8 +706,7 @@ impl AccountsState {
         info!("Validation outcomes are to be published on '{validation_outcomes_topic}'");
 
         // SPDD configs
-        let spdd_db_path =
-            config.get_string(DEFAULT_SPDD_DB_PATH.0).unwrap_or(DEFAULT_SPDD_DB_PATH.1.to_string());
+        let spdd_db_path = Self::resolve_spdd_db_path(config.as_ref());
         info!("SPDD database path: {spdd_db_path}");
         let spdd_retention_epochs = config
             .get_int(DEFAULT_SPDD_RETENTION_EPOCHS.0)
