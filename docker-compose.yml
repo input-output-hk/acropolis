@@ -11,9 +11,10 @@ services:
       - "${OMNIBUS_REST_PORT:-4340}:4340"
       - "${OMNIBUS_MCP_PORT:-4341}:4341"
     volumes:
-      - ${MITHRIL_DOWNLOADS_DIR:-./modules/mithril_snapshot_fetcher/downloads}:/app/processes/omnibus/downloads
+      - ${MITHRIL_DOWNLOADS_DIR:-omnibus_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
       - omnibus_spdd:/app/processes/omnibus/fjall-spdd
     restart: unless-stopped
 
 volumes:
   omnibus_spdd:
+  omnibus_downloads:

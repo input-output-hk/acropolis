@@ -18,6 +18,7 @@
 modules/mithril_snapshot_fetcher/downloads/**
 processes/omnibus/downloads/**
 modules/accounts_state/test-data/**
+!modules/accounts_state/test-data/pots.mainnet.csv
 **/target/**
 **/db/**
 **/*.db
