@@ -16,7 +16,18 @@ node-addresses = [
 # - "origin": sync from the very start of the chain
 # - "tip": sync from the very end of the chain
 # - "cache": replay messages from a local filesystem cache, then sync from the point right after that cache.
-# - "dynamic": awaits a sync command to begin fetching blocks, can change sync point at runtime. 
+# - "dynamic": awaits a sync command to begin fetching blocks, can change sync point at runtime.
 sync-point = "dynamic"
 # The cache dir to use when sync-point is "cache"
 cache-dir = "upstream-cache"
+
+# Block flow mode determines how blocks are synchronized:
+# - direct: blocks are auto-fetched as announced, peer-network-interface handles the full flow.
+# - consensus: block headers are published as offers and are only fetched when consensus sends back a BlockWanted message.
+block-flow-mode = "direct"
+
+# The consensus module subscribes to this to receive block announcements
+consensus-topic = "cardano.consensus.offers"
+
+# The consensus module publishes to this to request specific blocks be fetched
+block-wanted-topic = "cardano.consensus.wants"
