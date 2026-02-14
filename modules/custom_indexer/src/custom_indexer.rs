@@ -7,11 +7,12 @@
 pub mod chain_index;
 mod configuration;
 pub mod cursor_store;
+pub mod grpc_server;
 mod index_actor;
 mod utils;
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     sync::Arc,
 };
 
@@ -20,18 +21,97 @@ use anyhow::{bail, Result};
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateTransitionMessage},
     params::SECURITY_PARAMETER_K,
-    Point,
+    BlockHash, BlockInfo, Point,
 };
 use caryatid_sdk::{async_trait, Context, Module, Subscription};
 use config::Config;
 use futures::future::join_all;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use crate::{
     chain_index::ChainIndex, configuration::CustomIndexerConfig, cursor_store::CursorStore,
     index_actor::IndexActor,
 };
+
+const EVENT_CHANNEL_CAPACITY: usize = 256;
+
+/// A chain event emitted by the indexer after processing a block or rollback.
+#[derive(Clone, Debug)]
+pub enum ChainEvent {
+    RollForward { block: Arc<BlockInfo>, tx_count: u32 },
+    RollBack(Point),
+}
+
+/// Stored block metadata, kept in memory for recent blocks.
+#[derive(Clone, Debug)]
+pub struct BlockRecord {
+    pub block_number: u64,
+    pub hash: BlockHash,
+    pub epoch: u64,
+    pub slot: u64,
+    pub timestamp: u64,
+    pub tx_count: u32,
+}
+
+/// In-memory block index, keyed by slot for efficient rollback.
+/// Also provides hash-based lookup.
+#[derive(Default)]
+struct BlockIndex {
+    /// slot → BlockRecord (ordered for efficient rollback truncation)
+    by_slot: BTreeMap<u64, BlockRecord>,
+    /// hash → slot (reverse index for hash lookups)
+    hash_to_slot: HashMap<BlockHash, u64>,
+}
+
+impl BlockIndex {
+    fn insert(&mut self, record: BlockRecord) {
+        self.hash_to_slot.insert(record.hash, record.slot);
+        self.by_slot.insert(record.slot, record);
+    }
+
+    fn rollback_to(&mut self, slot: u64) {
+        let to_remove: Vec<u64> = self.by_slot.range((slot + 1)..).map(|(s, _)| *s).collect();
+        for s in to_remove {
+            if let Some(record) = self.by_slot.remove(&s) {
+                self.hash_to_slot.remove(&record.hash);
+            }
+        }
+    }
+
+    fn get_by_hash(&self, hash: &BlockHash) -> Option<&BlockRecord> {
+        let slot = self.hash_to_slot.get(hash)?;
+        self.by_slot.get(slot)
+    }
+}
+
+/// Read-only handle to the indexer's live state.
+///
+/// Passed to the gRPC server (or any other consumer) so it can query the
+/// current tip and subscribe to chain events without owning a separate copy.
+#[derive(Clone)]
+pub struct IndexerHandle {
+    tip: Arc<RwLock<Option<Point>>>,
+    events_tx: broadcast::Sender<ChainEvent>,
+    blocks: Arc<RwLock<BlockIndex>>,
+}
+
+impl IndexerHandle {
+    /// Read the current chain tip.
+    pub async fn tip(&self) -> Option<Point> {
+        self.tip.read().await.clone()
+    }
+
+    /// Subscribe to chain events. Each caller gets its own receiver.
+    pub fn subscribe(&self) -> broadcast::Receiver<ChainEvent> {
+        self.events_tx.subscribe()
+    }
+
+    /// Look up block metadata by hash.
+    pub async fn get_block_by_hash(&self, hash: &BlockHash) -> Option<BlockRecord> {
+        self.blocks.read().await.get_by_hash(hash).cloned()
+    }
+}
 
 struct IndexConfig {
     index: Box<dyn ChainIndex>,
@@ -42,6 +122,9 @@ struct IndexConfig {
 pub struct CustomIndexer<CS: CursorStore> {
     indexes: Arc<Mutex<HashMap<String, IndexConfig>>>,
     cursor_store: Arc<CS>,
+    tip: Arc<RwLock<Option<Point>>>,
+    events_tx: broadcast::Sender<ChainEvent>,
+    blocks: Arc<RwLock<BlockIndex>>,
 }
 
 impl<CS: CursorStore> Clone for CustomIndexer<CS> {
@@ -49,15 +132,34 @@ impl<CS: CursorStore> Clone for CustomIndexer<CS> {
         Self {
             indexes: self.indexes.clone(),
             cursor_store: self.cursor_store.clone(),
+            tip: self.tip.clone(),
+            events_tx: self.events_tx.clone(),
+            blocks: self.blocks.clone(),
         }
     }
 }
 
 impl<CS: CursorStore> CustomIndexer<CS> {
     pub fn new(cursor_store: CS) -> Self {
+        let (events_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             indexes: Arc::new(Mutex::new(HashMap::new())),
             cursor_store: Arc::new(cursor_store),
+            tip: Arc::new(RwLock::new(None)),
+            events_tx,
+            blocks: Arc::new(RwLock::new(BlockIndex::default())),
+        }
+    }
+
+    /// Return a read-only handle to the indexer's live state.
+    ///
+    /// Pass this to [`grpc_server::start_grpc_server`](crate::grpc_server::start_grpc_server)
+    /// or any other consumer that needs the current tip and event stream.
+    pub fn handle(&self) -> IndexerHandle {
+        IndexerHandle {
+            tip: self.tip.clone(),
+            events_tx: self.events_tx.clone(),
+            blocks: self.blocks.clone(),
         }
     }
 
@@ -168,6 +270,22 @@ impl<CS: CursorStore> CustomIndexer<CS> {
                         actor.update_cursor(cursor);
                     }
                     self.cursor_store.save(&cursors).await?;
+
+                    let tx_count = txs_msg.txs.len() as u32;
+                    let point = Point::Specific { hash: block.hash, slot: block.slot };
+                    *self.tip.write().await = Some(point);
+                    self.blocks.write().await.insert(BlockRecord {
+                        block_number: block.number,
+                        hash: block.hash,
+                        epoch: block.epoch,
+                        slot: block.slot,
+                        timestamp: block.timestamp,
+                        tx_count,
+                    });
+                    let _ = self.events_tx.send(ChainEvent::RollForward {
+                        block,
+                        tx_count,
+                    });
                 }
                 Message::Cardano((
                     _,
@@ -180,6 +298,10 @@ impl<CS: CursorStore> CustomIndexer<CS> {
                         actor.update_cursor(cursor);
                     }
                     self.cursor_store.save(&cursors).await?;
+
+                    *self.tip.write().await = Some(point.clone());
+                    self.blocks.write().await.rollback_to(point.slot());
+                    let _ = self.events_tx.send(ChainEvent::RollBack(point.clone()));
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }

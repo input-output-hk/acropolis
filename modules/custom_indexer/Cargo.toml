@@ -20,9 +20,16 @@ fjall = { workspace = true }
 futures = "0.3"
 minicbor = { workspace = true, features = ["std", "half", "derive"] }
 pallas = { workspace = true}
+prost = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 tokio = { workspace = true }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tonic = { workspace = true }
+tonic-reflection = "0.12"
 tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.12"
 
 [dev-dependencies]
 hex = "0.4"

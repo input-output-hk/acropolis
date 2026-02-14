@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::watch;
 
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_custom_indexer::grpc_server::start_grpc_server;
 use acropolis_module_custom_indexer::CustomIndexer;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
@@ -93,6 +94,16 @@ async fn main() -> Result<()> {
 
     let indexer = Arc::new(CustomIndexer::new(InMemoryCursorStore::new()));
     process.register(indexer.clone());
+
+    // Start the gRPC server — reads directly from the indexer's state
+    let handle = indexer.handle();
+    let grpc_addr = "0.0.0.0:50051".parse()?;
+    tokio::spawn(async move {
+        if let Err(e) = start_grpc_server(grpc_addr, handle).await {
+            tracing::error!("gRPC server failed: {e:#}");
+        }
+    });
+
     indexer
         .add_index(
             InMemoryPoolCostIndex::new(sender_1),
