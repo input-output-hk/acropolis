@@ -31,26 +31,14 @@ $ ulimit -n 4096
 
 ## Docker Compose
 
-Build and run with preview config (default):
+Build and run preview:
 
 ```shell
-docker compose up --build
+docker compose up --build omnibus-preview
 ```
 
-Run with mainnet config:
+Build and run mainnet:
 
 ```shell
-OMNIBUS_CONFIG=omnibus.toml docker compose up --build
+docker compose up --build omnibus-mainnet
 ```
-
-Choose another omnibus config at runtime:
-
-```shell
-OMNIBUS_CONFIG=omnibus-preview.toml docker compose up --build
-```
-
-Notes:
-- Relative paths in config resolve from `/app/processes/omnibus` in the container.
-- Mithril downloads persist by default in the named volume `omnibus_downloads`.
-- To persist Mithril downloads on the host instead, set `MITHRIL_DOWNLOADS_DIR` to a host path (for example `MITHRIL_DOWNLOADS_DIR=./modules/mithril_snapshot_fetcher/downloads`).
-- Mithril snapshot downloads are network-namespaced by the module default path: `.../downloads/<network-name>`.

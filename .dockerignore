@@ -17,6 +17,10 @@
 # Re-ignore local/runtime-heavy paths inside allowed trees
 modules/mithril_snapshot_fetcher/downloads/**
 processes/omnibus/downloads/**
+processes/omnibus/cache/**
+processes/omnibus/fjall-*/**
+processes/omnibus/fjall*/**
+modules/snapshot_bootstrapper/data/**
 modules/accounts_state/test-data/**
 !modules/accounts_state/test-data/pots.mainnet.csv
 **/target/**

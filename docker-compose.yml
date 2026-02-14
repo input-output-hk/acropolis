@@ -1,20 +1,50 @@
+x-omnibus-base: &omnibus-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /app/processes/omnibus
+  environment:
+    RUST_LOG: ${RUST_LOG:-info}
+  user: "${OMNIBUS_UID:-0}:${OMNIBUS_GID:-0}"
+  restart: unless-stopped
+
 services:
-  omnibus:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    working_dir: /app/processes/omnibus
-    environment:
-      RUST_LOG: ${RUST_LOG:-info}
-    command: ["--config", "${OMNIBUS_CONFIG:-omnibus-preview.toml}"]
+  omnibus-preview:
+    <<: *omnibus-base
+    container_name: omnibus-preview
+    command: ["--config", "omnibus-preview.toml"]
     ports:
-      - "${OMNIBUS_REST_PORT:-4340}:4340"
-      - "${OMNIBUS_MCP_PORT:-4341}:4341"
+      - "${OMNIBUS_PREVIEW_REST_PORT:-4340}:4340"
+      - "${OMNIBUS_PREVIEW_MCP_PORT:-4341}:4341"
     volumes:
-      - ${MITHRIL_DOWNLOADS_DIR:-omnibus_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
-      - omnibus_spdd:/app/processes/omnibus/fjall-spdd
-    restart: unless-stopped
+      - ${MITHRIL_DOWNLOADS_DIR_PREVIEW:-omnibus_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_PREVIEW:-omnibus_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_PREVIEW:-omnibus_preview_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_PREVIEW:-omnibus_preview_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_preview_spdd:/app/processes/omnibus/fjall-spdd
+
+  omnibus-mainnet:
+    <<: *omnibus-base
+    container_name: omnibus-mainnet
+    command: ["--config", "omnibus.toml"]
+    ports:
+      - "${OMNIBUS_MAINNET_REST_PORT:-5340}:4340"
+      - "${OMNIBUS_MAINNET_MCP_PORT:-5341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_MAINNET:-omnibus_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_MAINNET:-omnibus_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_MAINNET:-omnibus_mainnet_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_MAINNET:-omnibus_mainnet_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_mainnet_spdd:/app/processes/omnibus/fjall-spdd
 
 volumes:
-  omnibus_spdd:
-  omnibus_downloads:
+  omnibus_preview_spdd:
+  omnibus_preview_downloads:
+  omnibus_preview_snapshot_data:
+  omnibus_preview_address_state_db:
+  omnibus_preview_historical_accounts_state_db:
+  omnibus_mainnet_spdd:
+  omnibus_mainnet_downloads:
+  omnibus_mainnet_snapshot_data:
+  omnibus_mainnet_address_state_db:
+  omnibus_mainnet_historical_accounts_state_db:
