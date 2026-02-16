@@ -12,9 +12,10 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::{HashMap, HashSet};
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Range;
+use std::path::Path;
 use tracing::{debug, error, info};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -425,6 +426,11 @@ impl ConwayVoting {
             Some(o) => o,
             None => return Ok(()),
         };
+
+        if !Path::new(&out_file_name).exists() {
+            File::create(out_file_name)
+                .map_err(|e| anyhow::anyhow!("Cannot create {out_file_name}: {e}"))?;
+        }
 
         let mut out_file = match OpenOptions::new().append(true).open(out_file_name.clone()) {
             Ok(res) => res,
