@@ -5,7 +5,7 @@ use acropolis_common::BlockHash;
 use acropolis_common::messages::{
     BlockOfferedMessage, BlockWantedMessage, ConsensusMessage, Message,
 };
-use anyhow::{Result, bail};
+use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
@@ -47,7 +47,7 @@ impl BlockFlowHandler {
                     config.consensus_topic, config.block_wanted_topic
                 );
                 let subscription = context.subscribe(&config.block_wanted_topic).await?;
-                tokio::spawn(Self::forward_block_wanted_to_events(
+                context.run(Self::forward_block_wanted_to_events(
                     subscription,
                     events_sender,
                 ));
@@ -62,7 +62,7 @@ impl BlockFlowHandler {
     async fn forward_block_wanted_to_events(
         mut subscription: Box<dyn Subscription<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
-    ) -> Result<()> {
+    ) {
         while let Ok((_, msg)) = subscription.read().await {
             if let Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
                 hash,
@@ -76,10 +76,11 @@ impl BlockFlowHandler {
                     .await
                     .is_err()
             {
-                bail!("event channel closed");
+                error!("event channel closed");
+                return;
             }
         }
-        bail!("subscription closed");
+        error!("subscription closed");
     }
 
     /// Handle a peer announcing a block (roll forward).

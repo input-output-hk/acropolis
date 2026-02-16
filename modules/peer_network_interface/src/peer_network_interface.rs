@@ -99,6 +99,7 @@ impl PeerNetworkInterface {
                         flow_handler,
                         events,
                         events_sender,
+                        context,
                     );
                     manager.sync_to_point(Point::Origin);
                     manager
@@ -115,6 +116,7 @@ impl PeerNetworkInterface {
                             flow_handler,
                             events,
                             events_sender,
+                            context,
                         );
                         if let Err(error) = manager.sync_to_tip().await {
                             warn!("could not sync to tip: {error:#}");
@@ -139,6 +141,7 @@ impl PeerNetworkInterface {
                         flow_handler,
                         events,
                         events_sender,
+                        context,
                     );
                     manager.sync_to_point(cache_sync_point);
                     manager
@@ -159,6 +162,7 @@ impl PeerNetworkInterface {
                                 flow_handler,
                                 events,
                                 events_sender,
+                                context,
                             );
                             manager.sync_to_point(point);
                             manager
@@ -187,8 +191,9 @@ impl PeerNetworkInterface {
         flow_handler: BlockFlowHandler,
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
+        context: Arc<Context<Message>>,
     ) -> NetworkManager {
-        tokio::spawn(Self::forward_commands_to_events(
+        context.run(Self::forward_commands_to_events(
             command_subscription,
             events_sender.clone(),
         ));
@@ -206,7 +211,7 @@ impl PeerNetworkInterface {
     async fn forward_commands_to_events(
         mut subscription: Box<dyn Subscription<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
-    ) -> Result<()> {
+    ) {
         while let Ok((_, msg)) = subscription.read().await {
             if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(p))) =
                 msg.as_ref()
@@ -219,12 +224,13 @@ impl PeerNetworkInterface {
                 };
 
                 if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
-                    bail!("event channel closed");
+                    error!("event channel closed");
+                    return;
                 }
             }
         }
 
-        bail!("subscription closed");
+        error!("subscription closed");
     }
 
     async fn init_cache(
