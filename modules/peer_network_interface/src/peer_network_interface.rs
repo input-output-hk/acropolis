@@ -44,7 +44,6 @@ impl PeerNetworkInterface {
         };
         let mut command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
 
-        // Create the event channel early so we can spawn forwarders before init_manager
         let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
 
         let flow_handler =
