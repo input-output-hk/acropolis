@@ -64,13 +64,14 @@ pub struct NetworkManager {
 
 impl NetworkManager {
     pub fn new(
+        node_addresses: Vec<String>,
         network_magic: u32,
         events: mpsc::Receiver<NetworkEvent>,
         events_sender: mpsc::Sender<NetworkEvent>,
         block_sink: BlockSink,
         flow_handler: BlockFlowHandler,
     ) -> Self {
-        Self {
+        let mut manager = Self {
             network_magic,
             next_id: 0,
             peers: BTreeMap::new(),
@@ -80,7 +81,13 @@ impl NetworkManager {
             published_blocks: 0,
             sync_point: None,
             flow_handler,
+        };
+
+        for address in node_addresses {
+            manager.handle_new_connection(address, Duration::ZERO);
         }
+
+        manager
     }
 
     pub async fn run(mut self) -> Result<()> {

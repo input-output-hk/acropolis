@@ -18,7 +18,7 @@ use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc};
 
 use crate::{
     block_flow::BlockFlowHandler,
@@ -88,63 +88,25 @@ impl PeerNetworkInterface {
                 rolled_back: false,
             };
 
-            let manager = match cfg.sync_point {
+            let sync_point = match cfg.sync_point {
                 SyncPoint::Origin => {
                     info!("Starting sync from origin");
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                        flow_handler,
-                        events,
-                        events_sender,
-                        context,
-                    );
-                    manager.sync_to_point(Point::Origin);
-                    manager
+                    Some(Point::Origin)
                 }
-                // TODO: Temporary, only applicable in Direct mode
-                SyncPoint::Tip => match cfg.block_flow_mode {
-                    configuration::BlockFlowMode::Direct => {
-                        info!("Starting sync from tip");
-                        let mut manager = Self::init_manager(
-                            cfg.node_addresses,
-                            genesis_values.magic_number.into(),
-                            sink,
-                            command_subscription,
-                            flow_handler,
-                            events,
-                            events_sender,
-                            context,
-                        );
-                        if let Err(error) = manager.sync_to_tip().await {
-                            warn!("could not sync to tip: {error:#}");
-                            return;
-                        }
-                        manager
-                    }
-                    configuration::BlockFlowMode::Consensus => {
+                SyncPoint::Tip => {
+                    // TODO: Temporary, only applicable in Direct mode
+                    if cfg.block_flow_mode == configuration::BlockFlowMode::Consensus {
                         warn!(
                             "Requested sync point is Tip, which is not supported in Consensus mode."
                         );
                         return;
                     }
-                },
+                    info!("Starting sync from tip");
+                    None
+                }
                 SyncPoint::Cache => {
                     info!("Starting sync from cache at {:?}", cache_sync_point);
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                        flow_handler,
-                        events,
-                        events_sender,
-                        context,
-                    );
-                    manager.sync_to_point(cache_sync_point);
-                    manager
+                    Some(cache_sync_point)
                 }
                 SyncPoint::Dynamic => {
                     match Self::wait_initial_command(&mut command_subscription).await {
@@ -154,18 +116,7 @@ impl PeerNetworkInterface {
                                 sink.last_epoch = Some(epoch);
                                 info!("Starting sync from slot {} in epoch {}", slot, epoch);
                             }
-                            let mut manager = Self::init_manager(
-                                cfg.node_addresses,
-                                genesis_values.magic_number.into(),
-                                sink,
-                                command_subscription,
-                                flow_handler,
-                                events,
-                                events_sender,
-                                context,
-                            );
-                            manager.sync_to_point(point);
-                            manager
+                            Some(point)
                         }
                         Err(error) => {
                             warn!("sync command never received: {error:#}");
@@ -175,37 +126,37 @@ impl PeerNetworkInterface {
                 }
             };
 
+            context.run(Self::forward_commands_to_events(
+                command_subscription,
+                events_sender.clone(),
+            ));
+
+            let mut manager = NetworkManager::new(
+                cfg.node_addresses,
+                genesis_values.magic_number.into(),
+                events,
+                events_sender,
+                sink,
+                flow_handler,
+            );
+
+            match sync_point {
+                Some(point) => manager.sync_to_point(point),
+                None => {
+                    // Tip mode
+                    if let Err(error) = manager.sync_to_tip().await {
+                        warn!("could not sync to tip: {error:#}");
+                        return;
+                    }
+                }
+            }
+
             if let Err(err) = manager.run().await {
                 error!("chain sync failed: {err:#}");
             }
         });
 
         Ok(())
-    }
-
-    fn init_manager(
-        node_addresses: Vec<String>,
-        magic_number: u32,
-        sink: BlockSink,
-        command_subscription: Box<dyn Subscription<Message>>,
-        flow_handler: BlockFlowHandler,
-        events: mpsc::Receiver<NetworkEvent>,
-        events_sender: mpsc::Sender<NetworkEvent>,
-        context: Arc<Context<Message>>,
-    ) -> NetworkManager {
-        context.run(Self::forward_commands_to_events(
-            command_subscription,
-            events_sender.clone(),
-        ));
-
-        let mut manager =
-            NetworkManager::new(magic_number, events, events_sender, sink, flow_handler);
-
-        for address in node_addresses {
-            manager.handle_new_connection(address, Duration::ZERO);
-        }
-
-        manager
     }
 
     async fn forward_commands_to_events(
