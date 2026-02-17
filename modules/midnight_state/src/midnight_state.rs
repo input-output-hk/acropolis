@@ -72,17 +72,21 @@ impl MidnightState {
         let is_enabled =
             config.get_bool(DEFAULT_ENABLED_STATUS.0).unwrap_or(DEFAULT_ENABLED_STATUS.1);
 
+        // Early return if indexing is disabled
         if !is_enabled {
             return Ok(());
         }
 
+        // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
+
+        // Initalize unbounded state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
-            "epochs_state",
+            "midnight_state",
             StateHistoryStore::Unbounded,
         )));
 
-        // Subscribe for drdd messages from accounts_state
+        // Start the run task
         context.run(async move {
             Self::run(history, address_deltas_reader)
                 .await
