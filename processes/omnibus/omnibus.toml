@@ -100,31 +100,31 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = true
+store-spdd = false
 
-#[module.historical-accounts-state]
-## Clear state on start up (default true)
-#clear-on-start = true
-## Enables /accounts/{stake_address}/rewards endpoint
-#store-rewards-history = false
-## Enables /accounts/{stake_address}/history endpoint
-#store-active-stake-history = false
-## Enables /accounts/{stake_address}/registrations endpoint
-#store-registration-history = false
-## Enables /accounts/{stake_address}/delegations endpoint
-#store-delegation-history = false
-## Enables /accounts/{stake_address}/mirs endpoint
-#store-mir-history = false
-## Enables /accounts/{stake_address}/withdrawals endpoint
-#store-withdrawal-history = false
-## Enables /accounts/{stake_address}/addresses endpoint
-#store-addresses = false
-## Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
-#store-tx-count = false
-#
-#[module.historical-epochs-state]
-## Clear state on start up (default true)
-#clear-on-start = true
+[module.historical-accounts-state]
+# Clear state on start up (default true)
+clear-on-start = true
+# Enables /accounts/{stake_address}/rewards endpoint
+store-rewards-history = false
+# Enables /accounts/{stake_address}/history endpoint
+store-active-stake-history = false
+# Enables /accounts/{stake_address}/registrations endpoint
+store-registration-history = false
+# Enables /accounts/{stake_address}/delegations endpoint
+store-delegation-history = false
+# Enables /accounts/{stake_address}/mirs endpoint
+store-mir-history = false
+# Enables /accounts/{stake_address}/withdrawals endpoint
+store-withdrawal-history = false
+# Enables /accounts/{stake_address}/addresses endpoint
+store-addresses = false
+# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
+store-tx-count = false
+
+[module.historical-epochs-state]
+# Clear state on start up (default true)
+clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -201,9 +201,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-#[module.block-vrf-validator]
+[module.block-vrf-validator]
 
-#[module.block-kes-validator]
+[module.block-kes-validator]
 
 [module.clock]
 
