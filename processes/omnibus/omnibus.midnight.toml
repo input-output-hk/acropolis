@@ -1,10 +1,10 @@
-# Top-level configuration for Acropolis omnibus process (Preview network)
+# Top-level configuration for Acropolis omnibus process
 
 # ============================================================================
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network-name = "preview"
+network-name = "mainnet"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
@@ -15,10 +15,10 @@ topic = "cardano.sequence.start"
 [module.genesis-bootstrapper]
 
 [module.mithril-snapshot-fetcher]
-aggregator-url = "https://aggregator.pre-release-preview.api.mithril.network/aggregator"
-genesis-key = "5b3132372c37332c3132342c3136312c362c3133372c3133312c3231332c3230372c3131372c3139382c38352c3137362c3139392c3136322c3234312c36382c3132332c3131392c3134352c31332c3233322c3234332c34392c3232392c322c3234392c3230352c3230352c33392c3233352c34345d"
+aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
+genesis-key = "5b3139312c36362c3134302c3138352c3133382c31312c3233372c3230372c3235302c3134342c32372c322c3138382c33302c31322c38312c3135352c3230342c31302c3137392c37352c32332c3133382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
-download-max-age = 8
+download-max-age = "never"
 # Pause constraint E.g. "epoch:100", "block:1200"
 pause = "none"
 # Stop constraint likewise
@@ -34,9 +34,10 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 [module.peer-network-interface]
 sync-point = "dynamic"
 node-addresses = [
-    "preview-node.play.dev.cardano.org:3001",
+    "backbone.cardano.iog.io:3001",
+    "backbone.mainnet.cardanofoundation.org:3001",
+    "backbone.mainnet.emurgornd.com:3001",
 ]
-magic-number = 2
 
 [module.consensus]
 # List of validation result topics to listen on
@@ -47,6 +48,10 @@ validators = [
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
+
+
+[module.midnight-state]
+address-deltas-topic = "cardano.address.deltas"
 
 [module.block-unpacker]
 
@@ -71,7 +76,7 @@ publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-tx-validation-topic = "cardano.validation.tx"
-network-name = "preview"
+network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -100,7 +105,31 @@ store-stake-addresses = false
 
 [module.spdd-state]
 # Enables active_stakes in /epochs/latest | {number} endpoints
-store-spdd = true
+store-spdd = false
+
+[module.historical-accounts-state]
+# Clear state on start up (default true)
+clear-on-start = true
+# Enables /accounts/{stake_address}/rewards endpoint
+store-rewards-history = false
+# Enables /accounts/{stake_address}/history endpoint
+store-active-stake-history = false
+# Enables /accounts/{stake_address}/registrations endpoint
+store-registration-history = false
+# Enables /accounts/{stake_address}/delegations endpoint
+store-delegation-history = false
+# Enables /accounts/{stake_address}/mirs endpoint
+store-mir-history = false
+# Enables /accounts/{stake_address}/withdrawals endpoint
+store-withdrawal-history = false
+# Enables /accounts/{stake_address}/addresses endpoint
+store-addresses = false
+# Enables /accounts/{stake_address}/addresses/total endpoint (Requires store-addresses to be enabled)
+store-tx-count = false
+
+[module.historical-epochs-state]
+# Clear state on start up (default true)
+clear-on-start = true
 
 [module.drep-state]
 # Enables /governance/dreps/{drep_id} endpoint (Requires store-delegators to be enabled)
@@ -121,6 +150,7 @@ store-drdd = false
 # Listen for DRep and SPO distributions
 stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
+verification-output-file = "../../modules/governance_state/data/verification.csv"
 
 [module.parameters-state]
 # Listen for governance actions
@@ -128,7 +158,7 @@ enact-state-topic = "cardano.enact.state"
 store-history = false
 
 [module.stake-delta-filter]
-cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
+cache-mode = "predefined" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
@@ -136,12 +166,15 @@ write-full-cache = "false"
 [module.accounts-state]
 # Optional subscription for when governance is active
 drep-state-topic = "cardano.drep.state"
-verify-pots-file = "../../modules/accounts_state/test-data/pots.preview.csv"
 
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
 spdd-clear-on-start = true
+# Verify against captured CSV
+verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
@@ -159,7 +192,7 @@ store-addresses = false
 index-by-policy = false
 
 [module.chain-store]
- # Clear state on start up (default true)
+# Clear state on start up (default true)
 clear-on-start = true
 
 [module.address-state]
@@ -173,9 +206,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-#[module.block-vrf-validator]
+[module.block-vrf-validator]
 
-#[module.block-kes-validator]
+[module.block-kes-validator]
 
 [module.clock]
 

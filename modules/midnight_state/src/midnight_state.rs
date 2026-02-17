@@ -25,8 +25,6 @@ declare_cardano_reader!(
     AddressDeltasMessage
 );
 
-const DEFAULT_ENABLED_STATUS: (&str, bool) = ("enable-indexer", false);
-
 /// Midnight State module
 #[module(
     message_type(Message),
@@ -68,15 +66,6 @@ impl MidnightState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        // Get configuration
-        let is_enabled =
-            config.get_bool(DEFAULT_ENABLED_STATUS.0).unwrap_or(DEFAULT_ENABLED_STATUS.1);
-
-        // Early return if indexing is disabled
-        if !is_enabled {
-            return Ok(());
-        }
-
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
 
