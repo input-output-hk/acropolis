@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use crate::{connection::Header, network::PeerId};
 use acropolis_common::{BlockHash, hash::Hash, params::SECURITY_PARAMETER_K};
 use pallas::network::miniprotocols::Point;
-
-use crate::{connection::Header, network::PeerId};
+use tracing::warn;
 
 #[derive(Debug)]
 struct BlockData {
@@ -186,6 +186,7 @@ impl ChainState {
                 number: 0,
                 bytes: vec![],
                 era: acropolis_common::Era::Byron,
+                parent_hash: None,
             };
         };
         let hash = Hash::try_from(hash).unwrap_or_default();
@@ -200,6 +201,7 @@ impl ChainState {
                 number: 0,
                 bytes: vec![],
                 era: acropolis_common::Era::default(),
+                parent_hash: None,
             }
         }
     }
@@ -227,10 +229,16 @@ impl ChainState {
         self.tips.get(&self.preferred_upstream?)
     }
 
-    pub fn handle_disconnect(&mut self, id: PeerId) {
+    pub fn handle_disconnect(&mut self, id: PeerId, next_id: Option<PeerId>) {
         self.tips.remove(&id);
         if self.preferred_upstream == Some(id) {
             self.preferred_upstream = None;
+
+            if let Some(new_preferred) = next_id {
+                self.handle_new_preferred_upstream(new_preferred);
+            } else {
+                warn!("no upstream peers!");
+            }
         }
     }
 
@@ -389,6 +397,7 @@ mod tests {
             number: slot,
             bytes: desc.as_bytes().to_vec(),
             era: Era::Conway,
+            parent_hash: None, // Tests don't need parent hash tracking
         };
         let body = desc.as_bytes().to_vec();
         (header, body)
