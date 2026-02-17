@@ -25,9 +25,10 @@ cd ~/acropolis/processes/omnibus
 cargo run --release --bin acropolis_process_omnibus
 ```
 
-5. Run the validator
+5. Run the validators
 ```bash
 npm run test:spdd
+npm run test:drdd
 ```
 
 6. Observe output

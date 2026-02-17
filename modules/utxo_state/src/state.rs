@@ -2,13 +2,15 @@
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
+use acropolis_common::protocol_params::ProtocolParams;
+use acropolis_common::state_history::{StateHistory, StateHistoryStore};
 use acropolis_common::validation::ValidationError;
 use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
-    UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Address, AddressDelta, Era, PoolRegistrationUpdate, ShelleyAddressPointer,
+    StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -57,6 +59,19 @@ pub trait ImmutableUTXOStore: Send + Sync {
 
     /// Get the number of UTXOs in the store
     async fn len(&self) -> Result<usize>;
+
+    /// Get the total lovelace of all UTXOs in the store
+    async fn sum_lovelace(&self) -> Result<u64>;
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses.
+    /// Returns the list of cancelled UTxOs (identifier and value).
+    /// This is called at the Allegra hard fork boundary (epoch 236 on mainnet).
+    async fn cancel_redeem_utxos(&self) -> Result<Vec<(UTxOIdentifier, UTXOValue)>>;
+
+    /// Sum all unspent UTxOs at pointer addresses, grouped by pointer.
+    /// Used at the Conway hard fork boundary to remove pointer address stake
+    /// from the distribution (per Conway spec 9.1.2).
+    async fn sum_pointer_utxos(&self) -> Result<HashMap<ShelleyAddressPointer, u64>>;
 }
 
 /// Ledger state storage
@@ -84,6 +99,20 @@ pub struct State {
 
     /// Immutable UTXO store
     immutable_utxos: Arc<dyn ImmutableUTXOStore>,
+
+    /// Total lovelace at Shelley epoch boundary
+    lovelace_at_shelley_start: Option<u64>,
+
+    /// Total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// None until cancellation happens, then Some(total_value).
+    avvm_cancelled_value: Option<u64>,
+
+    /// Cached pointer address values at Conway boundary.
+    /// None until queried, then Some(map of pointer -> total lovelace).
+    pointer_address_values: Option<HashMap<ShelleyAddressPointer, u64>>,
+
+    /// State History of Protocol Parameter
+    protocol_parameters_history: StateHistory<ProtocolParams>,
 }
 
 impl State {
@@ -98,7 +127,32 @@ impl State {
             address_delta_observer: None,
             block_totals_observer: None,
             immutable_utxos: immutable_utxo_store,
+            lovelace_at_shelley_start: None,
+            protocol_parameters_history: StateHistory::new(
+                "utxo_state.protocol_parameters_history",
+                StateHistoryStore::default_block_store(),
+            ),
+            avvm_cancelled_value: None,
+            pointer_address_values: None,
         }
+    }
+
+    /// Get the current total lovelace of all utxos
+    pub async fn get_total_lovelace(&self) -> Result<u64> {
+        let volatile = Value::sum_lovelace(self.volatile_utxos.values().map(|v| &v.value));
+        let immutable = self.immutable_utxos.sum_lovelace().await?;
+        Ok(volatile + immutable)
+    }
+
+    /// Get the total lovelace at the Shelley epoch boundary
+    pub fn get_lovelace_at_shelley_start(&self) -> Option<u64> {
+        self.lovelace_at_shelley_start
+    }
+
+    /// Get the total value of AVVM UTxOs cancelled at Allegra boundary.
+    /// Returns None if cancellation hasn't happened yet.
+    pub fn get_avvm_cancelled_value(&self) -> Option<u64> {
+        self.avvm_cancelled_value
     }
 
     /// Get the total value of multiple utxos
@@ -135,6 +189,20 @@ impl State {
         Ok(entries)
     }
 
+    /// Get Protocol Parameter
+    pub fn get_or_init_protocol_parameters(&mut self) -> ProtocolParams {
+        self.protocol_parameters_history.get_or_init_with(ProtocolParams::default)
+    }
+
+    /// Commit protocol parameters
+    pub fn commit_protocol_parameters(
+        &mut self,
+        block_info: &BlockInfo,
+        protocol_params: ProtocolParams,
+    ) {
+        self.protocol_parameters_history.commit(block_info.number, protocol_params);
+    }
+
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
@@ -164,6 +232,59 @@ impl State {
             (immutable + (v_created - v_spent)).try_into().expect("total UTxO count went negative");
 
         total
+    }
+
+    /// Cancel all unspent Byron redeem (AVVM) addresses at the Allegra hard fork boundary.
+    /// Returns (count of cancelled UTxOs, total lovelace value).
+    ///
+    /// Only handles immutable UTxOs. By the Allegra boundary all Byron redeem UTxOs
+    /// are long-confirmed and immutable, so volatile UTxOs are not a concern.
+    ///
+    /// The total cancelled value is stored for later querying by accounts_state,
+    /// which adds it back to reserves.
+    pub async fn cancel_redeem_utxos(&mut self) -> Result<(usize, u64)> {
+        let cancelled = self.immutable_utxos.cancel_redeem_utxos().await?;
+
+        let count = cancelled.len();
+        let total_value: u64 = cancelled.iter().map(|(_, u)| u.value.lovelace).sum();
+
+        self.avvm_cancelled_value = Some(total_value);
+
+        Ok((count, total_value))
+    }
+
+    /// Get cached pointer address values, if already computed.
+    pub fn get_pointer_address_values(&self) -> Option<&HashMap<ShelleyAddressPointer, u64>> {
+        self.pointer_address_values.as_ref()
+    }
+
+    /// Compute and cache the total lovelace held in pointer address UTxOs,
+    /// grouped by pointer. Called at the Conway hard fork boundary.
+    ///
+    /// Scans both volatile and immutable UTxO stores for Shelley addresses
+    /// with pointer delegation parts, summing lovelace by pointer.
+    pub async fn compute_pointer_address_values(
+        &mut self,
+    ) -> Result<&HashMap<ShelleyAddressPointer, u64>> {
+        // Start with immutable store values
+        let mut values = self.immutable_utxos.sum_pointer_utxos().await?;
+
+        // Add volatile UTxO pointer values
+        for utxo in self.volatile_utxos.values() {
+            if let Some(ptr) = utxo.address.get_pointer() {
+                *values.entry(ptr).or_insert(0) += utxo.value.lovelace;
+            }
+        }
+
+        let total: u64 = values.values().sum();
+        let count = values.len();
+        info!(
+            count,
+            total, "Computed pointer address UTxO values at Conway boundary"
+        );
+
+        self.pointer_address_values = Some(values);
+        Ok(self.pointer_address_values.as_ref().unwrap())
     }
 
     /// Observe a block for statistics and handle rollbacks
@@ -341,8 +462,12 @@ impl State {
         Ok(())
     }
 
-    /// Handle a message
-    pub async fn handle(&mut self, block: &BlockInfo, deltas: &UTXODeltasMessage) -> Result<()> {
+    /// Handle a UTXODeltas message
+    pub async fn handle_utxo_deltas(
+        &mut self,
+        block: &BlockInfo,
+        deltas: &UTXODeltasMessage,
+    ) -> Result<()> {
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -353,6 +478,15 @@ impl State {
 
         // Observe block for stats and rollbacks
         self.observe_block(block).await?;
+
+        // If we're entering Shelley era, capture the total lovelace
+        // (used to resync reserves on entry to Shelley in AccountsState)
+        if block.is_new_era && block.era == Era::Shelley {
+            let total_lovelace = self.get_total_lovelace().await?;
+            info!(epoch = block.epoch, total_lovelace, "Shelley start");
+
+            self.lovelace_at_shelley_start = Some(total_lovelace);
+        }
 
         // Process the deltas
         for tx in &deltas.deltas {
@@ -507,37 +641,38 @@ impl State {
     pub async fn validate(
         &mut self,
         block: &BlockInfo,
-        deltas: &UTXODeltasMessage,
+        deltas_msg: &UTXODeltasMessage,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
+        protocol_params: &ProtocolParams,
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
+        let deltas = &deltas_msg.deltas;
 
         // collect utxos needed for validation
         // NOTE:
         // Also consider collateral inputs and reference inputs
-        let all_inputs = deltas
-            .deltas
-            .iter()
-            .flat_map(|tx_deltas| tx_deltas.consumes.iter())
-            .collect::<Vec<_>>();
-        let mut utxos_needed = self.collect_utxos(&all_inputs).await;
+        let all_inputs =
+            deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
+        let mut utxos = self.collect_utxos(&all_inputs).await;
 
-        for tx_deltas in deltas.deltas.iter() {
+        for tx_deltas in deltas.iter() {
             if block.era == Era::Shelley {
-                if let Err(e) = validations::validate_shelley_tx(
+                if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
                     stake_registration_updates,
-                    &utxos_needed,
+                    &utxos,
+                    protocol_params.shelley.as_ref(),
+                    block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
 
-            // add this transaction's outputs to the utxos needed
+            // add this transaction's outputs to the utxos
             for output in &tx_deltas.produces {
-                utxos_needed.insert(output.utxo_identifier, output.utxo_value());
+                utxos.insert(output.utxo_identifier, output.utxo_value());
             }
         }
 
@@ -589,6 +724,7 @@ mod tests {
             epoch: 99,
             epoch_slot: slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp: slot,
             tip_slot: None,
             era: Era::Byron,
@@ -644,25 +780,16 @@ mod tests {
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
 
-        let deltas = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![],
-                produces: vec![output.clone()],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![],
+            produces: vec![output.clone()],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas = UTXODeltasMessage { deltas };
 
-        state.handle(&block, &deltas).await.unwrap();
+        state.handle_utxo_deltas(&block, &deltas).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
 
@@ -1025,25 +1152,16 @@ mod tests {
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
-        let deltas1 = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![],
-                produces: vec![output.clone()],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![],
+            produces: vec![output.clone()],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas1 = UTXODeltasMessage { deltas };
 
-        state.handle(&block1, &deltas1).await.unwrap();
+        state.handle_utxo_deltas(&block1, &deltas1).await.unwrap();
         assert_eq!(1, state.immutable_utxos.len().await.unwrap());
         assert_eq!(1, state.count_valid_utxos().await);
         assert_eq!(42, *observer.balance.lock().await);
@@ -1051,25 +1169,15 @@ mod tests {
         let input = output.utxo_identifier;
 
         let block2 = create_block(BlockStatus::Immutable, 2, 2);
-        let deltas2 = UTXODeltasMessage {
-            deltas: vec![TxUTxODeltas {
-                tx_identifier: Default::default(),
-                consumes: vec![input],
-                produces: vec![],
-                fee: 0,
-                is_valid: true,
-                total_withdrawals: None,
-                certs_identifiers: None,
-                value_minted: None,
-                value_burnt: None,
-                vkey_hashes_needed: None,
-                script_hashes_needed: None,
-                vkey_hashes_provided: None,
-                script_hashes_provided: None,
-            }],
-        };
-
-        state.handle(&block2, &deltas2).await.unwrap();
+        let deltas = vec![TxUTxODeltas {
+            consumes: vec![input],
+            produces: vec![],
+            fee: 0,
+            is_valid: true,
+            ..TxUTxODeltas::default()
+        }];
+        let deltas2 = UTXODeltasMessage { deltas };
+        state.handle_utxo_deltas(&block2, &deltas2).await.unwrap();
 
         assert_eq!(0, state.immutable_utxos.len().await.unwrap());
         assert_eq!(0, state.count_valid_utxos().await);

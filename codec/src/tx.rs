@@ -1,14 +1,13 @@
 use crate::{
-    address::map_address,
-    certs::map_certificate,
-    map_reference_script_hash,
-    parameter::{map_alonzo_update, map_babbage_update},
-    utxo::{map_datum, map_value},
-    witness::{map_native_scripts, map_vkey_witnesses},
+    address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
+    map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
+    map_mint_burn, map_redeemer, map_reference_script_hash, map_value, witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
-use pallas_traverse::{Era as PallasEra, MultiEraInput, MultiEraTx};
+use pallas_traverse::{
+    ComputeHash, Era as PallasEra, MultiEraInput, MultiEraMeta, MultiEraSigners, MultiEraTx,
+};
 
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
     inputs
@@ -20,11 +19,27 @@ pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
         .collect()
 }
 
-/// Parse transaction consumes and produces, and return the parsed consumes, produces and errors
+pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHash> {
+    match required_signers {
+        MultiEraSigners::AlonzoCompatible(signers) => {
+            signers.iter().map(|signer| KeyHash::from(**signer)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Parse transaction consumes and produces,
+/// and return the parsed consumes, produces and errors
+/// NOTE:
+/// This function returns consumes sorted lexicographically by UTxO identifier
 pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
 ) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, Vec<String>) {
-    let parsed_consumes = map_transaction_inputs(&tx.consumes());
+    let consumed = match tx.is_valid() {
+        true => tx.inputs_sorted_set(),
+        false => tx.collateral(),
+    };
+    let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
     let mut errors = Vec::new();
 
@@ -57,19 +72,68 @@ pub fn map_transaction_consumes_produces(
     (parsed_consumes, parsed_produces, errors)
 }
 
-pub fn map_metadata(metadata: &PallasMetadatum) -> Metadata {
-    match metadata {
-        PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadata::Int(MetadataInt(*i)),
-        PallasMetadatum::Bytes(b) => Metadata::Bytes(b.to_vec()),
-        PallasMetadatum::Text(s) => Metadata::Text(s.clone()),
-        PallasMetadatum::Array(a) => Metadata::Array(a.iter().map(map_metadata).collect()),
+pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
+    match metadatum {
+        PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadatum::Int(i128::from(*i)),
+        PallasMetadatum::Bytes(b) => Metadatum::Bytes(b.to_vec()),
+        PallasMetadatum::Text(s) => Metadatum::Text(s.clone()),
+        PallasMetadatum::Array(a) => Metadatum::Array(a.iter().map(map_metadatum).collect()),
         PallasMetadatum::Map(m) => {
-            Metadata::Map(m.iter().map(|(k, v)| (map_metadata(k), map_metadata(v))).collect())
+            Metadatum::Map(m.iter().map(|(k, v)| (map_metadatum(k), map_metadatum(v))).collect())
         }
     }
 }
 
-/// Map a Pallas Transaction to extract
+pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
+    match metadata {
+        MultiEraMeta::AlonzoCompatible(m) => {
+            let mut metadata = Metadata::default();
+            for (label, datum) in m.iter() {
+                metadata.as_mut().push((*label, map_metadatum(datum)));
+            }
+            Some(metadata)
+        }
+        _ => None,
+    }
+}
+
+pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
+    let mut scripts_provided = Vec::new();
+
+    for script in tx.native_scripts() {
+        scripts_provided.push((ScriptHash::from(*script.compute_hash()), ScriptLang::Native));
+    }
+
+    for script in tx.plutus_v1_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV1,
+        ));
+    }
+
+    for script in tx.plutus_v2_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV2,
+        ));
+    }
+
+    for script in tx.plutus_v3_scripts() {
+        scripts_provided.push((
+            ScriptHash::from(*script.compute_hash()),
+            ScriptLang::PlutusV3,
+        ));
+    }
+
+    scripts_provided
+}
+
+/// Map a Pallas Transaction
+/// NOTE:
+/// This function sorts
+/// - consumes sorted lexicographically by UTxO identifier
+/// - withdrawals by RewardAccount (bytes)
+/// - mint/burn sorted by policy id
 pub fn map_transaction(
     tx: &MultiEraTx,
     raw_tx: &[u8],
@@ -77,15 +141,22 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    let (mut consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    consumes.sort();
+
+    let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
 
     let fee = tx.fee().unwrap_or(0);
+    let stated_total_collateral = tx.total_collateral();
     let is_valid = tx.is_valid();
 
-    let mut errors = input_output_errors;
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
+    let mut mint_burn_deltas = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
+    let mut voting_procedures = None;
+    let mut proposal_procedures = None;
+    let mut errors = input_output_errors;
 
     for (cert_index, cert) in tx.certs().iter().enumerate() {
         match map_certificate(cert, tx_identifier, cert_index, network_id.clone()) {
@@ -107,6 +178,14 @@ pub fn map_transaction(
                 "Withdrawal {} has been ignored: {e}",
                 hex::encode(key)
             )),
+        }
+    }
+
+    let required_signers = map_required_signatories(&tx.required_signers());
+
+    for policy_group in tx.mints_sorted_set().iter() {
+        if let Some((policy_id, deltas)) = map_mint_burn(policy_group) {
+            mint_burn_deltas.push((policy_id, deltas));
         }
     }
 
@@ -140,21 +219,78 @@ pub fn map_transaction(
         _ => {}
     }
 
-    let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
-    let native_scripts = map_native_scripts(tx.native_scripts());
+    if era == Era::Conway
+        && let Some(conway) = tx.as_conway()
+    {
+        if let Some(ref pallas_vp) = conway.transaction_body.voting_procedures {
+            match map_all_governance_voting_procedures(pallas_vp) {
+                Ok(vp) => voting_procedures = Some(vp),
+                Err(e) => errors.push(format!("Cannot decode governance voting procedures: {e}")),
+            }
+        }
 
+        if let Some(ref pallas_pp) = conway.transaction_body.proposal_procedures {
+            let mut procedures = Vec::new();
+            let mut proc_id = GovActionId {
+                transaction_id: TxHash::from(*tx.hash()),
+                action_index: 0,
+            };
+            for (action_index, proposal_procedure) in pallas_pp.iter().enumerate() {
+                match proc_id.set_action_index(action_index).and_then(|proc_id| {
+                    map_governance_proposals_procedure(proc_id, proposal_procedure)
+                }) {
+                    Ok(pp) => procedures.push(pp),
+                    Err(e) => errors.push(format!(
+                        "Cannot decode governance proposal procedure {} idx {}: {e}",
+                        proc_id, action_index
+                    )),
+                }
+            }
+
+            if !procedures.is_empty() {
+                proposal_procedures = Some(procedures);
+            }
+        }
+    }
+
+    let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
 
+    let script_witnesses = map_scripts_provided(tx);
+
+    let mut redeemers = Vec::new();
+    for redeemer in tx.redeemers() {
+        match map_redeemer(&redeemer) {
+            Ok(r) => redeemers.push(r),
+            Err(e) => errors.push(e.to_string()),
+        }
+    }
+
+    let plutus_data = tx
+        .plutus_data()
+        .iter()
+        .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
+        .collect::<Vec<_>>();
+
     Transaction {
+        id: tx_identifier,
         consumes,
         produces,
+        reference_inputs,
         fee,
+        stated_total_collateral,
         is_valid,
         certs,
         withdrawals,
+        required_signers,
+        mint_burn_deltas,
         proposal_update: alonzo_babbage_update_proposal,
+        voting_procedures,
+        proposal_procedures,
         vkey_witnesses,
-        native_scripts,
+        script_witnesses,
+        redeemers,
+        plutus_data,
         error: if errors.is_empty() {
             None
         } else {

@@ -8,9 +8,9 @@ use crate::{
     messages::{CardanoMessage::BlockValidation, Message},
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
-    Address, BlockInfo, CommitteeCredential, DataHash, Era, GenesisKeyhash, GovActionId, KeyHash,
-    Lovelace, NetworkId, PoolId, ProposalProcedure, ScriptHash, Slot, StakeAddress, UTxOIdentifier,
-    VKeyWitness, Value, Voter, VrfKeyHash,
+    Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
+    KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -94,9 +94,53 @@ pub enum TransactionValidationError {
     #[error("Phase 1 Validation Failed: {0}")]
     Phase1ValidationError(#[from] Phase1ValidationError),
 
+    /// **Cause**: Phase 2 Script Validation Error
+    #[error("Phase 2 Validation Failed: {0}")]
+    Phase2ValidationError(#[from] Phase2ValidationError),
+
     /// **Cause:** Other errors (e.g. Invalid shelley params)
     #[error("{0}")]
     Other(String),
+}
+
+/// Phase 2 (Plutus script execution) validation errors.
+///
+/// These errors occur during script evaluation after Phase 1 validation passes.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum Phase2ValidationError {
+    /// Script explicitly called the `error` builtin
+    #[error("Script {script_hash} failed: {message}")]
+    ScriptFailed {
+        script_hash: ScriptHash,
+        message: String,
+    },
+
+    /// Script exceeded CPU or memory budget
+    #[error("Script {script_hash} exceeded budget (cpu: {cpu}, mem: {mem})")]
+    BudgetExceeded {
+        script_hash: ScriptHash,
+        cpu: i64,
+        mem: i64,
+    },
+
+    /// Could not decode FLAT bytecode
+    #[error("Script {script_hash} decode failed: {reason}")]
+    DecodeFailed {
+        script_hash: ScriptHash,
+        reason: String,
+    },
+
+    /// Missing script referenced by redeemer
+    #[error("Missing script for redeemer at index {index}")]
+    MissingScript { index: u32 },
+
+    /// Missing datum for spending input
+    #[error("Missing datum {datum_hash}")]
+    MissingDatum { datum_hash: DatumHash },
+
+    /// Missing redeemer for script
+    #[error("Missing redeemer for script {script_hash}")]
+    MissingRedeemer { script_hash: ScriptHash },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
@@ -124,11 +168,11 @@ pub enum Phase1ValidationError {
     MaxTxSizeUTxO { supplied: u32, max: u32 },
 
     /// **Cause:** UTxO rules failure
-    #[error("{0}")]
+    #[error("UTxOValidationError: {0}")]
     UTxOValidationError(#[from] UTxOValidationError),
 
     /// **Cause:** UTxOW rules failure
-    #[error("{0}")]
+    #[error("UTxOWValidationError: {0}")]
     UTxOWValidationError(#[from] UTxOWValidationError),
 }
 
@@ -207,8 +251,11 @@ pub enum UTxOValidationError {
 /// UTxOW Rules Failure
 /// Shelley Era:
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxow.hs#L278
+/// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L97
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum UTxOWValidationError {
+    /// --------------------------- Shelley Era Errors
+    /// ----------------------------------------------
     /// **Cause:** The VKey witness has invalid signature
     #[error("Invalid VKey witness: key_hash={key_hash}, witness={witness}")]
     InvalidWitnessesUTxOW {
@@ -267,6 +314,10 @@ pub enum UTxOWValidationError {
     #[error("Invalid metadata: reason={reason}")]
     InvalidMetadata { reason: String },
 
+    /// **Cause:** Invalid metadata hash
+    #[error("Invalid metadata hash: reason={reason}")]
+    InvalidMetadataHash { reason: String },
+
     /// **Cause:** Metadata hash without actual metadata
     #[error(
         "Metadata hash without actual metadata: hash={}",
@@ -276,6 +327,43 @@ pub enum UTxOWValidationError {
         // hash of metadata included in tx body
         metadata_hash: DataHash,
     },
+
+    /// --------------------------- Alonzo Era Errors
+    /// ----------------------------------------------
+    /// **Cause:** Missing Redeemer
+    #[error("Missing Redeemers: redeemer_pointer={redeemer_pointer:?}")]
+    MissingRedeemers { redeemer_pointer: RedeemerPointer },
+
+    /// **Cause:** Extra Redeemer
+    #[error("Extra Redeemers: redeemer_pointer={redeemer_pointer:?}")]
+    ExtraRedeemers { redeemer_pointer: RedeemerPointer },
+
+    /// **Cause:** MissingRequiredDatums
+    #[error("Missing required datums: datum_hash={datum_hash:?}")]
+    MissingRequiredDatums { datum_hash: DatumHash },
+
+    /// **Cause:** Extra Datum
+    #[error("Not allowed supplemental datums: datum_hash={datum_hash}")]
+    NotAllowedSupplementalDatums { datum_hash: DatumHash },
+
+    /// **Cause:** Script integrity hash mismatch
+    #[error(
+        "Script integrity hash mismatch: expected={}, actual={}, reason={}",
+        hex::encode(expected.unwrap_or_default()),
+        hex::encode(actual.unwrap_or_default()),
+        reason
+    )]
+    ScriptIntegrityHashMismatch {
+        expected: Option<ScriptIntegrityHash>,
+        actual: Option<ScriptIntegrityHash>,
+        reason: String,
+    },
+
+    /// **Cause:** Unspendable UTxO without datum hash
+    /// To spend a UTxO locked at Plutus scripts
+    /// datum must be provided
+    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
+    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
 }
 
 /// Reference
@@ -766,12 +854,9 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
-    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+    pub fn print_errors(&mut self, module: &str, block: Option<&BlockInfo>) {
         if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+            error!("{module}: block {block:?}, outcomes {:?}", self.outcomes);
             self.outcomes.clear();
         }
     }
@@ -779,6 +864,7 @@ impl ValidationOutcomes {
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
+        module: &str,
         topic_field: &str,
         block: &BlockInfo,
     ) -> anyhow::Result<()> {
@@ -794,7 +880,7 @@ impl ValidationOutcomes {
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
         } else {
-            self.print_errors(Some(block));
+            self.print_errors(module, Some(block));
         }
         self.outcomes.clear();
         Ok(())

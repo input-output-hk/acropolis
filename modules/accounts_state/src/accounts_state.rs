@@ -17,7 +17,7 @@ use acropolis_common::{
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockInfo, BlockStatus, Era,
 };
 use anyhow::{anyhow, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -55,6 +55,7 @@ const DEFAULT_WITHDRAWALS_TOPIC: &str = "cardano.withdrawals";
 const DEFAULT_POT_DELTAS_TOPIC: &str = "cardano.pot.deltas";
 const DEFAULT_STAKE_DELTAS_TOPIC: &str = "cardano.stake.deltas";
 const DEFAULT_PROTOCOL_PARAMETERS_TOPIC: &str = "cardano.protocol.parameters";
+const DEFAULT_GOVERNANCE_PROCEDURES_TOPIC: &str = "cardano.governance";
 const DEFAULT_GOVERNANCE_OUTCOMES_TOPIC: &str = "cardano.enact.state";
 
 // Publishers
@@ -162,8 +163,8 @@ impl AccountsState {
         mut withdrawals_subscription: Box<dyn Subscription<Message>>,
         mut pots_subscription: Box<dyn Subscription<Message>>,
         mut stake_subscription: Box<dyn Subscription<Message>>,
+        mut governance_procedures_subscription: Box<dyn Subscription<Message>>,
         mut governance_outcomes_subscription: Box<dyn Subscription<Message>>,
-        mut drep_state_subscription: Option<Box<dyn Subscription<Message>>>,
         mut parameters_subscription: Box<dyn Subscription<Message>>,
         verifier: &Verifier,
         is_snapshot_mode: bool,
@@ -293,6 +294,23 @@ impl AccountsState {
                 // remove from pool registry, clear delegations
 
                 if let Some(block_info) = current_block.as_ref() {
+                    // Apply pending MIRs before generating SPDD so they're included in active stake
+                    state.apply_pending_mirs();
+
+                    // At the Conway hard fork, pointer addresses lose their staking
+                    // functionality (Conway spec 9.1.2). Subtract accumulated pointer
+                    // address UTxO values from utxo_value so they no longer count
+                    // towards the stake distribution.
+                    // Skip in snapshot mode: the snapshot already reflects post-Conway
+                    // state, so applying the subtraction again would double-count.
+                    if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
+                        if let Err(e) = state.remove_pointer_address_stake(context.clone()).await {
+                            vld.push_anyhow(anyhow!(
+                                "Error removing pointer address stake at Conway boundary: {e:#}"
+                            ));
+                        }
+                    }
+
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);
                     if let Err(e) = spo_publisher.publish_spdd(block_info, spdd).await {
@@ -310,35 +328,6 @@ impl AccountsState {
                         if let Err(e) = spdd_store.store_spdd(block_info.epoch + 1, spdd_state) {
                             vld.push_anyhow(anyhow!("Error storing SPDD state: {e:#}"))
                         }
-                    }
-                }
-
-                // Handle DRep (if configured)
-                if let Some(ref mut subscription) = drep_state_subscription {
-                    let (_, message) = subscription.read_ignoring_rollbacks().await?;
-                    match message.as_ref() {
-                        Message::Cardano((block_info, CardanoMessage::DRepState(dreps_msg))) => {
-                            let span = info_span!(
-                                "account_state.handle_drep_state",
-                                block = block_info.number
-                            );
-                            async {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_drep_state(dreps_msg);
-
-                                let drdd = state.generate_drdd();
-                                if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await
-                                {
-                                    vld.push_anyhow(anyhow!(
-                                        "Error publishing drep voting stake distribution: {e:#}"
-                                    ))
-                                }
-                            }
-                            .instrument(span)
-                            .await;
-                        }
-
-                        _ => error!("Unexpected message type: {message:?}"),
                     }
                 }
 
@@ -398,12 +387,24 @@ impl AccountsState {
                         async {
                             Self::check_sync(&current_block, block_info);
                             let after_epoch_result = state
-                                .handle_epoch_activity(ea_msg, block_info.era, verifier)
+                                .handle_epoch_activity(
+                                    context.clone(),
+                                    ea_msg,
+                                    block_info,
+                                    verifier,
+                                )
                                 .await
                                 .inspect_err(|e| {
                                     vld.push_anyhow(anyhow!("EpochActivity handling error: {e:#}"))
                                 })
                                 .ok();
+
+                            let drdd = state.generate_drdd();
+                            if let Err(e) = drep_publisher.publish_drdd(block_info, drdd).await {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing drep voting stake distribution: {e:#}"
+                                ))
+                            }
                             if let Some(refund_deltas) = after_epoch_result {
                                 // publish stake reward deltas
                                 stake_reward_deltas.extend(refund_deltas);
@@ -466,7 +467,12 @@ impl AccountsState {
                     async {
                         Self::check_sync(&current_block, block_info);
                         let stake_registration_updates = state
-                            .handle_tx_certificates(tx_certs_msg, &mut vld)
+                            .handle_tx_certificates(
+                                tx_certs_msg,
+                                block_info.epoch_slot,
+                                block_info.era,
+                                &mut vld,
+                            )
                             .inspect_err(|e| {
                                 vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
                             })
@@ -546,12 +552,39 @@ impl AccountsState {
                 _ => error!("Unexpected message type: {message:?}"),
             }
 
+            let (_, message) = governance_procedures_subscription.read_ignoring_rollbacks().await?;
+            match message.as_ref() {
+                Message::Cardano((
+                    block_info,
+                    CardanoMessage::GovernanceProcedures(procedures),
+                )) => {
+                    let span = info_span!(
+                        "account_state.handle_governance_procedures",
+                        block = block_info.number
+                    );
+                    async {
+                        Self::check_sync(&current_block, block_info);
+                        state.handle_governance_procedures(procedures)
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
-                vld.publish(&context, &validation_outcomes_topic, &block_info).await?;
+                vld.publish(
+                    &context,
+                    "accounts_state",
+                    &validation_outcomes_topic,
+                    &block_info,
+                )
+                .await?;
             } else {
-                vld.print_errors(None);
+                vld.print_errors("accounts_state", None);
             }
         }
     }
@@ -601,6 +634,11 @@ impl AccountsState {
             .unwrap_or(DEFAULT_STAKE_DELTAS_TOPIC.to_string());
         info!("Creating stake deltas subscriber on '{stake_deltas_topic}'");
 
+        let governance_procedures_topic = config
+            .get_string("governance-procedures-topic")
+            .unwrap_or(DEFAULT_GOVERNANCE_PROCEDURES_TOPIC.to_string());
+        info!("Creating governance procedures subscriber on '{governance_procedures_topic}'");
+
         let governance_outcomes_topic = config
             .get_string("governance-outcomes-topic")
             .unwrap_or(DEFAULT_GOVERNANCE_OUTCOMES_TOPIC.to_string());
@@ -610,12 +648,6 @@ impl AccountsState {
             .get_string("protocol-parameters-topic")
             .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_TOPIC.to_string());
         info!("Creating protocol parameters subscriber on '{parameters_topic}'");
-
-        // Optional topics
-        let drep_state_topic = config.get_string("drep-state-topic").ok();
-        if let Some(ref topic) = drep_state_topic {
-            info!("Creating DRep state subscriber on '{topic}'");
-        }
 
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -922,12 +954,10 @@ impl AccountsState {
         let withdrawals_subscription = context.subscribe(&withdrawals_topic).await?;
         let pot_deltas_subscription = context.subscribe(&pot_deltas_topic).await?;
         let stake_subscription = context.subscribe(&stake_deltas_topic).await?;
+        let governance_procedures_subscription =
+            context.subscribe(&governance_procedures_topic).await?;
         let governance_outcomes_subscription =
             context.subscribe(&governance_outcomes_topic).await?;
-        let drep_state_subscription = match drep_state_topic {
-            Some(ref topic) => Some(context.subscribe(topic).await?),
-            None => None,
-        };
         let parameters_subscription = context.subscribe(&parameters_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
@@ -960,8 +990,8 @@ impl AccountsState {
                 withdrawals_subscription,
                 pot_deltas_subscription,
                 stake_subscription,
+                governance_procedures_subscription,
                 governance_outcomes_subscription,
-                drep_state_subscription,
                 parameters_subscription,
                 &verifier,
                 is_snapshot_mode,

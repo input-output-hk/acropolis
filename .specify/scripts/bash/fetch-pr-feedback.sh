@@ -105,8 +105,9 @@ fetch_review_comments() {
     repo_info=$(get_repo_info)
     local owner="${repo_info%/*}"
     local repo="${repo_info#*/}"
-    
-    gh api graphql -f query='
+
+    local result
+    result=$(gh api graphql -f query='
         query($owner: String!, $repo: String!, $number: Int!) {
             repository(owner: $owner, name: $repo) {
                 pullRequest(number: $number) {
@@ -129,13 +130,28 @@ fetch_review_comments() {
                 }
             }
         }
-    ' -f owner="$owner" -f repo="$repo" -F number="$pr_number" 2>/dev/null || warn "Failed to fetch review comments for PR #$pr_number"
+    ' -f owner="$owner" -f repo="$repo" -F number="$pr_number" 2>/dev/null)
+
+    if [[ -z "$result" ]]; then
+        warn "Failed to fetch review comments for PR #$pr_number"
+        echo "null"
+    else
+        echo "$result"
+    fi
 }
 
 # Fetch PR discussion comments
 fetch_discussion_comments() {
     local pr_number=$1
-    gh pr view "$pr_number" --json comments 2>/dev/null || warn "Failed to fetch discussion comments for PR #$pr_number"
+    local result
+    result=$(gh pr view "$pr_number" --json comments 2>/dev/null)
+
+    if [[ -z "$result" ]]; then
+        warn "Failed to fetch discussion comments for PR #$pr_number"
+        echo "null"
+    else
+        echo "$result"
+    fi
 }
 
 # Main function to fetch all PR feedback data
@@ -151,12 +167,16 @@ fetch_all_feedback() {
     pr_info=$(fetch_pr_info "$pr_number")
     review_comments=$(fetch_review_comments "$pr_number")
     discussion_comments=$(fetch_discussion_comments "$pr_number")
-    
+
+    # Normalize empty strings to "null" for jq
+    [[ -z "$review_comments" || "$review_comments" == "null" ]] && review_comments="null"
+    [[ -z "$discussion_comments" || "$discussion_comments" == "null" ]] && discussion_comments="null"
+
     # Combine all data into a single JSON object
     jq -n \
         --argjson pr_info "$pr_info" \
-        --argjson review_comments "${review_comments:-null}" \
-        --argjson discussion_comments "${discussion_comments:-null}" \
+        --argjson review_comments "$review_comments" \
+        --argjson discussion_comments "$discussion_comments" \
         '{
             pr: $pr_info,
             reviews: $review_comments,

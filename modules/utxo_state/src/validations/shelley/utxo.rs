@@ -26,17 +26,9 @@ pub fn validate_bad_inputs_utxo(
 }
 
 pub fn validate_value_not_conserved(
-    inputs: &[UTxOIdentifier],
-    total_consumed_except_inputs: Value,
+    total_consumed: Value,
     total_produced: Value,
-    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
-    let mut total_consumed = total_consumed_except_inputs;
-    for input in inputs {
-        total_consumed +=
-            utxos_needed.get(input).map(|utxo| &utxo.value).unwrap_or(&Value::default());
-    }
-
     if total_consumed != total_produced {
         return Err(Box::new(UTxOValidationError::ValueNotConservedUTxO {
             consumed: total_consumed,
@@ -48,18 +40,13 @@ pub fn validate_value_not_conserved(
 
 pub fn validate(
     inputs: &[UTxOIdentifier],
-    total_consumed_except_inputs: Value,
+    total_consumed: Value,
     total_produced: Value,
-    utxos_needed: &HashMap<UTxOIdentifier, UTXOValue>,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
-    validate_bad_inputs_utxo(inputs, utxos_needed)?;
+    validate_bad_inputs_utxo(inputs, utxos)?;
 
-    validate_value_not_conserved(
-        inputs,
-        total_consumed_except_inputs,
-        total_produced,
-        utxos_needed,
-    )?;
+    validate_value_not_conserved(total_consumed, total_produced)?;
 
     Ok(())
 }
@@ -67,34 +54,71 @@ pub fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::TestContext, validation_fixture};
-    use acropolis_common::{TxHash, UTxOIdentifier};
-    use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+    use crate::{
+        test_utils::{to_era, to_pallas_era, TestContext},
+        validation_fixture,
+    };
+    use acropolis_common::{NetworkId, TxHash, TxIdentifier, UTxOIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
     use std::str::FromStr;
     use test_case::test_case;
 
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
+    ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
     )]
-    #[test_case(validation_fixture!("da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b", "bad_inputs_utxo") =>
+    #[test_case(validation_fixture!(
+        "shelley",
+        "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
+        "bad_inputs_utxo"
+    ) =>
         matches Err(UTxOValidationError::BadInputsUTxO { bad_input, bad_input_index })
         if bad_input == UTxOIdentifier::new(
             TxHash::from_str("e7075bff082ee708dfe49a366717dd4c6d51e9b3a7e5a070dcee253affda0999").unwrap(), 1)
             && bad_input_index == 0;
-        "bad_inputs_utxo"
+        "shelley - bad_inputs_utxo"
+    )]
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "f9ed2fef27cdcf60c863ba03f27d0e38f39c5047cf73ffdf2428b48edbe83234"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - failed transaction"
+    )]
+    #[test_case(validation_fixture!(
+        "babbage",
+        "b2d01aec0fc605e699b1145d8ff9fce132a9108c8e026177ce648ddbe79473b5"
+    ) =>
+        matches Ok(());
+        "babbage - valid transaction 1 - failed transaction with collateral return"
+    )]
+    #[test_case(validation_fixture!(
+        "babbage",
+        "0104b80dd6061ee0a452d612fb608c43149033ef34c622ae634d579bd4fc3892"
+    ) =>
+        matches Ok(());
+        "babbage - valid transaction 2 - failed transaction without collateral return"
     )]
     #[allow(clippy::result_large_err)]
-    fn shelley_test((ctx, raw_tx): (TestContext, Vec<u8>)) -> Result<(), UTxOValidationError> {
-        let tx = MultiEraTx::decode_for_era(PallasEra::Shelley, &raw_tx).unwrap();
+    fn shelley_utxo_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), UTxOValidationError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let tx_inputs = acropolis_codec::map_transaction_inputs(&tx.consumes());
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            to_era(era),
+        );
+        let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
 
-        validate(
-            &tx_inputs,
-            Value::default(),
-            Value::new(143945663102, vec![]),
-            &ctx.utxos,
-        )
-        .map_err(|e| *e)
+        validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }
 }

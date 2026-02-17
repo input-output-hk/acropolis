@@ -9,7 +9,7 @@ use acropolis_common::{
     ShelleyAddress, StakeAddress,
 };
 use anyhow::Result;
-use fjall::{Keyspace, Partition, PartitionCreateOptions};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use minicbor::{decode, to_vec};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tokio::sync::Mutex;
@@ -18,15 +18,15 @@ use tracing::{debug, error};
 use crate::state::{AccountEntry, ActiveStakeHistory, HistoricalAccountsConfig};
 
 pub struct ImmutableHistoricalAccountStore {
-    rewards_history: Partition,
-    active_stake_history: Partition,
-    delegation_history: Partition,
-    registration_history: Partition,
-    mir_history: Partition,
-    withdrawal_history: Partition,
-    addresses: Partition,
-    tx_count: Partition,
-    keyspace: Keyspace,
+    rewards_history: Keyspace,
+    active_stake_history: Keyspace,
+    delegation_history: Keyspace,
+    registration_history: Keyspace,
+    mir_history: Keyspace,
+    withdrawal_history: Keyspace,
+    addresses: Keyspace,
+    tx_count: Keyspace,
+    database: Database,
     pub pending: Mutex<Vec<HashMap<StakeAddress, AccountEntry>>>,
 }
 
@@ -37,23 +37,21 @@ impl ImmutableHistoricalAccountStore {
             std::fs::remove_dir_all(path)?;
         }
 
-        let cfg = fjall::Config::new(path).max_write_buffer_size(512 * 1024 * 1024).temporary(true);
-        let keyspace = Keyspace::open(cfg)?;
+        let database = Database::builder(path).temporary(true).open()?;
 
         let rewards_history =
-            keyspace.open_partition("rewards_history", PartitionCreateOptions::default())?;
+            database.keyspace("rewards_history", KeyspaceCreateOptions::default)?;
         let active_stake_history =
-            keyspace.open_partition("active_stake_history", PartitionCreateOptions::default())?;
+            database.keyspace("active_stake_history", KeyspaceCreateOptions::default)?;
         let delegation_history =
-            keyspace.open_partition("delegation_history", PartitionCreateOptions::default())?;
+            database.keyspace("delegation_history", KeyspaceCreateOptions::default)?;
         let registration_history =
-            keyspace.open_partition("registration_history", PartitionCreateOptions::default())?;
+            database.keyspace("registration_history", KeyspaceCreateOptions::default)?;
         let withdrawal_history =
-            keyspace.open_partition("withdrawal_history", PartitionCreateOptions::default())?;
-        let mir_history =
-            keyspace.open_partition("mir_history", PartitionCreateOptions::default())?;
-        let addresses = keyspace.open_partition("addresses", PartitionCreateOptions::default())?;
-        let tx_count = keyspace.open_partition("tx_count", PartitionCreateOptions::default())?;
+            database.keyspace("withdrawal_history", KeyspaceCreateOptions::default)?;
+        let mir_history = database.keyspace("mir_history", KeyspaceCreateOptions::default)?;
+        let addresses = database.keyspace("addresses", KeyspaceCreateOptions::default)?;
+        let tx_count = database.keyspace("tx_count", KeyspaceCreateOptions::default)?;
 
         Ok(Self {
             rewards_history,
@@ -64,7 +62,7 @@ impl ImmutableHistoricalAccountStore {
             mir_history,
             addresses,
             tx_count,
-            keyspace,
+            database,
             pending: Mutex::new(Vec::new()),
         })
     }
@@ -88,7 +86,7 @@ impl ImmutableHistoricalAccountStore {
             return Ok(0);
         }
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         let mut change_count = 0;
 
         for (account, entry) in Self::merge_block_deltas(drained_blocks) {
@@ -176,7 +174,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountReward>>> {
-        let mut immutable_rewards = self.collect_partition::<AccountReward>(
+        let mut immutable_rewards = self.collect_keyspace::<AccountReward>(
             &self.rewards_history,
             account.get_hash().as_ref(),
         )?;
@@ -195,7 +193,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<ActiveStakeHistory>>> {
-        let mut immutable_active_stake = self.collect_partition::<ActiveStakeHistory>(
+        let mut immutable_active_stake = self.collect_keyspace::<ActiveStakeHistory>(
             &self.active_stake_history,
             account.get_hash().as_ref(),
         )?;
@@ -214,7 +212,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<RegistrationUpdate>>> {
-        let mut immutable_registrations = self.collect_partition::<RegistrationUpdate>(
+        let mut immutable_registrations = self.collect_keyspace::<RegistrationUpdate>(
             &self.registration_history,
             account.get_hash().as_ref(),
         )?;
@@ -233,7 +231,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<DelegationUpdate>>> {
-        let mut immutable_delegations = self.collect_partition::<DelegationUpdate>(
+        let mut immutable_delegations = self.collect_keyspace::<DelegationUpdate>(
             &self.delegation_history,
             account.get_hash().as_ref(),
         )?;
@@ -252,7 +250,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_mirs = self.collect_partition::<AccountWithdrawal>(
+        let mut immutable_mirs = self.collect_keyspace::<AccountWithdrawal>(
             &self.mir_history,
             account.get_hash().as_ref(),
         )?;
@@ -266,7 +264,7 @@ impl ImmutableHistoricalAccountStore {
         &self,
         account: &StakeAddress,
     ) -> Result<Option<Vec<AccountWithdrawal>>> {
-        let mut immutable_withdrawals = self.collect_partition::<AccountWithdrawal>(
+        let mut immutable_withdrawals = self.collect_keyspace::<AccountWithdrawal>(
             &self.withdrawal_history,
             account.get_hash().as_ref(),
         )?;
@@ -290,7 +288,7 @@ impl ImmutableHistoricalAccountStore {
         let mut seen = HashSet::new();
 
         for result in self.addresses.prefix(&prefix) {
-            let (key, _) = result?;
+            let key = result.key()?;
             let shelley = ShelleyAddress::from_bytes_key(&key[prefix.len() + 8..])?;
             if seen.insert(shelley.clone()) {
                 addresses.push(shelley);
@@ -316,7 +314,7 @@ impl ImmutableHistoricalAccountStore {
         let mut total_count = 0;
 
         for result in self.tx_count.prefix(account.get_hash().as_ref()) {
-            let (_, bytes) = result?;
+            let bytes = result.value()?;
             let epoch_count = u32::from_le_bytes(bytes[..4].try_into()?);
             total_count += epoch_count;
         }
@@ -360,13 +358,13 @@ impl ImmutableHistoricalAccountStore {
         })
     }
 
-    fn collect_partition<T>(&self, partition: &Partition, prefix: &[u8]) -> Result<Vec<T>>
+    fn collect_keyspace<T>(&self, keyspace: &Keyspace, prefix: &[u8]) -> Result<Vec<T>>
     where
         T: for<'a> minicbor::Decode<'a, ()>,
     {
         let mut out = Vec::new();
-        for result in partition.prefix(prefix) {
-            let (_key, bytes) = result?;
+        for result in keyspace.prefix(prefix) {
+            let bytes = result.value()?;
             let vals: Vec<T> = decode(&bytes)?;
             out.extend(vals);
         }

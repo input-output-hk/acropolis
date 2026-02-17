@@ -1,60 +1,67 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
 use config::Config;
-use fjall::{Batch, Keyspace, Partition};
+use fjall::{Database, Keyspace, OwnedWriteBatch};
 
 use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
-    keyspace: Keyspace,
+    database: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
-    last_persisted_block: u64,
+    last_persisted_block: Option<u64>,
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
 const DEFAULT_CLEAR_ON_START: bool = true;
-const BLOCKS_PARTITION: &str = "blocks";
-const BLOCK_HASHES_BY_SLOT_PARTITION: &str = "block-hashes-by-slot";
-const BLOCK_HASHES_BY_NUMBER_PARTITION: &str = "block-hashes-by-number";
-const BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION: &str = "block-hashes-by-epoch-slot";
-const TXS_PARTITION: &str = "txs";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
+const BLOCKS_KEYSPACE: &str = "blocks";
+const BLOCK_HASHES_BY_SLOT_KEYSPACE: &str = "block-hashes-by-slot";
+const BLOCK_HASHES_BY_NUMBER_KEYSPACE: &str = "block-hashes-by-number";
+const BLOCK_HASHES_BY_EPOCH_SLOT_KEYSPACE: &str = "block-hashes-by-epoch-slot";
+const TXS_KEYSPACE: &str = "txs";
 
 impl FjallStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or_else(|_| {
+            format!(
+                "{DEFAULT_DATABASE_PATH}-{}",
+                Self::network_scope_from_config(config.as_ref())
+            )
+        });
         let clear = config.get_bool("clear-on-start").unwrap_or(DEFAULT_CLEAR_ON_START);
-        let path = Path::new(&path);
+        let path = PathBuf::from(path);
         if clear && path.exists() {
-            fs::remove_dir_all(path)?;
+            fs::remove_dir_all(&path)?;
         }
-        let fjall_config = fjall::Config::new(path);
-        let keyspace = fjall_config.open()?;
-        let blocks = FjallBlockStore::new(&keyspace)?;
-        let txs = FjallTXStore::new(&keyspace)?;
+        let database = Database::builder(&path).open()?;
+        let blocks = FjallBlockStore::new(&database)?;
+        let txs = FjallTXStore::new(&database)?;
 
         let last_persisted_block = if !clear {
-            blocks
-                .block_hashes_by_number
-                .iter()
-                .next_back()
-                .and_then(|res| {
-                    res.ok()
-                        .and_then(|(key, _)| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-                })
-                .unwrap_or(0)
+            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
+                res.key().ok().and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
+            })
         } else {
-            0
+            None
         };
 
         Ok(Self {
-            keyspace,
+            database,
             blocks,
             txs,
             last_persisted_block,
         })
+    }
+
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
     }
 }
 
@@ -71,7 +78,7 @@ impl super::Store for FjallStore {
             extra,
         };
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         self.blocks.insert(&mut batch, info, &raw);
         for (index, hash) in tx_hashes.iter().enumerate() {
             let block_ref = TxBlockReference {
@@ -87,7 +94,10 @@ impl super::Store for FjallStore {
     }
 
     fn should_persist(&self, block_number: u64) -> bool {
-        block_number > self.last_persisted_block
+        match self.last_persisted_block {
+            Some(last) => block_number > last,
+            None => true,
+        }
     }
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
@@ -133,27 +143,26 @@ impl super::Store for FjallStore {
 }
 
 struct FjallBlockStore {
-    blocks: Partition,
-    block_hashes_by_slot: Partition,
-    block_hashes_by_number: Partition,
-    block_hashes_by_epoch_slot: Partition,
+    blocks: Keyspace,
+    block_hashes_by_slot: Keyspace,
+    block_hashes_by_number: Keyspace,
+    block_hashes_by_epoch_slot: Keyspace,
 }
 
 impl FjallBlockStore {
-    fn new(keyspace: &Keyspace) -> Result<Self> {
-        let blocks =
-            keyspace.open_partition(BLOCKS_PARTITION, fjall::PartitionCreateOptions::default())?;
-        let block_hashes_by_slot = keyspace.open_partition(
-            BLOCK_HASHES_BY_SLOT_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+    fn new(database: &Database) -> Result<Self> {
+        let blocks = database.keyspace(BLOCKS_KEYSPACE, fjall::KeyspaceCreateOptions::default)?;
+        let block_hashes_by_slot = database.keyspace(
+            BLOCK_HASHES_BY_SLOT_KEYSPACE,
+            fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_number = keyspace.open_partition(
-            BLOCK_HASHES_BY_NUMBER_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+        let block_hashes_by_number = database.keyspace(
+            BLOCK_HASHES_BY_NUMBER_KEYSPACE,
+            fjall::KeyspaceCreateOptions::default,
         )?;
-        let block_hashes_by_epoch_slot = keyspace.open_partition(
-            BLOCK_HASHES_BY_EPOCH_SLOT_PARTITION,
-            fjall::PartitionCreateOptions::default(),
+        let block_hashes_by_epoch_slot = database.keyspace(
+            BLOCK_HASHES_BY_EPOCH_SLOT_KEYSPACE,
+            fjall::KeyspaceCreateOptions::default,
         )?;
 
         Ok(Self {
@@ -164,7 +173,7 @@ impl FjallBlockStore {
         })
     }
 
-    fn insert(&self, batch: &mut Batch, info: &BlockInfo, raw: &Block) {
+    fn insert(&self, batch: &mut OwnedWriteBatch, info: &BlockInfo, raw: &Block) {
         let encoded = {
             let mut bytes = vec![];
             minicbor::encode(raw, &mut bytes).expect("infallible");
@@ -221,7 +230,7 @@ impl FjallBlockStore {
         let max_number_bytes = max_number.to_be_bytes();
         let mut blocks = vec![];
         for res in self.block_hashes_by_number.range(min_number_bytes..=max_number_bytes) {
-            let (_, hash) = res?;
+            let hash = res.value()?;
             if let Some(block) = self.get_by_hash(&hash)? {
                 blocks.push(block);
             }
@@ -244,9 +253,10 @@ impl FjallBlockStore {
     }
 
     fn get_latest(&self) -> Result<Option<Block>> {
-        let Some((_, hash)) = self.block_hashes_by_slot.last_key_value()? else {
+        let Some(res) = self.block_hashes_by_slot.last_key_value() else {
             return Ok(None);
         };
+        let hash = res.value()?;
         self.get_by_hash(&hash)
     }
 }
@@ -259,16 +269,15 @@ fn epoch_slot_key(epoch: u64, epoch_slot: u64) -> [u8; 16] {
 }
 
 struct FjallTXStore {
-    txs: Partition,
+    txs: Keyspace,
 }
 impl FjallTXStore {
-    fn new(keyspace: &Keyspace) -> Result<Self> {
-        let txs =
-            keyspace.open_partition(TXS_PARTITION, fjall::PartitionCreateOptions::default())?;
+    fn new(database: &Database) -> Result<Self> {
+        let txs = database.keyspace(TXS_KEYSPACE, fjall::KeyspaceCreateOptions::default)?;
         Ok(Self { txs })
     }
 
-    fn insert_tx(&self, batch: &mut Batch, hash: TxHash, block_ref: TxBlockReference) {
+    fn insert_tx(&self, batch: &mut OwnedWriteBatch, hash: TxHash, block_ref: TxBlockReference) {
         let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
@@ -319,6 +328,7 @@ mod tests {
             epoch,
             epoch_slot,
             new_epoch: false,
+            is_new_era: false,
             timestamp,
             tip_slot: None,
             era: acropolis_common::Era::Conway,

@@ -9,7 +9,7 @@ use acropolis_common::{
     protocol_params::{Nonce, Nonces, PraosParams},
     BlockHash, BlockInfo, PoolId,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use imbl::HashMap;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::info;
@@ -135,7 +135,7 @@ impl State {
         // update nonces starting from Shelley Era
         if block_info.epoch >= genesis.shelley_epoch {
             let Some(praos_params) = self.praos_params.as_ref() else {
-                return Err(anyhow::anyhow!("Praos Param is not set"));
+                bail!("Praos Param is not set");
             };
 
             // if Shelley Era's first epoch
@@ -145,9 +145,7 @@ impl State {
 
             // current nonces must be set
             let Some(current_nonces) = self.nonces.as_ref() else {
-                return Err(anyhow::anyhow!(
-                    "Current Nonces are not set after Shelley Era"
-                ));
+                bail!("Current Nonces are not set after Shelley Era");
             };
 
             // check for stability window
@@ -160,7 +158,7 @@ impl State {
 
             // extract header's nonce vrf output
             let Some(nonce_vrf_output) = header.nonce_vrf_output().ok() else {
-                return Err(anyhow::anyhow!("Header Nonce VRF output error"));
+                bail!("Header Nonce VRF output error");
             };
 
             // Compute the new evolving nonce by combining it with the current one and the header's VRF
@@ -169,7 +167,7 @@ impl State {
 
             // there must be parent hash
             let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::from(*h)) else {
-                return Err(anyhow::anyhow!("Header Parent hash error"));
+                bail!("Header Parent hash error");
             };
 
             let new_nonces = Nonces {
@@ -181,7 +179,11 @@ impl State {
                 //
                 // If the epoch hasn't changed, then our active nonce is unchanged.
                 active: if new_epoch {
-                    Nonces::from_candidate(&current_nonces.candidate, &current_nonces.prev_lab)?
+                    Nonces::from_candidate(
+                        &current_nonces.candidate,
+                        &current_nonces.prev_lab,
+                        &praos_params.extra_entropy,
+                    )?
                 } else {
                     current_nonces.active.clone()
                 },
@@ -330,6 +332,7 @@ mod tests {
             epoch,
             epoch_slot: 99,
             new_epoch: false,
+            is_new_era: false,
             timestamp: 99999,
             era: Era::Shelley,
             tip_slot: None,
@@ -346,6 +349,7 @@ mod tests {
             epoch,
             epoch_slot: 99,
             new_epoch: true,
+            is_new_era: false,
             timestamp: 99999,
             era: Era::Shelley,
             tip_slot: None,
@@ -362,6 +366,7 @@ mod tests {
             epoch,
             epoch_slot: 99,
             new_epoch: false,
+            is_new_era: false,
             timestamp: 99999,
             era: Era::Conway,
             tip_slot: None,

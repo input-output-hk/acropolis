@@ -1,7 +1,7 @@
 use acropolis_common::{PoolId, StakeAddress};
 use anyhow::Result;
 use bigdecimal::Zero;
-use fjall::{Config, Keyspace, PartitionCreateOptions};
+use fjall::{Database, Keyspace, KeyspaceCreateOptions};
 use std::collections::HashMap;
 
 const POOL_ID_LENGTH: usize = 28;
@@ -58,15 +58,15 @@ impl SPDDStoreConfig {
 }
 
 pub struct SPDDStore {
-    keyspace: Keyspace,
-    /// Partition for all SPDD data
+    database: Database,
+    /// Keyspace for all SPDD data
     /// Key format: epoch(8 bytes) + pool_id + stake_key
     /// Value: amount(8 bytes)
-    spdd: fjall::PartitionHandle,
-    /// Partition for epoch completion markers
+    spdd: Keyspace,
+    /// Keyspace for epoch completion markers
     /// Key format: epoch(8 bytes)
     /// Value: "complete"
-    epoch_markers: fjall::PartitionHandle,
+    epoch_markers: Keyspace,
     /// Maximum number of epochs to retain (None = unlimited)
     retention_epochs: u64,
 }
@@ -78,13 +78,12 @@ impl SPDDStore {
             std::fs::remove_dir_all(path)?;
         }
 
-        let keyspace = Config::new(path).open()?;
-        let spdd = keyspace.open_partition("spdd", PartitionCreateOptions::default())?;
-        let epoch_markers =
-            keyspace.open_partition("epoch_markers", PartitionCreateOptions::default())?;
+        let database = Database::builder(path).open()?;
+        let spdd = database.keyspace("spdd", KeyspaceCreateOptions::default)?;
+        let epoch_markers = database.keyspace("epoch_markers", KeyspaceCreateOptions::default)?;
 
         Ok(Self {
-            keyspace,
+            database,
             spdd,
             epoch_markers,
             retention_epochs: config.retention_epochs,
@@ -106,7 +105,7 @@ impl SPDDStore {
         }
         self.remove_epoch_data(epoch)?;
 
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         let mut count = 0;
         for (pool_id, delegations) in spdd_state {
             for (stake_address, amount) in delegations {
@@ -117,7 +116,7 @@ impl SPDDStore {
                 count += 1;
                 if count >= BATCH_SIZE {
                     batch.commit()?;
-                    batch = self.keyspace.batch();
+                    batch = self.database.batch();
                     count = 0;
                 }
             }
@@ -144,19 +143,19 @@ impl SPDDStore {
         self.epoch_markers.remove(marker_key)?;
 
         let prefix = epoch.to_be_bytes();
-        let mut batch = self.keyspace.batch();
+        let mut batch = self.database.batch();
         let mut deleted_count = 0;
         let mut total_deleted_count: u64 = 0;
 
         for item in self.spdd.prefix(prefix) {
-            let (key, _) = item?;
+            let key = item.key()?;
             batch.remove(&self.spdd, key);
             total_deleted_count += 1;
 
             deleted_count += 1;
             if deleted_count >= BATCH_SIZE {
                 batch.commit()?;
-                batch = self.keyspace.batch();
+                batch = self.database.batch();
                 deleted_count = 0;
             }
         }
@@ -189,7 +188,7 @@ impl SPDDStore {
         let prefix = epoch.to_be_bytes();
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
-            let (key, value) = item?;
+            let (key, value) = item.into_inner()?;
             let (_, pool_id, stake_address) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
             result.push((pool_id, stake_address, amount));
@@ -209,7 +208,7 @@ impl SPDDStore {
         let prefix = encode_epoch_pool_prefix(epoch, pool_id);
         let mut result = Vec::new();
         for item in self.spdd.prefix(prefix) {
-            let (key, value) = item?;
+            let (key, value) = item.into_inner()?;
             let (_, _, stake_address) = decode_key(&key)?;
             let amount = u64::from_be_bytes(value.as_ref().try_into()?);
             result.push((stake_address, amount));

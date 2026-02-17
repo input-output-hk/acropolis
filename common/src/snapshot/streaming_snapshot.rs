@@ -41,7 +41,7 @@ pub use crate::{
     MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
     SingleHostName, StakeAddress, StakeCredential,
 };
-use crate::{PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
+use crate::{DataHash, PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
@@ -496,7 +496,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolMetadata {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         d.array()?;
         let url = d.str()?.to_string();
-        let hash = Hash::<32>::decode(d, ctx)?.to_vec();
+        let hash = DataHash::decode(d, ctx)?;
         Ok(SnapshotPoolMetadata(PoolMetadata { url, hash }))
     }
 }

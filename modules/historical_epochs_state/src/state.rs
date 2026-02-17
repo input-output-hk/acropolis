@@ -136,6 +136,7 @@ mod tests {
             hash: BlockHash::default(),
             epoch_slot: 0,
             new_epoch,
+            is_new_era: false,
             era: Era::Shelley,
             number: epoch * 10 + 100,
             epoch,

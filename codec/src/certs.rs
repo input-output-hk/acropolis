@@ -48,7 +48,7 @@ pub fn to_pool_reg(
         pool_metadata: match pool_metadata {
             Nullable::Some(md) => Some(PoolMetadata {
                 url: md.url.clone(),
-                hash: md.hash.to_vec(),
+                hash: DataHash::from(*md.hash),
             }),
             _ => None,
         },

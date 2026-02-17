@@ -1,11 +1,15 @@
 //! Acropolis epochs state module for Caryatid
 //! Unpacks block bodies to get transaction fees
 
-use acropolis_common::configuration::StartupMode;
-use acropolis_common::messages::{EpochBootstrapMessage, SnapshotMessage, SnapshotStateMessage};
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    caryatid::{RollbackWrapper, ValidationContext},
+    configuration::StartupMode,
+    declare_cardano_reader,
+    messages::{
+        BlockTxsMessage, CardanoMessage, EpochBootstrapMessage, GenesisCompleteMessage, Message,
+        ProtocolParamsMessage, RawBlockMessage, SnapshotMessage, SnapshotStateMessage, StateQuery,
+        StateQueryResponse, StateTransitionMessage,
+    },
     queries::{
         epochs::{
             EpochsStateQuery, EpochsStateQueryResponse, LatestEpoch, DEFAULT_EPOCHS_QUERY_TOPIC,
@@ -15,7 +19,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -31,18 +35,35 @@ use crate::{
 };
 use state::State;
 
-const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    BootstrapReader,
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
+    GenesisComplete,
+    GenesisCompleteMessage
 );
-const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-txs-subscribe-topic", "cardano.block.txs");
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    BlockReader,
+    "block-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
+);
+declare_cardano_reader!(
+    TxsReader,
+    "block-txs-subscribe-topic",
+    "cardano.block.txs",
+    BlockInfoMessage,
+    BlockTxsMessage
+);
+declare_cardano_reader!(
+    ParamsReader,
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
 );
+
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
@@ -50,6 +71,8 @@ const DEFAULT_EPOCH_ACTIVITY_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-activity-publish-topic", "cardano.epoch.activity");
 const DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC: (&str, &str) =
     ("epoch-nonce-publish-topic", "cardano.epoch.nonce");
+const DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC: (&str, &str) =
+    ("validation-publish-topic", "cardano.validation.epochs");
 
 /// Epochs State module
 #[module(
@@ -117,87 +140,71 @@ impl EpochsState {
     #[allow(clippy::too_many_arguments)]
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
-        mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
+        context: Arc<Context<Message>>,
+        mut bootstrap_reader: BootstrapReader, //mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
+        mut params_reader: ParamsReader,
+        mut block_reader: BlockReader,
+        mut txs_reader: TxsReader,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut block_subscription: Box<dyn Subscription<Message>>,
-        mut block_txs_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut epoch_activity_publisher: EpochActivityPublisher,
         mut epoch_nonce_publisher: EpochNoncePublisher,
+        validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
-        let genesis = match bootstrapped_message.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
-                complete.values.clone()
-            }
-            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
-        };
+        let (_, genesis) = bootstrap_reader.read_skip_rollbacks().await?;
 
         // Wait for the snapshot bootstrap (if available)
-        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis).await?;
+        Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis.values).await?;
 
-        // Consume initial protocol parameters (only needed for genesis bootstrap)
+        // Consume initial protocol parameters and txs (only needed for genesis bootstrap)
         if !is_snapshot_mode {
-            let _ = protocol_parameters_subscription.read().await?;
-            let _ = block_txs_subscription.read().await?;
+            let _ = params_reader.read_skip_rollbacks().await?;
+            let _ = txs_reader.read_skip_rollbacks().await?;
         }
 
         loop {
+            let mut ctx = ValidationContext::new(&context, &validation_topic);
+
             // Get a mutable state
-            let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis));
-            let mut current_block: Option<BlockInfo> = None;
+            let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            // Handle blocks first
-            let (_, message) = block_subscription.read().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
-                    // handle rollback here
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
+            match ctx.consume_sync(block_reader.read_with_rollbacks().await)? {
+                RollbackWrapper::Normal((blk_info, blk_msg)) => {
+                    if blk_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(blk_info.number);
                     }
-                    current_block = Some(block_info.clone());
-                    let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
+                    let is_new_epoch = blk_info.new_epoch && blk_info.epoch > 0;
 
-                    // read protocol parameters if new epoch
                     if is_new_epoch {
-                        let (_, protocol_parameters_msg) =
-                            protocol_parameters_subscription.read_ignoring_rollbacks().await?;
-                        if let Message::Cardano((_, CardanoMessage::ProtocolParams(params))) =
-                            protocol_parameters_msg.as_ref()
+                        if let Some((_, params)) = ctx
+                            .consume("protocol params", params_reader.read_skip_rollbacks().await)
                         {
-                            state.handle_protocol_parameters(params);
+                            state.handle_protocol_parameters(&params);
                         }
 
-                        let ea = state.end_epoch(block_info);
+                        let ea = state.end_epoch(&blk_info);
                         // publish epoch activity message
-                        epoch_activity_publisher.publish(block_info, ea).await.unwrap_or_else(
-                            |e| error!("Failed to publish epoch activity messages: {e}"),
+                        ctx.handle(
+                            "publish epoch activity",
+                            epoch_activity_publisher.publish(&blk_info, ea).await,
                         );
                     }
 
-                    let span = info_span!("epochs_state.decode_header", block = block_info.number);
-                    let mut header = None;
-                    span.in_scope(|| {
-                        header = match MultiEraHeader::decode(
-                            block_info.era as u8,
-                            None,
-                            &block_msg.header,
-                        ) {
-                            Ok(header) => Some(header),
-                            Err(e) => {
-                                error!("Can't decode header {}: {e}", block_info.slot);
-                                None
-                            }
-                        };
-                    });
+                    let header = ctx.handle(
+                        "epochs_state.decode_header",
+                        match MultiEraHeader::decode(blk_info.era as u8, None, &blk_msg.header) {
+                            Err(e) => Err(anyhow!("Can't decode header {}: {e}", blk_info.slot)),
+                            Ok(res) => Ok(Some(res)),
+                        },
+                    );
 
-                    let span = info_span!("epochs_state.evolve_nonces", block = block_info.number);
+                    let span = info_span!("epochs_state.evolve_nonces", block = blk_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
-                            if let Err(e) = state.evolve_nonces(&genesis, block_info, header) {
-                                error!("Error handling block header: {e}");
-                            }
+                            ctx.handle(
+                                "evolve_nonces",
+                                state.evolve_nonces(&genesis.values, &blk_info, header),
+                            )
                         }
                     });
 
@@ -205,83 +212,55 @@ impl EpochsState {
                     // for that epoch
                     if is_new_epoch {
                         let active_nonce = state.get_active_nonce();
-                        epoch_nonce_publisher
-                            .publish(block_info, active_nonce)
-                            .await
-                            .unwrap_or_else(|e| {
-                                error!("Failed to publish epoch nonce messages: {e}")
-                            });
+                        ctx.handle(
+                            "publish epoch nonce",
+                            epoch_nonce_publisher.publish(&blk_info, active_nonce).await,
+                        );
                     }
 
-                    let span = info_span!("epochs_state.handle_mint", block = block_info.number);
+                    let span = info_span!("epochs_state.handle_mint", block = blk_info.number);
                     span.in_scope(|| {
                         if let Some(header) = header.as_ref() {
                             state.handle_mint(
-                                block_info,
+                                &blk_info,
                                 header.issuer_vkey(),
                                 header.as_byron().is_some(),
                             );
                         }
                     });
                 }
-
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // publish epoch activity rollback message
-                    epoch_activity_publisher.publish_rollback(message).await.unwrap_or_else(|e| {
-                        error!("Failed to publish epoch activity rollback: {e}")
-                    });
+                RollbackWrapper::Rollback(raw_message) => {
+                    ctx.handle(
+                        "publishing rollback message",
+                        epoch_activity_publisher.publish_rollback(raw_message).await,
+                    );
                 }
-
-                _ => error!("Unexpected message type: {message:?}"),
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            let (_, message) = block_txs_subscription.read_ignoring_rollbacks().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockInfoMessage(txs_msg))) => {
-                    let span =
-                        info_span!("epochs_state.handle_block_txs", block = block_info.number);
-                    span.in_scope(|| {
-                        Self::check_sync(&current_block, block_info);
-                        state.handle_block_txs(block_info, txs_msg);
-                    });
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
+            if let Some((blk_info, msg)) =
+                ctx.consume("block_txs", txs_reader.read_skip_rollbacks().await)
+            {
+                let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
+                span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
             }
 
             // Commit the new state
-            if let Some(block_info) = current_block {
+            if let Some(block_info) = ctx.get_current_block_opt() {
                 history.lock().await.commit(block_info.number, state);
             }
+
+            ctx.publish("epochs_state").await;
         }
     }
 
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Subscription topics
-        let bootstrapped_subscribe_topic = config
-            .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
-
-        let block_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for blocks on '{block_subscribe_topic}'");
-
-        let block_txs_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_TXS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for block txs on '{block_txs_subscribe_topic}'");
-
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
+        let bootstrap_reader = BootstrapReader::new(&context, &config).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
+        let txs_reader = TxsReader::new(&context, &config).await?;
+        let block_reader = BlockReader::new(&context, &config).await?;
 
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -299,6 +278,11 @@ impl EpochsState {
             .unwrap_or(DEFAULT_EPOCH_NONCE_PUBLISH_TOPIC.1.to_string());
         info!("Publishing EpochNonceMessage on '{epoch_nonce_publish_topic}'");
 
+        let validation_outcome_topic = config
+            .get_string(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.0)
+            .unwrap_or(DEFAULT_VALIDATION_OUTCOME_PUBLISH_TOPIC.1.to_string());
+        info!("Publishing validation outcomes on '{validation_outcome_topic}'");
+
         // query topic
         let epochs_query_topic = config
             .get_string(DEFAULT_EPOCHS_QUERY_TOPIC.0)
@@ -311,13 +295,6 @@ impl EpochsState {
             StateHistoryStore::default_block_store(),
         )));
         let history_query = history.clone();
-
-        // Subscribe
-        let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
-        let protocol_parameters_subscription =
-            context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let block_txs_subscription = context.subscribe(&block_txs_subscribe_topic).await?;
 
         // Only subscribe to Snapshot if we're using Snapshot to start-up
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
@@ -370,17 +347,21 @@ impl EpochsState {
             }
         });
 
+        let context_clone = context.clone();
+
         // Start the run task
         context.run(async move {
             Self::run(
                 history,
-                bootstrapped_subscription,
+                context_clone,
+                bootstrap_reader,
+                params_reader,
+                block_reader,
+                txs_reader,
                 snapshot_subscription,
-                block_subscription,
-                block_txs_subscription,
-                protocol_parameters_subscription,
                 epoch_activity_publisher,
                 epoch_nonce_publisher,
+                validation_outcome_topic,
                 is_snapshot_mode,
             )
             .await
@@ -388,18 +369,5 @@ impl EpochsState {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }

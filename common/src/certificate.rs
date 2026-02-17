@@ -4,8 +4,8 @@ use crate::address::StakeAddress;
 use crate::drep::{Anchor, DRepChoice, DRepDeregistration, DRepRegistration, DRepUpdate};
 use crate::hash::Hash;
 use crate::types::{
-    Credential, KeyHash, Lovelace, PoolId, PoolMetadata, Ratio, Relay, ScriptHash, StakeCredential,
-    TxIdentifier, VrfKeyHash,
+    Credential, KeyHash, Lovelace, PoolId, PoolMetadata, Ratio, Relay, ScriptHash, TxIdentifier,
+    VrfKeyHash,
 };
 use serde_with::{hex::Hex, serde_as};
 use std::collections::HashSet;
@@ -320,32 +320,32 @@ pub enum TxCertificate {
 }
 
 impl TxCertificate {
-    /// This function extracts required VKey Hashes from TxCertificate
     /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
-    ///
-    /// returns (vkey_hashes, script_hashes)
-    pub fn get_cert_authors(
-        &self,
-        vkey_hashes: &mut HashSet<KeyHash>,
-        script_hashes: &mut HashSet<ScriptHash>,
-    ) {
-        let mut parse_cred = |cred: &StakeCredential| match cred {
-            StakeCredential::AddrKeyHash(vkey_hash) => {
-                vkey_hashes.insert(*vkey_hash);
-            }
-            StakeCredential::ScriptHash(script_hash) => {
-                script_hashes.insert(*script_hash);
-            }
-        };
+    pub fn get_script_cert_author(&self) -> Option<ScriptHash> {
+        match self {
+            // Deregistration requires witness from stake credential
+            Self::StakeDeregistration(addr) => addr.credential.get_script_hash(),
+            // Delegation requires witness from delegator
+            Self::StakeDelegation(deleg) => deleg.stake_address.credential.get_script_hash(),
+            _ => None,
+        }
+    }
 
+    /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    pub fn get_vkey_cert_authors(&self) -> HashSet<KeyHash> {
+        let mut vkey_hashes = HashSet::new();
         match self {
             // Deregistration requires witness from stake credential
             Self::StakeDeregistration(addr) => {
-                parse_cred(&addr.credential);
+                if let Some(vkey_hash) = addr.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
             }
             // Delegation requires witness from delegator
             Self::StakeDelegation(deleg) => {
-                parse_cred(&deleg.stake_address.credential);
+                if let Some(vkey_hash) = deleg.stake_address.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
             }
             // Pool registration requires witness from pool cold key and owners
             Self::PoolRegistration(pool_reg) => {
@@ -360,10 +360,12 @@ impl TxCertificate {
             }
             // Genesis delegation requires witness from genesis key
             Self::GenesisKeyDelegation(gen_deleg) => {
-                vkey_hashes.insert(*gen_deleg.genesis_delegate_hash);
+                vkey_hashes.insert(gen_deleg.genesis_hash);
             }
             _ => {}
         }
+
+        vkey_hashes
     }
 }
 
