@@ -82,6 +82,7 @@ pub struct Header {
     pub number: u64,
     pub bytes: Vec<u8>,
     pub era: Era,
+    pub parent_hash: Option<BlockHash>,
 }
 
 #[derive(Debug)]
@@ -211,12 +212,14 @@ impl PeerConnectionWorker {
             return Ok(None);
         }
         let era = Era::try_from(hdr_variant)?;
+        let parent_hash = hdr.previous_hash().map(|h| BlockHash::new(*h));
         Ok(Some(Header {
             hash: BlockHash::new(*hdr.hash()),
             slot: hdr.slot(),
             number: hdr.number(),
             bytes: header.cbor,
             era,
+            parent_hash,
         }))
     }
 }
