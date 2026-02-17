@@ -130,6 +130,13 @@ impl BlockFlowHandler {
         }
     }
 
+    /// Whether PNI should autonomously re-request blocks when a peer disconnects.
+    /// In Direct mode, PNI manages chain selection and should retry from other peers.
+    /// In Consensus mode, block fetching is driven by the consensus module via BlockWanted.
+    pub fn should_rerequest_on_disconnect(&self) -> bool {
+        matches!(self, BlockFlowHandler::Direct { .. })
+    }
+
     /// Handle a peer disconnecting.
     pub fn handle_disconnect(&mut self, peer: PeerId, next_peer: Option<PeerId>) {
         match self {
@@ -184,13 +191,12 @@ impl BlockFlowHandler {
 
     /// Get peers that announced a specific block.
     pub fn block_announcers(&self, slot: u64, hash: BlockHash) -> Option<Vec<PeerId>> {
-        match self {
-            BlockFlowHandler::Direct { chain } => Some(chain.block_announcers(slot, hash)),
-            BlockFlowHandler::Consensus(state) => {
-                state.block_announcers(slot, hash);
-                None
-            }
-        }
+        let announcers = match self {
+            BlockFlowHandler::Direct { chain } => chain.block_announcers(slot, hash),
+            BlockFlowHandler::Consensus(state) => state.block_announcers(slot, hash),
+        };
+
+        (!announcers.is_empty()).then_some(announcers)
     }
 
     /// Reset state for a new sync point.

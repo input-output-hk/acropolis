@@ -226,12 +226,13 @@ impl NetworkManager {
         // The next peer is temporary needed for Direct mode flow handler only
         self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
 
-        for (requested_hash, requested_slot) in peer.reqs {
-            if let Some(announcers) =
-                self.flow_handler.block_announcers(requested_slot, requested_hash)
-            {
-                // TODO: Temporary for direct mode.
-                self.request_block(requested_slot, requested_hash, announcers);
+        if self.flow_handler.should_rerequest_on_disconnect() {
+            for (requested_hash, requested_slot) in peer.reqs {
+                if let Some(announcers) =
+                    self.flow_handler.block_announcers(requested_slot, requested_hash)
+                {
+                    self.request_block(requested_slot, requested_hash, announcers);
+                }
             }
         }
 
