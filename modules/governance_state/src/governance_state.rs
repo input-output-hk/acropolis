@@ -326,7 +326,7 @@ impl GovernanceState {
             let mut vld = ValidationContext::new(
                 &context,
                 &config.validation_outcome_topic,
-                "governance_state"
+                "governance_state",
             );
 
             let (blk_g, gov_procs) =

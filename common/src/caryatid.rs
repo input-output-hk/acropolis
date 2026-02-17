@@ -192,7 +192,7 @@ pub struct ValidationContext {
     current_block: Option<Arc<BlockInfo>>,
     validation: ValidationOutcomes,
     validation_topic: String,
-    module: String
+    module: String,
 }
 
 impl ValidationContext {
@@ -202,7 +202,7 @@ impl ValidationContext {
             current_block: None,
             context: context.clone(),
             validation_topic: validation_topic.to_owned(),
-            module: module.to_owned()
+            module: module.to_owned(),
         }
     }
 
@@ -293,8 +293,10 @@ impl ValidationContext {
 
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
-            if let Err(e) =
-                self.validation.publish(&self.context, &self.module, &self.validation_topic, blk).await
+            if let Err(e) = self
+                .validation
+                .publish(&self.context, &self.module, &self.validation_topic, blk)
+                .await
             {
                 error!("Publish failed in {}: {:?}", self.module, e);
             }
