@@ -35,6 +35,7 @@ pub struct AssetSpend {
     pub spending_tx_hash: TxHash,
 }
 
+#[allow(dead_code)]
 pub struct Registration {
     pub full_datum: Datum,
     pub block_number: BlockNumber,
@@ -45,6 +46,7 @@ pub struct Registration {
     pub utxo_index: u16,
 }
 
+#[allow(dead_code)]
 pub struct Deregistration {
     pub full_datum: Datum,
     pub block_number: BlockNumber,
@@ -83,23 +85,25 @@ pub struct UTxOMeta {
 }
 
 pub struct RegistrationEvent {
-    pub _header: EventHeader,
-    pub _datum: Datum,
+    pub header: EventHeader,
+    pub datum: Datum,
 }
 
 pub struct DeregistrationEvent {
-    pub _header: EventHeader,
-    pub _spent_utxo_hash: TxHash,
-    pub _spent_utxo_index: u16,
-    pub _datum: Datum,
+    pub header: EventHeader,
+    pub spent_block_timestamp: NaiveDateTime,
+    pub spent_block_hash: BlockHash,
+    pub spent_tx_hash: TxHash,
+    pub spent_tx_index: u32,
+    pub datum: Datum,
 }
 
 pub struct EventHeader {
-    pub _block_hash: BlockHash,
-    pub _block_timestamp: NaiveDateTime,
-    pub _tx_index_in_block: u32,
-    pub _tx_hash: TxHash,
-    pub _tx_index: u16,
+    pub block_hash: BlockHash,
+    pub block_timestamp: NaiveDateTime,
+    pub tx_index: u32,
+    pub tx_hash: TxHash,
+    pub utxo_index: u16,
 }
 
 #[derive(Clone)]

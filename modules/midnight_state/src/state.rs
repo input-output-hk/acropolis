@@ -36,7 +36,6 @@ pub struct AssetUTxOState {
 pub struct CandidateRegistrationState {
     pub registrations: BTreeMap<BlockNumber, Vec<Arc<RegistrationEvent>>>,
     pub deregistrations: BTreeMap<BlockNumber, Vec<Arc<DeregistrationEvent>>>,
-    pub datum_index: HashMap<UTxOIdentifier, Datum>,
 }
 
 #[derive(Clone, Default)]
@@ -131,6 +130,45 @@ impl State {
                             .spend_tx
                             .expect("UTxO index out of sync with spent_utxos"),
                     }
+                })
+            })
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_registrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Registration> {
+        self.candidate_registrations
+            .registrations
+            .range(start..=end)
+            .flat_map(|(block_number, events)| {
+                events.iter().map(|event| Registration {
+                    full_datum: event.datum.clone(),
+                    block_number: *block_number,
+                    block_hash: event.header.block_hash,
+                    block_timestamp: event.header.block_timestamp,
+                    tx_index_in_block: event.header.tx_index,
+                    tx_hash: event.header.tx_hash,
+                    utxo_index: event.header.utxo_index,
+                })
+            })
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_deregistrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Deregistration> {
+        self.candidate_registrations
+            .deregistrations
+            .range(start..=end)
+            .flat_map(|(block_number, events)| {
+                events.iter().map(|event| Deregistration {
+                    full_datum: event.datum.clone(),
+                    block_number: *block_number,
+                    block_hash: event.spent_block_hash,
+                    block_timestamp: event.spent_block_timestamp,
+                    tx_index_in_block: event.spent_tx_index,
+                    tx_hash: event.spent_tx_hash,
+                    utxo_tx_hash: event.header.tx_hash,
+                    utxo_index: event.header.utxo_index,
                 })
             })
             .collect()
