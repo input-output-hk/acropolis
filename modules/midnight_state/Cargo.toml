@@ -16,10 +16,6 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 chrono = { workspace = true }
-hex = { workspace = true }
-imbl = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
