@@ -10,8 +10,8 @@ use acropolis_common::{
         PotDeltasMessage, UTXODeltasMessage,
     },
     Address, BlockHash, BlockInfo, BlockIntent, BlockStatus, ByronAddress, Era, GenesisDelegates,
-    Lovelace, LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas,
-    UTxOIdentifier, Value,
+    LovelaceDelta, MagicNumber, TxHash, TxIdentifier, TxOutput, TxUTxODeltas, UTxOIdentifier,
+    Value,
 };
 use anyhow::Result;
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -47,14 +47,19 @@ const MAINNET_FIRST_BLOCK_ERA: Era = Era::Byron;
 const PREVIEW_FIRST_BLOCK_ERA: Era = Era::Shelley;
 const SANCHONET_FIRST_BLOCK_ERA: Era = Era::Conway;
 
-// Initial reserves (=maximum ever Lovelace supply)
-const INITIAL_RESERVES: Lovelace = 45_000_000_000_000_000;
-
 fn hash_genesis_bytes(raw_bytes: &[u8]) -> Hash<32> {
     let mut hasher = Blake2b::<U32>::new();
     hasher.update(raw_bytes);
     let hash: [u8; 32] = hasher.finalize().into();
     Hash::<32>::new(hash)
+}
+
+fn approximate_rational(num: u64, den: u64) -> f64 {
+    let scale = 10u128.pow(3);
+
+    let scaled = (num as u128 * scale + den as u128 / 2) / den as u128;
+
+    scaled as f64 / scale as f64
 }
 
 /// Genesis bootstrapper module
@@ -125,6 +130,9 @@ impl GenesisBootstrapper {
                     .expect("Invalid JSON in BYRON_GENESIS file");
                 let shelley_genesis: ShelleyGenesisFile = serde_json::from_slice(shelley_genesis)
                     .expect("Invalid JSON in SHELLEY_GENESIS file");
+                let initial_reserves = shelley_genesis
+                    .max_lovelace_supply
+                    .expect("max_lovelace_supply not set in SHELLEY_GENESIS file");
 
                 // Construct messages
                 let block_info = BlockInfo {
@@ -207,13 +215,41 @@ impl GenesisBootstrapper {
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
                     // Send the pot update message with the remaining reserves
-                    let pot_deltas_message = PotDeltasMessage {
-                        deltas: BootstrapPotDeltas {
-                            delta_reserves: (INITIAL_RESERVES - total_allocated) as LovelaceDelta,
+                    let pot_deltas = if first_block_era < Era::Shelley {
+                        BootstrapPotDeltas {
+                            delta_reserves: (initial_reserves - total_allocated) as LovelaceDelta,
                             delta_treasury: 0,
                             delta_deposits: 0,
-                        },
+                        }
+                    } else {
+                        // When booting directly into Shelley (e.g. Preview), apply the first epoch's
+                        // treasury cut immediately. We approximate tau and rho to 3 decimal places to reflect
+                        // their intended decimal values instead of the binary scaled rationals encoded in genesis.
+                        let reserves_after_allocation = (initial_reserves - total_allocated) as f64;
+
+                        let tau = approximate_rational(
+                            shelley_genesis.protocol_params.tau.numerator,
+                            shelley_genesis.protocol_params.tau.denominator,
+                        );
+
+                        let rho = approximate_rational(
+                            shelley_genesis.protocol_params.rho.numerator,
+                            shelley_genesis.protocol_params.rho.denominator,
+                        );
+
+                        let treasury_delta = reserves_after_allocation * tau * rho;
+
+                        BootstrapPotDeltas {
+                            delta_reserves: (initial_reserves
+                                - total_allocated
+                                - treasury_delta as u64)
+                                as LovelaceDelta,
+                            delta_treasury: treasury_delta as LovelaceDelta,
+                            delta_deposits: 0,
+                        }
                     };
+
+                    let pot_deltas_message = PotDeltasMessage { deltas: pot_deltas };
 
                     let message_enum = Message::Cardano((
                         block_info.clone(),
