@@ -19,6 +19,10 @@ sync-point = "cache" #"cache" # "origin", "tip", "snapshot"
 node-addresses = ["sancho-testnet.able-pool.io:6002"]
 magic-number = 4
 
+[module.midnight-state]
+enable-indexer = false
+address-deltas-topic = "cardano.address.deltas"
+
 [module.block-unpacker]
 
 [module.tx-unpacker]

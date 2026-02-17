@@ -34,6 +34,7 @@ members = [
     "modules/rest_blockfrost",              # Blockfrost-compatible REST API
     "modules/mcp_server",                   # Model Context Protocol server
     "modules/custom_indexer",               # Custom indexer module
+    "modules/midnight_state",               # Indexes and serves data needed by the `midnight-node`
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process

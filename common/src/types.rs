@@ -817,6 +817,12 @@ impl Display for VKeyWitness {
 /// Slot
 pub type Slot = u64;
 
+/// Block Number
+pub type BlockNumber = u64;
+
+/// Epoch
+pub type Epoch = u64;
+
 /// Point on the chain
 #[derive(
     Debug,

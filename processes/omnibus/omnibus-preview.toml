@@ -48,6 +48,10 @@ validators = [
 #           "cardano.validation.spo"
 ]
 
+[module.midnight-state]
+enable-indexer = false
+address-deltas-topic = "cardano.address.deltas"
+
 [module.block-unpacker]
 
 [module.rest-blockfrost]
