@@ -35,16 +35,16 @@ Blocks should be identified by hash.
 The content of each Block comprises:
 
 * The block number (height)
+* The slot number
 * The raw block body (`Option<Vec<u8>>` - None if not yet fetched)
-* Pointers to child blocks (`Vec<Arc<Block>>`)
-* Pointer to parent block (`Option<Arc<Block>>`) - the genesis root has none
+* Hash of child blocks (`Vec<BlockHash>`)
+* Hash of parent block (`Option<BlockHash>`) - the genesis root has none
+* Lifecycle status (Offered → Wanted → Fetched → Validated, or Rejected)
 
-These should be stored in a `HashMap<Hash, Arc<Block>>` for fast lookup by hash.
+These are stored in a `HashMap<BlockHash, TreeBlock>` for fast lookup by hash.
 
-For the `get_favoured_chain()` operation we will probably need a
-root_hash indicating the root of the tree, or a direct `Arc<Block>`
-pointer, although it can be obtained from any node by walking
-backwards up the tree.
+The tree also tracks a `root` hash, a `favoured_tip` hash, and the
+security parameter `k`.
 
 ## Observers
 
@@ -52,12 +52,13 @@ The ConsensusTree will need observers/callbacks for:
 
 * `block_proposed`: Block proposed as new tip of favoured chain (connects to `cardano.block.proposed`)
 * `rollback`: Favoured chain has switched - indicates rollback to the common ancestor block number
+* `block_rejected`: A block has failed validation - PNI should sanction the peers that provided it
 
 ## Operations
 
 ### Check if a block is wanted
 
-`check_block_wanted(hash: Hash, parent_hash: Hash, number: u64) -> Result<Vec<Hash>>`
+`check_block_wanted(hash: BlockHash, parent_hash: BlockHash, number: u64, slot: u64) -> Result<Vec<BlockHash>>`
 
 Queried when the Peer Network Interface (PNI) has offered a new block.  Returns a list of blocks
 that are now wanted, which may include both the one offered and any previously unfetched blocks
@@ -70,7 +71,8 @@ block's number is not one more than the parent's block number, reject
 Create an empty result vector.
 
 Create a new block (with no block_body) and add the block to the tree by connecting to the
-parent and adding it to the parent's children.  Call `get_favoured_chain()`.
+parent and adding it to the parent's children.  Check fork depth against bounded `maxvalid`:
+if fork depth > k, remove the block and reject.  Call `get_favoured_chain()`.
 
 If the favoured chain has switched, call `find_common_ancestor`
 with the old and new favoured tips, and call the `rollback` observer with the resulting common
@@ -88,16 +90,17 @@ each recursion)
 The effect of this is to publish blocks on the new chain that we have, and request those
 we don't, which will then be fixed up in `add_block()` when they arrive.
 
-Call `prune(block.number)` to remove any now-immutable blocks.
+Note: pruning is done externally by the consensus module, not inside this operation.
 
 ### Add a block:
 
-`add_block(block_body: Vec<u8>) -> Result<()>`
+`add_block(hash: BlockHash, body: Vec<u8>) -> Result<()>`
 
-Called when PNI sends a block on `cardano.block.available`.
+Called when PNI sends a block on `cardano.block.available`.  The hash is passed by the
+caller (the consensus module knows which block body this is).
 
-Operation: On receipt of a new candidate block, decode it to get the hash and look it up
-in the hashmap.  If it's not there, fail (we shouldn't be sent blocks we haven't requested).
+Operation: Look up the block by hash in the hashmap.  If it's not there, fail (we shouldn't
+be sent blocks we haven't requested).
 
 If this block was already fetched, exit.
 
@@ -116,7 +119,7 @@ propose as far down the chain as we can to retain the ordering.
 
 ### Remove a block
 
-`remove_block(hash: Hash) -> Vec<Hash>`
+`remove_block(hash: BlockHash) -> Result<Vec<BlockHash>>`
 
 Called when PNI sends `cardano.block.rescinded` because all peers have rolled back this block.
 Returns a list of block hashes that have become wanted if the deletion of the block has changed the
@@ -128,58 +131,67 @@ Process the potential favoured chain switch in the same way as `check_block_want
 common code), so that we generate a list of blocks that were previously unfetched but we now
 need as part of the favoured chain, and propose any we have already fetched.
 
+### Validation
+
+`mark_validated(hash)` transitions a fetched block to Validated.
+
+`mark_rejected(hash)` fires the `block_rejected` observer, then delegates to `remove_block`
+to remove the block and its descendants (potentially triggering a chain switch).
+
 ## Helper functions
 
 ### Get favoured chain
 
-`get_favoured_chain() -> Arc<Block>`
+`get_favoured_chain() -> Option<BlockHash>`
 
 Recursively search the tree from the root to find the longest chain, and return the
-last block on the longest chain.  Uses an internal recursive function along these lines:
+last block on the longest chain.  Ties are broken deterministically in favour of the
+chain containing the current `favoured_tip` (Praos `maxvalid` rule, paper line 667-668).
+Uses an internal recursive function along these lines:
 
 ```rust
-get_longest_chain_length_and_tip_from(block: Arc<Block>) -> (u64, Arc<Block>) {
-  let mut max_length = 1;
-  let mut tip = block;
+longest_chain_from(hash: BlockHash) -> (u64, BlockHash) {
+let mut max_length = 0;
+let mut best_tip = hash;
 
-  for child in block.children.iter() {
-    let (child_max_length, child_tip) = get_longest_chain_length_and_tip_from(child);
-    if child_max_length > max_length {
-        max_length = child_max_length;
-        tip = child_tip;
-    }
-  }
+for child in block.children {
+let (child_len, child_tip) = longest_chain_from(child);
+if child_len > max_length {
+max_length = child_len;
+best_tip = child_tip;
+} else if child_len == max_length {
+// Tie-break: favour current tip (Praos maxvalid)
+if child_tip == favoured_tip || is_ancestor_of(child_tip, favoured_tip) {
+best_tip = child_tip;
+}
+}
+}
 
-  (max_length, tip)
+(max_length + 1, best_tip)
 }
 ```
 
 ### Find common ancestor
 
-`find_common_ancestor(a: Arc<Block>, b: Arc<Block>) -> Option<Arc<Block>>`
+`find_common_ancestor(a: BlockHash, b: BlockHash) -> Result<BlockHash>`
 
-(actually this should never fail in any connected tree)
-
-Something like...
-
-1. Whichever of a & b has the highest number, or arbitrarily if the same, walk back up the chain from there until a branch point (a block with more than 1 child)
-2. If a & b are the same, return Ok(a)
-3. If both a & b have no parents, return None
-4. Repeat from 1
+Walk the higher-numbered block back until both are at the same height, then walk both
+back in lockstep until they meet.  Returns an error if either block is not in the tree.
 
 ### Chain contains
 
-`chain_contains(block: Arc<Block>, tip: Arc<Block>) -> bool`
+`chain_contains(block_hash: BlockHash, tip: BlockHash) -> bool`
 
 Returns whether a chain ending at the given tip includes the given block.  Walk back up
 from the tip until you reach either the block (true) or there is no further to walk (false)
 
 ### Prune
 
-`prune(latest_number: u64, favoured_tip: Arc<Block>)`
+`prune() -> Result<()>`
 
-Discard all blocks from the tree older than `latest_number - k` where
-'k' is the security parameter (a configuration option on the tree, currently 2160).  If discarded
-blocks have multiple children, use `chain_contains` with each child and the `favoured_tip` to
-see if each child branch is on the favoured chain, and recursively delete any that aren't.
+Discard all blocks from the tree older than `tip - k` where
+'k' is the security parameter (a configuration option on the tree, currently 2160).  Derives
+the prune boundary and favoured tip internally.  The block at the prune boundary on the
+favoured chain becomes the new root.  All blocks reachable from the new root are preserved
+(including forks after the boundary); everything else is discarded.
 
