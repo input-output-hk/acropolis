@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use acropolis_common::{rest_error::RESTError, AssetName, PolicyId};
+use acropolis_common::{rest_error::RESTError, AssetName, DataHash, PolicyId};
 use anyhow::Result;
 use blake2::digest::{Update, VariableOutput};
 use reqwest::Client;
@@ -65,7 +65,7 @@ pub async fn fetch_pool_metadata_as_bytes(url: String, timeout: Duration) -> Res
 /// * `Err(<error description>)` - for failed verifaction
 pub fn verify_pool_metadata_hash(
     pool_metadata: &[u8],
-    expected_hash: &acropolis_common::types::DataHash,
+    expected_hash: &DataHash,
 ) -> Result<(), String> {
     // hash the serialized metadata
     let mut hasher = blake2::Blake2bVar::new(32).map_err(invalid_size_desc)?;
@@ -74,7 +74,7 @@ pub fn verify_pool_metadata_hash(
     let mut hash = vec![0; 32];
     hasher.finalize_variable(&mut hash).map_err(invalid_size_desc)?;
 
-    if &hash == expected_hash {
+    if hash.as_slice() == expected_hash.as_ref() {
         return Ok(());
     }
 
@@ -109,6 +109,8 @@ pub fn split_policy_and_asset(hex_str: &str) -> Result<(PolicyId, AssetName), RE
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     // XXX: it’s best to leave Internet interactions to integration tests, not unit tests, so let’s provide:
@@ -154,7 +156,8 @@ mod tests {
         let url = " https://880w.short.gy/clrsp.json ";
 
         let expected_hash = "3c914463aa1cddb425fba48b21c4db31958ea7a30e077f756a82903f30e04905";
-        let expected_hash_as_arr = hex::decode(expected_hash).expect("should be able to decode {}");
+        let expected_hash_as_arr =
+            DataHash::from_str(expected_hash).expect("should be able to decode {}");
 
         let pool_metadata =
             offline_fetch_pool_metadata_as_bytes(url.to_string(), Duration::from_secs(3))

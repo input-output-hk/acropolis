@@ -179,7 +179,7 @@ impl UTXOState {
                         }
 
                         validation_outcomes
-                            .publish(&context, &publish_tx_validation_topic, block)
+                            .publish(&context, "utxo_state", &publish_tx_validation_topic, block)
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
                     }

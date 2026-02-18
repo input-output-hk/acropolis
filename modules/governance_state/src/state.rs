@@ -8,7 +8,7 @@ use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
     messages::{
-        CardanoMessage, DRepStakeDistributionMessage, GovernanceOutcomesMessage,
+        CardanoMessage, DRepStakeDistributionMessage, DRepStateMessage, GovernanceOutcomesMessage,
         GovernanceProceduresMessage, Message, ProtocolParamsMessage, SPOStakeDistributionMessage,
     },
     protocol_params::ProtocolVersion,
@@ -92,10 +92,18 @@ impl State {
     pub async fn handle_drep_stake(
         &mut self,
         drep_message: &DRepStakeDistributionMessage,
+        drep_state_message: &DRepStateMessage,
         spo_message: &SPOStakeDistributionMessage,
     ) -> Result<()> {
         self.drep_stake_messages_count += 1;
-        self.drep_stake = HashMap::from_iter(drep_message.drdd.dreps.iter().cloned());
+        let filtered_dreps = drep_message
+            .drdd
+            .dreps
+            .iter()
+            .filter(|(cred, _)| !drep_state_message.inactive_dreps.contains(cred))
+            .cloned();
+
+        self.drep_stake = HashMap::from_iter(filtered_dreps);
         self.drep_no_confidence = drep_message.drdd.no_confidence;
         self.drep_abstain = drep_message.drdd.abstain;
         self.spo_stake = HashMap::from_iter(spo_message.spos.iter().cloned());

@@ -8,6 +8,7 @@ use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
 mod alonzo;
 mod babbage;
 mod conway;
+pub mod phase2;
 mod shelley;
 
 pub fn validate_tx(
@@ -79,6 +80,7 @@ fn validate_alonzo_compatible_tx(
         ));
     }
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+    let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
     match era {
         Era::Shelley => {
@@ -97,8 +99,10 @@ fn validate_alonzo_compatible_tx(
                 tx_hash,
                 &vkey_witnesses,
                 &native_scripts,
+                &metadata,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -111,8 +115,10 @@ fn validate_alonzo_compatible_tx(
                 tx_hash,
                 &vkey_witnesses,
                 &native_scripts,
+                &metadata,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -125,8 +131,10 @@ fn validate_alonzo_compatible_tx(
                 tx_hash,
                 &vkey_witnesses,
                 &native_scripts,
+                &metadata,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -136,8 +144,10 @@ fn validate_alonzo_compatible_tx(
                 tx_hash,
                 &vkey_witnesses,
                 &native_scripts,
+                &metadata,
                 genesis_delegs,
                 shelley_params.update_quorum,
+                &shelley_params.protocol_params.protocol_version,
             )
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
         }
@@ -172,6 +182,7 @@ fn validate_babbage_tx(
         ));
     }
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+    let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
     if era == Era::Babbage {
         babbage::utxow::validate(
@@ -179,8 +190,10 @@ fn validate_babbage_tx(
             tx_hash,
             &vkey_witnesses,
             &native_scripts,
+            &metadata,
             genesis_delegs,
             shelley_params.update_quorum,
+            &shelley_params.protocol_params.protocol_version,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }

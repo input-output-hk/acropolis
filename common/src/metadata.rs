@@ -1,40 +1,35 @@
-use minicbor::data::Int;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
+use std::ops::Deref;
 
-#[derive(Debug, Clone)]
-pub struct MetadataInt(pub Int);
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Metadata(pub Vec<(MetadatumLabel, Metadatum)>);
+
+impl AsRef<Vec<(MetadatumLabel, Metadatum)>> for Metadata {
+    fn as_ref(&self) -> &Vec<(MetadatumLabel, Metadatum)> {
+        &self.0
+    }
+}
+
+impl AsMut<Vec<(MetadatumLabel, Metadatum)>> for Metadata {
+    fn as_mut(&mut self) -> &mut Vec<(MetadatumLabel, Metadatum)> {
+        &mut self.0
+    }
+}
+
+impl Deref for Metadata {
+    type Target = Vec<(MetadatumLabel, Metadatum)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum Metadata {
-    Int(MetadataInt),
+pub enum Metadatum {
+    Int(i128),
     Bytes(Vec<u8>),
     Text(String),
-    Array(Vec<Metadata>),
-    Map(Vec<(Metadata, Metadata)>),
+    Array(Vec<Metadatum>),
+    Map(Vec<(Metadatum, Metadatum)>),
 }
 
-impl Serialize for MetadataInt {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_i128(self.0.into())
-    }
-}
-
-impl fmt::Display for MetadataInt {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<'a> Deserialize<'a> for MetadataInt {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'a>,
-    {
-        // TODO if this is ever used, i64 may not be enough!
-        Ok(MetadataInt(Int::from(i64::deserialize(deserializer)?)))
-    }
-}
+pub type MetadatumLabel = u64;

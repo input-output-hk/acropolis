@@ -58,13 +58,20 @@ validators = [
 bootstrapped-subscribe-topic = "cardano.sequence.bootstrapped"
 protocol-parameters-subscribe-topic = "cardano.protocol.parameters"
 
+# Plutus Phase 2 Validation
+# Enable Phase 2 script validation (Plutus/native scripts).
+# When enabled, transactions with Plutus scripts will be fully evaluated.
+# When disabled (default), script validation is skipped for faster sync.
+# WARNING: Enable only after thorough testing. Incorrect script evaluation
+# can cause consensus failures or missed invalid transactions.
+phase2-enabled = false
+
 publish-utxo-deltas-topic = "cardano.utxo.deltas"
 publish-asset-deltas-topic = "cardano.asset.deltas"
 publish-withdrawals-topic = "cardano.withdrawals"
 publish-certificates-topic = "cardano.certificates"
 publish-governance-topic = "cardano.governance"
 publish-tx-validation-topic = "cardano.validation.tx"
-network-name = "mainnet"
 
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
@@ -138,6 +145,7 @@ store-drdd = false
 # Listen for DRep and SPO distributions
 stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
+verification-output-file = "../../modules/governance_state/data/verification.csv"
 
 [module.parameters-state]
 # Listen for governance actions

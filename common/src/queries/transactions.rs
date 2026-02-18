@@ -1,5 +1,5 @@
 use crate::{
-    BlockHash, InstantaneousRewardSource, Lovelace, Metadata, NativeAsset, PoolId,
+    BlockHash, InstantaneousRewardSource, Lovelace, Metadatum, NativeAsset, PoolId,
     PoolRegistration, StakeAddress, TxHash,
 };
 
@@ -159,7 +159,7 @@ pub struct TransactionPoolRetirementCertificates {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TransactionMetadataItem {
     pub label: String,
-    pub json_metadata: Metadata,
+    pub json_metadata: Metadatum,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

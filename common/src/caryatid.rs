@@ -287,15 +287,15 @@ impl ValidationContext {
         }
     }
 
-    pub async fn publish(&mut self) {
+    pub async fn publish(&mut self, module: &str) {
         if let Some(blk) = &self.current_block {
             if let Err(e) =
-                self.validation.publish(&self.context, &self.validation_topic, blk).await
+                self.validation.publish(&self.context, module, &self.validation_topic, blk).await
             {
                 error!("Publish failed: {:?}", e);
             }
         } else {
-            self.validation.print_errors(None);
+            self.validation.print_errors(module, None);
         }
     }
 

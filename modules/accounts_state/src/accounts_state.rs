@@ -301,7 +301,9 @@ impl AccountsState {
                     // functionality (Conway spec 9.1.2). Subtract accumulated pointer
                     // address UTxO values from utxo_value so they no longer count
                     // towards the stake distribution.
-                    if block_info.is_new_era && block_info.era == Era::Conway {
+                    // Skip in snapshot mode: the snapshot already reflects post-Conway
+                    // state, so applying the subtraction again would double-count.
+                    if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
                         if let Err(e) = state.remove_pointer_address_stake(context.clone()).await {
                             vld.push_anyhow(anyhow!(
                                 "Error removing pointer address stake at Conway boundary: {e:#}"
@@ -574,9 +576,15 @@ impl AccountsState {
             // Commit the new state
             if let Some(block_info) = current_block {
                 history.lock().await.commit(block_info.number, state);
-                vld.publish(&context, &validation_outcomes_topic, &block_info).await?;
+                vld.publish(
+                    &context,
+                    "accounts_state",
+                    &validation_outcomes_topic,
+                    &block_info,
+                )
+                .await?;
             } else {
-                vld.print_errors(None);
+                vld.print_errors("accounts_state", None);
             }
         }
     }

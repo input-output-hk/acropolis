@@ -657,13 +657,14 @@ impl State {
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley {
+            if block.era == Era::Shelley && block.status != BlockStatus::Bootstrap {
                 if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
                     protocol_params.shelley.as_ref(),
+                    block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }

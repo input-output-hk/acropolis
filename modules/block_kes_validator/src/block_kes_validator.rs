@@ -192,7 +192,12 @@ impl BlockKesValidator {
                         }
 
                         validation_outcomes
-                            .publish(&context, &kes_validation_publisher_topic, block_info)
+                            .publish(
+                                &context,
+                                "block_kes_validator",
+                                &kes_validation_publisher_topic,
+                                block_info,
+                            )
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish KES validation: {e}"));
                     }

@@ -123,7 +123,11 @@ impl BlockVrfValidator {
     ) -> Result<()> {
         let (_, bootstrapped_message) = bootstrapped_subscription.read().await?;
         let genesis = match bootstrapped_message.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+            Message::Cardano((block_info, CardanoMessage::GenesisComplete(complete))) => {
+                let mut state = history.lock().await.get_or_init_with(State::new);
+                state.handle_genesis(&complete.values, block_info);
+                history.lock().await.commit(block_info.number, state);
+
                 complete.values.clone()
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
@@ -133,7 +137,15 @@ impl BlockVrfValidator {
         if let Some(snapshot_subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
         } else {
-            let _ = protocol_parameters_subscription.read().await?;
+            let (_, protocol_parameters_msg) = protocol_parameters_subscription.read().await?;
+            match protocol_parameters_msg.as_ref() {
+                Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.handle_protocol_parameters(msg);
+                    history.lock().await.commit(block_info.number, state);
+                }
+                _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
+            }
         }
 
         loop {
@@ -222,7 +234,12 @@ impl BlockVrfValidator {
                         }
 
                         validation_outcomes
-                            .publish(&context, &publish_vrf_validation_topic, block_info)
+                            .publish(
+                                &context,
+                                "block_vrf_validator",
+                                &publish_vrf_validation_topic,
+                                block_info,
+                            )
                             .await
                             .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
                     }

@@ -55,6 +55,12 @@ impl State {
         }
     }
 
+    pub fn handle_genesis(&mut self, genesis: &GenesisValues, block_info: &BlockInfo) {
+        if block_info.epoch >= genesis.shelley_epoch && block_info.era != Era::Byron {
+            self.epoch_nonce = Some(Nonce::from(genesis.shelley_genesis_hash));
+        }
+    }
+
     pub fn handle_protocol_parameters(&mut self, msg: &ProtocolParamsMessage) {
         if let Some(shelley_params) = msg.params.shelley.as_ref() {
             self.decentralisation_param =

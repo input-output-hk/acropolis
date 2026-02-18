@@ -34,6 +34,7 @@ members = [
     "modules/rest_blockfrost",              # Blockfrost-compatible REST API
     "modules/mcp_server",                   # Model Context Protocol server
     "modules/custom_indexer",               # Custom indexer module
+    "modules/midnight_state",               # Indexes and serves data needed by the `midnight-node`
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process
@@ -67,7 +68,9 @@ pallas = "0.34.0"
 pallas-math = "0.34.0"
 pallas-primitives = "0.34.0"
 pallas-traverse = "0.34.0"
+rayon = "1.10"
 serde = { version = "1.0.214", features = ["derive"] }
+uplc-turbo = { git = "https://github.com/pragma-org/uplc", package = "uplc-turbo" }
 serde_json = "1.0.132"
 serde_with = { version = "3.12.0", features = ["hex"] }
 tokio = { version = "1", features = ["full"] }

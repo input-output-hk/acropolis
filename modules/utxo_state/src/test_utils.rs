@@ -1,16 +1,17 @@
 use std::{collections::HashMap, str::FromStr};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, Address, Datum, ReferenceScript, TxHash, UTXOValue,
+    protocol_params::ShelleyParams, Address, Datum, Era, ScriptHash, TxHash, UTXOValue,
     UTxOIdentifier, Value,
 };
+use pallas::ledger::traverse::Era as PallasEra;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct UTxOValueJson {
     pub address: String,
     pub value: Value,
     pub datum: Option<Datum>,
-    pub reference_script: Option<ReferenceScript>,
+    pub reference_script_hash: Option<ScriptHash>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -41,10 +42,7 @@ impl From<TestContextJson> for TestContext {
                             address: Address::from_string(&v.address).unwrap(),
                             value: v.value.clone(),
                             datum: v.datum.clone(),
-                            reference_script_hash: v
-                                .reference_script
-                                .clone()
-                                .and_then(|s| s.compute_hash()),
+                            reference_script_hash: v.reference_script_hash,
                         },
                     )
                 })
@@ -83,12 +81,40 @@ macro_rules! validation_fixture {
         (
             $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
             $crate::include_cbor!(concat!($era, "/", $hash, "/tx.cbor")),
+            $era,
         )
     };
     ($era:literal, $hash:literal, $variant:literal) => {
         (
             $crate::include_context!(concat!($era, "/", $hash, "/context.json")),
             $crate::include_cbor!(concat!($era, "/", $hash, "/", $variant, ".cbor")),
+            $era,
         )
     };
+}
+
+pub fn to_era(era: &str) -> Era {
+    match era {
+        "byron" => Era::Byron,
+        "shelley" => Era::Shelley,
+        "allegra" => Era::Allegra,
+        "mary" => Era::Mary,
+        "alonzo" => Era::Alonzo,
+        "babbage" => Era::Babbage,
+        "conway" => Era::Conway,
+        _ => panic!("Invalid era: {}", era),
+    }
+}
+
+pub fn to_pallas_era(era: &str) -> PallasEra {
+    match era {
+        "byron" => PallasEra::Byron,
+        "shelley" => PallasEra::Shelley,
+        "allegra" => PallasEra::Allegra,
+        "mary" => PallasEra::Mary,
+        "alonzo" => PallasEra::Alonzo,
+        "babbage" => PallasEra::Babbage,
+        "conway" => PallasEra::Conway,
+        _ => panic!("Invalid era: {}", era),
+    }
 }
