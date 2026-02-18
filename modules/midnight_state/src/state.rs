@@ -75,7 +75,7 @@ impl State {
     }
 
     pub fn handle_address_deltas(&mut self, address_deltas: &AddressDeltasMessage) -> Result<()> {
-        let extended_deltas = address_deltas.to_extended_deltas().map_err(|e| {
+        let extended_deltas = address_deltas.as_extended_deltas().map_err(|e| {
             anyhow!("{e}; midnight-state requires AddressDeltasMessage::ExtendedDeltas")
         })?;
         self.epoch_totals.observe_deltas(extended_deltas);

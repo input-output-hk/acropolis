@@ -27,6 +27,7 @@ use crate::queries::{
 };
 use crate::snapshot::AccountState;
 use crate::{Pots, TxUTxODeltas, UTXOValue, UTxOIdentifier};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
@@ -117,19 +118,11 @@ impl AddressDeltasMessage {
         }
     }
 
-    /// Returns extended deltas when this message is extended.
-    pub fn as_extended_deltas(&self) -> Option<&[ExtendedAddressDelta]> {
-        match self {
-            Self::Deltas(_) => None,
-            Self::ExtendedDeltas(deltas) => Some(deltas),
-        }
-    }
-
     /// Returns extended deltas or an error if compact deltas were published.
-    pub fn to_extended_deltas(&self) -> Result<&[ExtendedAddressDelta], &'static str> {
+    pub fn as_extended_deltas(&self) -> Result<&[ExtendedAddressDelta]> {
         match self {
+            Self::Deltas(_) => Err(anyhow!("address-delta-publish-mode set to compact")),
             Self::ExtendedDeltas(deltas) => Ok(deltas),
-            Self::Deltas(_) => Err("address-delta-publish-mode set to compact"),
         }
     }
 
@@ -805,7 +798,9 @@ mod tests {
 
         let expected = vec![delta];
         assert_eq!(decoded.as_deltas(), Some(expected.as_slice()));
-        assert!(decoded.as_extended_deltas().is_none());
+        let err =
+            decoded.as_extended_deltas().expect_err("compact should not return extended deltas");
+        assert_eq!(err.to_string(), "address-delta-publish-mode set to compact");
     }
 
     #[test]
@@ -879,19 +874,19 @@ mod tests {
     }
 
     #[test]
-    fn to_extended_deltas_accepts_extended() {
+    fn as_extended_deltas_accepts_extended() {
         let extended = sample_extended_address_delta();
         let msg = AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()]);
 
-        let extracted = msg.to_extended_deltas().expect("expected extended deltas");
+        let extracted = msg.as_extended_deltas().expect("expected extended deltas");
         assert_eq!(extracted.len(), 1);
         assert_eq!(extracted[0].address, extended.address);
     }
 
     #[test]
-    fn to_extended_deltas_rejects_compact() {
+    fn as_extended_deltas_rejects_compact() {
         let msg = AddressDeltasMessage::Deltas(vec![sample_address_delta()]);
-        let err = msg.to_extended_deltas().expect_err("compact should be rejected");
-        assert_eq!(err, "address-delta-publish-mode set to compact");
+        let err = msg.as_extended_deltas().expect_err("compact should be rejected");
+        assert_eq!(err.to_string(), "address-delta-publish-mode set to compact");
     }
 }
