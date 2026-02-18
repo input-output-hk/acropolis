@@ -369,7 +369,7 @@ impl MithrilSnapshotFetcher {
                         #[cfg(not(target_env = "msvc"))]
                         if profile_constraint.should_pause(&block_info) {
                             let filename = format!(
-                                "jeprof-{}.out",
+                                "memory-{}.jeprof",
                                 profile_constraint.get_filename_part(&block_info)
                             );
                             info!("Dumping jemalloc profile to {} ...", filename);
