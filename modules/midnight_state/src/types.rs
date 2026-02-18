@@ -112,7 +112,7 @@ pub struct DeregistrationEvent {
 }
 
 #[derive(Clone)]
-pub struct CandidateUTxO {
+pub struct TxOutput {
     pub utxo: UTxOIdentifier,
     pub _epoch_number: Epoch,
     pub _block_number: BlockNumber,

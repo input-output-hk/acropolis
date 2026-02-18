@@ -1,9 +1,10 @@
+use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, HashMap};
 
 use acropolis_common::{BlockNumber, UTxOIdentifier};
 
 use crate::types::{
-    CandidateUTxO, Deregistration, DeregistrationEvent, Registration, RegistrationEvent,
+    Deregistration, DeregistrationEvent, Registration, RegistrationEvent, TxOutput,
 };
 
 #[derive(Clone, Default)]
@@ -13,9 +14,9 @@ pub struct CandidateState {
     // Candidate deregistrations by block enabling range lookups
     pub deregistrations: BTreeMap<BlockNumber, Vec<DeregistrationEvent>>,
     // Current candidate set
-    pub current: HashMap<UTxOIdentifier, CandidateUTxO>,
+    pub current: HashMap<UTxOIdentifier, TxOutput>,
     // Candidate set snapshots at the last block of each epoch
-    pub history: HashMap<BlockNumber, Vec<CandidateUTxO>>,
+    pub history: HashMap<BlockNumber, Vec<TxOutput>>,
 }
 
 impl CandidateState {
@@ -24,16 +25,13 @@ impl CandidateState {
     pub fn register_candidates(
         &mut self,
         block: BlockNumber,
-        candidates: Vec<(CandidateUTxO, RegistrationEvent)>,
+        candidates: Vec<(TxOutput, RegistrationEvent)>,
     ) {
-        let registrations: Vec<_> = candidates
-            .into_iter()
-            .map(|(candidate, event)| {
-                self.current.insert(candidate.utxo, candidate);
-                event
-            })
-            .collect();
-
+        let mut registrations = Vec::with_capacity(candidates.len());
+        for (candidate, event) in candidates {
+            self.current.insert(candidate.utxo, candidate);
+            registrations.push(event);
+        }
         self.registrations.insert(block, registrations);
     }
 
@@ -94,5 +92,17 @@ impl CandidateState {
                 })
             })
             .collect()
+    }
+
+    #[allow(dead_code)]
+    /// Get the registered candidate set at a specified last block in an epoch
+    pub fn get_registered_candidates(
+        &self,
+        last_block_in_epoch: BlockNumber,
+    ) -> Result<Vec<TxOutput>> {
+        match self.history.get(&last_block_in_epoch) {
+            Some(tx_outputs) => Ok(tx_outputs.to_vec()),
+            None => Err(anyhow!("Requested block not indexed")),
+        }
     }
 }

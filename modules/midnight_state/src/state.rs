@@ -46,14 +46,14 @@ impl State {
         Self::default()
     }
 
-    pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
+    /// Snapshot the candidate set and Ariadne parameters at epoch boundary
+    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<()> {
+        self.candidates.snapshot_candidate_set(block_info.number);
+        self.parameters.snapshot_parameters(block_info.epoch);
         Ok(())
     }
 
-    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<()> {
-        // Snapshot the candidate set and parameters at epoch boundary
-        self.candidates.snapshot_candidate_set(block_info.number);
-        self.parameters.snapshot_parameters(block_info.epoch);
+    pub fn handle_address_deltas(&mut self, _address_deltas: &AddressDeltasMessage) -> Result<()> {
         Ok(())
     }
 }
