@@ -1,0 +1,98 @@
+use std::collections::{BTreeMap, HashMap};
+
+use acropolis_common::{BlockNumber, UTxOIdentifier};
+
+use crate::types::{
+    CandidateUTxO, Deregistration, DeregistrationEvent, Registration, RegistrationEvent,
+};
+
+#[derive(Clone, Default)]
+pub struct CandidateState {
+    // Candidate registrations by block enabling range lookups
+    pub registrations: BTreeMap<BlockNumber, Vec<RegistrationEvent>>,
+    // Candidate deregistrations by block enabling range lookups
+    pub deregistrations: BTreeMap<BlockNumber, Vec<DeregistrationEvent>>,
+    // Current candidate set
+    pub current: HashMap<UTxOIdentifier, CandidateUTxO>,
+    // Candidate set snapshots at the last block of each epoch
+    pub history: HashMap<BlockNumber, Vec<CandidateUTxO>>,
+}
+
+impl CandidateState {
+    #[allow(dead_code)]
+    /// Handle all candidate registrations for a block
+    pub fn register_candidates(
+        &mut self,
+        block: BlockNumber,
+        candidates: Vec<(CandidateUTxO, RegistrationEvent)>,
+    ) {
+        let registrations: Vec<_> = candidates
+            .into_iter()
+            .map(|(candidate, event)| {
+                self.current.insert(candidate.utxo, candidate);
+                event
+            })
+            .collect();
+
+        self.registrations.insert(block, registrations);
+    }
+
+    #[allow(dead_code)]
+    /// Handle all candidate deregistrations for a block
+    pub fn deregister_candidates(&mut self, block: BlockNumber, events: Vec<DeregistrationEvent>) {
+        for event in &events {
+            self.current.remove(&UTxOIdentifier::new(
+                event.registration.tx_hash,
+                event.registration.utxo_index,
+            ));
+        }
+
+        self.deregistrations.insert(block, events);
+    }
+
+    /// Snapshot the current candidate set and insert into history
+    pub fn snapshot_candidate_set(&mut self, block: BlockNumber) {
+        if !self.current.is_empty() {
+            self.history.insert(block, self.current.values().cloned().collect());
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Get the candidate registrations within a specified block range
+    pub fn get_registrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Registration> {
+        self.registrations
+            .range(start..=end)
+            .flat_map(|(block_number, events)| {
+                events.iter().map(|event| Registration {
+                    full_datum: event.datum.clone(),
+                    block_number: *block_number,
+                    block_hash: event.block_hash,
+                    block_timestamp: event.block_timestamp,
+                    tx_index_in_block: event.tx_index,
+                    tx_hash: event.tx_hash,
+                    utxo_index: event.utxo_index,
+                })
+            })
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    /// Get the candidate deregistrations within a specified block range
+    pub fn get_deregistrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Deregistration> {
+        self.deregistrations
+            .range(start..=end)
+            .flat_map(|(block_number, events)| {
+                events.iter().map(|event| Deregistration {
+                    full_datum: event.datum.clone(),
+                    block_number: *block_number,
+                    block_hash: event.spent_block_hash,
+                    block_timestamp: event.spent_block_timestamp,
+                    tx_index_in_block: event.spent_tx_index,
+                    tx_hash: event.spent_tx_hash,
+                    utxo_tx_hash: event.registration.tx_hash,
+                    utxo_index: event.registration.utxo_index,
+                })
+            })
+            .collect()
+    }
+}
