@@ -150,24 +150,24 @@ chain containing the current `favoured_tip` (Praos `maxvalid` rule, paper line 6
 Uses an internal recursive function along these lines:
 
 ```rust
-longest_chain_from(hash: BlockHash) -> (u64, BlockHash) {
-let mut max_length = 0;
-let mut best_tip = hash;
+fn longest_chain_from(hash: BlockHash) -> (u64, BlockHash) {
+    let mut max_length = 0;
+    let mut best_tip = hash;
 
-for child in block.children {
-let (child_len, child_tip) = longest_chain_from(child);
-if child_len > max_length {
-max_length = child_len;
-best_tip = child_tip;
-} else if child_len == max_length {
-// Tie-break: favour current tip (Praos maxvalid)
-if child_tip == favoured_tip || is_ancestor_of(child_tip, favoured_tip) {
-best_tip = child_tip;
-}
-}
-}
+    for child in block.children {
+        let (child_len, child_tip) = longest_chain_from(child);
+        if child_len > max_length {
+            max_length = child_len;
+            best_tip = child_tip;
+        } else if child_len == max_length {
+            // Tie-break: favour current tip (Praos maxvalid)
+            if child_tip == favoured_tip || is_ancestor_of(child_tip, favoured_tip) {
+                best_tip = child_tip;
+            }
+        }
+    }
 
-(max_length + 1, best_tip)
+    (max_length + 1, best_tip)
 }
 ```
 
