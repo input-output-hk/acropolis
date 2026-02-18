@@ -8,11 +8,11 @@ use crate::types::{AssetCreate, AssetSpend, CNightCreation, CNightSpend, UTxOMet
 #[derive(Clone, Default)]
 pub struct CNightUTxOState {
     // Created UTxOs receiving CNight indexed by block
-    pub created_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
+    created_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
     // Spent UTxOs sending CNight indexed by block
-    pub spent_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
+    spent_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
     // An index mapping UTxO identifiers to their corresponding metadata
-    pub utxo_index: HashMap<UTxOIdentifier, UTxOMeta>,
+    utxo_index: HashMap<UTxOIdentifier, UTxOMeta>,
 }
 
 impl CNightUTxOState {
