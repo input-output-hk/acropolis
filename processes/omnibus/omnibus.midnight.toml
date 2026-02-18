@@ -52,8 +52,18 @@ validators = [
 
 [module.midnight-state]
 address-deltas-topic = "cardano.address.deltas.extended"
-cnight-policy-id = "00000000000000000000000000000000000000000000000000000000"
-cnight-asset-name = "634e69676874"
+cnight-policy-id = "d2dbff622e509dda256fedbd31ef6e9fd98ed49ad91d5c0e07f68af1"
+cnight-asset-name = ""
+
+# Optional future midnight indexing config (from midnight-node res/dev)
+mapping-validator-address = "addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng"
+auth-token-asset-name = ""
+committee-candidates-address = "addr_test1wqgdltkw2egyzv7q65j285dmvqcs3223qw9fp4q3y79jnvsefxzwg"
+permissioned-candidates-policy-id = "e78beca2dc84128a0b91b55b48bf1672a7affa5df25feb625ee398c5"
+council-address = "addr_test1wq3zc4tj95nd22lgag4nhcjjmapl728wayyml375us60engf2ffwh"
+council-policy-id = "222c55722d26d52be8ea2b3be252df43ff28eee909bfc7d4e434fccd"
+technical-committee-address = "addr_test1wq5sw7ukk9c0h5vfd9g72pyz6l9vvhz3ly245c3ph6hhwxsgd44za"
+technical-committee-policy-id = "29077b96b170fbd1896951e50482d7cac65c51f9155a6221beaf771a"
 
 [module.block-unpacker]
 
