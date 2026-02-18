@@ -5,8 +5,7 @@ use std::{
 };
 
 use acropolis_common::{
-    BlockInfo, BlockNumber, BlockStatus, Datum, Epoch, Era, UTxOIdentifier,
-    messages::AddressDeltasMessage,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, Era, UTxOIdentifier,
 };
 
 use crate::types::{
@@ -18,14 +17,12 @@ use crate::types::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EpochSummary {
     pub epoch: u64,
-    pub block_number: u64,
-    pub status: BlockStatus,
     pub era: Era,
-    pub compact_blocks: usize,
-    pub extended_blocks: usize,
+    pub blocks: usize,
     pub delta_count: usize,
     pub created_utxos: usize,
     pub spent_utxos: usize,
+    pub saw_compact: bool,
 }
 
 trait EpochTotalsObserver {
@@ -47,8 +44,6 @@ struct EpochTotalsAccumulator {
 #[derive(Clone)]
 struct EpochCheckpoint {
     epoch: u64,
-    block_number: u64,
-    status: BlockStatus,
     era: Era,
 }
 
@@ -56,8 +51,6 @@ impl EpochCheckpoint {
     fn from_block(block: &BlockInfo) -> Self {
         Self {
             epoch: block.epoch,
-            block_number: block.number,
-            status: block.status.clone(),
             era: block.era,
         }
     }
@@ -67,14 +60,12 @@ impl EpochTotalsAccumulator {
     fn summarise_epoch(&self) -> Option<EpochSummary> {
         self.last_checkpoint.as_ref().map(|checkpoint| EpochSummary {
             epoch: checkpoint.epoch,
-            block_number: checkpoint.block_number,
-            status: checkpoint.status.clone(),
             era: checkpoint.era,
-            compact_blocks: self.compact_blocks,
-            extended_blocks: self.extended_blocks,
+            blocks: self.extended_blocks,
             delta_count: self.delta_count,
             created_utxos: self.created_utxos,
             spent_utxos: self.spent_utxos,
+            saw_compact: self.compact_blocks > 0,
         })
     }
 
