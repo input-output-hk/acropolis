@@ -65,32 +65,45 @@ pub struct Deregistration {
 /// These structs are used internally by the indexing state and are not
 /// exposed by public getter methods.
 /// ---------------------------------------------------------------------------
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct UTxOMeta {
-    pub holder_address: Address,
-    pub asset_quantity: i64,
-
-    // Creation info
-    pub created_in: BlockNumber,
-    pub created_tx: TxHash,
-    pub created_tx_index: u32,
-    pub created_utxo_index: u16,
-    pub created_block_timestamp: NaiveDateTime,
-
-    // Spend info
-    pub spent_in: Option<BlockNumber>,
-    pub spend_tx: Option<TxHash>,
-    pub spent_tx_index: Option<u32>,
-    pub spent_block_timestamp: Option<NaiveDateTime>,
+    pub creation: CNightCreation,
+    pub spend: Option<CNightSpend>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CNightCreation {
+    pub address: Address,
+    pub quantity: i64,
+    pub utxo: UTxOIdentifier,
+    pub block_number: BlockNumber,
+    pub block_hash: BlockHash,
+    pub tx_index: u32,
+    pub block_timestamp: NaiveDateTime,
+}
+
+#[derive(Debug, Clone)]
+pub struct CNightSpend {
+    pub block_number: BlockNumber,
+    pub block_hash: BlockHash,
+    pub tx_hash: TxHash,
+    pub tx_index: u32,
+    pub block_timestamp: NaiveDateTime,
+}
+
+#[derive(Clone)]
 pub struct RegistrationEvent {
-    pub header: EventHeader,
+    pub block_hash: BlockHash,
+    pub block_timestamp: NaiveDateTime,
+    pub tx_index: u32,
+    pub tx_hash: TxHash,
+    pub utxo_index: u16,
     pub datum: Datum,
 }
 
+#[derive(Clone)]
 pub struct DeregistrationEvent {
-    pub header: EventHeader,
+    pub registration: RegistrationEvent,
     pub spent_block_timestamp: NaiveDateTime,
     pub spent_block_hash: BlockHash,
     pub spent_tx_hash: TxHash,
@@ -98,17 +111,9 @@ pub struct DeregistrationEvent {
     pub datum: Datum,
 }
 
-pub struct EventHeader {
-    pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
-    pub tx_index: u32,
-    pub tx_hash: TxHash,
-    pub utxo_index: u16,
-}
-
 #[derive(Clone)]
 pub struct CandidateUTxO {
-    pub _utxo: UTxOIdentifier,
+    pub utxo: UTxOIdentifier,
     pub _epoch_number: Epoch,
     pub _block_number: BlockNumber,
     pub _slot_number: Slot,

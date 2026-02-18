@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 mod state;
 use state::State;
+mod indexes;
 mod types;
 
 declare_cardano_reader!(
@@ -53,7 +54,7 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        state.handle_new_epoch()?;
+                        state.handle_new_epoch(&blk_info)?;
                     }
 
                     state.handle_address_deltas(&deltas)?;
