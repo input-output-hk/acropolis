@@ -1,16 +1,22 @@
 //! Acropolis Midnight state module for Caryatid
 //! Indexes data required by `midnight-node`
 use acropolis_common::{
-    BlockInfo, BlockStatus, Era,
     caryatid::RollbackWrapper,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
+    state_history::{StateHistory, StateHistoryStore},
+    BlockInfo, BlockStatus,
 };
-use anyhow::{Result, bail};
-use caryatid_sdk::{Context, Subscription, module};
+use anyhow::{bail, Result};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+
+mod state;
+use state::{EpochSummary, State};
+mod types;
 
 declare_cardano_reader!(
     AddressDeltasReader,
@@ -29,89 +35,44 @@ declare_cardano_reader!(
 
 pub struct MidnightState;
 
-#[derive(Default)]
-struct EpochTotals {
-    compact_blocks: usize,
-    extended_blocks: usize,
-    delta_count: usize,
-    created_utxos: usize,
-    spent_utxos: usize,
-}
-
-impl EpochTotals {
-    fn observe(&mut self, deltas: &AddressDeltasMessage) {
-        match deltas {
-            AddressDeltasMessage::Deltas(deltas) => {
-                self.compact_blocks += 1;
-                self.delta_count += deltas.len();
-                self.created_utxos +=
-                    deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
-                self.spent_utxos +=
-                    deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
-            }
-            AddressDeltasMessage::ExtendedDeltas(deltas) => {
-                self.extended_blocks += 1;
-                self.delta_count += deltas.len();
-                self.created_utxos +=
-                    deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
-                self.spent_utxos +=
-                    deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
-            }
-        }
-    }
-}
-
-struct EpochCheckpoint {
-    epoch: u64,
-    block_number: u64,
-    status: BlockStatus,
-    era: Era,
-}
-
-impl EpochCheckpoint {
-    fn from_block(block: &BlockInfo) -> Self {
-        Self {
-            epoch: block.epoch,
-            block_number: block.number,
-            status: block.status.clone(),
-            era: block.era,
-        }
-    }
-}
-
 impl MidnightState {
-    fn log_epoch_summary(checkpoint: &EpochCheckpoint, totals: &EpochTotals) {
+    fn log_epoch_summary(summary: &EpochSummary) {
         info!(
-            epoch = checkpoint.epoch,
-            block_number = checkpoint.block_number,
-            era = ?checkpoint.era,
-            status = ?checkpoint.status,
-            compact_blocks = totals.compact_blocks,
-            extended_blocks = totals.extended_blocks,
-            delta_count = totals.delta_count,
-            created_utxos = totals.created_utxos,
-            spent_utxos = totals.spent_utxos,
+            epoch = summary.epoch,
+            block_number = summary.block_number,
+            era = ?summary.era,
+            status = ?summary.status,
+            compact_blocks = summary.compact_blocks,
+            extended_blocks = summary.extended_blocks,
+            delta_count = summary.delta_count,
+            created_utxos = summary.created_utxos,
+            spent_utxos = summary.spent_utxos,
             "epoch checkpoint"
         );
 
-        if totals.compact_blocks > 0 {
+        if summary.compact_blocks > 0 {
             warn!(
-                epoch = checkpoint.epoch,
-                compact_blocks = totals.compact_blocks,
+                epoch = summary.epoch,
+                compact_blocks = summary.compact_blocks,
                 "received compact deltas; expected extended mode for midnight"
             );
         }
     }
 
-    async fn run(mut address_deltas_reader: AddressDeltasReader) -> Result<()> {
-        let mut current_epoch: Option<u64> = None;
-        let mut totals = EpochTotals::default();
-        let mut checkpoint: Option<EpochCheckpoint> = None;
-
+    async fn run(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut address_deltas_reader: AddressDeltasReader,
+    ) -> Result<()> {
         loop {
+            let mut state = {
+                let mut h = history.lock().await;
+                h.get_or_init_with(State::new)
+            };
+
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((blk_info, deltas)) => {
                     if blk_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(blk_info.number);
                         warn!(
                             block_number = blk_info.number,
                             block_hash = %blk_info.hash,
@@ -119,18 +80,18 @@ impl MidnightState {
                         );
                     }
 
-                    if let Some(epoch) = current_epoch {
-                        if blk_info.epoch != epoch {
-                            if let Some(cp) = checkpoint.as_ref() {
-                                Self::log_epoch_summary(cp, &totals);
-                            }
-                            totals = EpochTotals::default();
+                    if blk_info.new_epoch {
+                        state.handle_new_epoch()?;
+                        if let Some(summary) = state.take_epoch_summary_if_ready() {
+                            Self::log_epoch_summary(&summary);
                         }
                     }
 
-                    current_epoch = Some(blk_info.epoch);
-                    checkpoint = Some(EpochCheckpoint::from_block(blk_info.as_ref()));
-                    totals.observe(deltas.as_ref());
+                    state.start_block(blk_info.as_ref());
+                    state.handle_address_deltas(deltas.as_ref())?;
+                    state.finalise_block(blk_info.as_ref());
+
+                    history.lock().await.commit(blk_info.number, state);
                 }
                 RollbackWrapper::Rollback(point) => {
                     warn!(
@@ -146,9 +107,17 @@ impl MidnightState {
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
 
+        // Initialize unbounded state history for rollback-safe replay.
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "midnight_state",
+            StateHistoryStore::Unbounded,
+        )));
+
         // Start the run task
         context.run(async move {
-            Self::run(address_deltas_reader).await.unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(history, address_deltas_reader)
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         Ok(())

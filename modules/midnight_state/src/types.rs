@@ -66,6 +66,7 @@ pub struct Deregistration {
 /// exposed by public getter methods.
 /// ---------------------------------------------------------------------------
 #[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
 pub struct UTxOMeta {
     pub holder_address: Address,
     pub asset_quantity: i64,
