@@ -1,6 +1,7 @@
 use acropolis_common::{
     Address, BlockHash, BlockNumber, Datum, Epoch, Slot, TxHash, UTxOIdentifier,
 };
+use anyhow::{anyhow, Error};
 use chrono::NaiveDateTime;
 
 /// ---------------------------------------------------------------------------
@@ -71,6 +72,43 @@ pub struct UTxOMeta {
     pub spend: Option<CNightSpend>,
 }
 
+impl From<&UTxOMeta> for AssetCreate {
+    fn from(meta: &UTxOMeta) -> Self {
+        let creation = &meta.creation;
+
+        AssetCreate {
+            block_number: creation.block_number,
+            block_hash: creation.block_hash,
+            block_timestamp: creation.block_timestamp,
+            tx_index_in_block: creation.tx_index,
+            quantity: creation.quantity,
+            holder_address: creation.address.clone(),
+            tx_hash: creation.utxo.tx_hash,
+            utxo_index: creation.utxo.output_index,
+        }
+    }
+}
+
+impl TryFrom<&UTxOMeta> for AssetSpend {
+    type Error = Error;
+
+    fn try_from(meta: &UTxOMeta) -> Result<Self, Self::Error> {
+        let spend = meta.spend.as_ref().ok_or_else(|| anyhow!("UTxO has no spend record"))?;
+
+        Ok(AssetSpend {
+            block_number: spend.block_number,
+            block_hash: spend.block_hash,
+            block_timestamp: spend.block_timestamp,
+            tx_index_in_block: spend.tx_index,
+            quantity: meta.creation.quantity,
+            holder_address: meta.creation.address.clone(),
+            utxo_tx_hash: meta.creation.utxo.tx_hash,
+            utxo_index: meta.creation.utxo.output_index,
+            spending_tx_hash: spend.tx_hash,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
     pub address: Address,
@@ -101,6 +139,20 @@ pub struct RegistrationEvent {
     pub datum: Datum,
 }
 
+impl From<(BlockNumber, &RegistrationEvent)> for Registration {
+    fn from((block_number, event): (BlockNumber, &RegistrationEvent)) -> Self {
+        Registration {
+            full_datum: event.datum.clone(),
+            block_number,
+            block_hash: event.block_hash,
+            block_timestamp: event.block_timestamp,
+            tx_index_in_block: event.tx_index,
+            tx_hash: event.tx_hash,
+            utxo_index: event.utxo_index,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DeregistrationEvent {
     pub registration: RegistrationEvent,
@@ -109,6 +161,21 @@ pub struct DeregistrationEvent {
     pub spent_tx_hash: TxHash,
     pub spent_tx_index: u32,
     pub datum: Datum,
+}
+
+impl From<(BlockNumber, &DeregistrationEvent)> for Deregistration {
+    fn from((block_number, event): (BlockNumber, &DeregistrationEvent)) -> Self {
+        Deregistration {
+            full_datum: event.datum.clone(),
+            block_number,
+            block_hash: event.spent_block_hash,
+            block_timestamp: event.spent_block_timestamp,
+            tx_index_in_block: event.spent_tx_index,
+            tx_hash: event.spent_tx_hash,
+            utxo_tx_hash: event.registration.tx_hash,
+            utxo_index: event.registration.utxo_index,
+        }
+    }
 }
 
 #[derive(Clone)]

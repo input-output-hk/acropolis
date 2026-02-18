@@ -17,6 +17,7 @@ pub struct CNightUTxOState {
 
 impl CNightUTxOState {
     #[allow(dead_code)]
+    /// Add the created UTxOs for one block to state
     pub fn add_created_utxos(&mut self, block: BlockNumber, utxos: Vec<CNightCreation>) {
         let mut identifiers = Vec::with_capacity(utxos.len());
 
@@ -35,6 +36,7 @@ impl CNightUTxOState {
     }
 
     #[allow(dead_code)]
+    /// Add the spent UTxOs for one block to state
     pub fn add_spent_utxos(
         &mut self,
         block: BlockNumber,
@@ -72,16 +74,7 @@ impl CNightUTxOState {
                     .get(utxo_id)
                     .ok_or_else(|| anyhow!("UTxO creation without existing record"))?;
 
-                Ok(AssetCreate {
-                    block_number: meta.creation.block_number,
-                    block_hash: meta.creation.block_hash,
-                    block_timestamp: meta.creation.block_timestamp,
-                    tx_index_in_block: meta.creation.tx_index,
-                    quantity: meta.creation.quantity,
-                    holder_address: meta.creation.address.clone(),
-                    tx_hash: meta.creation.utxo.tx_hash,
-                    utxo_index: meta.creation.utxo.output_index,
-                })
+                Ok(AssetCreate::from(meta))
             })
             .collect()
     }
@@ -102,22 +95,7 @@ impl CNightUTxOState {
                     .get(utxo_id)
                     .ok_or_else(|| anyhow!("UTxO spend without existing record"))?;
 
-                let spend = meta
-                    .spend
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("UTxO index out of sync with spent_utxos"))?;
-
-                Ok(AssetSpend {
-                    block_number: spend.block_number,
-                    block_hash: spend.block_hash,
-                    block_timestamp: spend.block_timestamp,
-                    tx_index_in_block: spend.tx_index,
-                    quantity: meta.creation.quantity,
-                    holder_address: meta.creation.address.clone(),
-                    utxo_tx_hash: meta.creation.utxo.tx_hash,
-                    utxo_index: meta.creation.utxo.output_index,
-                    spending_tx_hash: spend.tx_hash,
-                })
+                AssetSpend::try_from(meta)
             })
             .collect()
     }

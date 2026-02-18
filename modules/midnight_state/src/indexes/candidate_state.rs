@@ -61,15 +61,7 @@ impl CandidateState {
         self.registrations
             .range(start..=end)
             .flat_map(|(block_number, events)| {
-                events.iter().map(|event| Registration {
-                    full_datum: event.datum.clone(),
-                    block_number: *block_number,
-                    block_hash: event.block_hash,
-                    block_timestamp: event.block_timestamp,
-                    tx_index_in_block: event.tx_index,
-                    tx_hash: event.tx_hash,
-                    utxo_index: event.utxo_index,
-                })
+                events.iter().map(|event| Registration::from((*block_number, event)))
             })
             .collect()
     }
@@ -80,16 +72,7 @@ impl CandidateState {
         self.deregistrations
             .range(start..=end)
             .flat_map(|(block_number, events)| {
-                events.iter().map(|event| Deregistration {
-                    full_datum: event.datum.clone(),
-                    block_number: *block_number,
-                    block_hash: event.spent_block_hash,
-                    block_timestamp: event.spent_block_timestamp,
-                    tx_index_in_block: event.spent_tx_index,
-                    tx_hash: event.spent_tx_hash,
-                    utxo_tx_hash: event.registration.tx_hash,
-                    utxo_index: event.registration.utxo_index,
-                })
+                events.iter().map(|event| Deregistration::from((*block_number, event)))
             })
             .collect()
     }
