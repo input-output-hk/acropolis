@@ -28,3 +28,17 @@ systems this can be done with the ulimit command:
 ```
 $ ulimit -n 4096
 ```
+
+## Docker Compose
+
+Build and run preview:
+
+```shell
+docker compose up --build omnibus-preview
+```
+
+Build and run mainnet:
+
+```shell
+docker compose up --build omnibus-mainnet
+```
