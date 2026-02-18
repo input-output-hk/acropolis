@@ -32,6 +32,7 @@ help:
 	@echo "  build                    Build the omnibus process"
 	@echo "  run                      Run the omnibus (mainnet)"
 	@echo "  run-preview              Run the omnibus (preview network)"
+	@echo "  run-midnight             Run the omnibus with `midnight_state` enabled"
 	@echo "  run-bootstrap            Run the omnibus with bootstrap config (snapshot)"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
@@ -66,6 +67,8 @@ run-preview:
 run-bootstrap:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
 
+run-midnight:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.midnight.toml
 fmt:
 	$(CARGO) fmt --all
 
