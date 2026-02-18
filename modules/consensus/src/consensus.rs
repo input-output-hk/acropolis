@@ -16,7 +16,7 @@ use acropolis_common::{
     BlockHash, BlockIntent,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use consensus_tree::ConsensusTree;
 use futures::future::try_join_all;
@@ -60,6 +60,20 @@ impl ConsensusTreeObserver for QueueObserver {
     fn block_rejected(&self, hash: BlockHash) {
         self.events.lock().unwrap().push(ObserverEvent::BlockRejected { hash });
     }
+}
+
+/// Bundled runtime state for the consensus loop.
+struct ConsensusRuntime {
+    context: Arc<Context<Message>>,
+    publish_blocks_topic: String,
+    publish_consensus_topic: String,
+    event_queue: EventQueue,
+    tree: ConsensusTree,
+    block_data: HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
+    validator_topics: Vec<String>,
+    validator_subscriptions: Vec<Box<dyn Subscription<Message>>>,
+    validation_timeout: Duration,
+    do_validation: bool,
 }
 
 /// Consensus module
@@ -110,13 +124,13 @@ impl Consensus {
         info!("Security parameter k={security_parameter}");
 
         // Subscribe for incoming blocks (PNI → CON: BlockAvailable)
-        let mut block_subscription = context.subscribe(&subscribe_blocks_topic).await?;
+        let block_subscription = context.subscribe(&subscribe_blocks_topic).await?;
 
         // Subscribe for consensus messages (PNI → CON: BlockOffered, BlockRescinded)
-        let mut consensus_subscription = context.subscribe(&consensus_topic).await?;
+        let consensus_subscription = context.subscribe(&consensus_topic).await?;
 
         // Subscribe all the validators
-        let mut validator_subscriptions: Vec<_> =
+        let validator_subscriptions: Vec<_> =
             try_join_all(validator_topics.iter().map(|topic| context.subscribe(topic))).await?;
 
         let do_validation = !validator_subscriptions.is_empty();
@@ -126,263 +140,353 @@ impl Consensus {
         let observer = Box::new(QueueObserver {
             events: event_queue.clone(),
         });
-        let mut tree = ConsensusTree::new(security_parameter, observer);
+        let tree = ConsensusTree::new(security_parameter, observer);
 
-        // Map block hash → (BlockInfo, RawBlockMessage) for reconstructing published messages
-        let mut block_data: HashMap<BlockHash, (BlockInfo, RawBlockMessage)> = HashMap::new();
+        let mut runtime = ConsensusRuntime {
+            context: context.clone(),
+            publish_blocks_topic,
+            publish_consensus_topic,
+            event_queue,
+            tree,
+            block_data: HashMap::new(),
+            validator_topics,
+            validator_subscriptions,
+            validation_timeout,
+            do_validation,
+        };
 
-        context.clone().run(async move {
-            loop {
-                // Wait for either a block or consensus message
-                tokio::select! {
-                    result = block_subscription.read() => {
-                        let Ok((_, message)) = result else {
-                            error!("Block message read failed");
-                            return;
-                        };
-
-                        match message.as_ref() {
-                            Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                                let block_info = if do_validation {
-                                    raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                                } else {
-                                    raw_blk_info.clone()
-                                };
-
-                                let span = info_span!("consensus", block = block_info.number);
-
-                                async {
-                                    // Parse header to extract parent hash
-                                    let parent_hash = match extract_parent_hash(&block_info, &raw_block.header) {
-                                        Ok(Some(h)) => h,
-                                        Ok(None) => {
-                                            // Genesis/epoch boundary block — no parent
-                                            debug!("Block {} has no parent hash (genesis/EB)", block_info.number);
-                                            if tree.is_empty() {
-                                                if let Err(e) = tree.set_root(block_info.hash, block_info.number, block_info.slot) {
-                                                    error!("Failed to set root: {e}");
-                                                    return;
-                                                }
-                                                block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
-
-                                                let msg = Arc::new(Message::Cardano((
-                                                    block_info.clone(),
-                                                    CardanoMessage::BlockAvailable(raw_block.clone()),
-                                                )));
-                                                context.message_bus.publish(&publish_blocks_topic, msg).await
-                                                    .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                                            }
-                                            return;
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to parse block header: {e}");
-                                            return;
-                                        }
-                                    };
-
-                                    // If tree is empty, set root using parent as virtual root
-                                    if tree.is_empty() {
-                                        let parent_number = block_info.number.saturating_sub(1);
-                                        if let Err(e) = tree.set_root(parent_hash, parent_number, 0) {
-                                            error!("Failed to set tree root: {e}");
-                                            return;
-                                        }
-                                        debug!("Tree root set to parent block {parent_number}");
-                                    }
-
-                                    // Store block data for later reconstruction
-                                    block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
-
-                                    let mut wanted = Vec::new();
-                                    let block_already_registered = tree.get_block(&block_info.hash).is_some();
-                                    if !block_already_registered {
-                                        // Register block with the tree (chain selection)
-                                        wanted = match tree.check_block_wanted(
-                                            block_info.hash,
-                                            parent_hash,
-                                            block_info.number,
-                                            block_info.slot,
-                                        ) {
-                                            Ok(w) => w,
-                                            Err(e) => {
-                                                warn!("Block {} rejected by tree: {e}", block_info.number);
-                                                return;
-                                            }
-                                        };
-                                    }
-
-                                    // If this block was previously offered, guard against conflicting metadata.
-                                    if let Some(existing) = tree.get_block(&block_info.hash) {
-                                        if existing.parent != Some(parent_hash) || existing.number != block_info.number {
-                                            warn!(
-                                                "Ignoring block {} due to conflicting tree metadata",
-                                                block_info.number
-                                            );
-                                            return;
-                                        }
-                                    }
-
-                                    // Notify PNI about any newly-wanted blocks on a chain switch.
-                                    let newly_wanted: Vec<BlockHash> = wanted
-                                        .iter()
-                                        .copied()
-                                        .filter(|h| *h != block_info.hash)
-                                        .collect();
-                                    publish_block_wanted_messages(
-                                        &context,
-                                        &publish_consensus_topic,
-                                        &build_block_wanted_messages(&tree, &newly_wanted),
-                                    )
-                                    .await;
-
-                                    // We already have the body — store it (idempotent if already stored).
-                                    let had_body = tree
-                                        .get_block(&block_info.hash)
-                                        .map(|b| b.body.is_some())
-                                        .unwrap_or(false);
-                                    if let Err(e) = tree.add_block(block_info.hash, raw_block.body.clone()) {
-                                        error!("Failed to add block body: {e}");
-                                    }
-
-                                    // Collect and publish observer events
-                                    let events = collect_observer_events(
-                                        &event_queue,
-                                        &publish_blocks_topic,
-                                        &publish_consensus_topic,
-                                        &block_data,
-                                        &tree,
-                                    );
-                                    publish_messages(&context, events).await;
-
-                                    // Validate only when this call newly supplied body for a favoured block.
-                                    let should_validate = !had_body
-                                        && tree
-                                            .favoured_tip()
-                                            .is_some_and(|tip| tree.chain_contains(block_info.hash, tip));
-                                    if do_validation && should_validate {
-                                        handle_validation(
-                                            &block_info,
-                                            &validator_topics,
-                                            &mut validator_subscriptions,
-                                            validation_timeout,
-                                            &mut tree,
-                                            &event_queue,
-                                            &context,
-                                            &publish_blocks_topic,
-                                            &publish_consensus_topic,
-                                            &mut block_data,
-                                        ).await;
-                                    }
-
-                                    prune_block_data(&mut block_data, &tree);
-
-                                    // Prune periodically
-                                    if let Err(e) = tree.prune() {
-                                        error!("Prune failed: {e}");
-                                    }
-                                    prune_block_data(&mut block_data, &tree);
-                                }
-                                .instrument(span)
-                                .await;
-                            }
-
-                            _ => debug!("Ignoring non-BlockAvailable message on blocks topic"),
-                        }
-                    }
-
-                    result = consensus_subscription.read() => {
-                        let Ok((_, message)) = result else {
-                            error!("Consensus message read failed");
-                            return;
-                        };
-
-                        match message.as_ref() {
-                            Message::Consensus(ConsensusMessage::BlockOffered(offered)) => {
-                                let span = info_span!("consensus-offered", hash = %offered.hash);
-                                async {
-                                    // Derive block number from parent in tree
-                                    let number = match tree.get_block(&offered.parent_hash) {
-                                        Some(parent) => parent.number + 1,
-                                        None => {
-                                            warn!("Parent {} not in tree for offered block {}", offered.parent_hash, offered.hash);
-                                            return;
-                                        }
-                                    };
-
-                                    let wanted = match tree.check_block_wanted(
-                                        offered.hash,
-                                        offered.parent_hash,
-                                        number,
-                                        offered.slot,
-                                    ) {
-                                        Ok(w) => w,
-                                        Err(e) => {
-                                            warn!("Offered block {} rejected: {e}", offered.hash);
-                                            return;
-                                        }
-                                    };
-
-                                    // Collect and publish observer events
-                                    let events = collect_observer_events(
-                                        &event_queue,
-                                        &publish_blocks_topic,
-                                        &publish_consensus_topic,
-                                        &block_data,
-                                        &tree,
-                                    );
-                                    publish_messages(&context, events).await;
-
-                                    publish_block_wanted_messages(
-                                        &context,
-                                        &publish_consensus_topic,
-                                        &build_block_wanted_messages(&tree, &wanted),
-                                    )
-                                    .await;
-                                }
-                                .instrument(span)
-                                .await;
-                            }
-
-                            Message::Consensus(ConsensusMessage::BlockRescinded(rescinded)) => {
-                                let span = info_span!("consensus-rescinded", hash = %rescinded.hash);
-                                async {
-                                    match tree.remove_block(rescinded.hash) {
-                                        Ok(newly_wanted) => {
-                                            // Collect and publish observer events
-                                            let events = collect_observer_events(
-                                                &event_queue,
-                                                &publish_blocks_topic,
-                                                &publish_consensus_topic,
-                                                &block_data,
-                                                &tree,
-                                            );
-                                            publish_messages(&context, events).await;
-
-                                            publish_block_wanted_messages(
-                                                &context,
-                                                &publish_consensus_topic,
-                                                &build_block_wanted_messages(&tree, &newly_wanted),
-                                            )
-                                            .await;
-                                            prune_block_data(&mut block_data, &tree);
-                                        }
-                                        Err(e) => {
-                                            warn!("Failed to remove rescinded block {}: {e}", rescinded.hash);
-                                        }
-                                    }
-                                }
-                                .instrument(span)
-                                .await;
-                            }
-
-                            _ => debug!("Ignoring unknown consensus message"),
-                        }
-                    }
-                }
-            }
+        context.run(async move {
+            runtime.run(block_subscription, consensus_subscription).await;
         });
 
         Ok(())
+    }
+}
+
+impl ConsensusRuntime {
+    /// Main select loop: dispatches incoming messages to handler functions.
+    async fn run(
+        &mut self,
+        mut block_subscription: Box<dyn Subscription<Message>>,
+        mut consensus_subscription: Box<dyn Subscription<Message>>,
+    ) {
+        loop {
+            tokio::select! {
+                result = block_subscription.read() => {
+                    let Ok((_, message)) = result else {
+                        error!("Block message read failed");
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
+                            let block_info = if self.do_validation {
+                                raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
+                            } else {
+                                raw_blk_info.clone()
+                            };
+
+                            let span = info_span!("consensus", block = block_info.number);
+                            self.handle_block_available(block_info, raw_block.clone())
+                                .instrument(span)
+                                .await;
+                        }
+
+                        _ => debug!("Ignoring non-BlockAvailable message on blocks topic"),
+                    }
+                }
+
+                result = consensus_subscription.read() => {
+                    let Ok((_, message)) = result else {
+                        error!("Consensus message read failed");
+                        return;
+                    };
+
+                    match message.as_ref() {
+                        Message::Consensus(ConsensusMessage::BlockOffered(offered)) => {
+                            let span = info_span!("consensus-offered", hash = %offered.hash);
+                            self.handle_block_offered(offered.hash, offered.parent_hash, offered.slot)
+                                .instrument(span)
+                                .await;
+                        }
+
+                        Message::Consensus(ConsensusMessage::BlockRescinded(rescinded)) => {
+                            let span = info_span!("consensus-rescinded", hash = %rescinded.hash);
+                            self.handle_block_rescinded(rescinded.hash)
+                                .instrument(span)
+                                .await;
+                        }
+
+                        _ => debug!("Ignoring unknown consensus message"),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle a BlockAvailable message: parse header, register in tree, validate, prune.
+    async fn handle_block_available(&mut self, block_info: BlockInfo, raw_block: RawBlockMessage) {
+        // Parse header to extract parent hash
+        let parent_hash = match extract_parent_hash(&block_info, &raw_block.header) {
+            Ok(Some(h)) => h,
+            Ok(None) => {
+                // Genesis/epoch boundary block — no parent
+                debug!(
+                    "Block {} has no parent hash (genesis/EB)",
+                    block_info.number
+                );
+                if self.tree.is_empty() {
+                    if let Err(e) =
+                        self.tree.set_root(block_info.hash, block_info.number, block_info.slot)
+                    {
+                        error!("Failed to set root: {e}");
+                        return;
+                    }
+                    self.block_data
+                        .insert(block_info.hash, (block_info.clone(), raw_block.clone()));
+
+                    let msg = Arc::new(Message::Cardano((
+                        block_info.clone(),
+                        CardanoMessage::BlockAvailable(raw_block.clone()),
+                    )));
+                    self.context
+                        .message_bus
+                        .publish(&self.publish_blocks_topic, msg)
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                }
+                return;
+            }
+            Err(e) => {
+                error!("Failed to parse block header: {e}");
+                return;
+            }
+        };
+
+        // If tree is empty, set root using parent as virtual root
+        if self.tree.is_empty() {
+            let parent_number = block_info.number.saturating_sub(1);
+            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
+                error!("Failed to set tree root: {e}");
+                return;
+            }
+            debug!("Tree root set to parent block {parent_number}");
+        }
+
+        // Store block data for later reconstruction
+        self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
+
+        let mut wanted = Vec::new();
+        let block_already_registered = self.tree.get_block(&block_info.hash).is_some();
+        if !block_already_registered {
+            // Register block with the tree (chain selection)
+            wanted = match self.tree.check_block_wanted(
+                block_info.hash,
+                parent_hash,
+                block_info.number,
+                block_info.slot,
+            ) {
+                Ok(w) => w,
+                Err(e) => {
+                    warn!("Block {} rejected by tree: {e}", block_info.number);
+                    return;
+                }
+            };
+        }
+
+        // If this block was previously offered, guard against conflicting metadata.
+        if let Some(existing) = self.tree.get_block(&block_info.hash) {
+            if existing.parent != Some(parent_hash) || existing.number != block_info.number {
+                warn!(
+                    "Ignoring block {} due to conflicting tree metadata",
+                    block_info.number
+                );
+                return;
+            }
+        }
+
+        // Notify PNI about any newly-wanted blocks on a chain switch.
+        let newly_wanted: Vec<BlockHash> =
+            wanted.iter().copied().filter(|h| *h != block_info.hash).collect();
+        let wanted_msgs = build_block_wanted_messages(&self.tree, &newly_wanted);
+        self.publish_block_wanted_messages(&wanted_msgs).await;
+
+        // We already have the body — store it (idempotent if already stored).
+        let had_body =
+            self.tree.get_block(&block_info.hash).map(|b| b.body.is_some()).unwrap_or(false);
+        if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+            error!("Failed to add block body: {e}");
+        }
+
+        // Collect and publish observer events
+        self.drain_and_publish_events().await;
+
+        // Validate only when this call newly supplied body for a favoured block.
+        let should_validate = !had_body
+            && self
+                .tree
+                .favoured_tip()
+                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip));
+        if self.do_validation && should_validate {
+            self.handle_validation(&block_info).await;
+        }
+
+        self.prune_block_data();
+
+        // Prune periodically
+        if let Err(e) = self.tree.prune() {
+            error!("Prune failed: {e}");
+        }
+        self.prune_block_data();
+    }
+
+    /// Handle a BlockOffered message: derive number, check_block_wanted, publish.
+    async fn handle_block_offered(&mut self, hash: BlockHash, parent_hash: BlockHash, slot: u64) {
+        // Derive block number from parent in tree
+        let number = match self.tree.get_block(&parent_hash) {
+            Some(parent) => parent.number + 1,
+            None => {
+                warn!("Parent {parent_hash} not in tree for offered block {hash}");
+                return;
+            }
+        };
+
+        let wanted = match self.tree.check_block_wanted(hash, parent_hash, number, slot) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Offered block {hash} rejected: {e}");
+                return;
+            }
+        };
+
+        // Collect and publish observer events
+        self.drain_and_publish_events().await;
+
+        let wanted_msgs = build_block_wanted_messages(&self.tree, &wanted);
+        self.publish_block_wanted_messages(&wanted_msgs).await;
+    }
+
+    /// Handle a BlockRescinded message: remove block, publish events.
+    async fn handle_block_rescinded(&mut self, hash: BlockHash) {
+        match self.tree.remove_block(hash) {
+            Ok(newly_wanted) => {
+                self.drain_and_publish_events().await;
+
+                let wanted_msgs = build_block_wanted_messages(&self.tree, &newly_wanted);
+                self.publish_block_wanted_messages(&wanted_msgs).await;
+                self.prune_block_data();
+            }
+            Err(e) => {
+                warn!("Failed to remove rescinded block {hash}: {e}");
+            }
+        }
+    }
+
+    /// Collect observer events, resolve to messages, and publish.
+    async fn drain_and_publish_events(&mut self) {
+        let events = collect_observer_events(
+            &self.event_queue,
+            &self.publish_blocks_topic,
+            &self.publish_consensus_topic,
+            &self.block_data,
+            &self.tree,
+        );
+        publish_messages(&self.context, events).await;
+    }
+
+    /// Publish `BlockWanted` messages for each hash.
+    async fn publish_block_wanted_messages(&mut self, wanted: &[BlockWantedMessage]) {
+        for wanted_block in wanted {
+            let msg = Arc::new(Message::Consensus(ConsensusMessage::BlockWanted(
+                wanted_block.clone(),
+            )));
+            self.context
+                .message_bus
+                .publish(&self.publish_consensus_topic, msg)
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish BlockWanted: {e}"));
+        }
+    }
+
+    /// Keep only metadata for blocks still present in the tree.
+    fn prune_block_data(&mut self) {
+        self.block_data.retain(|hash, _| self.tree.get_block(hash).is_some());
+    }
+
+    /// Collect validation responses and update the tree accordingly.
+    async fn handle_validation(&mut self, block_info: &BlockInfo) {
+        let completed_tasks = Arc::new(Mutex::new(
+            HashMap::<String, Option<Arc<Message>>>::from_iter(
+                self.validator_topics.iter().map(|s| (s.clone(), None)),
+            ),
+        ));
+
+        let mut validation_results: Vec<(String, Arc<Message>)> = Vec::new();
+        let all_say_go = match timeout(self.validation_timeout, async {
+            for sub in self.validator_subscriptions.iter_mut() {
+                let (topic, res) = sub.read().await?;
+                completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
+                validation_results.push((topic, res));
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        {
+            Ok(Ok(())) => {
+                validation_results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
+                    Message::Cardano((_, CardanoMessage::BlockValidation(status))) => {
+                        match status {
+                            ValidationStatus::Go => all_ok,
+                            ValidationStatus::NoGo(err) => {
+                                error!(
+                                    block = block_info.number,
+                                    ?err,
+                                    "Validation failure: {topic}, result {msg:?}"
+                                );
+                                false
+                            }
+                        }
+                    }
+                    _ => {
+                        error!("Unexpected validation message type: {msg:?}");
+                        false
+                    }
+                })
+            }
+            Ok(Err(e)) => {
+                error!("Failed to read validations: {e}");
+                false
+            }
+            Err(_) => {
+                error!("Timeout waiting for validation responses");
+                false
+            }
+        };
+
+        if all_say_go {
+            if let Err(e) = self.tree.mark_validated(block_info.hash) {
+                error!("Failed to mark block validated: {e}");
+            }
+        } else {
+            error!(
+                block = block_info.number,
+                "Validation rejected block, results available:"
+            );
+            let completed = completed_tasks.lock().await;
+            for (topic, msg) in completed.iter() {
+                error!("Topic {topic}, result {msg:?}");
+            }
+            drop(completed);
+
+            // Mark rejected in tree — triggers observer events
+            if let Err(e) = self.tree.mark_rejected(block_info.hash) {
+                error!("Failed to mark block rejected: {e}");
+            }
+
+            // Collect and publish events from mark_rejected
+            self.drain_and_publish_events().await;
+            self.prune_block_data();
+        }
     }
 }
 
@@ -456,24 +560,6 @@ async fn publish_messages(context: &Arc<Context<Message>>, messages: Vec<(String
     }
 }
 
-/// Publish `BlockWanted` messages for each hash.
-async fn publish_block_wanted_messages(
-    context: &Arc<Context<Message>>,
-    publish_consensus_topic: &str,
-    wanted: &[BlockWantedMessage],
-) {
-    for wanted_block in wanted {
-        let msg = Arc::new(Message::Consensus(ConsensusMessage::BlockWanted(
-            wanted_block.clone(),
-        )));
-        context
-            .message_bus
-            .publish(publish_consensus_topic, msg)
-            .await
-            .unwrap_or_else(|e| error!("Failed to publish BlockWanted: {e}"));
-    }
-}
-
 /// Build `BlockWanted` payloads from tree metadata.
 fn build_block_wanted_messages(
     tree: &ConsensusTree,
@@ -486,14 +572,6 @@ fn build_block_wanted_messages(
             slot: tree.get_block(hash).map_or(0, |b| b.slot),
         })
         .collect()
-}
-
-/// Keep only metadata for blocks still present in the tree.
-fn prune_block_data(
-    block_data: &mut HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
-    tree: &ConsensusTree,
-) {
-    block_data.retain(|hash, _| tree.get_block(hash).is_some());
 }
 
 /// Find the Point for a block at a given number by walking the tree.
@@ -515,6 +593,24 @@ fn find_point_at_number(tree: &ConsensusTree, number: u64) -> Point {
     Point::Origin
 }
 
+/// Construct a default BlockInfo with minimal fields populated.
+fn default_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
+    BlockInfo {
+        status: acropolis_common::BlockStatus::Volatile,
+        intent: BlockIntent::Apply,
+        slot,
+        number,
+        hash,
+        epoch: 0,
+        epoch_slot: 0,
+        new_epoch: false,
+        is_new_era: false,
+        tip_slot: None,
+        timestamp: 0,
+        era: acropolis_common::Era::Conway,
+    }
+}
+
 /// Find or construct a BlockInfo for a block at a given number.
 fn find_block_info_at_number(
     block_data: &HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
@@ -528,131 +624,12 @@ fn find_block_info_at_number(
                 if let Some((info, _)) = block_data.get(&h) {
                     return info.clone();
                 }
-                return BlockInfo {
-                    status: acropolis_common::BlockStatus::Volatile,
-                    intent: BlockIntent::Apply,
-                    slot: b.slot,
-                    number: b.number,
-                    hash: b.hash,
-                    epoch: 0,
-                    epoch_slot: 0,
-                    new_epoch: false,
-                    is_new_era: false,
-                    tip_slot: None,
-                    timestamp: 0,
-                    era: acropolis_common::Era::Conway,
-                };
+                return default_block_info(b.number, b.slot, b.hash);
             }
             current = b.parent;
         } else {
             break;
         }
     }
-    BlockInfo {
-        status: acropolis_common::BlockStatus::Volatile,
-        intent: BlockIntent::Apply,
-        slot: 0,
-        number,
-        hash: BlockHash::default(),
-        epoch: 0,
-        epoch_slot: 0,
-        new_epoch: false,
-        is_new_era: false,
-        tip_slot: None,
-        timestamp: 0,
-        era: acropolis_common::Era::Conway,
-    }
-}
-
-/// Collect validation responses and update the tree accordingly.
-#[allow(clippy::too_many_arguments)]
-async fn handle_validation(
-    block_info: &BlockInfo,
-    validator_topics: &[String],
-    validator_subscriptions: &mut [Box<dyn caryatid_sdk::Subscription<Message>>],
-    validation_timeout: Duration,
-    tree: &mut ConsensusTree,
-    event_queue: &EventQueue,
-    context: &Arc<Context<Message>>,
-    publish_blocks_topic: &str,
-    publish_consensus_topic: &str,
-    block_data: &mut HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
-) {
-    let completed_tasks = Arc::new(Mutex::new(
-        HashMap::<String, Option<Arc<Message>>>::from_iter(
-            validator_topics.iter().map(|s| (s.clone(), None)),
-        ),
-    ));
-
-    let mut validation_results: Vec<(String, Arc<Message>)> = Vec::new();
-    let all_say_go = match timeout(validation_timeout, async {
-        for sub in validator_subscriptions.iter_mut() {
-            let (topic, res) = sub.read().await?;
-            completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
-            validation_results.push((topic, res));
-        }
-        Ok::<(), anyhow::Error>(())
-    })
-    .await
-    {
-        Ok(Ok(())) => {
-            validation_results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
-                Message::Cardano((_, CardanoMessage::BlockValidation(status))) => match status {
-                    ValidationStatus::Go => all_ok,
-                    ValidationStatus::NoGo(err) => {
-                        error!(
-                            block = block_info.number,
-                            ?err,
-                            "Validation failure: {topic}, result {msg:?}"
-                        );
-                        false
-                    }
-                },
-                _ => {
-                    error!("Unexpected validation message type: {msg:?}");
-                    false
-                }
-            })
-        }
-        Ok(Err(e)) => {
-            error!("Failed to read validations: {e}");
-            false
-        }
-        Err(_) => {
-            error!("Timeout waiting for validation responses");
-            false
-        }
-    };
-
-    if all_say_go {
-        if let Err(e) = tree.mark_validated(block_info.hash) {
-            error!("Failed to mark block validated: {e}");
-        }
-    } else {
-        error!(
-            block = block_info.number,
-            "Validation rejected block, results available:"
-        );
-        let completed = completed_tasks.lock().await;
-        for (topic, msg) in completed.iter() {
-            error!("Topic {topic}, result {msg:?}");
-        }
-        drop(completed);
-
-        // Mark rejected in tree — triggers observer events
-        if let Err(e) = tree.mark_rejected(block_info.hash) {
-            error!("Failed to mark block rejected: {e}");
-        }
-
-        // Collect and publish events from mark_rejected
-        let events = collect_observer_events(
-            event_queue,
-            publish_blocks_topic,
-            publish_consensus_topic,
-            block_data,
-            tree,
-        );
-        publish_messages(context, events).await;
-        prune_block_data(block_data, tree);
-    }
+    default_block_info(number, 0, BlockHash::default())
 }
