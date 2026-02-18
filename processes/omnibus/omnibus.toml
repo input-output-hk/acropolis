@@ -49,10 +49,6 @@ validators = [
 #           "cardano.validation.spo"
 ]
 
-[module.midnight-state]
-address-deltas-topic = "cardano.address.deltas.extended"
-cnight-policy-id = "d2dbff622e509dda256fedbd31ef6e9fd98ed49ad91d5c0e07f68af1"
-cnight-asset-name = ""
 
 [module.block-unpacker]
 
@@ -79,9 +75,9 @@ publish-governance-topic = "cardano.governance"
 publish-tx-validation-topic = "cardano.validation.tx"
 
 [module.utxo-state]
+address-delta-publish-mode = "compact"
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
-address-delta-extended-topic = "cardano.address.deltas.extended"
 block-totals-topic = "cardano.block.txs"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"

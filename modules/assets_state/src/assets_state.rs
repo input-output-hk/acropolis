@@ -179,9 +179,9 @@ impl AssetsState {
                         let reg = registry.lock().await;
                         if let Some(ref address_state) = address_state {
                             let mut address_state = address_state.lock().await;
-                            let compact_deltas = address_deltas_msg.to_compact_deltas();
+                            let compact_deltas = address_deltas_msg.as_compact_or_convert();
                             if let Err(e) =
-                                address_state.handle_address_deltas(&compact_deltas, &reg)
+                                address_state.handle_address_deltas(compact_deltas.as_ref(), &reg)
                             {
                                 error!("Address deltas handling error: {e:#}");
                             };

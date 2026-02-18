@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod state;
-use state::{ImmutableUTXOStore, State};
+use state::{AddressDeltaPublishMode, ImmutableUTXOStore, State};
 
 #[cfg(test)]
 mod test_utils;
@@ -56,6 +56,7 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
+const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
 
 /// UTXO state module
 #[module(
@@ -267,6 +268,15 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
+        let address_delta_publish_mode = config
+            .get_string("address-delta-publish-mode")
+            .unwrap_or_else(|_| DEFAULT_ADDRESS_DELTA_PUBLISH_MODE.to_string())
+            .parse::<AddressDeltaPublishMode>()?;
+        info!(
+            mode = ?address_delta_publish_mode,
+            "Address delta publish mode"
+        );
+
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Create store
@@ -280,10 +290,11 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store);
+        let mut state = State::new(store, address_delta_publish_mode);
 
         // Create address delta publisher and pass it observations
-        let deltas_publisher = AddressDeltaPublisher::new(context.clone(), config.clone());
+        let deltas_publisher =
+            AddressDeltaPublisher::new(context.clone(), config.clone(), address_delta_publish_mode);
         state.register_address_delta_observer(Arc::new(deltas_publisher));
 
         // Create block totals publisher and pass it observations

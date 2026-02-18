@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use crate::cbor::u128_cbor_codec;
 use crate::validation::ValidationStatus;
 use crate::{types::*, DRepRecord};
+use std::borrow::Cow;
 
 // Caryatid core messages which we re-export
 use crate::epoch_snapshot::SnapshotsContainer;
@@ -126,19 +127,26 @@ impl AddressDeltasMessage {
 
     /// Returns compact deltas, converting from extended form if needed.
     pub fn to_compact_deltas(&self) -> Vec<AddressDelta> {
+        self.as_compact_or_convert().into_owned()
+    }
+
+    /// Returns compact deltas as borrowed when compact, owned when extended.
+    pub fn as_compact_or_convert(&self) -> Cow<'_, [AddressDelta]> {
         match self {
-            Self::Deltas(deltas) => deltas.clone(),
-            Self::ExtendedDeltas(deltas) => deltas
-                .iter()
-                .map(|delta| AddressDelta {
-                    address: delta.address.clone(),
-                    tx_identifier: delta.tx_identifier,
-                    spent_utxos: delta.spent_utxos.iter().map(|u| u.utxo).collect(),
-                    created_utxos: delta.created_utxos.iter().map(|u| u.utxo).collect(),
-                    sent: delta.sent.clone(),
-                    received: delta.received.clone(),
-                })
-                .collect(),
+            Self::Deltas(deltas) => Cow::Borrowed(deltas.as_slice()),
+            Self::ExtendedDeltas(deltas) => Cow::Owned(
+                deltas
+                    .iter()
+                    .map(|delta| AddressDelta {
+                        address: delta.address.clone(),
+                        tx_identifier: delta.tx_identifier,
+                        spent_utxos: delta.spent_utxos.iter().map(|u| u.utxo).collect(),
+                        created_utxos: delta.created_utxos.iter().map(|u| u.utxo).collect(),
+                        sent: delta.sent.clone(),
+                        received: delta.received.clone(),
+                    })
+                    .collect(),
+            ),
         }
     }
 }
@@ -840,5 +848,31 @@ mod tests {
         );
         assert_eq!(compact[0].sent, extended.sent);
         assert_eq!(compact[0].received, extended.received);
+    }
+
+    #[test]
+    fn as_compact_or_convert_borrows_when_compact() {
+        let delta = sample_address_delta();
+        let msg = AddressDeltasMessage::Deltas(vec![delta.clone()]);
+
+        let compact = msg.as_compact_or_convert();
+        assert!(matches!(compact, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(compact.as_ref(), &[delta]);
+    }
+
+    #[test]
+    fn as_compact_or_convert_owns_when_extended() {
+        let extended = sample_extended_address_delta();
+        let msg = AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()]);
+
+        let compact = msg.as_compact_or_convert();
+        assert!(matches!(compact, std::borrow::Cow::Owned(_)));
+        assert_eq!(compact[0].address, extended.address);
+        assert_eq!(compact[0].tx_identifier, extended.tx_identifier);
+        assert_eq!(compact[0].spent_utxos, vec![extended.spent_utxos[0].utxo]);
+        assert_eq!(
+            compact[0].created_utxos,
+            vec![extended.created_utxos[0].utxo]
+        );
     }
 }
