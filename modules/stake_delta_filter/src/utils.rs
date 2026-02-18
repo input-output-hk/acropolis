@@ -332,9 +332,9 @@ pub fn process_message(
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
     let mut grouped: HashMap<StakeAddress, StakeEntry> = HashMap::new();
-    let compact_deltas = delta.as_compact_or_convert();
+    let deltas = delta.as_compact_or_convert();
 
-    for d in compact_deltas.iter() {
+    for d in deltas.iter() {
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
         // 2. Shelley Address delegation is a pointer + target address is a stake

@@ -49,7 +49,6 @@ validators = [
 #           "cardano.validation.spo"
 ]
 
-
 [module.block-unpacker]
 
 [module.rest-blockfrost]
