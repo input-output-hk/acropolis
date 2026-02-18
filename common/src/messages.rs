@@ -31,7 +31,7 @@ use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
 use crate::validation::ValidationStatus;
-use crate::{types::*, DRepRecord};
+use crate::{DRepRecord, types::*};
 use std::borrow::Cow;
 
 // Caryatid core messages which we re-export
@@ -123,11 +123,6 @@ impl AddressDeltasMessage {
             Self::Deltas(_) => None,
             Self::ExtendedDeltas(deltas) => Some(deltas),
         }
-    }
-
-    /// Returns compact deltas, converting from extended form if needed.
-    pub fn to_compact_deltas(&self) -> Vec<AddressDelta> {
-        self.as_compact_or_convert().into_owned()
     }
 
     /// Returns compact deltas as borrowed when compact, owned when extended.
@@ -833,10 +828,11 @@ mod tests {
     }
 
     #[test]
-    fn to_compact_deltas_converts_extended_entries() {
+    fn as_compact_or_convert_converts_extended_entries() {
         let extended = sample_extended_address_delta();
-        let compact =
-            AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()]).to_compact_deltas();
+        let compact = AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()])
+            .as_compact_or_convert()
+            .into_owned();
 
         assert_eq!(compact.len(), 1);
         assert_eq!(compact[0].address, extended.address);
