@@ -323,7 +323,12 @@ impl GovernanceState {
         });
 
         loop {
-            let mut vld = ValidationContext::new(&context, &config.validation_outcome_topic);
+            let mut vld = ValidationContext::new(
+                &context,
+                &config.validation_outcome_topic,
+                "governance_state",
+            );
+
             let (blk_g, gov_procs) =
                 match vld.consume_sync(readers.gov_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(normal) => normal,
@@ -373,7 +378,7 @@ impl GovernanceState {
             .instrument(span)
             .await;
 
-            vld.publish("governance_state").await;
+            vld.publish().await;
         }
     }
 
