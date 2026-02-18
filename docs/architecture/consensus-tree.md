@@ -1,13 +1,15 @@
 # Consensus Tree data structure
 
 This is an outline of the consensus tree data structure used to track the current state of the
-chain and all potentially viable forks.
+chain and all potentially viable forks. It is guide the implementation, not necessarily to be
+replicated 1:1 in the code. As such this document will change and evolve.
 
 ## Data structure
 
-The ConsensusTree will store blocks in a tree structure.  It is not a DAG because a block, even
-with the same content as another, in a different part of the tree has different parents and hence
-a different hash.
+ConsensusTree stores blocks in a rooted tree (a special case of a DAG). In this model, each block
+has exactly one parent, so the structure is not a general DAG with shared-parent/merge nodes.
+Even if two blocks carry similar payloads, different parent links produce different hashes and
+therefore distinct nodes.
 
 Only 'volatile' blocks (those within 'k' blocks of the current longest chain tip) are stored.
 
