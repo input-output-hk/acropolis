@@ -358,6 +358,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_module_midnight_state"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "chrono",
+ "config",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "acropolis_module_mithril_snapshot_fetcher"
 version = "0.1.0"
 dependencies = [
@@ -613,6 +626,7 @@ dependencies = [
  "acropolis_module_historical_accounts_state",
  "acropolis_module_historical_epochs_state",
  "acropolis_module_mcp_server",
+ "acropolis_module_midnight_state",
  "acropolis_module_mithril_snapshot_fetcher",
  "acropolis_module_parameters_state",
  "acropolis_module_peer_network_interface",
