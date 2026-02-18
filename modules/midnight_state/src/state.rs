@@ -15,7 +15,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     _utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    candidates: CandidateState,
+    _candidates: CandidateState,
     // Governance indexed by block
     _governance: GovernanceState,
     // Parameters indexed by epoch
@@ -32,9 +32,8 @@ impl State {
         }
     }
 
-    /// Snapshot the candidate set and Ariadne parameters at epoch boundary
+    /// Snapshot Ariadne parameters at epoch boundary
     pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<()> {
-        self.candidates.snapshot_candidate_set(block_info.number);
         self.parameters.snapshot_parameters(block_info.epoch);
         Ok(())
     }

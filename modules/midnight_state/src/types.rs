@@ -1,6 +1,4 @@
-use acropolis_common::{
-    Address, BlockHash, BlockNumber, Datum, Epoch, Slot, TxHash, UTxOIdentifier,
-};
+use acropolis_common::{Address, BlockHash, BlockNumber, Datum, TxHash, UTxOIdentifier};
 use anyhow::{anyhow, Error};
 use chrono::NaiveDateTime;
 
@@ -176,15 +174,4 @@ impl From<(BlockNumber, &DeregistrationEvent)> for Deregistration {
             utxo_index: event.registration.utxo_index,
         }
     }
-}
-
-#[derive(Clone)]
-pub struct TxOutput {
-    pub utxo: UTxOIdentifier,
-    pub _epoch_number: Epoch,
-    pub _block_number: BlockNumber,
-    pub _slot_number: Slot,
-    pub _tx_index_within_block: u32,
-    pub _datum: Datum,
-    pub _inputs: Vec<UTxOIdentifier>,
 }
