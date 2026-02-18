@@ -58,26 +58,29 @@ impl CNightUTxOState {
 
     #[allow(dead_code)]
     /// Get the CNight UTxO creations within a specified block range
-    pub fn get_asset_creates(&self, start: BlockNumber, end: BlockNumber) -> Vec<AssetCreate> {
+    pub fn get_asset_creates(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> Result<Vec<AssetCreate>> {
         self.created_utxos
             .range(start..=end)
-            .flat_map(|(_, utxos)| {
-                utxos.iter().map(|utxo_id| {
-                    let meta = self
-                        .utxo_index
-                        .get(utxo_id)
-                        .expect("UTxO index out of sync with created_utxos");
+            .flat_map(|(_, utxos)| utxos.iter())
+            .map(|utxo_id| {
+                let meta = self
+                    .utxo_index
+                    .get(utxo_id)
+                    .ok_or_else(|| anyhow!("UTxO creation without existing record"))?;
 
-                    AssetCreate {
-                        block_number: meta.creation.block_number,
-                        block_hash: meta.creation.block_hash,
-                        block_timestamp: meta.creation.block_timestamp,
-                        tx_index_in_block: meta.creation.tx_index,
-                        quantity: meta.creation.quantity,
-                        holder_address: meta.creation.address.clone(),
-                        tx_hash: meta.creation.utxo.tx_hash,
-                        utxo_index: meta.creation.utxo.output_index,
-                    }
+                Ok(AssetCreate {
+                    block_number: meta.creation.block_number,
+                    block_hash: meta.creation.block_hash,
+                    block_timestamp: meta.creation.block_timestamp,
+                    tx_index_in_block: meta.creation.tx_index,
+                    quantity: meta.creation.quantity,
+                    holder_address: meta.creation.address.clone(),
+                    tx_hash: meta.creation.utxo.tx_hash,
+                    utxo_index: meta.creation.utxo.output_index,
                 })
             })
             .collect()
@@ -85,29 +88,35 @@ impl CNightUTxOState {
 
     #[allow(dead_code)]
     /// Get the CNight UTxO spends within a specified block range
-    pub fn get_asset_spends(&self, start: BlockNumber, end: BlockNumber) -> Vec<AssetSpend> {
+    pub fn get_asset_spends(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> Result<Vec<AssetSpend>> {
         self.spent_utxos
             .range(start..=end)
-            .flat_map(|(_, utxos)| {
-                utxos.iter().map(|utxo_id| {
-                    let meta = self
-                        .utxo_index
-                        .get(utxo_id)
-                        .expect("UTxO index out of sync with spent_utxos");
+            .flat_map(|(_, utxos)| utxos.iter())
+            .map(|utxo_id| {
+                let meta = self
+                    .utxo_index
+                    .get(utxo_id)
+                    .ok_or_else(|| anyhow!("UTxO spend without existing record"))?;
 
-                    let spend =
-                        meta.spend.as_ref().expect("UTxO index out of sync with spent_utxos");
-                    AssetSpend {
-                        block_number: spend.block_number,
-                        block_hash: spend.block_hash,
-                        block_timestamp: spend.block_timestamp,
-                        tx_index_in_block: spend.tx_index,
-                        quantity: meta.creation.quantity,
-                        holder_address: meta.creation.address.clone(),
-                        utxo_tx_hash: meta.creation.utxo.tx_hash,
-                        utxo_index: meta.creation.utxo.output_index,
-                        spending_tx_hash: spend.tx_hash,
-                    }
+                let spend = meta
+                    .spend
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("UTxO index out of sync with spent_utxos"))?;
+
+                Ok(AssetSpend {
+                    block_number: spend.block_number,
+                    block_hash: spend.block_hash,
+                    block_timestamp: spend.block_timestamp,
+                    tx_index_in_block: spend.tx_index,
+                    quantity: meta.creation.quantity,
+                    holder_address: meta.creation.address.clone(),
+                    utxo_tx_hash: meta.creation.utxo.tx_hash,
+                    utxo_index: meta.creation.utxo.output_index,
+                    spending_tx_hash: spend.tx_hash,
                 })
             })
             .collect()
