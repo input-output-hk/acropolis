@@ -139,3 +139,180 @@ impl State {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use acropolis_common::{
+        Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
+        Era, ExtendedAddressDelta, NativeAsset, PolicyId, SpentUTxOExtended, TxHash, TxIdentifier,
+        UTxOIdentifier, Value,
+    };
+    use chrono::NaiveDateTime;
+
+    use crate::{
+        configuration::MidnightConfig,
+        state::State,
+        types::{CNightCreation, UTxOMeta},
+    };
+
+    fn test_block_info() -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Volatile,
+            intent: BlockIntent::Apply,
+            slot: 1000,
+            number: 1,
+            hash: BlockHash::default(),
+            epoch: 1,
+            epoch_slot: 1000,
+            new_epoch: false,
+            is_new_era: false,
+            tip_slot: Some(1000),
+            timestamp: 0,
+            era: Era::Conway,
+        }
+    }
+
+    fn test_config(policy: PolicyId, asset: AssetName) -> MidnightConfig {
+        MidnightConfig {
+            cnight_policy_id: policy,
+            cnight_asset_name: asset,
+            ..Default::default()
+        }
+    }
+
+    fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> Value {
+        Value::new(
+            0,
+            vec![(
+                policy,
+                vec![NativeAsset {
+                    name: asset,
+                    amount,
+                }],
+            )],
+        )
+    }
+
+    fn test_value_no_token() -> Value {
+        Value::new(50, vec![])
+    }
+
+    #[test]
+    fn collects_cnight_creation_when_token_present() {
+        let block_info = test_block_info();
+        let policy = PolicyId::new([1u8; 28]);
+        let asset = AssetName::new(b"").unwrap();
+
+        let mut state = State::new(test_config(policy, asset));
+
+        let token_value_5 = test_value_with_token(policy, asset, 5);
+        let token_value_10 = test_value_with_token(policy, asset, 10);
+        let no_token_value = test_value_no_token();
+
+        let delta = ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![
+                CreatedUTxOExtended {
+                    utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                    value: token_value_5,
+                    datum: None,
+                },
+                CreatedUTxOExtended {
+                    utxo: UTxOIdentifier::new(TxHash::default(), 2),
+                    value: token_value_10,
+                    datum: None,
+                },
+                CreatedUTxOExtended {
+                    utxo: UTxOIdentifier::new(TxHash::default(), 3),
+                    value: no_token_value,
+                    datum: None,
+                },
+            ],
+            spent_utxos: vec![],
+            received: Value::default(),
+            sent: Value::default(),
+        };
+
+        // Collect the CNight UTxO creations
+        let creations = state.collect_cnight_creations(&delta, &block_info);
+        assert_eq!(creations.len(), 2);
+        assert_eq!(creations[0].quantity, 5);
+
+        // Index the CNightCreation
+        state.utxos.add_created_utxos(block_info.number, creations);
+
+        // Retrieve the UTxO from state using the getter
+        let utxos = state.utxos.get_asset_creates(block_info.number, block_info.number).unwrap();
+        assert_eq!(utxos.len(), 2);
+        assert_eq!(utxos[0].quantity, 5);
+        assert_eq!(utxos[1].quantity, 10);
+    }
+
+    #[test]
+    fn collects_cnight_spend_when_token_present() {
+        let block_info = test_block_info();
+        let policy = PolicyId::new([1u8; 28]);
+        let asset = AssetName::new(b"").unwrap();
+
+        let mut state = State::new(test_config(policy, asset));
+
+        // Preseed the utxo_index with a UTxO creation
+        state.utxos.utxo_index.insert(
+            UTxOIdentifier {
+                tx_hash: TxHash::default(),
+                output_index: 2,
+            },
+            UTxOMeta {
+                creation: CNightCreation {
+                    address: Address::None,
+                    quantity: 5,
+                    utxo: UTxOIdentifier {
+                        tx_hash: TxHash::default(),
+                        output_index: 2,
+                    },
+                    block_number: 5,
+                    block_hash: BlockHash::default(),
+                    block_timestamp: NaiveDateTime::default(),
+                    tx_index: 50,
+                },
+                spend: None,
+            },
+        );
+
+        let delta = ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![],
+            spent_utxos: vec![
+                SpentUTxOExtended {
+                    spent_by: TxHash::default(),
+                    utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                },
+                SpentUTxOExtended {
+                    spent_by: TxHash::new([2u8; 32]),
+                    utxo: UTxOIdentifier::new(TxHash::default(), 2),
+                },
+                SpentUTxOExtended {
+                    spent_by: TxHash::default(),
+                    utxo: UTxOIdentifier::new(TxHash::default(), 3),
+                },
+            ],
+            received: Value::default(),
+            sent: Value::default(),
+        };
+
+        // Collect the CNight UTxO spends
+        let spends = state.collect_cnight_spends(&delta, &block_info);
+        assert_eq!(spends.len(), 1);
+        assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
+
+        // Index the CNightSpend
+        state.utxos.add_spent_utxos(block_info.number, spends).unwrap();
+
+        // Retrieve the UTxO from state using the getter
+        let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number).unwrap();
+        assert_eq!(utxos.len(), 1);
+        assert_eq!(utxos[0].quantity, 5);
+    }
+}
