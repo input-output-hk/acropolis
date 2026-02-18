@@ -9,14 +9,44 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, Era, PoolRegistrationUpdate, ShelleyAddressPointer,
-    StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Address, AddressDelta, CreatedUTxOExtended, Era, ExtendedAddressDelta, PoolRegistrationUpdate,
+    ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue,
+    UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AddressDeltaPublishMode {
+    #[default]
+    Compact,
+    Extended,
+}
+
+impl FromStr for AddressDeltaPublishMode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "compact" => Ok(Self::Compact),
+            "extended" => Ok(Self::Extended),
+            _ => Err(anyhow::anyhow!(
+                "Invalid address-delta-publish-mode '{s}', expected 'compact' or 'extended'"
+            )),
+        }
+    }
+}
+
+/// Internal observer payload emitted by UTxO state according to publish mode.
+#[derive(Clone, Debug)]
+pub enum ObservedAddressDelta {
+    Compact(AddressDelta),
+    Extended(ExtendedAddressDelta),
+}
 
 /// Address delta observer
 /// Note all methods are immutable to avoid locking in state - use channels
@@ -27,7 +57,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&self, address: &AddressDelta);
+    async fn observe_delta(&self, address: ObservedAddressDelta);
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
@@ -113,11 +143,17 @@ pub struct State {
 
     /// State History of Protocol Parameter
     protocol_parameters_history: StateHistory<ProtocolParams>,
+
+    /// Address delta publish mode for emitted observer deltas.
+    address_delta_publish_mode: AddressDeltaPublishMode,
 }
 
 impl State {
     /// Create a new empty state
-    pub fn new(immutable_utxo_store: Arc<dyn ImmutableUTXOStore>) -> Self {
+    pub fn new(
+        immutable_utxo_store: Arc<dyn ImmutableUTXOStore>,
+        address_delta_publish_mode: AddressDeltaPublishMode,
+    ) -> Self {
         Self {
             last_slot: 0,
             last_number: 0,
@@ -134,6 +170,7 @@ impl State {
             ),
             avvm_cancelled_value: None,
             pointer_address_values: None,
+            address_delta_publish_mode,
         }
     }
 
@@ -491,9 +528,23 @@ impl State {
         // Process the deltas
         for tx in &deltas.deltas {
             if tx.is_valid {
-                self.handle_valid_tx(tx, block).await?;
+                match self.address_delta_publish_mode {
+                    AddressDeltaPublishMode::Compact => {
+                        self.handle_valid_tx_compact(tx, block).await?
+                    }
+                    AddressDeltaPublishMode::Extended => {
+                        self.handle_valid_tx_extended(tx, block).await?
+                    }
+                }
             } else {
-                self.handle_invalid_tx(tx, block).await?;
+                match self.address_delta_publish_mode {
+                    AddressDeltaPublishMode::Compact => {
+                        self.handle_invalid_tx_compact(tx, block).await?
+                    }
+                    AddressDeltaPublishMode::Extended => {
+                        self.handle_invalid_tx_extended(tx, block).await?
+                    }
+                }
             }
         }
 
@@ -508,18 +559,19 @@ impl State {
         Ok(())
     }
 
-    async fn handle_valid_tx(&mut self, tx: &TxUTxODeltas, block: &BlockInfo) -> Result<()> {
-        // Temporary map to sum UTxO deltas efficiently
-        let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
+    async fn handle_valid_tx_compact(
+        &mut self,
+        tx: &TxUTxODeltas,
+        block: &BlockInfo,
+    ) -> Result<()> {
+        let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
 
         for input in &tx.consumes {
             if let Some(utxo) = self.lookup_utxo(input).await? {
-                // Remove or mark spent
                 self.observe_input(input, block).await?;
 
                 let addr = utxo.address.clone();
-                let entry = address_map.entry(addr.clone()).or_default();
-
+                let entry = address_map.entry(addr).or_default();
                 entry.spent_utxos.push(*input);
                 entry.sent.add_value(&utxo.value);
             }
@@ -530,8 +582,7 @@ impl State {
             self.observe_output(output, block).await?;
 
             let addr = output.address.clone();
-            let entry = address_map.entry(addr.clone()).or_default();
-
+            let entry = address_map.entry(addr).or_default();
             entry.created_utxos.push(output.utxo_identifier);
             entry.received.add_value(&output.value);
             tx_output += output.value.coin();
@@ -547,7 +598,7 @@ impl State {
                 received: Value::from(entry.received),
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
-                observer.observe_delta(&delta).await;
+                observer.observe_delta(ObservedAddressDelta::Compact(delta)).await;
             }
         }
 
@@ -558,8 +609,75 @@ impl State {
         Ok(())
     }
 
-    async fn handle_invalid_tx(&mut self, tx: &TxUTxODeltas, block: &BlockInfo) -> Result<()> {
-        let mut address_map: HashMap<Address, AddressTxMap> = HashMap::new();
+    async fn handle_valid_tx_extended(
+        &mut self,
+        tx: &TxUTxODeltas,
+        block: &BlockInfo,
+    ) -> Result<()> {
+        // Temporary map to sum UTxO deltas efficiently
+        let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
+
+        for input in &tx.consumes {
+            if let Some(utxo) = self.lookup_utxo(input).await? {
+                // Remove or mark spent
+                self.observe_input(input, block).await?;
+
+                let addr = utxo.address.clone();
+                let entry = address_map.entry(addr.clone()).or_default();
+
+                entry.spent_utxos.push(SpentUTxOExtended {
+                    utxo: *input,
+                    value: utxo.value.clone(),
+                    spent_by: tx.tx_hash,
+                    datum: utxo.datum.clone(),
+                });
+                entry.sent.add_value(&utxo.value);
+            }
+        }
+
+        let mut tx_output = 0;
+        for output in &tx.produces {
+            self.observe_output(output, block).await?;
+
+            let addr = output.address.clone();
+            let entry = address_map.entry(addr.clone()).or_default();
+
+            entry.created_utxos.push(CreatedUTxOExtended {
+                utxo: output.utxo_identifier,
+                value: output.value.clone(),
+                datum: output.datum.clone(),
+            });
+            entry.received.add_value(&output.value);
+            tx_output += output.value.coin();
+        }
+
+        for (addr, entry) in address_map {
+            let delta = ExtendedAddressDelta {
+                address: addr,
+                tx_identifier: tx.tx_identifier,
+                spent_utxos: entry.spent_utxos,
+                created_utxos: entry.created_utxos,
+                sent: Value::from(entry.sent),
+                received: Value::from(entry.received),
+            };
+            if let Some(observer) = self.address_delta_observer.as_ref() {
+                observer.observe_delta(ObservedAddressDelta::Extended(delta)).await;
+            }
+        }
+
+        if let Some(observer) = self.block_totals_observer.as_ref() {
+            observer.observe_tx(tx_output, tx.fee).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_invalid_tx_compact(
+        &mut self,
+        tx: &TxUTxODeltas,
+        block: &BlockInfo,
+    ) -> Result<()> {
+        let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
         let mut tx_fees = 0;
 
         for input in &tx.consumes {
@@ -596,7 +714,69 @@ impl State {
                 received: Value::from(entry.received),
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
-                observer.observe_delta(&delta).await;
+                observer.observe_delta(ObservedAddressDelta::Compact(delta)).await;
+            }
+        }
+
+        if let Some(observer) = self.block_totals_observer.as_ref() {
+            observer.observe_tx(0, tx_fees).await;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_invalid_tx_extended(
+        &mut self,
+        tx: &TxUTxODeltas,
+        block: &BlockInfo,
+    ) -> Result<()> {
+        let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
+        let mut tx_fees = 0;
+
+        for input in &tx.consumes {
+            if let Some(utxo) = self.lookup_utxo(input).await? {
+                self.observe_input(input, block).await?;
+
+                let entry = address_map.entry(utxo.address.clone()).or_default();
+                entry.spent_utxos.push(SpentUTxOExtended {
+                    utxo: *input,
+                    value: utxo.value.clone(),
+                    spent_by: tx.tx_hash,
+                    datum: utxo.datum.clone(),
+                });
+                entry.sent.add_value(&utxo.value);
+                tx_fees += utxo.value.coin();
+            } else {
+                error!("Collateral UTxO {} not found", input);
+            }
+        }
+
+        if let Some(output) = &tx.produces.first() {
+            self.observe_output(output, block).await?;
+
+            let addr = output.address.clone();
+            let entry = address_map.entry(addr.clone()).or_default();
+
+            entry.created_utxos.push(CreatedUTxOExtended {
+                utxo: output.utxo_identifier,
+                value: output.value.clone(),
+                datum: output.datum.clone(),
+            });
+            entry.received.add_value(&output.value);
+            tx_fees -= output.value.coin();
+        };
+
+        for (addr, entry) in address_map {
+            let delta = ExtendedAddressDelta {
+                address: addr,
+                tx_identifier: tx.tx_identifier,
+                spent_utxos: entry.spent_utxos,
+                created_utxos: entry.created_utxos,
+                sent: Value::from(entry.sent),
+                received: Value::from(entry.received),
+            };
+            if let Some(observer) = self.address_delta_observer.as_ref() {
+                observer.observe_delta(ObservedAddressDelta::Extended(delta)).await;
             }
         }
 
@@ -688,11 +868,19 @@ impl State {
 
 /// Internal helper used during `handle` aggregation for summing UTxO deltas.
 #[derive(Default)]
-struct AddressTxMap {
+struct AddressTxMapCompact {
     sent: ValueMap,
     received: ValueMap,
     spent_utxos: Vec<UTxOIdentifier>,
     created_utxos: Vec<UTxOIdentifier>,
+}
+
+#[derive(Default)]
+struct AddressTxMapExtended {
+    sent: ValueMap,
+    received: ValueMap,
+    spent_utxos: Vec<SpentUTxOExtended>,
+    created_utxos: Vec<CreatedUTxOExtended>,
 }
 
 // -- Tests --
@@ -702,9 +890,10 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        PolicyId, ScriptHash, TxHash, TxUTxODeltas, Value,
+        PolicyId, ScriptHash, TxHash, TxIdentifier, TxUTxODeltas, Value,
     };
     use config::Config;
+    use std::str::FromStr;
     use tokio::sync::Mutex;
 
     // Create an address for testing - we use Byron just because it's easier to
@@ -732,8 +921,12 @@ mod tests {
     }
 
     fn new_state() -> State {
+        new_state_with_mode(AddressDeltaPublishMode::Compact)
+    }
+
+    fn new_state_with_mode(mode: AddressDeltaPublishMode) -> State {
         let config = Arc::new(Config::builder().build().unwrap());
-        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)))
+        State::new(Arc::new(InMemoryImmutableUTXOStore::new(config)), mode)
     }
 
     fn policy_id() -> PolicyId {
@@ -1077,12 +1270,21 @@ mod tests {
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
-        async fn observe_delta(&self, delta: &AddressDelta) {
+        async fn observe_delta(&self, delta: ObservedAddressDelta) {
+            let (address, sent, received) = match &delta {
+                ObservedAddressDelta::Compact(delta) => {
+                    (&delta.address, &delta.sent, &delta.received)
+                }
+                ObservedAddressDelta::Extended(delta) => {
+                    (&delta.address, &delta.sent, &delta.received)
+                }
+            };
+
             assert!(matches!(
-                &delta.address,
+                address,
                 Address::Byron(ByronAddress { payload }) if payload[0] == 99
             ));
-            let lovelace_net = (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
+            let lovelace_net = (received.lovelace as i64) - (sent.lovelace as i64);
             assert!(lovelace_net == 42 || lovelace_net == -42);
 
             let mut balance = self.balance.lock().await;
@@ -1090,7 +1292,7 @@ mod tests {
 
             let mut asset_balances = self.asset_balances.lock().await;
 
-            for (policy, assets) in &delta.received.assets {
+            for (policy, assets) in &received.assets {
                 assert_eq!(policy_id(), *policy);
                 for asset in assets {
                     assert!(
@@ -1103,7 +1305,7 @@ mod tests {
                 }
             }
 
-            for (policy, assets) in &delta.sent.assets {
+            for (policy, assets) in &sent.assets {
                 assert_eq!(policy_id(), *policy);
                 for asset in assets {
                     assert!(
@@ -1191,5 +1393,116 @@ mod tests {
             *ab.get(&(policy_id(), AssetName::new(b"FOO").unwrap())).unwrap(),
             0
         );
+    }
+
+    struct RecordingDeltaObserver {
+        deltas: Mutex<Vec<ExtendedAddressDelta>>,
+    }
+
+    impl RecordingDeltaObserver {
+        fn new() -> Self {
+            Self {
+                deltas: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AddressDeltaObserver for RecordingDeltaObserver {
+        async fn start_block(&self, _block: &BlockInfo) {}
+
+        async fn observe_delta(&self, delta: ObservedAddressDelta) {
+            match delta {
+                ObservedAddressDelta::Extended(delta) => self.deltas.lock().await.push(delta),
+                ObservedAddressDelta::Compact(_) => {
+                    panic!("expected extended deltas in extended mode test")
+                }
+            }
+        }
+
+        async fn finalise_block(&self, _block: &BlockInfo) {}
+
+        async fn rollback(&self, _msg: Arc<Message>) {}
+    }
+
+    #[tokio::test]
+    async fn extended_delta_spent_by_and_datum_are_preserved() {
+        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended);
+        let observer = Arc::new(RecordingDeltaObserver::new());
+        state.register_address_delta_observer(observer.clone());
+
+        let datum = Datum::Inline(vec![7, 8, 9]);
+        let created = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([1u8; 32]), 0),
+            address: create_address(99),
+            value: Value::new(42, vec![]),
+            datum: Some(datum.clone()),
+            reference_script_hash: None,
+        };
+
+        let create_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: TxIdentifier::new(1, 0),
+                tx_hash: TxHash::from([1u8; 32]),
+                consumes: vec![],
+                produces: vec![created.clone()],
+                fee: 0,
+                is_valid: true,
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state
+            .handle_utxo_deltas(&create_block(BlockStatus::Immutable, 1, 1), &create_deltas)
+            .await
+            .unwrap();
+
+        let spend_tx_hash = TxHash::from([2u8; 32]);
+        let spend_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: TxIdentifier::new(2, 0),
+                tx_hash: spend_tx_hash,
+                consumes: vec![created.utxo_identifier],
+                produces: vec![],
+                fee: 0,
+                is_valid: true,
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state
+            .handle_utxo_deltas(&create_block(BlockStatus::Immutable, 2, 2), &spend_deltas)
+            .await
+            .unwrap();
+
+        let deltas = observer.deltas.lock().await.clone();
+        let create_delta = deltas.iter().find(|delta| !delta.created_utxos.is_empty()).unwrap();
+        let spend_delta = deltas.iter().find(|delta| !delta.spent_utxos.is_empty()).unwrap();
+
+        assert!(matches!(
+            create_delta.created_utxos[0].datum,
+            Some(Datum::Inline(ref bytes)) if bytes == &vec![7, 8, 9]
+        ));
+        assert!(matches!(
+            spend_delta.spent_utxos[0].datum,
+            Some(Datum::Inline(ref bytes)) if bytes == &vec![7, 8, 9]
+        ));
+        assert_eq!(spend_delta.spent_utxos[0].spent_by, spend_tx_hash);
+    }
+
+    #[test]
+    fn publish_mode_parser_accepts_known_values() {
+        assert_eq!(
+            AddressDeltaPublishMode::from_str("compact").unwrap(),
+            AddressDeltaPublishMode::Compact
+        );
+        assert_eq!(
+            AddressDeltaPublishMode::from_str("extended").unwrap(),
+            AddressDeltaPublishMode::Extended
+        );
+    }
+
+    #[test]
+    fn publish_mode_parser_rejects_unknown_values() {
+        let err = AddressDeltaPublishMode::from_str("dual").expect_err("dual is unsupported");
+        assert!(err.to_string().contains("address-delta-publish-mode"));
     }
 }

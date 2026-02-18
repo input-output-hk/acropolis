@@ -100,6 +100,7 @@ network-name = "mainnet"
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
+address-delta-publish-mode = "extended"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 

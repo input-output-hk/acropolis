@@ -2,31 +2,53 @@
 use acropolis_common::{
     caryatid::RollbackAwarePublisher,
     messages::{AddressDeltasMessage, CardanoMessage, Message},
-    AddressDelta, BlockInfo,
+    AddressDelta, BlockInfo, ExtendedAddressDelta,
 };
 use async_trait::async_trait;
 use caryatid_sdk::Context;
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::error;
+use tracing::{debug, error};
 
-use crate::state::AddressDeltaObserver;
+use crate::state::{AddressDeltaObserver, AddressDeltaPublishMode, ObservedAddressDelta};
+
+enum AddressDeltaAccumulator {
+    Compact(Mutex<Vec<AddressDelta>>),
+    Extended(Mutex<Vec<ExtendedAddressDelta>>),
+}
 
 /// Address delta publisher
 pub struct AddressDeltaPublisher {
-    /// Accumulating deltas for the current block
-    deltas: Mutex<Vec<AddressDelta>>,
+    /// Selected publish mode for this runtime.
+    mode: AddressDeltaPublishMode,
 
-    /// Publisher
+    /// Accumulating mode-aligned deltas for the current block.
+    deltas: AddressDeltaAccumulator,
+
+    /// Single publisher for `address-delta-topic`.
     publisher: Option<Mutex<RollbackAwarePublisher<Message>>>,
 }
 
 impl AddressDeltaPublisher {
     /// Create
-    pub fn new(context: Arc<Context<Message>>, config: Arc<Config>) -> Self {
+    pub fn new(
+        context: Arc<Context<Message>>,
+        config: Arc<Config>,
+        mode: AddressDeltaPublishMode,
+    ) -> Self {
+        let deltas = match mode {
+            AddressDeltaPublishMode::Compact => {
+                AddressDeltaAccumulator::Compact(Mutex::new(Vec::new()))
+            }
+            AddressDeltaPublishMode::Extended => {
+                AddressDeltaAccumulator::Extended(Mutex::new(Vec::new()))
+            }
+        };
+
         Self {
-            deltas: Mutex::new(Vec::new()),
+            mode,
+            deltas,
             publisher: config
                 .get_string("address-delta-topic")
                 .ok()
@@ -40,31 +62,71 @@ impl AddressDeltaObserver for AddressDeltaPublisher {
     /// Observe a new block
     async fn start_block(&self, _block: &BlockInfo) {
         // Clear the deltas
-        self.deltas.lock().await.clear();
+        match &self.deltas {
+            AddressDeltaAccumulator::Compact(deltas) => deltas.lock().await.clear(),
+            AddressDeltaAccumulator::Extended(deltas) => deltas.lock().await.clear(),
+        }
     }
 
     /// Observe an address delta and publish messages
-    async fn observe_delta(&self, delta: &AddressDelta) {
+    async fn observe_delta(&self, delta: ObservedAddressDelta) {
         // Accumulate the delta
-        self.deltas.lock().await.push(delta.clone());
+        match (&self.mode, &self.deltas, delta) {
+            (
+                AddressDeltaPublishMode::Compact,
+                AddressDeltaAccumulator::Compact(deltas),
+                ObservedAddressDelta::Compact(delta),
+            ) => deltas.lock().await.push(delta),
+            (
+                AddressDeltaPublishMode::Extended,
+                AddressDeltaAccumulator::Extended(deltas),
+                ObservedAddressDelta::Extended(delta),
+            ) => deltas.lock().await.push(delta),
+            (mode, _, _) => error!(
+                mode = ?mode,
+                "address delta mode mismatch between state emission and publisher mode"
+            ),
+        }
     }
 
     async fn finalise_block(&self, block: &BlockInfo) {
-        // Send out the accumulated deltas
         if let Some(publisher) = &self.publisher {
-            let mut deltas = self.deltas.lock().await;
-            let message = AddressDeltasMessage {
-                deltas: std::mem::take(&mut *deltas),
+            let message = match &self.deltas {
+                AddressDeltaAccumulator::Compact(deltas) => {
+                    let compact_deltas = std::mem::take(&mut *deltas.lock().await);
+                    debug!(
+                        block_number = block.number,
+                        mode = "compact",
+                        delta_count = compact_deltas.len(),
+                        "utxo-state finalising address deltas"
+                    );
+                    Message::Cardano((
+                        block.clone(),
+                        CardanoMessage::AddressDeltas(AddressDeltasMessage::Deltas(compact_deltas)),
+                    ))
+                }
+                AddressDeltaAccumulator::Extended(deltas) => {
+                    let extended_deltas = std::mem::take(&mut *deltas.lock().await);
+                    debug!(
+                        block_number = block.number,
+                        mode = "extended",
+                        delta_count = extended_deltas.len(),
+                        "utxo-state finalising address deltas"
+                    );
+                    Message::Cardano((
+                        block.clone(),
+                        CardanoMessage::AddressDeltas(AddressDeltasMessage::ExtendedDeltas(
+                            extended_deltas,
+                        )),
+                    ))
+                }
             };
-
-            let message_enum =
-                Message::Cardano((block.clone(), CardanoMessage::AddressDeltas(message)));
             publisher
                 .lock()
                 .await
-                .publish(Arc::new(message_enum))
+                .publish(Arc::new(message))
                 .await
-                .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                .unwrap_or_else(|e| error!("Failed to publish address deltas: {e}"));
         }
     }
 
