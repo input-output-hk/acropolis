@@ -5,8 +5,8 @@ use std::{
 };
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, BlockStatus, Datum, Epoch, Era,
-    UTxOIdentifier,
+    BlockInfo, BlockNumber, BlockStatus, Datum, Epoch, Era, UTxOIdentifier,
+    messages::AddressDeltasMessage,
 };
 
 use crate::types::{

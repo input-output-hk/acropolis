@@ -1,14 +1,14 @@
 //! Acropolis Midnight state module for Caryatid
 //! Indexes data required by `midnight-node`
 use acropolis_common::{
+    BlockInfo, BlockStatus,
     caryatid::RollbackWrapper,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
 };
-use anyhow::{bail, Result};
-use caryatid_sdk::{module, Context, Subscription};
+use anyhow::{Result, bail};
+use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -39,11 +39,8 @@ impl MidnightState {
     fn log_epoch_summary(summary: &EpochSummary) {
         info!(
             epoch = summary.epoch,
-            block_number = summary.block_number,
             era = ?summary.era,
-            status = ?summary.status,
-            compact_blocks = summary.compact_blocks,
-            extended_blocks = summary.extended_blocks,
+            blocks = summary.extended_blocks,
             delta_count = summary.delta_count,
             created_utxos = summary.created_utxos,
             spent_utxos = summary.spent_utxos,
@@ -53,7 +50,6 @@ impl MidnightState {
         if summary.compact_blocks > 0 {
             warn!(
                 epoch = summary.epoch,
-                compact_blocks = summary.compact_blocks,
                 "received compact deltas; expected extended mode for midnight"
             );
         }
