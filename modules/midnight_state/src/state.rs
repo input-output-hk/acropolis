@@ -1,9 +1,11 @@
 use anyhow::Result;
-use std::collections::{BTreeMap, HashMap};
 
-use acropolis_common::{messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch};
+use acropolis_common::{messages::AddressDeltasMessage, BlockInfo};
 
-use crate::indexes::{candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState};
+use crate::indexes::{
+    candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
+    governance_state::GovernanceState, parameters_state::ParametersState,
+};
 
 #[derive(Clone, Default)]
 pub struct State {
@@ -15,30 +17,6 @@ pub struct State {
     _governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
-}
-
-#[derive(Clone, Default)]
-pub struct GovernanceState {
-    pub _technical_committee: HashMap<BlockNumber, Datum>,
-    pub _council: HashMap<BlockNumber, Datum>,
-}
-
-#[derive(Clone, Default)]
-pub struct ParametersState {
-    pub current: Option<Datum>,
-    pub permissioned_candidates: BTreeMap<Epoch, Datum>,
-}
-
-impl ParametersState {
-    fn snapshot_parameters(&mut self, epoch: Epoch) {
-        let Some(current) = self.current.clone() else {
-            return;
-        };
-
-        if self.permissioned_candidates.values().next_back() != Some(&current) {
-            self.permissioned_candidates.insert(epoch, current);
-        }
-    }
 }
 
 impl State {
