@@ -25,6 +25,7 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use hex::decode;
 use regex::Regex;
 use serde::de::Error as SerdeError;
@@ -308,6 +309,12 @@ impl BlockInfo {
             slot: self.slot,
         }
     }
+
+    pub fn to_naive_datetime(&self) -> NaiveDateTime {
+        DateTime::<Utc>::from_timestamp(self.timestamp as i64, 0)
+            .expect("invalid UNIX timestamp")
+            .naive_utc()
+    }
 }
 
 // For stake address registration/deregistration (handles deposits/refunds)
@@ -586,6 +593,20 @@ impl Value {
 
     pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
         iter.map(|v| v.lovelace).sum()
+    }
+
+    pub fn token_amount(&self, policy_id: &PolicyId, asset_name: &AssetName) -> u64 {
+        for (pid, assets) in &self.assets {
+            if pid == policy_id {
+                for asset in assets {
+                    if &asset.name == asset_name {
+                        return asset.amount;
+                    }
+                }
+                return 0;
+            }
+        }
+        0
     }
 }
 

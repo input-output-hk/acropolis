@@ -15,7 +15,7 @@ pub struct AssetCreate {
     pub block_hash: BlockHash,
     pub block_timestamp: NaiveDateTime,
     pub tx_index_in_block: u32,
-    pub quantity: i64,
+    pub quantity: u64,
     pub holder_address: Address,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
@@ -27,7 +27,7 @@ pub struct AssetSpend {
     pub block_hash: BlockHash,
     pub block_timestamp: NaiveDateTime,
     pub tx_index_in_block: u32,
-    pub quantity: i64,
+    pub quantity: u64,
     pub holder_address: Address,
     pub utxo_tx_hash: TxHash,
     pub utxo_index: u16,
@@ -110,7 +110,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
     pub address: Address,
-    pub quantity: i64,
+    pub quantity: u64,
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,

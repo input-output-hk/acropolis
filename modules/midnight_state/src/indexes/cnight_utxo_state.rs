@@ -12,7 +12,7 @@ pub struct CNightUTxOState {
     // Spent UTxOs sending CNight indexed by block
     spent_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
     // An index mapping UTxO identifiers to their corresponding metadata
-    utxo_index: HashMap<UTxOIdentifier, UTxOMeta>,
+    pub utxo_index: HashMap<UTxOIdentifier, UTxOMeta>,
 }
 
 impl CNightUTxOState {
