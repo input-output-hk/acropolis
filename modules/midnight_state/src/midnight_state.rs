@@ -12,7 +12,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::{str::FromStr, sync::Arc};
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 mod state;
 use state::State;
 mod types;
@@ -20,7 +20,7 @@ mod types;
 declare_cardano_reader!(
     AddressDeltasReader,
     "address-deltas-topic",
-    "cardano.address.deltas",
+    "cardano.address.deltas.extended",
     AddressDeltas,
     AddressDeltasMessage
 );
@@ -76,19 +76,65 @@ impl MidnightState {
 
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((blk_info, deltas)) => {
+                    let (delta_kind, delta_count) = match deltas.as_ref() {
+                        AddressDeltasMessage::Deltas(deltas) => ("compact", deltas.len()),
+                        AddressDeltasMessage::ExtendedDeltas(deltas) => ("extended", deltas.len()),
+                    };
+
                     if blk_info.status == BlockStatus::RolledBack {
+                        warn!(
+                            block_number = blk_info.number,
+                            block_hash = %blk_info.hash,
+                            "applying rollback"
+                        );
                         state = history.lock().await.get_rolled_back_state(blk_info.number);
                     }
 
                     if blk_info.new_epoch {
+                        info!(
+                            epoch = blk_info.epoch,
+                            block_number = blk_info.number,
+                            era = ?blk_info.era,
+                            status = ?blk_info.status,
+                            delta_kind,
+                            delta_count,
+                            cnight_creates = state.epoch_cnight_create_count(),
+                            cnight_spends = state.epoch_cnight_spend_count(),
+                            tracked_utxos = state.tracked_utxo_count(),
+                            "epoch checkpoint"
+                        );
                         state.handle_new_epoch()?;
                     }
 
-                    state.handle_address_deltas(&blk_info, &deltas)?;
+                    if matches!(deltas.as_ref(), AddressDeltasMessage::Deltas(_)) {
+                        if blk_info.new_epoch {
+                            warn!(
+                                epoch = blk_info.epoch,
+                                block_number = blk_info.number,
+                                "received compact deltas; expected extended topic"
+                            );
+                        }
+                        history.lock().await.commit(blk_info.number, state);
+                        continue;
+                    }
+
+                    if let Err(e) = state.handle_address_deltas(&blk_info, deltas.as_ref()) {
+                        error!(
+                            block_number = blk_info.number,
+                            block_hash = %blk_info.hash,
+                            "skipped block due to delta processing error: {e}"
+                        );
+                        continue;
+                    }
 
                     history.lock().await.commit(blk_info.number, state);
                 }
-                RollbackWrapper::Rollback(_) => {}
+                RollbackWrapper::Rollback(point) => {
+                    warn!(
+                        rollback_point = ?point,
+                        "received rollback wrapper message"
+                    );
+                }
             };
         }
     }
@@ -98,7 +144,7 @@ impl MidnightState {
         info!(
             cnight_policy_id = %cnight_policy_id,
             cnight_asset_name = %hex::encode(cnight_asset_name.as_slice()),
-            "midnight-state configured cNight filter"
+            "configured cNight filter"
         );
 
         // Subscribe to the `AddressDeltasMessage` publisher

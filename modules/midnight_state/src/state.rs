@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
-use tracing::{debug, info, warn};
+use tracing::warn;
 
 use acropolis_common::{
     messages::AddressDeltasMessage, AssetName, BlockInfo, BlockNumber, Datum, Epoch, PolicyId,
@@ -32,6 +32,10 @@ pub struct State {
     _governance: GovernanceState,
     // Parameters indexed by epoch
     _parameters: ParametersState,
+
+    // cNight activity counters accumulated since the last epoch boundary.
+    epoch_cnight_creates: usize,
+    epoch_cnight_spends: usize,
 }
 
 impl Default for State {
@@ -83,6 +87,8 @@ impl State {
             _candidate_utxos: CandidateUTxOState::default(),
             _governance: GovernanceState::default(),
             _parameters: ParametersState::default(),
+            epoch_cnight_creates: 0,
+            epoch_cnight_spends: 0,
         }
     }
 
@@ -95,46 +101,29 @@ impl State {
             warn!(
                 block_number = block.number,
                 block_hash = %block.hash,
-                "midnight-state received compact deltas; extended deltas are required"
+                "received compact deltas; extended deltas are required"
             );
             return Err(anyhow!(
                 "midnight-state requires AddressDeltasMessage::ExtendedDeltas"
             ));
         };
 
-        debug!(
-            block_number = block.number,
-            block_hash = %block.hash,
-            delta_count = extended_deltas.len(),
-            "midnight-state processing address deltas"
-        );
-
         let block_timestamp = Self::to_block_timestamp(block.timestamp)?;
-        let mut cnight_creates = 0usize;
-        let mut cnight_spends = 0usize;
 
         for delta in extended_deltas {
             let tx_index_in_block = u32::from(delta.tx_identifier.tx_index());
-            debug!(
-                block_number = block.number,
-                tx_identifier = %delta.tx_identifier,
-                address = ?delta.address,
-                created_utxos = delta.created_utxos.len(),
-                spent_utxos = delta.spent_utxos.len(),
-                "midnight-state scanning address delta"
-            );
 
             for created_utxo in &delta.created_utxos {
                 let Some(quantity) = self.get_cnight_quantity(&created_utxo.value)? else {
                     continue;
                 };
-                cnight_creates += 1;
 
                 self.asset_utxos
                     .created_utxos
                     .entry(block.number)
                     .or_default()
                     .push(created_utxo.utxo);
+                self.epoch_cnight_creates = self.epoch_cnight_creates.saturating_add(1);
 
                 self.asset_utxos.utxo_index.insert(
                     created_utxo.utxo,
@@ -154,21 +143,12 @@ impl State {
                         spent_block_timestamp: None,
                     },
                 );
-
-                debug!(
-                    block_number = block.number,
-                    address = ?delta.address,
-                    utxo = %created_utxo.utxo,
-                    quantity,
-                    "midnight-state indexed cNight create"
-                );
             }
 
             for spent_utxo in &delta.spent_utxos {
                 let Some(quantity) = self.get_cnight_quantity(&spent_utxo.value)? else {
                     continue;
                 };
-                cnight_spends += 1;
 
                 self.asset_utxos.spent_utxos.entry(block.number).or_default().push(spent_utxo.utxo);
 
@@ -198,40 +178,29 @@ impl State {
                 entry.spend_tx = Some(spent_utxo.spent_by);
                 entry.spent_tx_index = Some(tx_index_in_block);
                 entry.spent_block_timestamp = Some(block_timestamp);
-
-                debug!(
-                    block_number = block.number,
-                    address = ?delta.address,
-                    utxo = %spent_utxo.utxo,
-                    quantity,
-                    spending_tx_hash = %spent_utxo.spent_by,
-                    "midnight-state indexed cNight spend"
-                );
+                self.epoch_cnight_spends = self.epoch_cnight_spends.saturating_add(1);
             }
-        }
-
-        if cnight_creates > 0 || cnight_spends > 0 {
-            info!(
-                block_number = block.number,
-                block_hash = %block.hash,
-                cnight_creates,
-                cnight_spends,
-                tracked_utxos = self.asset_utxos.utxo_index.len(),
-                "midnight-state indexed cNight activity"
-            );
-        } else {
-            debug!(
-                block_number = block.number,
-                block_hash = %block.hash,
-                "midnight-state found no cNight activity in block"
-            );
         }
 
         Ok(())
     }
 
     pub fn handle_new_epoch(&mut self) -> Result<()> {
+        self.epoch_cnight_creates = 0;
+        self.epoch_cnight_spends = 0;
         Ok(())
+    }
+
+    pub fn tracked_utxo_count(&self) -> usize {
+        self.asset_utxos.utxo_index.len()
+    }
+
+    pub fn epoch_cnight_create_count(&self) -> usize {
+        self.epoch_cnight_creates
+    }
+
+    pub fn epoch_cnight_spend_count(&self) -> usize {
+        self.epoch_cnight_spends
     }
 
     fn get_cnight_quantity(&self, value: &Value) -> Result<Option<i64>> {
@@ -523,5 +492,59 @@ mod tests {
 
         assert!(state.get_asset_creates(1, 1).is_empty());
         assert!(state.get_asset_spends(1, 1).is_empty());
+    }
+
+    #[test]
+    fn resets_epoch_cnight_counters_on_new_epoch() {
+        let mut state = State::new(cnight_policy(), cnight_asset());
+        let created_utxo = UTxOIdentifier::new(TxHash::from([1u8; 32]), 0);
+
+        let create_delta = ExtendedAddressDelta {
+            address: Address::None,
+            tx_identifier: TxIdentifier::new(1, 0),
+            spent_utxos: Vec::new(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: created_utxo,
+                value: cnight_value(5),
+                datum: None,
+            }],
+            sent: Value::default(),
+            received: cnight_value(5),
+        };
+
+        let spend_delta = ExtendedAddressDelta {
+            address: Address::None,
+            tx_identifier: TxIdentifier::new(2, 0),
+            spent_utxos: vec![SpentUTxOExtended {
+                utxo: created_utxo,
+                value: cnight_value(5),
+                spent_by: TxHash::from([2u8; 32]),
+                datum: None,
+            }],
+            created_utxos: Vec::new(),
+            sent: cnight_value(5),
+            received: Value::default(),
+        };
+
+        state
+            .handle_address_deltas(
+                &block(1, 1),
+                &AddressDeltasMessage::ExtendedDeltas(vec![create_delta]),
+            )
+            .unwrap();
+        state
+            .handle_address_deltas(
+                &block(2, 2),
+                &AddressDeltasMessage::ExtendedDeltas(vec![spend_delta]),
+            )
+            .unwrap();
+
+        assert_eq!(state.epoch_cnight_create_count(), 1);
+        assert_eq!(state.epoch_cnight_spend_count(), 1);
+
+        state.handle_new_epoch().unwrap();
+
+        assert_eq!(state.epoch_cnight_create_count(), 0);
+        assert_eq!(state.epoch_cnight_spend_count(), 0);
     }
 }
