@@ -125,6 +125,14 @@ impl AddressDeltasMessage {
         }
     }
 
+    /// Returns extended deltas or an error if compact deltas were published.
+    pub fn to_extended_deltas(&self) -> Result<&[ExtendedAddressDelta], &'static str> {
+        match self {
+            Self::ExtendedDeltas(deltas) => Ok(deltas),
+            Self::Deltas(_) => Err("address-delta-publish-mode set to compact"),
+        }
+    }
+
     /// Returns compact deltas as borrowed when compact, owned when extended.
     pub fn as_compact_or_convert(&self) -> Cow<'_, [AddressDelta]> {
         match self {
@@ -868,5 +876,22 @@ mod tests {
             compact[0].created_utxos,
             vec![extended.created_utxos[0].utxo]
         );
+    }
+
+    #[test]
+    fn to_extended_deltas_accepts_extended() {
+        let extended = sample_extended_address_delta();
+        let msg = AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()]);
+
+        let extracted = msg.to_extended_deltas().expect("expected extended deltas");
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].address, extended.address);
+    }
+
+    #[test]
+    fn to_extended_deltas_rejects_compact() {
+        let msg = AddressDeltasMessage::Deltas(vec![sample_address_delta()]);
+        let err = msg.to_extended_deltas().expect_err("compact should be rejected");
+        assert_eq!(err, "address-delta-publish-mode set to compact");
     }
 }

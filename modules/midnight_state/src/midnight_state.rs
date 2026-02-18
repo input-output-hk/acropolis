@@ -7,7 +7,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
@@ -69,13 +69,6 @@ impl MidnightState {
                             spent_utxos = summary.spent_utxos,
                             "epoch checkpoint"
                         );
-
-                        if summary.saw_compact {
-                            warn!(
-                                epoch = summary.epoch,
-                                "received compact deltas; set `address-delta-publish-mode = \"extended\"` for midnight"
-                            );
-                        }
                     }
 
                     state.start_block(blk_info.as_ref());

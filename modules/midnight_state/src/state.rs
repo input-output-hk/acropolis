@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -75,7 +75,10 @@ impl State {
     }
 
     pub fn handle_address_deltas(&mut self, address_deltas: &AddressDeltasMessage) -> Result<()> {
-        self.epoch_totals.observe_deltas(address_deltas);
+        let extended_deltas = address_deltas.to_extended_deltas().map_err(|e| {
+            anyhow!("{e}; midnight-state requires AddressDeltasMessage::ExtendedDeltas")
+        })?;
+        self.epoch_totals.observe_deltas(extended_deltas);
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-use acropolis_common::{messages::AddressDeltasMessage, BlockInfo, Era};
+use acropolis_common::{BlockInfo, Era, ExtendedAddressDelta};
 
 /// Epoch summary emitted by midnight-state logging runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9,18 +9,16 @@ pub struct EpochSummary {
     pub delta_count: usize,
     pub created_utxos: usize,
     pub spent_utxos: usize,
-    pub saw_compact: bool,
 }
 
 trait EpochTotalsObserver {
     fn start_block(&mut self, block: &BlockInfo);
-    fn observe_deltas(&mut self, deltas: &AddressDeltasMessage);
+    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]);
     fn finalise_block(&mut self, block: &BlockInfo);
 }
 
 #[derive(Clone, Default)]
 pub struct EpochTotals {
-    compact_blocks: usize,
     extended_blocks: usize,
     delta_count: usize,
     created_utxos: usize,
@@ -48,7 +46,7 @@ impl EpochTotals {
         <Self as EpochTotalsObserver>::start_block(self, block);
     }
 
-    pub fn observe_deltas(&mut self, deltas: &AddressDeltasMessage) {
+    pub fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
         <Self as EpochTotalsObserver>::observe_deltas(self, deltas);
     }
 
@@ -70,12 +68,10 @@ impl EpochTotals {
             delta_count: self.delta_count,
             created_utxos: self.created_utxos,
             spent_utxos: self.spent_utxos,
-            saw_compact: self.compact_blocks > 0,
         }
     }
 
     pub fn reset_epoch(&mut self) {
-        self.compact_blocks = 0;
         self.extended_blocks = 0;
         self.delta_count = 0;
         self.created_utxos = 0;
@@ -87,25 +83,11 @@ impl EpochTotals {
 impl EpochTotalsObserver for EpochTotals {
     fn start_block(&mut self, _block: &BlockInfo) {}
 
-    fn observe_deltas(&mut self, deltas: &AddressDeltasMessage) {
-        match deltas {
-            AddressDeltasMessage::Deltas(compact_deltas) => {
-                self.compact_blocks += 1;
-                self.delta_count += compact_deltas.len();
-                self.created_utxos +=
-                    compact_deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
-                self.spent_utxos +=
-                    compact_deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
-            }
-            AddressDeltasMessage::ExtendedDeltas(extended_deltas) => {
-                self.extended_blocks += 1;
-                self.delta_count += extended_deltas.len();
-                self.created_utxos +=
-                    extended_deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
-                self.spent_utxos +=
-                    extended_deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
-            }
-        }
+    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
+        self.extended_blocks += 1;
+        self.delta_count += deltas.len();
+        self.created_utxos += deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
+        self.spent_utxos += deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
     }
 
     fn finalise_block(&mut self, block: &BlockInfo) {
