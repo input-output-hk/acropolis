@@ -15,6 +15,9 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 mod state;
 use state::State;
+
+use crate::configuration::MidnightConfig;
+mod configuration;
 mod indexes;
 mod types;
 
@@ -38,13 +41,14 @@ pub struct MidnightState;
 impl MidnightState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
     ) -> Result<()> {
         loop {
             // Get a mutable state
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(State::new)
+                h.get_or_init_with(|| State::new(config.clone()))
             };
 
             match address_deltas_reader.read_with_rollbacks().await? {
@@ -67,6 +71,9 @@ impl MidnightState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Get the config
+        let cfg = MidnightConfig::try_load(&config)?;
+
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
 
@@ -78,7 +85,7 @@ impl MidnightState {
 
         // Start the run task
         context.run(async move {
-            Self::run(history, address_deltas_reader)
+            Self::run(history, cfg, address_deltas_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });

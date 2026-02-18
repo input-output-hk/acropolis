@@ -2,9 +2,12 @@ use anyhow::Result;
 
 use acropolis_common::{messages::AddressDeltasMessage, BlockInfo};
 
-use crate::indexes::{
-    candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
-    governance_state::GovernanceState, parameters_state::ParametersState,
+use crate::{
+    configuration::MidnightConfig,
+    indexes::{
+        candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
+        governance_state::GovernanceState, parameters_state::ParametersState,
+    },
 };
 
 #[derive(Clone, Default)]
@@ -17,11 +20,16 @@ pub struct State {
     _governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
+    // Midnight configuration
+    _config: MidnightConfig,
 }
 
 impl State {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(_config: MidnightConfig) -> Self {
+        Self {
+            _config,
+            ..Self::default()
+        }
     }
 
     /// Snapshot the candidate set and Ariadne parameters at epoch boundary
