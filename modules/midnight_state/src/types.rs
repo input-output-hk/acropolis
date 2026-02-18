@@ -72,6 +72,7 @@ pub struct UTxOMeta {
 
     // Creation info
     pub created_in: BlockNumber,
+    pub created_block_hash: BlockHash,
     pub created_tx: TxHash,
     pub created_tx_index: u32,
     pub created_utxo_index: u16,
@@ -79,6 +80,7 @@ pub struct UTxOMeta {
 
     // Spend info
     pub spent_in: Option<BlockNumber>,
+    pub spent_block_hash: Option<BlockHash>,
     pub spend_tx: Option<TxHash>,
     pub spent_tx_index: Option<u32>,
     pub spent_block_timestamp: Option<NaiveDateTime>,

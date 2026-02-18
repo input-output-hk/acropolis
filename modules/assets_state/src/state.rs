@@ -729,6 +729,7 @@ mod tests {
     ) -> TxUTxODeltas {
         TxUTxODeltas {
             tx_identifier,
+            tx_hash: TxHash::default(),
             consumes,
             produces,
             fee: 0,

@@ -51,7 +51,9 @@ validators = [
 
 
 [module.midnight-state]
-address-deltas-topic = "cardano.address.deltas"
+address-deltas-topic = "cardano.address.deltas.extended"
+cnight-policy-id = "00000000000000000000000000000000000000000000000000000000"
+cnight-asset-name = "634e69676874"
 
 [module.block-unpacker]
 
@@ -81,6 +83,7 @@ network-name = "mainnet"
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
+address-delta-extended-topic = "cardano.address.deltas.extended"
 block-totals-topic = "cardano.block.txs"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"

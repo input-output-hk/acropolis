@@ -123,7 +123,8 @@ impl AddressState {
                         }
 
                         // Add deltas to volatile
-                        state.apply_address_deltas(&address_deltas_msg.deltas);
+                        let compact_deltas = address_deltas_msg.to_compact_deltas();
+                        state.apply_address_deltas(&compact_deltas);
 
                         store = state.immutable.clone();
                         config = state.config.clone();

@@ -366,6 +366,7 @@ dependencies = [
  "caryatid_sdk",
  "chrono",
  "config",
+ "hex",
  "tokio",
  "tracing",
 ]

@@ -100,9 +100,47 @@ pub struct TxCertificatesMessage {
 
 /// Address deltas message
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AddressDeltasMessage {
-    /// Set of deltas
-    pub deltas: Vec<AddressDelta>,
+pub enum AddressDeltasMessage {
+    /// Compact address deltas
+    Deltas(Vec<AddressDelta>),
+    /// Extended address deltas with per-UTxO details
+    ExtendedDeltas(Vec<ExtendedAddressDelta>),
+}
+
+impl AddressDeltasMessage {
+    /// Returns compact deltas when this message is compact.
+    pub fn as_deltas(&self) -> Option<&[AddressDelta]> {
+        match self {
+            Self::Deltas(deltas) => Some(deltas),
+            Self::ExtendedDeltas(_) => None,
+        }
+    }
+
+    /// Returns extended deltas when this message is extended.
+    pub fn as_extended_deltas(&self) -> Option<&[ExtendedAddressDelta]> {
+        match self {
+            Self::Deltas(_) => None,
+            Self::ExtendedDeltas(deltas) => Some(deltas),
+        }
+    }
+
+    /// Returns compact deltas, converting from extended form if needed.
+    pub fn to_compact_deltas(&self) -> Vec<AddressDelta> {
+        match self {
+            Self::Deltas(deltas) => deltas.clone(),
+            Self::ExtendedDeltas(deltas) => deltas
+                .iter()
+                .map(|delta| AddressDelta {
+                    address: delta.address.clone(),
+                    tx_identifier: delta.tx_identifier,
+                    spent_utxos: delta.spent_utxos.iter().map(|u| u.utxo).collect(),
+                    created_utxos: delta.created_utxos.iter().map(|u| u.utxo).collect(),
+                    sent: delta.sent.clone(),
+                    received: delta.received.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Withdrawals message
@@ -709,4 +747,98 @@ pub enum Command {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CommandResponse {
     Transactions(TransactionsCommandResponse),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Address, CreatedUTxOExtended, SpentUTxOExtended, TxHash, TxIdentifier, Value};
+
+    fn sample_address_delta() -> AddressDelta {
+        AddressDelta {
+            address: Address::None,
+            tx_identifier: TxIdentifier::new(1, 2),
+            spent_utxos: vec![UTxOIdentifier::new(TxHash::from([1u8; 32]), 0)],
+            created_utxos: vec![UTxOIdentifier::new(TxHash::from([2u8; 32]), 1)],
+            sent: Value::new(10, Vec::new()),
+            received: Value::new(20, Vec::new()),
+        }
+    }
+
+    fn sample_extended_address_delta() -> ExtendedAddressDelta {
+        ExtendedAddressDelta {
+            address: Address::None,
+            tx_identifier: TxIdentifier::new(3, 4),
+            spent_utxos: vec![SpentUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::from([3u8; 32]), 2),
+                value: Value::new(30, Vec::new()),
+                spent_by: TxHash::from([4u8; 32]),
+                datum: None,
+            }],
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::from([5u8; 32]), 3),
+                value: Value::new(40, Vec::new()),
+                datum: None,
+            }],
+            sent: Value::new(30, Vec::new()),
+            received: Value::new(40, Vec::new()),
+        }
+    }
+
+    #[test]
+    fn address_deltas_message_roundtrips_compact() {
+        let delta = sample_address_delta();
+        let msg = AddressDeltasMessage::Deltas(vec![delta.clone()]);
+
+        let encoded = serde_json::to_vec(&msg).expect("serialize compact message");
+        let decoded: AddressDeltasMessage =
+            serde_json::from_slice(&encoded).expect("deserialize compact message");
+
+        let expected = vec![delta];
+        assert_eq!(decoded.as_deltas(), Some(expected.as_slice()));
+        assert!(decoded.as_extended_deltas().is_none());
+    }
+
+    #[test]
+    fn address_deltas_message_roundtrips_extended() {
+        let delta = sample_extended_address_delta();
+        let msg = AddressDeltasMessage::ExtendedDeltas(vec![delta.clone()]);
+
+        let encoded = serde_json::to_vec(&msg).expect("serialize extended message");
+        let decoded: AddressDeltasMessage =
+            serde_json::from_slice(&encoded).expect("deserialize extended message");
+
+        let extended = decoded.as_extended_deltas().expect("expected extended deltas");
+        assert_eq!(extended.len(), 1);
+        assert_eq!(extended[0].address, delta.address);
+        assert_eq!(extended[0].tx_identifier, delta.tx_identifier);
+        assert_eq!(extended[0].spent_utxos[0].utxo, delta.spent_utxos[0].utxo);
+        assert_eq!(
+            extended[0].created_utxos[0].utxo,
+            delta.created_utxos[0].utxo
+        );
+        assert_eq!(
+            extended[0].spent_utxos[0].spent_by,
+            delta.spent_utxos[0].spent_by
+        );
+        assert!(decoded.as_deltas().is_none());
+    }
+
+    #[test]
+    fn to_compact_deltas_converts_extended_entries() {
+        let extended = sample_extended_address_delta();
+        let compact =
+            AddressDeltasMessage::ExtendedDeltas(vec![extended.clone()]).to_compact_deltas();
+
+        assert_eq!(compact.len(), 1);
+        assert_eq!(compact[0].address, extended.address);
+        assert_eq!(compact[0].tx_identifier, extended.tx_identifier);
+        assert_eq!(compact[0].spent_utxos, vec![extended.spent_utxos[0].utxo]);
+        assert_eq!(
+            compact[0].created_utxos,
+            vec![extended.created_utxos[0].utxo]
+        );
+        assert_eq!(compact[0].sent, extended.sent);
+        assert_eq!(compact[0].received, extended.received);
+    }
 }
