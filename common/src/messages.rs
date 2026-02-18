@@ -31,7 +31,7 @@ use std::collections::HashMap;
 
 use crate::cbor::u128_cbor_codec;
 use crate::validation::ValidationStatus;
-use crate::{DRepRecord, types::*};
+use crate::{types::*, DRepRecord};
 use std::borrow::Cow;
 
 // Caryatid core messages which we re-export

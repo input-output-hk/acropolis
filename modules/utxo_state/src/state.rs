@@ -20,16 +20,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AddressDeltaPublishMode {
+    #[default]
     Compact,
     Extended,
-}
-
-impl Default for AddressDeltaPublishMode {
-    fn default() -> Self {
-        Self::Compact
-    }
 }
 
 impl FromStr for AddressDeltaPublishMode {
