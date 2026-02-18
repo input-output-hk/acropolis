@@ -28,7 +28,7 @@ pub trait AddressDeltaObserver: Send + Sync {
     async fn start_block(&self, block: &BlockInfo);
 
     /// Observe a delta
-    async fn observe_delta(&self, address: &ExtendedAddressDelta);
+    async fn observe_delta(&self, address: ExtendedAddressDelta);
 
     /// Finalise a block
     async fn finalise_block(&self, block: &BlockInfo);
@@ -557,7 +557,7 @@ impl State {
                 received: Value::from(entry.received),
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
-                observer.observe_delta(&delta).await;
+                observer.observe_delta(delta).await;
             }
         }
 
@@ -615,7 +615,7 @@ impl State {
                 received: Value::from(entry.received),
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
-                observer.observe_delta(&delta).await;
+                observer.observe_delta(delta).await;
             }
         }
 
@@ -676,7 +676,7 @@ impl State {
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley {
+            if block.era == Era::Shelley && block.status != BlockStatus::Bootstrap {
                 if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,
@@ -1096,7 +1096,7 @@ mod tests {
     #[async_trait]
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
-        async fn observe_delta(&self, delta: &ExtendedAddressDelta) {
+        async fn observe_delta(&self, delta: ExtendedAddressDelta) {
             assert!(matches!(
                 &delta.address,
                 Address::Byron(ByronAddress { payload }) if payload[0] == 99
@@ -1228,8 +1228,8 @@ mod tests {
     impl AddressDeltaObserver for RecordingDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
 
-        async fn observe_delta(&self, delta: &ExtendedAddressDelta) {
-            self.deltas.lock().await.push(delta.clone());
+        async fn observe_delta(&self, delta: ExtendedAddressDelta) {
+            self.deltas.lock().await.push(delta);
         }
 
         async fn finalise_block(&self, _block: &BlockInfo) {}

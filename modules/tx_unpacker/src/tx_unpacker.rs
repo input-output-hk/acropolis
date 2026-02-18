@@ -33,6 +33,7 @@ const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
 
 const CIP25_METADATA_LABEL: u64 = 721;
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -432,8 +433,14 @@ impl TxUnpacker {
             None => None,
         };
 
-        let network_id: NetworkId =
-            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
+        let network_id = match config
+            .get_string("startup.network-name")
+            .unwrap_or(DEFAULT_NETWORK_NAME.to_string())
+            .as_ref()
+        {
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Testnet,
+        };
 
         // Phase 2 script validation (disabled by default)
         let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
