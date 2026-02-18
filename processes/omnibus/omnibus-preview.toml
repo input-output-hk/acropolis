@@ -73,7 +73,6 @@ publish-governance-topic = "cardano.governance"
 publish-tx-validation-topic = "cardano.validation.tx"
 
 [module.utxo-state]
-address-delta-publish-mode = "compact"
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"

@@ -48,7 +48,6 @@ publish-block-txs-topic = "cardano.block.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
-address-delta-publish-mode = "compact"
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
 

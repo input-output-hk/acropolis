@@ -44,7 +44,6 @@ publish-utxo-deltas-topic = "cardano.utxo.deltas"
 network-name = "mainnet"
 
 [module.utxo-state]
-address-delta-publish-mode = "compact"
 
 [module.clock]
 

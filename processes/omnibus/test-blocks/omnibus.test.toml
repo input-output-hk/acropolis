@@ -55,7 +55,6 @@ publish-tx-validation-topic = "cardano.validation.txs"
 network-name = "mainnet"
 
 [module.utxo-state]
-address-delta-publish-mode = "compact"
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.delta"
 
