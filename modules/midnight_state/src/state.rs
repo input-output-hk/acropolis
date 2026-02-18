@@ -5,7 +5,7 @@ use std::{
 };
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, Era, UTxOIdentifier,
+    BlockInfo, BlockNumber, Datum, Epoch, Era, UTxOIdentifier, messages::AddressDeltasMessage,
 };
 
 use crate::types::{
@@ -112,7 +112,6 @@ impl EpochTotalsObserver for EpochTotalsAccumulator {
 pub struct State {
     // Runtime-active in this PR: epoch totals observer used for logging summaries.
     epoch_totals: EpochTotalsAccumulator,
-    pending_epoch_summary: Option<EpochSummary>,
 
     // -----------------------------------------------------------------------
     // NOTE: Indexing scaffolding retained for follow-up work.
@@ -178,14 +177,10 @@ impl State {
         self.epoch_totals.finalise_block(block);
     }
 
-    pub fn handle_new_epoch(&mut self) -> Result<()> {
-        self.pending_epoch_summary = self.epoch_totals.summarise_epoch();
+    pub fn handle_new_epoch(&mut self) -> Option<EpochSummary> {
+        let summary = self.epoch_totals.summarise_epoch();
         self.epoch_totals.reset_epoch();
-        Ok(())
-    }
-
-    pub fn take_epoch_summary_if_ready(&mut self) -> Option<EpochSummary> {
-        self.pending_epoch_summary.take()
+        summary
     }
 
     #[allow(dead_code)]

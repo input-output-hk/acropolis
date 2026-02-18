@@ -1,21 +1,21 @@
 //! Acropolis Midnight state module for Caryatid
 //! Indexes data required by `midnight-node`
 use acropolis_common::{
+    BlockInfo, BlockStatus,
     caryatid::RollbackWrapper,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
 };
-use anyhow::{bail, Result};
-use caryatid_sdk::{module, Context, Subscription};
+use anyhow::{Result, bail};
+use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 mod state;
-use state::{EpochSummary, State};
+use state::State;
 mod types;
 
 declare_cardano_reader!(
@@ -36,25 +36,6 @@ declare_cardano_reader!(
 pub struct MidnightState;
 
 impl MidnightState {
-    fn log_epoch_summary(summary: &EpochSummary) {
-        info!(
-            epoch = summary.epoch,
-            era = ?summary.era,
-            blocks = summary.blocks,
-            delta_count = summary.delta_count,
-            created_utxos = summary.created_utxos,
-            spent_utxos = summary.spent_utxos,
-            "epoch checkpoint"
-        );
-
-        if summary.saw_compact {
-            warn!(
-                epoch = summary.epoch,
-                "received compact deltas; expected extended mode for midnight"
-            );
-        }
-    }
-
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         mut address_deltas_reader: AddressDeltasReader,
@@ -77,9 +58,23 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        state.handle_new_epoch()?;
-                        if let Some(summary) = state.take_epoch_summary_if_ready() {
-                            Self::log_epoch_summary(&summary);
+                        if let Some(summary) = state.handle_new_epoch() {
+                            info!(
+                                epoch = summary.epoch,
+                                era = ?summary.era,
+                                blocks = summary.blocks,
+                                delta_count = summary.delta_count,
+                                created_utxos = summary.created_utxos,
+                                spent_utxos = summary.spent_utxos,
+                                "epoch checkpoint"
+                            );
+
+                            if summary.saw_compact {
+                                warn!(
+                                    epoch = summary.epoch,
+                                    "received compact deltas; expected extended mode for midnight"
+                                );
+                            }
                         }
                     }
 
