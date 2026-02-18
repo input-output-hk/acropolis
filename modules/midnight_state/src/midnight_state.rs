@@ -14,8 +14,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+mod epoch_totals;
 mod state;
-use state::{EpochSummary, State};
+use state::State;
 mod types;
 
 declare_cardano_reader!(
@@ -36,25 +37,6 @@ declare_cardano_reader!(
 pub struct MidnightState;
 
 impl MidnightState {
-    fn log_epoch_summary(summary: &EpochSummary) {
-        info!(
-            epoch = summary.epoch,
-            era = ?summary.era,
-            blocks = summary.blocks,
-            delta_count = summary.delta_count,
-            created_utxos = summary.created_utxos,
-            spent_utxos = summary.spent_utxos,
-            "epoch checkpoint"
-        );
-
-        if summary.saw_compact {
-            warn!(
-                epoch = summary.epoch,
-                "received compact deltas; expected extended mode for midnight"
-            );
-        }
-    }
-
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
         config: MidnightConfig,
@@ -78,10 +60,16 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        state.handle_new_epoch()?;
-                        if let Some(summary) = state.take_epoch_summary_if_ready() {
-                            Self::log_epoch_summary(&summary);
-                        }
+                        let summary = state.handle_new_epoch(blk_info.as_ref());
+                        info!(
+                            epoch = summary.epoch,
+                            era = ?summary.era,
+                            blocks = summary.blocks,
+                            delta_count = summary.delta_count,
+                            created_utxos = summary.created_utxos,
+                            spent_utxos = summary.spent_utxos,
+                            "epoch checkpoint"
+                        );
                     }
 
                     state.start_block(blk_info.as_ref());

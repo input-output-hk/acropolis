@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxHash,
-    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
+    UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -95,7 +95,6 @@ impl Transaction {
         } = self;
         let mut utxo_deltas = TxUTxODeltas {
             tx_identifier: id,
-            tx_hash: TxHash::default(),
             consumes,
             produces,
             reference_inputs,
@@ -140,7 +139,6 @@ impl Transaction {
 pub struct TxUTxODeltas {
     // Transaction identifier
     pub tx_identifier: TxIdentifier,
-    pub tx_hash: TxHash,
 
     // Spent and Created UTxOs
     pub consumes: Vec<UTxOIdentifier>,

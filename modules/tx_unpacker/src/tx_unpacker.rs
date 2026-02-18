@@ -200,9 +200,7 @@ impl TxUnpacker {
                                     }
 
                                     if publish_utxo_deltas_topic.is_some() {
-                                        let mut deltas = mapped_tx.convert_to_utxo_deltas(true);
-                                        deltas.tx_hash = tx_hash;
-                                        utxo_deltas.push(deltas);
+                                        utxo_deltas.push(mapped_tx.convert_to_utxo_deltas(true));
                                     }
                                 }
 
