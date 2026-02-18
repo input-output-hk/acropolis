@@ -40,6 +40,9 @@ node-addresses = [
 ]
 
 [module.consensus]
+# Security parameter k — maximum fork depth (Praos Common Prefix parameter)
+security-parameter = 2160
+
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
