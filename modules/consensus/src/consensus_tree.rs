@@ -317,6 +317,38 @@ impl ConsensusTree {
         number: u64,
         slot: u64,
     ) -> Result<Vec<BlockHash>, ConsensusTreeError> {
+        // Idempotent for already-known block headers: avoid reinserting
+        // the same hash and duplicating parent->child edges.
+        if let Some(existing) = self.blocks.get(&hash) {
+            if existing.parent != Some(parent_hash) {
+                return Err(ConsensusTreeError::ParentNotFound { hash: parent_hash });
+            }
+            if existing.number != number {
+                return Err(ConsensusTreeError::InvalidBlockNumber {
+                    expected: existing.number,
+                    got: number,
+                });
+            }
+
+            let tip = self.get_favoured_chain();
+            self.favoured_tip = tip;
+            let on_favoured_chain = tip.is_some_and(|t| self.chain_contains(hash, t));
+
+            return match existing.status {
+                BlockValidationStatus::Offered if on_favoured_chain => {
+                    if let Some(block) = self.blocks.get_mut(&hash) {
+                        block.status = BlockValidationStatus::Wanted;
+                    }
+                    Ok(vec![hash])
+                }
+                BlockValidationStatus::Wanted => Ok(vec![hash]),
+                BlockValidationStatus::Offered
+                | BlockValidationStatus::Fetched
+                | BlockValidationStatus::Validated
+                | BlockValidationStatus::Rejected => Ok(Vec::new()),
+            };
+        }
+
         // Validate parent exists
         if !self.blocks.contains_key(&parent_hash) {
             return Err(ConsensusTreeError::ParentNotFound { hash: parent_hash });
@@ -1266,6 +1298,22 @@ mod tests {
 
         let count_after = unsafe { &*obs }.proposed.lock().unwrap().len();
         assert_eq!(count_before, count_after);
+    }
+
+    /// Duplicate check_block_wanted should not duplicate parent children.
+    #[test]
+    fn test_check_block_wanted_idempotent_for_existing_header() {
+        let (mut tree, _) = make_tree(2160);
+        tree.set_root(hash(1), 0, 0).unwrap();
+
+        let first = tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
+        let second = tree.check_block_wanted(hash(2), hash(1), 1, 1).unwrap();
+
+        assert_eq!(first, vec![hash(2)]);
+        assert_eq!(second, vec![hash(2)]);
+        let root_children = &tree.get_block(&hash(1)).unwrap().children;
+        assert_eq!(root_children.len(), 1);
+        assert_eq!(root_children[0], hash(2));
     }
 
     /// T029: add_block for hash not in tree returns BlockNotInTree.
