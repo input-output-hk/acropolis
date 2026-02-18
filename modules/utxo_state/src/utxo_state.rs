@@ -21,7 +21,9 @@ use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
 mod state;
-use state::{AddressDeltaPublishMode, ImmutableUTXOStore, State};
+use state::{ImmutableUTXOStore, State};
+mod address_delta_mode;
+use address_delta_mode::AddressDeltaPublishMode;
 
 #[cfg(test)]
 mod test_utils;

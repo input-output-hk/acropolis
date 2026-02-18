@@ -11,7 +11,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
-use crate::state::{AddressDeltaObserver, AddressDeltaPublishMode, ObservedAddressDelta};
+use crate::address_delta_mode::AddressDeltaPublishMode;
+use crate::state::{AddressDeltaObserver, ObservedAddressDelta};
 
 enum AddressDeltaAccumulator {
     Compact(Mutex<Vec<AddressDelta>>),

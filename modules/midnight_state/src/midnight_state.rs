@@ -1,19 +1,20 @@
 //! Acropolis Midnight state module for Caryatid
 //! Indexes data required by `midnight-node`
 use acropolis_common::{
-    BlockInfo, BlockStatus,
     caryatid::RollbackWrapper,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
     state_history::{StateHistory, StateHistoryStore},
+    BlockInfo, BlockStatus,
 };
 use anyhow::{Result, bail};
-use caryatid_sdk::{Context, Subscription, module};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+mod epoch_totals;
 mod state;
 use state::State;
 mod types;
@@ -58,23 +59,22 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        if let Some(summary) = state.handle_new_epoch() {
-                            info!(
-                                epoch = summary.epoch,
-                                era = ?summary.era,
-                                blocks = summary.blocks,
-                                delta_count = summary.delta_count,
-                                created_utxos = summary.created_utxos,
-                                spent_utxos = summary.spent_utxos,
-                                "epoch checkpoint"
-                            );
+                        let summary = state.handle_new_epoch(blk_info.as_ref());
+                        info!(
+                            epoch = summary.epoch,
+                            era = ?summary.era,
+                            blocks = summary.blocks,
+                            delta_count = summary.delta_count,
+                            created_utxos = summary.created_utxos,
+                            spent_utxos = summary.spent_utxos,
+                            "epoch checkpoint"
+                        );
 
-                            if summary.saw_compact {
-                                warn!(
-                                    epoch = summary.epoch,
-                                    "received compact deltas; expected extended mode for midnight"
-                                );
-                            }
+                        if summary.saw_compact {
+                            warn!(
+                                epoch = summary.epoch,
+                                "received compact deltas; set `address-delta-publish-mode = \"extended\"` for midnight"
+                            );
                         }
                     }
 

@@ -386,14 +386,8 @@ pub struct SpentUTxOExtended {
     /// UTxO identifier being spent
     pub utxo: UTxOIdentifier,
 
-    /// Full value of the spent UTxO
-    pub value: Value,
-
     /// Hash of the transaction spending this UTxO
     pub spent_by: TxHash,
-
-    /// Datum attached to the spent UTxO, if present
-    pub datum: Option<Datum>,
 }
 
 /// Extended created UTxO details for address delta messages

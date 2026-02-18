@@ -774,9 +774,7 @@ mod tests {
             tx_identifier: TxIdentifier::new(3, 4),
             spent_utxos: vec![SpentUTxOExtended {
                 utxo: UTxOIdentifier::new(TxHash::from([3u8; 32]), 2),
-                value: Value::new(30, Vec::new()),
                 spent_by: TxHash::from([4u8; 32]),
-                datum: None,
             }],
             created_utxos: vec![CreatedUTxOExtended {
                 utxo: UTxOIdentifier::new(TxHash::from([5u8; 32]), 3),

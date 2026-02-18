@@ -1,4 +1,5 @@
 //! Acropolis UTXOState: State storage
+use crate::address_delta_mode::AddressDeltaPublishMode;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
@@ -10,36 +11,14 @@ use acropolis_common::{
 };
 use acropolis_common::{
     Address, AddressDelta, CreatedUTxOExtended, Era, ExtendedAddressDelta, PoolRegistrationUpdate,
-    ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue,
-    UTxOIdentifier, Value, ValueMap,
+    ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate, TxHash, TxUTxODeltas,
+    UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
-use tracing::{debug, error, info};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum AddressDeltaPublishMode {
-    #[default]
-    Compact,
-    Extended,
-}
-
-impl FromStr for AddressDeltaPublishMode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "compact" => Ok(Self::Compact),
-            "extended" => Ok(Self::Extended),
-            _ => Err(anyhow::anyhow!(
-                "Invalid address-delta-publish-mode '{s}', expected 'compact' or 'extended'"
-            )),
-        }
-    }
-}
+use tracing::{debug, error, info, warn};
 
 /// Internal observer payload emitted by UTxO state according to publish mode.
 #[derive(Clone, Debug)]
@@ -616,6 +595,15 @@ impl State {
     ) -> Result<()> {
         // Temporary map to sum UTxO deltas efficiently
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
+        let spending_tx_hash = Self::spending_tx_hash(tx);
+
+        if spending_tx_hash.is_none() && !tx.consumes.is_empty() {
+            warn!(
+                tx_identifier = %tx.tx_identifier,
+                block_number = block.number,
+                "extended deltas cannot set spent_by because transaction has no outputs; spent UTxO entries will be omitted"
+            );
+        }
 
         for input in &tx.consumes {
             if let Some(utxo) = self.lookup_utxo(input).await? {
@@ -625,12 +613,12 @@ impl State {
                 let addr = utxo.address.clone();
                 let entry = address_map.entry(addr.clone()).or_default();
 
-                entry.spent_utxos.push(SpentUTxOExtended {
-                    utxo: *input,
-                    value: utxo.value.clone(),
-                    spent_by: tx.tx_hash,
-                    datum: utxo.datum.clone(),
-                });
+                if let Some(spent_by) = spending_tx_hash {
+                    entry.spent_utxos.push(SpentUTxOExtended {
+                        utxo: *input,
+                        spent_by,
+                    });
+                }
                 entry.sent.add_value(&utxo.value);
             }
         }
@@ -732,18 +720,27 @@ impl State {
     ) -> Result<()> {
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
         let mut tx_fees = 0;
+        let spending_tx_hash = Self::spending_tx_hash(tx);
+
+        if spending_tx_hash.is_none() && !tx.consumes.is_empty() {
+            warn!(
+                tx_identifier = %tx.tx_identifier,
+                block_number = block.number,
+                "extended deltas cannot set spent_by because transaction has no outputs; spent UTxO entries will be omitted"
+            );
+        }
 
         for input in &tx.consumes {
             if let Some(utxo) = self.lookup_utxo(input).await? {
                 self.observe_input(input, block).await?;
 
                 let entry = address_map.entry(utxo.address.clone()).or_default();
-                entry.spent_utxos.push(SpentUTxOExtended {
-                    utxo: *input,
-                    value: utxo.value.clone(),
-                    spent_by: tx.tx_hash,
-                    datum: utxo.datum.clone(),
-                });
+                if let Some(spent_by) = spending_tx_hash {
+                    entry.spent_utxos.push(SpentUTxOExtended {
+                        utxo: *input,
+                        spent_by,
+                    });
+                }
                 entry.sent.add_value(&utxo.value);
                 tx_fees += utxo.value.coin();
             } else {
@@ -795,6 +792,10 @@ impl State {
             observer.rollback(message).await;
         }
         Ok(())
+    }
+
+    fn spending_tx_hash(tx: &TxUTxODeltas) -> Option<TxHash> {
+        tx.produces.first().map(|output| output.utxo_identifier.tx_hash)
     }
 
     async fn collect_utxos(
@@ -893,7 +894,6 @@ mod tests {
         PolicyId, ScriptHash, TxHash, TxIdentifier, TxUTxODeltas, Value,
     };
     use config::Config;
-    use std::str::FromStr;
     use tokio::sync::Mutex;
 
     // Create an address for testing - we use Byron just because it's easier to
@@ -1426,7 +1426,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extended_delta_spent_by_and_datum_are_preserved() {
+    async fn extended_delta_spent_by_and_created_datum_are_preserved() {
         let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended);
         let observer = Arc::new(RecordingDeltaObserver::new());
         state.register_address_delta_observer(observer.clone());
@@ -1443,7 +1443,6 @@ mod tests {
         let create_deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: TxIdentifier::new(1, 0),
-                tx_hash: TxHash::from([1u8; 32]),
                 consumes: vec![],
                 produces: vec![created.clone()],
                 fee: 0,
@@ -1457,12 +1456,18 @@ mod tests {
             .unwrap();
 
         let spend_tx_hash = TxHash::from([2u8; 32]);
+        let spend_output = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(spend_tx_hash, 0),
+            address: create_address(99),
+            value: Value::new(1, vec![]),
+            datum: None,
+            reference_script_hash: None,
+        };
         let spend_deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
                 tx_identifier: TxIdentifier::new(2, 0),
-                tx_hash: spend_tx_hash,
                 consumes: vec![created.utxo_identifier],
-                produces: vec![],
+                produces: vec![spend_output],
                 fee: 0,
                 is_valid: true,
                 ..TxUTxODeltas::default()
@@ -1481,28 +1486,59 @@ mod tests {
             create_delta.created_utxos[0].datum,
             Some(Datum::Inline(ref bytes)) if bytes == &vec![7, 8, 9]
         ));
-        assert!(matches!(
-            spend_delta.spent_utxos[0].datum,
-            Some(Datum::Inline(ref bytes)) if bytes == &vec![7, 8, 9]
-        ));
         assert_eq!(spend_delta.spent_utxos[0].spent_by, spend_tx_hash);
     }
 
-    #[test]
-    fn publish_mode_parser_accepts_known_values() {
-        assert_eq!(
-            AddressDeltaPublishMode::from_str("compact").unwrap(),
-            AddressDeltaPublishMode::Compact
-        );
-        assert_eq!(
-            AddressDeltaPublishMode::from_str("extended").unwrap(),
-            AddressDeltaPublishMode::Extended
-        );
-    }
+    #[tokio::test]
+    async fn extended_delta_omits_spent_entries_when_tx_has_no_outputs() {
+        let mut state = new_state_with_mode(AddressDeltaPublishMode::Extended);
+        let observer = Arc::new(RecordingDeltaObserver::new());
+        state.register_address_delta_observer(observer.clone());
 
-    #[test]
-    fn publish_mode_parser_rejects_unknown_values() {
-        let err = AddressDeltaPublishMode::from_str("dual").expect_err("dual is unsupported");
-        assert!(err.to_string().contains("address-delta-publish-mode"));
+        let created = TxOutput {
+            utxo_identifier: UTxOIdentifier::new(TxHash::from([3u8; 32]), 0),
+            address: create_address(99),
+            value: Value::new(10, vec![]),
+            datum: None,
+            reference_script_hash: None,
+        };
+
+        let create_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: TxIdentifier::new(3, 0),
+                consumes: vec![],
+                produces: vec![created.clone()],
+                fee: 0,
+                is_valid: true,
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state
+            .handle_utxo_deltas(&create_block(BlockStatus::Immutable, 3, 3), &create_deltas)
+            .await
+            .unwrap();
+
+        let spend_deltas = UTXODeltasMessage {
+            deltas: vec![TxUTxODeltas {
+                tx_identifier: TxIdentifier::new(4, 0),
+                consumes: vec![created.utxo_identifier],
+                produces: vec![],
+                fee: 0,
+                is_valid: true,
+                ..TxUTxODeltas::default()
+            }],
+        };
+        state
+            .handle_utxo_deltas(&create_block(BlockStatus::Immutable, 4, 4), &spend_deltas)
+            .await
+            .unwrap();
+
+        let deltas = observer.deltas.lock().await.clone();
+        let spend_delta = deltas
+            .iter()
+            .find(|delta| delta.tx_identifier == TxIdentifier::new(4, 0))
+            .expect("expected spend delta for tx 4:0");
+        assert!(spend_delta.spent_utxos.is_empty());
+        assert_eq!(spend_delta.sent.lovelace, 10);
     }
 }
