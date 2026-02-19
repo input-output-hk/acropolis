@@ -19,10 +19,6 @@ pub struct State {
     // Runtime-active in this PR: epoch totals observer used for logging summaries.
     epoch_totals: EpochTotals,
 
-    // -----------------------------------------------------------------------
-    // NOTE: Indexing scaffolding retained for follow-up work.
-    // These fields are intentionally inactive in the runtime path for this PR.
-    // -----------------------------------------------------------------------
     // CNight UTxO spends and creations indexed by block
     utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
@@ -76,8 +72,12 @@ impl State {
         }
 
         // Add created and spent CNight utxos to state
-        self.utxos.add_created_utxos(block_info.number, cnight_creations);
-        self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
+        if !cnight_creations.is_empty() {
+            self.utxos.add_created_utxos(block_info.number, cnight_creations);
+        }
+        if !cnight_spends.is_empty() {
+            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
+        }
         Ok(())
     }
 

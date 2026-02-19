@@ -16,7 +16,6 @@ pub struct CNightUTxOState {
 }
 
 impl CNightUTxOState {
-    #[allow(dead_code)]
     /// Add the created UTxOs for one block to state
     pub fn add_created_utxos(&mut self, block: BlockNumber, utxos: Vec<CNightCreation>) {
         let mut identifiers = Vec::with_capacity(utxos.len());
@@ -35,7 +34,6 @@ impl CNightUTxOState {
         self.created_utxos.insert(block, identifiers);
     }
 
-    #[allow(dead_code)]
     /// Add the spent UTxOs for one block to state
     pub fn add_spent_utxos(
         &mut self,
@@ -68,14 +66,7 @@ impl CNightUTxOState {
         self.created_utxos
             .range(start..=end)
             .flat_map(|(_, utxos)| utxos.iter())
-            .map(|utxo_id| {
-                let meta = self
-                    .utxo_index
-                    .get(utxo_id)
-                    .ok_or_else(|| anyhow!("UTxO creation without existing record"))?;
-
-                Ok(AssetCreate::from(meta))
-            })
+            .map(|utxo_id| AssetCreate::try_from(self.utxo_index.get(utxo_id)))
             .collect()
     }
 
@@ -89,14 +80,7 @@ impl CNightUTxOState {
         self.spent_utxos
             .range(start..=end)
             .flat_map(|(_, utxos)| utxos.iter())
-            .map(|utxo_id| {
-                let meta = self
-                    .utxo_index
-                    .get(utxo_id)
-                    .ok_or_else(|| anyhow!("UTxO spend without existing record"))?;
-
-                AssetSpend::try_from(meta)
-            })
+            .map(|utxo_id| AssetSpend::try_from(self.utxo_index.get(utxo_id)))
             .collect()
     }
 }

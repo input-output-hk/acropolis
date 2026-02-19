@@ -70,11 +70,15 @@ pub struct UTxOMeta {
     pub spend: Option<CNightSpend>,
 }
 
-impl From<&UTxOMeta> for AssetCreate {
-    fn from(meta: &UTxOMeta) -> Self {
+impl TryFrom<Option<&UTxOMeta>> for AssetCreate {
+    type Error = Error;
+
+    fn try_from(meta_opt: Option<&UTxOMeta>) -> Result<Self, Self::Error> {
+        let meta =
+            meta_opt.as_ref().ok_or_else(|| anyhow!("UTxO creation without existing record"))?;
         let creation = &meta.creation;
 
-        AssetCreate {
+        Ok(AssetCreate {
             block_number: creation.block_number,
             block_hash: creation.block_hash,
             block_timestamp: creation.block_timestamp,
@@ -83,14 +87,16 @@ impl From<&UTxOMeta> for AssetCreate {
             holder_address: creation.address.clone(),
             tx_hash: creation.utxo.tx_hash,
             utxo_index: creation.utxo.output_index,
-        }
+        })
     }
 }
 
-impl TryFrom<&UTxOMeta> for AssetSpend {
+impl TryFrom<Option<&UTxOMeta>> for AssetSpend {
     type Error = Error;
 
-    fn try_from(meta: &UTxOMeta) -> Result<Self, Self::Error> {
+    fn try_from(meta_opt: Option<&UTxOMeta>) -> Result<Self, Self::Error> {
+        let meta =
+            meta_opt.as_ref().ok_or_else(|| anyhow!("UTxO spend without existing record"))?;
         let spend = meta.spend.as_ref().ok_or_else(|| anyhow!("UTxO has no spend record"))?;
 
         Ok(AssetSpend {
