@@ -39,7 +39,6 @@ impl State {
         }
     }
 
-    /// Snapshot Ariadne parameters at epoch boundary
     pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<EpochSummary> {
         let summary = self.epoch_totals.summarise_completed_epoch(block_info);
         self.epoch_totals.reset_epoch();
