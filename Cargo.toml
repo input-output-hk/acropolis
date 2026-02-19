@@ -38,6 +38,7 @@ members = [
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process
+    "processes/midnight",           # All-inclusive process to index Midnight state
     "processes/replayer",           # All-inclusive process to replay messages
     "processes/golden_tests",       # All-inclusive golden tests process
     "processes/tx_submitter_cli",   # CLI wrapper for TX submitter

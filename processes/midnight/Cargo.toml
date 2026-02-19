@@ -1,0 +1,52 @@
+# Acropolis Midnight process
+[package]
+name = "acropolis_process_midnight"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Acropolis process for indexing Midnight state and exposing it via gRPC"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+acropolis_module_midnight_state = { path = "../../modules/midnight_state" }
+acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstrapper" }
+acropolis_module_snapshot_bootstrapper = { path = "../../modules/snapshot_bootstrapper" }
+acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
+acropolis_module_peer_network_interface = { path = "../../modules/peer_network_interface" }
+acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
+acropolis_module_tx_unpacker = { path = "../../modules/tx_unpacker" }
+acropolis_module_accounts_state = { path = "../../modules/accounts_state" }
+acropolis_module_drep_state = { path = "../../modules/drep_state" }
+acropolis_module_governance_state = { path = "../../modules/governance_state" }
+acropolis_module_parameters_state = { path = "../../modules/parameters_state" }
+acropolis_module_utxo_state = { path = "../../modules/utxo_state" }
+acropolis_module_epochs_state = { path = "../../modules/epochs_state" }
+acropolis_module_spo_state = { path = "../../modules/spo_state" }
+acropolis_module_stake_delta_filter = { path = "../../modules/stake_delta_filter" }
+acropolis_module_consensus = { path = "../../modules/consensus" }
+acropolis_module_block_vrf_validator = { path = "../../modules/block_vrf_validator" }
+acropolis_module_block_kes_validator = { path = "../../modules/block_kes_validator" }
+acropolis_module_chain_store = { path = "../../modules/chain_store" }
+acropolis_module_spdd_state = { path = "../../modules/spdd_state" }
+
+caryatid_process = { workspace = true }
+caryatid_module_clock = { workspace = true }
+caryatid_module_rest_server = { workspace = true }
+caryatid_module_spy = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+config = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3.20", features = ["registry", "env-filter"] }
+tokio = { workspace = true }
+
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true}
+opentelemetry-otlp = { workspace = true }
+
+# Memory allocator
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6.0"

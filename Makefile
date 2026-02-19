@@ -68,10 +68,8 @@ run-bootstrap:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
 
 run-midnight:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.midnight.toml
-
-run-midnight-indexer: run-midnight
-
+	cd processes/midnight && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin acropolis_process_midnight -- --config acropolis.midnight.toml
+	
 fmt:
 	$(CARGO) fmt --all
 
