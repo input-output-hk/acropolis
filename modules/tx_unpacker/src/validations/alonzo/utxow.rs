@@ -3,7 +3,7 @@
 //!
 //! NOTE: Alonzo UTxOW re-uses Shelley UTxOW rules, but introduces several new validation rules.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::validations::shelley;
 use acropolis_common::{
@@ -130,7 +130,7 @@ pub fn validate_script_integrity_hash(
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &HashSet<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
     metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
