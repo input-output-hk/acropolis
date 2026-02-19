@@ -13,15 +13,15 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-
 mod epoch_totals;
-mod state;
-use state::State;
 
-use crate::configuration::MidnightConfig;
 mod configuration;
 mod indexes;
+mod state;
 mod types;
+
+use crate::configuration::MidnightConfig;
+use state::State;
 
 declare_cardano_reader!(
     AddressDeltasReader,

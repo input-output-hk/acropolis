@@ -26,7 +26,7 @@ pub struct State {
     // Governance indexed by block
     _governance: GovernanceState,
     // Parameters indexed by epoch
-    parameters: ParametersState,
+    _parameters: ParametersState,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -41,7 +41,6 @@ impl State {
 
     /// Snapshot Ariadne parameters at epoch boundary
     pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<EpochSummary> {
-        self.parameters.snapshot_parameters(block_info.epoch);
         let summary = self.epoch_totals.summarise_completed_epoch(block_info);
         self.epoch_totals.reset_epoch();
         Ok(summary)

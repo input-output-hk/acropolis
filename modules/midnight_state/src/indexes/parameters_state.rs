@@ -4,27 +4,17 @@ use acropolis_common::{Datum, Epoch};
 
 #[derive(Clone, Default)]
 pub struct ParametersState {
-    /// The current Ariadne parameters
-    pub current: Option<Datum>,
     /// Ariadne parameters keyed by epoch
     pub permissioned_candidates: BTreeMap<Epoch, Datum>,
 }
 
 impl ParametersState {
     #[allow(dead_code)]
-    /// Update the current parameters
-    pub fn update_current_parameters(&mut self, datum: Datum) {
-        self.current = Some(datum);
-    }
-
-    /// Snapshot the current paramters and store in `permissioned_candidates`
-    pub fn snapshot_parameters(&mut self, epoch: Epoch) {
-        let Some(current) = self.current.clone() else {
-            return;
-        };
-
-        if self.permissioned_candidates.last_key_value().map(|(_, v)| v) != Some(&current) {
-            self.permissioned_candidates.insert(epoch, current);
+    /// Insert the parameters for an epoch on change, overwriting existing entry if multiple
+    /// updates in the same epoch
+    pub fn add_parameter_datum(&mut self, epoch: Epoch, datum: Datum) {
+        if self.permissioned_candidates.last_key_value().map(|(_, v)| v) != Some(&datum) {
+            self.permissioned_candidates.insert(epoch, datum);
         }
     }
 
