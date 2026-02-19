@@ -42,6 +42,7 @@ impl State {
         context: Arc<Context<Message>>,
         enact_state_topic: String,
         verification_output_file: Option<String>,
+        verify_votes_files: Option<String>,
     ) -> Self {
         Self {
             publisher: RollbackAwarePublisher::new(context, enact_state_topic),
@@ -51,7 +52,7 @@ impl State {
             current_era: Era::default(),
 
             alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file),
+            conway_voting: ConwayVoting::new(verification_output_file, verify_votes_files),
 
             drep_stake: HashMap::new(),
             drep_no_confidence: 0,
@@ -187,7 +188,7 @@ impl State {
         ))
     }
 
-    /// Loops through all actions and checks their status for the new_epoch
+    /// Loops through all actions and checks their status for the `new_epoch`
     /// All incoming data (parameters for the epoch, drep distribution, etc)
     /// should already be actual at this moment.
     pub fn process_new_epoch(
@@ -210,6 +211,7 @@ impl State {
                 &self.spo_stake,
             )?;
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
+            self.conway_voting.include_pending_votes()?;
             let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();
 
             info!(
