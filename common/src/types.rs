@@ -1014,14 +1014,23 @@ impl Credential {
 
     pub fn from_json_string(credential: &str) -> Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
-            Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+            Self::script_hash_from_string(hash)
         } else if let Some(hash) = credential.strip_prefix("keyHash-") {
-            Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
+            Self::key_hash_from_string(hash)
+            //Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
         } else {
             Err(anyhow!(
                 "Incorrect credential {credential}, expected scriptHash- or keyHash- prefix"
             ))
         }
+    }
+
+    pub fn script_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+    }
+
+    pub fn key_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
     }
 
     pub fn to_json_string(&self) -> String {
@@ -1963,6 +1972,19 @@ pub enum Vote {
     Abstain,
 }
 
+impl TryFrom<&str> for Vote {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "yes" => Ok(Vote::Yes),
+            "no" => Ok(Vote::No),
+            "abstain" => Ok(Vote::Abstain),
+            _ => Err(anyhow!("Invalid vote string: {value}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedure {
     pub vote: Vote,
@@ -1997,6 +2019,14 @@ impl VoteCount {
             yes: 0,
             no: 0,
             abstain: 0,
+        }
+    }
+
+    pub fn register_vote(&mut self, v: &Vote, stake: Lovelace) {
+        match v {
+            Vote::Yes => self.yes += stake,
+            Vote::No => self.no += stake,
+            Vote::Abstain => self.abstain += stake,
         }
     }
 

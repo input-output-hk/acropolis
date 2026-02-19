@@ -42,6 +42,7 @@ impl State {
         context: Arc<Context<Message>>,
         enact_state_topic: String,
         verification_output_file: Option<String>,
+        verification_pattern: Option<String>,
     ) -> Self {
         Self {
             publisher: RollbackAwarePublisher::new(context, enact_state_topic),
@@ -51,7 +52,7 @@ impl State {
             current_era: Era::default(),
 
             alonzo_babbage_voting: AlonzoBabbageVoting::default(),
-            conway_voting: ConwayVoting::new(verification_output_file),
+            conway_voting: ConwayVoting::new(verification_output_file, verification_pattern),
 
             drep_stake: HashMap::new(),
             drep_no_confidence: 0,
@@ -193,6 +194,7 @@ impl State {
     pub fn process_new_epoch(
         &mut self,
         new_block: &BlockInfo,
+        vld: &mut ValidationOutcomes,
     ) -> Result<GovernanceOutcomesMessage> {
         let mut output = GovernanceOutcomesMessage {
             alonzo_babbage_outcomes: self.alonzo_babbage_voting.finalize_voting(new_block)?,
@@ -208,6 +210,7 @@ impl State {
                 &voting_state,
                 &self.drep_stake,
                 &self.spo_stake,
+                vld
             )?;
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
             let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();

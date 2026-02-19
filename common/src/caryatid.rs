@@ -208,6 +208,10 @@ impl ValidationContext {
         self.current_block.as_ref().ok_or_else(|| anyhow!("Current block missing")).cloned()
     }
 
+    pub fn get_validation(&mut self) -> &mut ValidationOutcomes {
+        &mut self.validation
+    }
+
     pub fn get_current_block_opt(&self) -> Option<Arc<BlockInfo>> {
         self.current_block.clone()
     }

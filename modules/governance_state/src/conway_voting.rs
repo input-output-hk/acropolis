@@ -4,18 +4,18 @@ use acropolis_common::protocol_params::ConwayParams;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
-    AddrKeyhash, BlockInfo, DRepCredential, DelegatedStake, EnactStateElem, GovActionId,
-    GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId,
-    ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote,
-    VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure,
-};
+    AddrKeyhash, BlockInfo, Committee, CommitteeCredential, ConstitutionalCommitteeKeyHash, DRepScriptHash,
+    ConstitutionalCommitteeScriptHash, DRepCredential, DRepKeyHash, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure};
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::fs::{File, OpenOptions};
+use std::hash::Hash;
 use std::io::Write;
 use std::ops::Range;
 use std::path::Path;
+use std::str::FromStr;
 use tracing::{debug, error, info};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +45,109 @@ impl ActionStatus {
     }
 }
 
+#[derive(Default)]
+pub struct CastVotes {
+    votes: HashMap<Voter, (Vote, Lovelace)>,
+}
+
+impl CastVotes {
+    fn get(&self, voter: &Voter) -> Option<&(Vote, Lovelace)> {
+        self.votes.get(voter)
+    }
+
+    fn reg_vote(&mut self, voter: &Voter, vote: Vote, stake: Lovelace) -> Result<()> {
+        if let Some((v, s)) = self.votes.insert(voter.clone(), (vote.clone(), stake)) {
+            bail!("{voter:?} vote already registered: {:?}, stake {}, new vote: {:?}, stake {}",
+                v, s, vote, stake);
+        }
+        Ok(())
+    }
+
+    /// Reads actual cast votes from a file, given in parameter `filename`.
+    /// The file is specified in csv format:
+    /// voter-type, voter-key-hash, vote, voted-stake
+    pub fn new_from_file(filename: &Path) -> Result<Self> {
+        let reader = csv::ReaderBuilder::new().delimiter(b',').from_path(&filename);
+        let mut res = Self::default();
+
+        for (n,line) in reader?.records().enumerate() {
+            println!("Line: {:?}", line);
+
+            let split = line?.iter().map(|x| x.to_owned()).collect::<Vec<String>>();
+            let [vtype, vhash, vote, vstake] = &split[..] else {
+                bail!("Unexpected elements count at line {n}, file {filename:?}: {split:?}");
+            };
+
+            let vote = Vote::try_from(vote.as_str())?;
+            let vstake = vstake.parse::<Lovelace>()?;
+
+            match vtype.as_str() {
+                "DRK" => res.reg_vote(
+                    &Voter::DRepKey(DRepKeyHash::from_str(vhash)?), vote, vstake
+                )?,
+                "DRS" => res.reg_vote(
+                    &Voter::DRepScript(DRepScriptHash::from_str(vhash)?), vote, vstake
+                )?,
+                "SPO" => res.reg_vote(
+                    &Voter::StakePoolKey(PoolId::from_str(vhash)?), vote, vstake
+                )?,
+                "CCK" => res.reg_vote(
+                    &Voter::ConstitutionalCommitteeKey(ConstitutionalCommitteeKeyHash::from_str(vhash)?), vote, vstake
+                )?,
+                "CCS" => res.reg_vote(
+                    &Voter::ConstitutionalCommitteeScript(ConstitutionalCommitteeScriptHash::from_str(vhash)?), vote, vstake
+                )?,
+                x => bail!("Unknown record type '{x}' at line {n}, file {filename:?}")
+            }
+        }
+
+        Ok(res)
+    }
+
+    pub fn compare(&self, epoch: u64, action_id: &GovActionId, reference: &CastVotes) {
+        let mut equal = true;
+
+        for (key, (v, s)) in self.votes.iter() {
+            match reference.votes.get(key) {
+                None => {
+                    error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}: {s:<12} ---- reference (None)");
+                    equal = false;
+                },
+                Some((rv, rs)) if rv == v && rs == s => (),
+                Some((rv, rs)) => {
+                    error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}:{s:<12} ---- reference {rv:<7?}:{rs:<12}");
+                    equal = false;
+                }
+            }
+        }
+
+        for (key, (rv, rs)) in reference.votes.iter() {
+            if !self.votes.contains_key(key) {
+                error!("{epoch}, {action_id}, {key:?}: computed (None) ---- reference {rv:<7?}:{rs:<12}");
+                equal = false;
+            }
+        }
+
+        if !equal {
+            error!("Votes validation failed: epoch {epoch}, action_id {action_id}");
+        }
+    }
+
+    pub fn compute_votes(&self) -> VoteResult<VoteCount> {
+        let mut votes = VoteResult::<VoteCount> {
+            committee: VoteCount::zero(),
+            drep: VoteCount::zero(),
+            pool: VoteCount::zero(),
+        };
+
+        for (_drep, (vote, stake)) in self.votes.iter() {
+            votes.drep.register_vote(vote, *stake);
+        }
+
+        votes
+    }
+}
+
 pub struct ConwayVoting {
     conway: Option<ConwayParams>,
     bootstrap: Option<bool>,
@@ -53,13 +156,17 @@ pub struct ConwayVoting {
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
+    verification_votes_pattern: Option<String>,
     verification_output_file: Option<String>,
     action_proposal_count: usize,
     votes_count: usize,
 }
 
 impl ConwayVoting {
-    pub fn new(verification_output_file: Option<String>) -> Self {
+    pub fn new(
+        verification_votes_pattern: Option<String>,
+        verification_output_file: Option<String>
+    ) -> Self {
         Self {
             conway: None,
             bootstrap: None,
@@ -68,6 +175,7 @@ impl ConwayVoting {
             action_status: Default::default(),
             action_proposal_count: 0,
             votes_count: 0,
+            verification_votes_pattern,
             verification_output_file,
         }
     }
@@ -222,9 +330,10 @@ impl ConwayVoting {
         new_epoch: u64,
         voting_state: &VotingRegistrationState,
         action_id: &GovActionId,
-        drep_stake: &HashMap<DRepCredential, Lovelace>,
-        spo_stake: &HashMap<PoolId, DelegatedStake>,
+        cast_votes: &CastVotes,
     ) -> Result<VotingOutcome> {
+        let votes = cast_votes.compute_votes();
+
         let (_epoch, proposal) = self
             .proposals
             .get(action_id)
@@ -232,7 +341,6 @@ impl ConwayVoting {
         let conway_params = self.get_conway_params()?;
         let threshold = voting_state.get_action_thresholds(proposal, conway_params);
 
-        let votes = self.get_actual_votes(new_epoch, action_id, drep_stake, spo_stake)?;
         let bootstrap = self.is_bootstrap()?;
         let voted = voting_state.compare_votes(proposal, bootstrap, &votes, &threshold)?;
         let previous_ok = match proposal.gov_action.get_previous_action_id() {
@@ -263,80 +371,46 @@ impl ConwayVoting {
     /// voters) are not applied at this stage.
     fn get_actual_votes(
         &self,
-        new_epoch: u64,
         action_id: &GovActionId,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
-    ) -> Result<VoteResult<VoteCount>> {
-        let mut votes = VoteResult::<VoteCount> {
-            committee: VoteCount::zero(),
-            drep: VoteCount::zero(),
-            pool: VoteCount::zero(),
-        };
+    ) -> Result<CastVotes> {
+        let mut cast_votes = CastVotes::default();
 
         let Some(all_votes) = self.votes.get(action_id) else {
-            return Ok(votes);
+            return Ok(cast_votes);
         };
 
         for (voter, (_hash, voting_proc)) in all_votes.iter() {
-            let (vc, vd, vp) = match voting_proc.vote {
-                Vote::Yes => (
-                    &mut votes.committee.yes,
-                    &mut votes.drep.yes,
-                    &mut votes.pool.yes,
-                ),
-                Vote::No => (
-                    &mut votes.committee.no,
-                    &mut votes.drep.no,
-                    &mut votes.pool.no,
-                ),
-                Vote::Abstain => (
-                    &mut votes.committee.abstain,
-                    &mut votes.drep.abstain,
-                    &mut votes.pool.abstain,
-                ),
-            };
-
-            match voter {
-                Voter::ConstitutionalCommitteeKey(_keyhash) => *vc += 1,
-                Voter::ConstitutionalCommitteeScript(_scripthash) => *vc += 1,
+            match &voter {
+                Voter::ConstitutionalCommitteeKey(_) |
+                Voter::ConstitutionalCommitteeScript(_) =>
+                    cast_votes.reg_vote(voter, voting_proc.vote.clone(), 1)?,
                 Voter::DRepKey(key) => {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!(
-                            "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
-                            drep_stake.get(&DRepCredential::AddrKeyHash(AddrKeyhash::from(
-                                key.into_inner()
-                            )))
-                        );
+                    let cred = &DRepCredential::AddrKeyHash(AddrKeyhash::from(
+                        key.into_inner(),
+                    ));
+                    if let Some(stake) = drep_stake.get(cred) {
+                        cast_votes.reg_vote(voter, voting_proc.vote.clone(), *stake)?;
                     }
-                    drep_stake
-                        .get(&DRepCredential::AddrKeyHash(AddrKeyhash::from(
-                            key.into_inner(),
-                        )))
-                        .inspect(|v| *vd += *v);
                 }
                 Voter::DRepScript(script) => {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!(
-                            "Vote for {action_id}, epoch start {new_epoch}: {voter} = {:?}",
-                            drep_stake.get(&DRepCredential::ScriptHash(ScriptHash::from(
-                                script.into_inner()
-                            )))
-                        );
+                    let cred = &DRepCredential::ScriptHash(ScriptHash::from(
+                        script.into_inner(),
+                    ));
+                    if let Some(stake) = drep_stake.get(cred) {
+                        cast_votes.reg_vote(voter, voting_proc.vote.clone(), *stake)?;
                     }
-                    drep_stake
-                        .get(&DRepCredential::ScriptHash(ScriptHash::from(
-                            script.into_inner(),
-                        )))
-                        .inspect(|v| *vd += *v);
                 }
                 Voter::StakePoolKey(pool) => {
-                    spo_stake.get(pool).inspect(|ds| *vp += ds.active);
+                    if let Some(stake) = spo_stake.get(pool) {
+                        cast_votes.reg_vote(voter, voting_proc.vote.clone(), stake.active)?;
+                    }
                 }
             }
         }
 
-        Ok(votes)
+        Ok(cast_votes)
     }
 
     /// Checks whether action is expired at the beginning of new_epoch
@@ -382,6 +456,17 @@ impl ConwayVoting {
         }
     }
 
+    /// Replaces {action_id} with first 8 characters of transaction_id in hex and
+    /// action_id.action_index, and {epoch} with epoch number.
+    fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
+        let pattern = self.verification_votes_pattern.as_ref()?;
+        let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
+        let act_id = format!("{tx_hash}_{action_id}");
+        let applied = pattern.replace("{action_id}", &act_id)
+            .replace("{epoch}", &new_epoch.to_string());
+        Some(applied)
+    }
+
     /// Checks and updates action_id state at the start of new_epoch
     /// If the action is accepted, returns accepted ProposalProcedure.
     pub fn process_one_proposal(
@@ -392,8 +477,19 @@ impl ConwayVoting {
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
     ) -> Result<Option<VotingOutcome>> {
+        let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
+
+        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch) {
+            let ref_path = Path::new(&ref_file);
+            if ref_path.exists() {
+                let reference_votes = CastVotes::new_from_file(ref_path)?;
+                cast_votes.compare(new_epoch, action_id, &reference_votes);
+            }
+        }
+
         let outcome =
-            self.is_finally_accepted(new_epoch, voting_state, action_id, drep_stake, spo_stake)?;
+            self.is_finally_accepted(new_epoch, voting_state, action_id, &cast_votes)?;
+
         let expired = self.is_expired(new_epoch, action_id)?;
         if outcome.accepted || expired {
             self.end_voting(action_id);
@@ -496,6 +592,7 @@ impl ConwayVoting {
         voting_state: &VotingRegistrationState,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
+        vld: &mut ValidationOutcomes,
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
         let actions = self.proposals.keys().cloned().collect::<Vec<_>>();
@@ -649,7 +746,7 @@ mod tests {
     /// Simple test for general mechanics of action_status processing.
     #[test]
     fn test_outcomes_action_status() -> Result<()> {
-        let mut voting = ConwayVoting::new(None);
+        let mut voting = ConwayVoting::new(None, None);
         let oc1 = create_governance_outcome(1, true);
         voting.action_status.insert(
             oc1.voting.procedure.gov_action_id.clone(),
@@ -710,6 +807,59 @@ mod tests {
         let x = "\"A\"\" lot (\"of\") quotes\"";
         let xx = ConwayVoting::prepare_quotes(x);
         assert_eq!(xx, "\"\"A\"\"\"\" lot (\"\"of\"\") quotes\"\"");
+        Ok(())
+    }
+
+    #[test]
+    fn test_splitting_csv_string() -> Result<()> {
+        let line = "\"DRK\",\"hash1\",\"Yes\",\"1000\"";
+        let split = line.split(',').map(|x| x.to_owned()).collect::<Vec<String>>();
+        let [vtype, vhash, vote, vstake] = &split[..] else {
+            bail!("Unexpected elements count at line: {split:?}");
+        };
+        assert_eq!(vtype, "\"DRK\"");
+        assert_eq!(vhash, "\"hash1\"");
+        assert_eq!(vote, "\"Yes\"");
+        assert_eq!(vstake, "\"1000\"");
+
+        let split = vec!["a", "b", "c", "d", "e"];
+        let [vtype, vhash, vote, vstake] = &split[..] else {
+            return Ok(())
+        };
+        bail!("Should not be able to decompose {split:?} into 4 elements");
+    }
+
+    #[test]
+    fn test_new_from_file() -> Result<()> {
+        let filename = "../../modules/governance_state/data/test_votes.csv";
+
+        let cast_votes = CastVotes::new_from_file(Path::new(filename))?;
+        //#voter-type, voter-key-hash, vote, voted-stake
+        //"SPO","0000fc522cea692e3e714b392d90cec75e4b87542c5f9638bf9a363a",Yes,37035968048975
+        //"DRK","fcc1946fe92b7f27a8b21d6639bffc72be07157b2745ef204d7467c0",No,177029805388
+        //"DRS","2bccc3b22a9d63fe5f85ea1f48536cc434ff17e8a8917111119159f4",Abstain,308757729830
+
+        assert_eq!(
+            cast_votes.get(&Voter::StakePoolKey(PoolId::from_str(
+            "0000fc522cea692e3e714b392d90cec75e4b87542c5f9638bf9a363a")?
+            )),
+            Some(&(Vote::Yes, 37035968048975))
+        );
+
+        assert_eq!(
+            cast_votes.get(&Voter::DRepKey(DRepKeyHash::from_str(
+                "fcc1946fe92b7f27a8b21d6639bffc72be07157b2745ef204d7467c0"
+            )?)),
+            Some(&(Vote::No, 177029805388))
+        );
+
+        assert_eq!(
+            cast_votes.get(&Voter::DRepScript(DRepScriptHash::from_str(
+                "2bccc3b22a9d63fe5f85ea1f48536cc434ff17e8a8917111119159f4"
+            )?)),
+            Some(&(Vote::Abstain, 308757729830))
+        );
+
         Ok(())
     }
 }

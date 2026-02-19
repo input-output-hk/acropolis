@@ -20,6 +20,7 @@ mod tests {
 
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
+    use acropolis_common::validation::ValidationOutcomes;
 
     struct ConwayVotingTestRecord {
         action_id: GovActionId,
@@ -278,7 +279,7 @@ mod tests {
             let conway = cfg.conway.as_ref().unwrap();
             let bootstrap = shelley.protocol_params.protocol_version.major <= 9;
 
-            let mut conway_voting = ConwayVoting::new(None);
+            let mut conway_voting = ConwayVoting::new(None, None);
             conway_voting.update_parameters(&cfg.conway, bootstrap);
             conway_voting
                 .insert_proposal_procedure(record.start_epoch, &record.proposal_procedure)?;

@@ -80,6 +80,7 @@ const CONFIG_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 
 const VERIFICATION_OUTPUT_FILE: &str = "verification-output-file";
+const VERIFICATION_PATTERN: &str = "verification-pattern";
 
 /// Governance State module
 #[module(
@@ -95,6 +96,7 @@ pub struct GovernanceStateConfig {
     validation_outcome_topic: String,
     snapshot_subscribe_topic: String,
     verification_output_file: Option<String>,
+    verification_pattern: Option<String>,
 }
 
 struct Readers {
@@ -125,6 +127,10 @@ impl GovernanceStateConfig {
                 .get_string(VERIFICATION_OUTPUT_FILE)
                 .map(Some)
                 .unwrap_or(None),
+            verification_pattern: config
+                .get_string(VERIFICATION_PATTERN)
+                .map(Some)
+                .unwrap_or_default(),
         })
     }
 }
@@ -235,6 +241,7 @@ impl GovernanceState {
             context.clone(),
             config.enact_publish_topic.clone(),
             config.verification_output_file.clone(),
+            config.verification_pattern.clone(),
         )));
 
         // Wait for snapshot bootstrap if subscription is provided
@@ -340,8 +347,9 @@ impl GovernanceState {
                     // New governance from new epoch means that we must prepare all governance
                     // outcome for the previous epoch.
                     let mut state = state.lock().await;
+                    let gov_outcomes = state.process_new_epoch(&blk_g, vld.get_validation());
                     if let Some(gov_outcomes) =
-                        vld.handle("process outcome", state.process_new_epoch(&blk_g).map(Some))
+                        vld.handle("process outcome", gov_outcomes.map(Some))
                     {
                         vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
                     }
