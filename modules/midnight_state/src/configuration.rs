@@ -1,5 +1,5 @@
 use acropolis_common::{Address, AssetName, PolicyId};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use config::Config;
 
 #[derive(Debug, serde::Deserialize, Default, Clone)]
@@ -13,6 +13,8 @@ pub struct MidnightConfig {
     // Candidate config
     pub mapping_validator_address: Address,
     pub auth_token_asset_name: AssetName,
+    #[serde(skip)] // Derived from `mapping_validator_address`
+    pub auth_token_policy_id: PolicyId,
 
     // Governance config
     pub technical_committee_address: Address,
@@ -27,6 +29,20 @@ pub struct MidnightConfig {
 impl MidnightConfig {
     pub fn try_load(config: &Config) -> Result<Self> {
         let full_config = Config::builder().add_source(config.clone()).build()?;
-        Ok(full_config.try_deserialize()?)
+        let mut cfg: MidnightConfig = full_config.try_deserialize()?;
+        // Derive the candidate auth token based on the validator address
+        cfg.auth_token_policy_id =
+            extract_policy_id_from_payment_script(&cfg.mapping_validator_address)?;
+        Ok(cfg)
     }
+}
+
+fn extract_policy_id_from_payment_script(address: &Address) -> Result<PolicyId> {
+    let payment_part =
+        address.get_payment_part().ok_or_else(|| anyhow!("address is not a Shelley address"))?;
+
+    let script_hash =
+        payment_part.to_script_hash().ok_or_else(|| anyhow!("address is not a script address"))?;
+
+    Ok(PolicyId::from(script_hash))
 }

@@ -11,7 +11,7 @@ use crate::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
     },
-    types::{CNightCreation, CNightSpend},
+    types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
 
 #[derive(Clone, Default)]
@@ -22,7 +22,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    _candidates: CandidateState,
+    candidates: CandidateState,
     // Governance indexed by block
     _governance: GovernanceState,
     // Parameters indexed by epoch
@@ -63,10 +63,19 @@ impl State {
 
         let mut cnight_creations = Vec::new();
         let mut cnight_spends = Vec::new();
+        let mut candidate_registrations = Vec::new();
+        let mut candidate_deregistrations = Vec::new();
+
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             cnight_creations.append(&mut self.collect_cnight_creations(delta, block_info));
-            cnight_spends.append(&mut self.collect_cnight_spends(delta, block_info))
+            cnight_spends.append(&mut self.collect_cnight_spends(delta, block_info));
+
+            // Collect candidate registrations and deregistrations
+            candidate_registrations
+                .append(&mut self.collect_candidate_registrations(delta, block_info));
+            candidate_deregistrations
+                .append(&mut self.collect_candidate_deregistrations(delta, block_info));
         }
 
         // Add created and spent CNight utxos to state
@@ -75,6 +84,14 @@ impl State {
         }
         if !cnight_spends.is_empty() {
             self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
+        }
+
+        // Add registered and deregistered candidates to state
+        if !candidate_registrations.is_empty() {
+            self.candidates.register_candidates(block_info.number, candidate_registrations);
+        }
+        if !candidate_deregistrations.is_empty() {
+            self.candidates.deregister_candidates(block_info.number, candidate_deregistrations);
         }
         Ok(())
     }
@@ -135,6 +152,66 @@ impl State {
                 }
             })
             .collect()
+    }
+
+    fn collect_candidate_registrations(
+        &self,
+        delta: &ExtendedAddressDelta,
+        block_info: &BlockInfo,
+    ) -> Vec<RegistrationEvent> {
+        let mut registrations = Vec::new();
+
+        if delta.address == self.config.mapping_validator_address {
+            return registrations;
+        }
+
+        for created in &delta.created_utxos {
+            let has_auth_token = created.value.token_amount(
+                &self.config.auth_token_policy_id,
+                &self.config.auth_token_asset_name,
+            ) > 0;
+
+            if has_auth_token {
+                if let Some(datum) = &created.datum {
+                    registrations.push(RegistrationEvent {
+                        block_hash: block_info.hash,
+                        block_timestamp: block_info.to_naive_datetime(),
+                        tx_index: delta.tx_identifier.tx_index() as u32,
+                        tx_hash: created.utxo.tx_hash,
+                        utxo_index: created.utxo.output_index,
+                        datum: datum.clone(),
+                    });
+                }
+            }
+        }
+
+        registrations
+    }
+
+    fn collect_candidate_deregistrations(
+        &self,
+        delta: &ExtendedAddressDelta,
+        block_info: &BlockInfo,
+    ) -> Vec<DeregistrationEvent> {
+        let mut deregistrations = Vec::new();
+
+        if delta.address == self.config.mapping_validator_address {
+            return deregistrations;
+        }
+
+        for spent in &delta.spent_utxos {
+            if self.candidates.registration_index.contains_key(&spent.utxo) {
+                deregistrations.push(DeregistrationEvent {
+                    registration_utxo: spent.utxo,
+                    spent_block_hash: block_info.hash,
+                    spent_block_timestamp: block_info.to_naive_datetime(),
+                    spent_tx_hash: spent.spent_by,
+                    spent_tx_index: delta.tx_identifier.tx_index() as u32,
+                });
+            }
+        }
+
+        deregistrations
     }
 }
 
