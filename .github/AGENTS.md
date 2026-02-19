@@ -4,7 +4,7 @@ When working in this repository, incorporate lessons learned from past PR review
 
 ## Instructions
 
-1. Read `docs/feedback/lessons.md` if it exists
+1. Read `.specify/memory/lessons.md` if it exists
 2. Filter lessons by relevance to current task:
    - For specifications: prioritize architecture, documentation lessons
    - For plans: prioritize architecture, testing, performance lessons

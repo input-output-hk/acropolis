@@ -26,8 +26,8 @@ This will:
 1. Detect the current branch
 2. Find the open PR for that branch (or most recently merged if none open)
 3. Extract review comments and PR description
-4. Categorize lessons and save to `docs/feedback/pr-<number>-lessons.md`
-5. Update the central `docs/feedback/lessons.md` database
+4. Categorize lessons and save to `.specify/memory/feedback/pr-<number>-lessons.md`
+5. Update the central `.specify/memory/lessons.md` database
 6. Prompt you to commit the changes to your branch
 
 ### Capture and Auto-Commit
@@ -70,8 +70,8 @@ Add a manual lesson with explicit category assignment.
 
 | File | Description |
 |------|-------------|
-| `docs/feedback/pr-<number>-lessons.md` | Lessons from a specific PR |
-| `docs/feedback/lessons.md` | Central database of all lessons |
+| `.specify/memory/feedback/pr-<number>-lessons.md` | Lessons from a specific PR |
+| `.specify/memory/lessons.md` | Central database of all lessons |
 
 ## Categories
 
@@ -108,11 +108,11 @@ $ /speckit.feedback
    - 2 documentation lessons  
    - 1 testing lesson
 
-📝 Created: docs/feedback/pr-142-lessons.md
-📊 Updated: docs/feedback/lessons.md (now contains 47 total lessons)
+📝 Created: .specify/memory/feedback/pr-142-lessons.md
+📊 Updated: .specify/memory/lessons.md (now contains 47 total lessons)
 
 📝 Ready to commit! Run:
-   git add docs/feedback/
+   git add .specify/memory/feedback/
    git commit -m "chore(feedback): capture lessons from PR #142"
    git push
 
@@ -131,8 +131,8 @@ $ /speckit.feedback
    - 2 new lessons added
    - 1 duplicate skipped
 
-📝 Updated: docs/feedback/pr-142-lessons.md (now contains 7 lessons)
-📊 Updated: docs/feedback/lessons.md (now contains 49 total lessons)
+📝 Updated: .specify/memory/feedback/pr-142-lessons.md (now contains 7 lessons)
+📊 Updated: .specify/memory/lessons.md (now contains 49 total lessons)
 ```
 
 ### Adding Manual Lessons Before Merge
@@ -143,7 +143,7 @@ You can also add manual lessons alongside PR-extracted ones:
 $ /speckit.feedback --category architecture "Consider using the repository pattern for data access"
 
 ✅ Added manual lesson to database
-📊 Updated: docs/feedback/lessons.md (now contains 50 total lessons)
+📊 Updated: .specify/memory/lessons.md (now contains 50 total lessons)
 ```
 
 ### Quick Manual Entry After Pair Session
@@ -152,5 +152,5 @@ $ /speckit.feedback --category architecture "Consider using the repository patte
 /speckit.feedback --category architecture "Prefer composition over inheritance for service dependencies"
 
 ✅ Added manual lesson to database
-📊 Updated: docs/feedback/lessons.md (now contains 48 total lessons)
+📊 Updated: .specify/memory/lessons.md (now contains 48 total lessons)
 ```
