@@ -147,6 +147,7 @@ store-drdd = false
 stake-drep-distribution-topic = "cardano.drep.distribution"
 stake-spo-distribution-topic = "cardano.spo.distribution"
 verification-output-file = "../../modules/governance_state/data/verification.csv"
+verification-pattern = "../../modules/governance-state/main-voting/votes.{epoch}.{action_id}.csv"
 
 [module.parameters-state]
 # Listen for governance actions
