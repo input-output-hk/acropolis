@@ -1,6 +1,6 @@
-# Acropolis Midnight process
+# Acropolis Midnight indexer process
 [package]
-name = "acropolis_process_midnight"
+name = "acropolis_process_midnight_indexer"
 version = "0.1.0"
 edition = "2021"
 authors = ["William Hankins <william@sundae.fi>"]
