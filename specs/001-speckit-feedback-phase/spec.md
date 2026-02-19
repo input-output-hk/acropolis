@@ -110,7 +110,7 @@ As a developer, I want to manually add lessons learned even without a PR context
 - **FR-008**: System MUST support manual lesson entry via command arguments when no PR context exists.
 - **FR-009**: System MUST preserve existing lessons when updating the database (append-only, no destructive updates).
 - **FR-010**: System MUST report a summary of captured lessons to the user upon completion.
-- **FR-011**: Existing speckit phases (specify, plan, implement) MUST be able to read `.specify/memory/lessons.md` and incorporate relevant lessons as context when generating their outputs. This MUST be achieved via agent instruction files (`AGENTS.md` and `CLAUDE.md`) co-located with the lessons database, NOT by modifying existing agent files.
+- **FR-011**: Existing speckit phases (specify, plan, implement) MUST be able to read `.specify/memory/lessons.md` and incorporate relevant lessons as context when generating their outputs. This is achieved by updating the existing agent files (`.github/agents/speckit.specify.agent.md`, `.github/agents/speckit.plan.agent.md`, `.github/agents/speckit.implement.agent.md`) to include instructions for reading and applying lessons from the central database.
 - **FR-012**: System MUST support incremental updates when run multiple times on the same PR, merging new lessons with existing ones rather than overwriting.
 - **FR-013**: System MUST support a `--commit` flag that automatically runs `git add .specify/memory/feedback/`, `git commit -m "chore(feedback): capture lessons from PR #<number>"`, and `git push` after extracting lessons.
 

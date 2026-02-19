@@ -97,11 +97,7 @@
 
 ## ~~Phase 6: Existing Agent Integration (FR-011)~~ — REMOVED
 
-**Note**: FR-011 is now satisfied by T004 and T005 in Phase 1 (creating `AGENTS.md` and `CLAUDE.md` in `.specify/memory/feedback/`). No modifications to existing agent files are required.
-
-The co-located instruction files are automatically discovered by:
-- **GitHub Copilot**: finds "nearest AGENTS.md in directory tree"
-- **Claude Code**: reads "CLAUDE.md from child directories"
+**Note**: FR-011 is satisfied by directly updating the existing speckit agent files (`.github/agents/speckit.specify.agent.md`, `.github/agents/speckit.plan.agent.md`, `.github/agents/speckit.implement.agent.md`, etc.) to read `.specify/memory/lessons.md` and incorporate relevant lessons as context when generating their outputs. T004 and T005 are therefore superseded by this approach and the co-located `AGENTS.md`/`CLAUDE.md` files are not required.
 
 ---
 
