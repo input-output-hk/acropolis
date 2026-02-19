@@ -21,6 +21,12 @@ pub enum ScriptLang {
     PlutusV3,
 }
 
+impl ScriptLang {
+    pub fn is_native(&self) -> bool {
+        matches!(self, ScriptLang::Native)
+    }
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
