@@ -32,6 +32,7 @@ help:
 	@echo "  build                    Build the omnibus process"
 	@echo "  run                      Run the omnibus (mainnet)"
 	@echo "  run-preview              Run the omnibus (preview network)"
+	@echo "  run-midnight             Run the omnibus with `midnight_state` enabled"
 	@echo "  run-bootstrap            Run the omnibus with bootstrap config (snapshot)"
 	@echo "  run-midnight             Run the midnight indexer omnibus config"
 	@echo "  test                     Run all tests"

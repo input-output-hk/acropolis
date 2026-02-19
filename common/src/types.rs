@@ -27,7 +27,8 @@ use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -485,6 +486,7 @@ pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
 pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
 
 #[derive(
+    Default,
     Debug,
     Copy,
     Clone,
@@ -492,7 +494,6 @@ pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
     PartialEq,
     Hash,
     serde::Serialize,
-    serde::Deserialize,
     minicbor::Encode,
     minicbor::Decode,
 )]
@@ -526,6 +527,17 @@ impl AssetName {
 
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        AssetName::new(s.as_bytes())
+            .ok_or_else(|| SerdeError::custom("AssetName too long (max 32 bytes)"))
     }
 }
 

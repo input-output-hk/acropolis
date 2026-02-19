@@ -53,8 +53,8 @@ The speckit workflow consists of these phases, each with a corresponding agent f
 
 7. **feedback** - Extract lessons from PR feedback
    - Location: `.github/agents/speckit.feedback.agent.md`
-   - Creates: `docs/feedback/pr-NNN-lessons.md`
-   - Updates: `docs/feedback/lessons.md` central database
+   - Creates: `.specify/memory/feedback/pr-NNN-lessons.md`
+   - Updates: `.specify/memory/lessons.md` central database
    - Categories: code-quality, architecture, testing, documentation, security, performance
 
 ### Supporting Agents
