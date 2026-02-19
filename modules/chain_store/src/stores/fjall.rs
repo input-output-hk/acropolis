@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
@@ -11,11 +11,12 @@ pub struct FjallStore {
     database: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
-    last_persisted_block: u64,
+    last_persisted_block: Option<u64>,
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
 const DEFAULT_CLEAR_ON_START: bool = true;
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const BLOCKS_KEYSPACE: &str = "blocks";
 const BLOCK_HASHES_BY_SLOT_KEYSPACE: &str = "block-hashes-by-slot";
 const BLOCK_HASHES_BY_NUMBER_KEYSPACE: &str = "block-hashes-by-number";
@@ -24,29 +25,27 @@ const TXS_KEYSPACE: &str = "txs";
 
 impl FjallStore {
     pub fn new(config: Arc<Config>) -> Result<Self> {
-        let path = config.get_string("database-path").unwrap_or(DEFAULT_DATABASE_PATH.to_string());
+        let path = config.get_string("database-path").unwrap_or_else(|_| {
+            format!(
+                "{DEFAULT_DATABASE_PATH}-{}",
+                Self::network_scope_from_config(config.as_ref())
+            )
+        });
         let clear = config.get_bool("clear-on-start").unwrap_or(DEFAULT_CLEAR_ON_START);
-        let path = Path::new(&path);
+        let path = PathBuf::from(path);
         if clear && path.exists() {
-            fs::remove_dir_all(path)?;
+            fs::remove_dir_all(&path)?;
         }
-        let database = Database::builder(path).open()?;
+        let database = Database::builder(&path).open()?;
         let blocks = FjallBlockStore::new(&database)?;
         let txs = FjallTXStore::new(&database)?;
 
         let last_persisted_block = if !clear {
-            blocks
-                .block_hashes_by_number
-                .iter()
-                .next_back()
-                .and_then(|res| {
-                    res.key()
-                        .ok()
-                        .and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-                })
-                .unwrap_or(0)
+            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
+                res.key().ok().and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
+            })
         } else {
-            0
+            None
         };
 
         Ok(Self {
@@ -55,6 +54,14 @@ impl FjallStore {
             txs,
             last_persisted_block,
         })
+    }
+
+    fn network_scope_from_config(config: &Config) -> String {
+        config
+            .get_string("startup.network-name")
+            .or_else(|_| config.get_string("network-name"))
+            .or_else(|_| config.get_string("network-id"))
+            .unwrap_or_else(|_| DEFAULT_NETWORK_NAME.to_string())
     }
 }
 
@@ -87,7 +94,10 @@ impl super::Store for FjallStore {
     }
 
     fn should_persist(&self, block_number: u64) -> bool {
-        block_number > self.last_persisted_block
+        match self.last_persisted_block {
+            Some(last) => block_number > last,
+            None => true,
+        }
     }
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {

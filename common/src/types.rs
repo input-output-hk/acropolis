@@ -5,6 +5,7 @@
 use crate::certificate::TxCertificateIdentifier;
 use crate::crypto::keyhash_224;
 use crate::drep::{Anchor, DRepVotingThresholds};
+use crate::script::Datum;
 use crate::UTxOIdentifier;
 // Re-export certificate types for backward compatibility
 pub use crate::certificate::{
@@ -375,6 +376,47 @@ pub struct AddressDelta {
     pub created_utxos: Vec<UTxOIdentifier>,
 
     // Sums of spent and created UTxOs
+    pub sent: Value,
+    pub received: Value,
+}
+
+/// Extended spent UTxO details for address delta messages
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpentUTxOExtended {
+    /// UTxO identifier being spent
+    pub utxo: UTxOIdentifier,
+
+    /// Hash of the transaction spending this UTxO
+    pub spent_by: TxHash,
+}
+
+/// Extended created UTxO details for address delta messages
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CreatedUTxOExtended {
+    /// UTxO identifier being created
+    pub utxo: UTxOIdentifier,
+
+    /// Full value of the created UTxO
+    pub value: Value,
+
+    /// Datum attached to the created UTxO, if present
+    pub datum: Option<Datum>,
+}
+
+/// Extended per-address balance change with UTxO-level details
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExtendedAddressDelta {
+    /// Address involved in delta
+    pub address: Address,
+
+    /// Transaction in which delta occurred
+    pub tx_identifier: TxIdentifier,
+
+    /// Address impacted spent and created UTxOs
+    pub spent_utxos: Vec<SpentUTxOExtended>,
+    pub created_utxos: Vec<CreatedUTxOExtended>,
+
+    /// Sums of spent and created UTxOs
     pub sent: Value,
     pub received: Value,
 }
@@ -816,6 +858,12 @@ impl Display for VKeyWitness {
 
 /// Slot
 pub type Slot = u64;
+
+/// Block Number
+pub type BlockNumber = u64;
+
+/// Epoch
+pub type Epoch = u64;
 
 /// Point on the chain
 #[derive(

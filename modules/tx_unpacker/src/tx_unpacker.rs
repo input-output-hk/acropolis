@@ -23,8 +23,8 @@ use tracing::{debug, error, info, info_span, Instrument};
 
 use crate::state::State;
 mod crypto;
-mod state;
-mod validations;
+pub mod state;
+pub mod validations;
 
 #[cfg(test)]
 mod test_utils;
@@ -33,6 +33,7 @@ const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
 
 const CIP25_METADATA_LABEL: u64 = 721;
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -49,6 +50,7 @@ impl TxUnpacker {
         context: Arc<Context<Message>>,
         network_id: NetworkId,
         history: Arc<Mutex<StateHistory<State>>>,
+        phase2_enabled: bool,
         // publishers
         publish_utxo_deltas_topic: Option<String>,
         publish_asset_deltas_topic: Option<String>,
@@ -79,7 +81,10 @@ impl TxUnpacker {
         };
 
         loop {
-            let mut state = history.lock().await.get_or_init_with(State::new);
+            let mut state = history
+                .lock()
+                .await
+                .get_or_init_with(|| State::with_phase2_enabled(phase2_enabled));
             let mut current_block: Option<BlockInfo> = None;
 
             let Ok((_, message)) = txs_sub.read().await else {
@@ -195,8 +200,7 @@ impl TxUnpacker {
                                     }
 
                                     if publish_utxo_deltas_topic.is_some() {
-                                        let deltas = mapped_tx.convert_to_utxo_deltas(true);
-                                        utxo_deltas.push(deltas);
+                                        utxo_deltas.push(mapped_tx.convert_to_utxo_deltas(true));
                                     }
                                 }
 
@@ -341,7 +345,12 @@ impl TxUnpacker {
                             }
 
                             validation_outcomes
-                                .publish(&context, publish_tx_validation_topic, block)
+                                .publish(
+                                    &context,
+                                    "tx_unpacker",
+                                    publish_tx_validation_topic,
+                                    block,
+                                )
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
                         }
@@ -422,8 +431,20 @@ impl TxUnpacker {
             None => None,
         };
 
-        let network_id: NetworkId =
-            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
+        let network_id = match config
+            .get_string("startup.network-name")
+            .unwrap_or(DEFAULT_NETWORK_NAME.to_string())
+            .as_ref()
+        {
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Testnet,
+        };
+
+        // Phase 2 script validation (disabled by default)
+        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
+        if phase2_enabled {
+            info!("Phase 2 script validation enabled");
+        }
 
         // Initialize State
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -437,6 +458,7 @@ impl TxUnpacker {
                 context_run,
                 network_id,
                 history,
+                phase2_enabled,
                 publish_utxo_deltas_topic,
                 publish_asset_deltas_topic,
                 publish_withdrawals_topic,

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::validations::shelley;
 use acropolis_common::{
-    protocol_params::ProtocolVersion, validation::UTxOWValidationError, GenesisDelegates,
+    protocol_params::ProtocolVersion, validation::UTxOWValidationError, GenesisDelegates, Metadata,
     NativeScript, TxHash, VKeyWitness,
 };
 use pallas::ledger::primitives::alonzo;
@@ -34,11 +34,13 @@ pub fn validate_script_integrity_hash(
 /// Since Alonzo introduces **Plutus Scripts** (phase 2), this requires new UTxOW validation rules.
 ///
 /// 1. ScriptIntegrityHashMismatch
+#[allow(clippy::too_many_arguments)]
 pub fn validate(
     mtx: &alonzo::MintedTx,
     tx_hash: TxHash,
     vkey_witnesses: &HashSet<VKeyWitness>,
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
     update_quorum: u32,
     protocol_version: &ProtocolVersion,
@@ -48,6 +50,7 @@ pub fn validate(
         tx_hash,
         vkey_witnesses,
         native_scripts,
+        metadata,
         genesis_delegs,
         update_quorum,
         protocol_version,

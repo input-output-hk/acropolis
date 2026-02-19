@@ -41,7 +41,7 @@ pub use crate::{
     MultiHostName, NetworkId, PoolId, PoolMetadata, PoolRegistration, Ratio, Relay, SingleHostAddr,
     SingleHostName, StakeAddress, StakeCredential,
 };
-use crate::{DataHash, PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
+use crate::{DataHash, Epoch, PoolBlockProduction, Pots, ProtocolParamUpdate, RewardParams};
 // Import snapshot parsing support
 use super::mark_set_go::{RawSnapshotsContainer, SnapshotsCallback};
 use super::reward_snapshot::PulsingRewardUpdate;
@@ -73,8 +73,6 @@ pub struct InstantRewardsResult {
 // -----------------------------------------------------------------------------
 // Cardano Ledger Types (for decoding with minicbor)
 // -----------------------------------------------------------------------------
-
-pub type Epoch = u64;
 
 /*
  * This was replaced with the StakeCredential defined in types.rs, but the implementation here is much

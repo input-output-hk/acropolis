@@ -1,0 +1,23 @@
+# Acropolis Midnight state module
+
+[package]
+name = "acropolis_module_midnight_state"
+version = "0.1.0"
+edition = "2021"
+authors = ["William Hankins <william@sundae.fi>"]
+description = "Midnight State Indexer to be used as an alternative to db-sync"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+
+anyhow = { workspace = true }
+config = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lib]
+path = "src/midnight_state.rs"

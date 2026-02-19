@@ -161,8 +161,13 @@ impl DRepState {
         // Wait for snapshot bootstrap first (if available)
         Self::wait_for_bootstrap(history.clone(), subs.snapshot, storage_config).await?;
 
+        // Consume initial protocol parameters published at epoch 0 to keep params
+        // reader in sync with the main loop's epoch-boundary consumption.
         if !is_bootstrap_mode {
-            subs.params.read_skip_rollbacks().await?;
+            let (_, initial_params) = subs.params.read_skip_rollbacks().await?;
+            let mut state = history.lock().await.get_or_init_with(|| State::new(storage_config));
+            state.update_protocol_params(&initial_params.params)?;
+            history.lock().await.commit(0, state);
         }
 
         // Main loop of synchronised messages
@@ -173,7 +178,7 @@ impl DRepState {
                 h.get_or_init_with(|| State::new(storage_config))
             };
 
-            let mut ctx = ValidationContext::new(&context, &validation_topic);
+            let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
             let (certs_message, new_epoch) =
                 match &ctx.consume_sync(subs.certs.read_with_rollbacks().await)? {

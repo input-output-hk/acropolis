@@ -192,15 +192,17 @@ pub struct ValidationContext {
     current_block: Option<Arc<BlockInfo>>,
     validation: ValidationOutcomes,
     validation_topic: String,
+    module: String,
 }
 
 impl ValidationContext {
-    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
+    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str, module: &str) -> Self {
         Self {
             validation: ValidationOutcomes::new(),
             current_block: None,
             context: context.clone(),
             validation_topic: validation_topic.to_owned(),
+            module: module.to_owned(),
         }
     }
 
@@ -213,7 +215,9 @@ impl ValidationContext {
     }
 
     pub fn handle_error(&mut self, handler: &str, error: &anyhow::Error) {
-        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
+        let msg = format!("Error in module {}, {handler}: {error:#}", self.module);
+        error!("{msg}");
+        self.validation.push_anyhow(anyhow!("{msg}"));
     }
 
     /// Adds given `outcome` to the validation outcomes list.
@@ -281,7 +285,7 @@ impl ValidationContext {
                 Some(msg.clone())
             }
             Err(e) => {
-                self.validation.push_anyhow(e);
+                self.handle_error(handler, &e);
                 None
             }
         }
@@ -289,13 +293,15 @@ impl ValidationContext {
 
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
-            if let Err(e) =
-                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            if let Err(e) = self
+                .validation
+                .publish(&self.context, &self.module, &self.validation_topic, blk)
+                .await
             {
-                error!("Publish failed: {:?}", e);
+                error!("Publish failed in {}: {:?}", self.module, e);
             }
         } else {
-            self.validation.print_errors(None);
+            self.validation.print_errors(&self.module, None);
         }
     }
 
@@ -303,11 +309,14 @@ impl ValidationContext {
     fn check_sync(&mut self, handler: &str, actual: &BlockInfo) {
         if let Some(ref block) = self.current_block {
             if block.number != actual.number {
-                self.validation.push_anyhow(anyhow!(
-                    "Messages out of sync: expected {:?}, actual ({handler}) {:?}",
-                    block,
-                    actual
-                ));
+                self.handle_error(
+                    handler,
+                    &anyhow!(
+                        "Messages out of sync: expected {:?}, actual {:?}",
+                        block,
+                        actual
+                    ),
+                );
             }
         }
     }
