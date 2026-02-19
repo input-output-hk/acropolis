@@ -56,19 +56,16 @@ specs/001-speckit-feedback-phase/
     └── speckit.feedback.prompt.md   # NEW: Feedback prompt registration
 
 .specify/
-└── scripts/
-    └── bash/
-        └── fetch-pr-feedback.sh     # NEW: Helper script for PR data extraction
-
-docs/
-└── feedback/
+├── scripts/
+│   └── bash/
+│       └── fetch-pr-feedback.sh     # NEW: Helper script for PR data extraction
+└── memory/
     ├── lessons.md                   # NEW: Central lessons database
-    ├── AGENTS.md                    # NEW: Agent instructions for Copilot (reads lessons.md)
-    ├── CLAUDE.md                    # NEW: Agent instructions for Claude Code (identical to AGENTS.md)
-    └── pr-<number>-lessons.md       # NEW: Per-PR lessons files (generated)
+    └── feedback/
+        └── pr-<number>-lessons.md   # NEW: Per-PR lessons files (generated)
 ```
 
-**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `.specify/memory/feedback/` for discoverability. Agent instruction files (`AGENTS.md` + `CLAUDE.md`) co-located with lessons database enable cross-platform integration without modifying existing agents.
+**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `.specify/memory/feedback/` for discoverability.
 
 ## Complexity Tracking
 
