@@ -38,7 +38,7 @@ use acropolis_module_block_vrf_validator::BlockVrfValidator;
 use acropolis_module_consensus::Consensus;
 
 // Storage modules
-// use acropolis_module_chain_store::ChainStore;
+use acropolis_module_chain_store::ChainStore;
 use acropolis_module_spdd_state::SPDDState;
 
 // Caryatid modules
@@ -123,7 +123,7 @@ pub async fn main() -> Result<()> {
     AccountsState::register(&mut process);
     SPDDState::register(&mut process);
     Consensus::register(&mut process);
-    //ChainStore::register(&mut process);
+    ChainStore::register(&mut process);
     BlockVrfValidator::register(&mut process);
     BlockKesValidator::register(&mut process);
     MidnightState::register(&mut process);

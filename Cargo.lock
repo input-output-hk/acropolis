@@ -631,7 +631,6 @@ dependencies = [
  "acropolis_module_utxo_state",
  "anyhow",
  "caryatid_module_clock",
- "caryatid_module_rest_server",
  "caryatid_module_spy",
  "caryatid_process",
  "clap 4.5.58",
