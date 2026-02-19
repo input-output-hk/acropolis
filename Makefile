@@ -20,7 +20,7 @@ SNAP_URL ?= "https://pub-b844360df4774bb092a2bb2043b888e5.r2.dev/134092758.670ca
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
-.PHONY: help all build test run run-preview run-bootstrap fmt clippy
+.PHONY: help all build test run run-preview run-bootstrap run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
 .PHONY: snap-test-streaming
 
@@ -33,6 +33,7 @@ help:
 	@echo "  run                      Run the omnibus (mainnet)"
 	@echo "  run-preview              Run the omnibus (preview network)"
 	@echo "  run-bootstrap            Run the omnibus with bootstrap config (snapshot)"
+	@echo "  run-midnight             Run the midnight indexer omnibus config"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
@@ -65,6 +66,11 @@ run-preview:
 
 run-bootstrap:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
+
+run-midnight:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.midnight.toml
+
+run-midnight-indexer: run-midnight
 
 fmt:
 	$(CARGO) fmt --all
