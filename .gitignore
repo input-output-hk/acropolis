@@ -6,6 +6,9 @@ configuration/
 docker-compose.yaml
 .DS_Store
 
+# Jetbrains IDE files
+.idea
+
 # Nix
 result
 result-*
@@ -17,3 +20,5 @@ tests/fixtures/134092758.670ca68c3de580f8469677754a725e86ca72a7be381d3108569f070
 
 downloads/
 fjall-*/
+# Nightshift plan artifacts (keep out of version control)
+.nightshift-plan
