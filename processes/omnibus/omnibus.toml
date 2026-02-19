@@ -33,6 +33,7 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 # ============================================================================
 [module.peer-network-interface]
 sync-point = "dynamic"
+block-flow-mode = "consensus"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
@@ -46,8 +47,8 @@ security-parameter = 2160
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
-#           "cardano.validation.vrf",
-#           "cardano.validation.kes",
+           "cardano.validation.vrf",
+           "cardano.validation.kes",
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
