@@ -606,6 +606,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "acropolis_process_midnight_indexer"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "acropolis_module_accounts_state",
+ "acropolis_module_block_kes_validator",
+ "acropolis_module_block_unpacker",
+ "acropolis_module_block_vrf_validator",
+ "acropolis_module_chain_store",
+ "acropolis_module_consensus",
+ "acropolis_module_drep_state",
+ "acropolis_module_epochs_state",
+ "acropolis_module_genesis_bootstrapper",
+ "acropolis_module_governance_state",
+ "acropolis_module_midnight_state",
+ "acropolis_module_mithril_snapshot_fetcher",
+ "acropolis_module_parameters_state",
+ "acropolis_module_peer_network_interface",
+ "acropolis_module_snapshot_bootstrapper",
+ "acropolis_module_spdd_state",
+ "acropolis_module_spo_state",
+ "acropolis_module_stake_delta_filter",
+ "acropolis_module_tx_unpacker",
+ "acropolis_module_utxo_state",
+ "anyhow",
+ "caryatid_module_clock",
+ "caryatid_module_spy",
+ "caryatid_process",
+ "clap 4.5.58",
+ "config",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tikv-jemallocator",
+ "tokio",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "acropolis_process_omnibus"
 version = "0.1.0"
 dependencies = [
