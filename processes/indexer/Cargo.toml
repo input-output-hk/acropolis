@@ -14,6 +14,7 @@ acropolis_module_genesis_bootstrapper = { path = "../../modules/genesis_bootstra
 acropolis_module_mithril_snapshot_fetcher = { path = "../../modules/mithril_snapshot_fetcher" }
 acropolis_module_peer_network_interface = { path = "../../modules/peer_network_interface" }
 acropolis_module_block_unpacker = { path = "../../modules/block_unpacker" }
+acropolis_module_consensus = { path = "../../modules/consensus" }
 acropolis_module_custom_indexer = { path = "../../modules/custom_indexer" }
 
 caryatid_process = { workspace = true }
