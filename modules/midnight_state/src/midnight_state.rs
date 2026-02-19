@@ -17,6 +17,7 @@ use tracing::{error, info, warn};
 mod epoch_totals;
 mod state;
 use state::State;
+mod indexes;
 mod types;
 
 declare_cardano_reader!(
