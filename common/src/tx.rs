@@ -4,7 +4,7 @@ use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
     Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
-    UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
+    UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -224,13 +224,13 @@ impl TxUTxODeltas {
         &self,
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    ) -> Value {
-        let mut total_consumed = Value::new(0, vec![]);
+    ) -> ValueMap {
+        let mut total_consumed = ValueMap::default();
 
         // Add Inputs UTxO values
         for input in self.consumes.iter() {
             if let Some(utxo) = utxos.get(input) {
-                total_consumed += &utxo.value;
+                total_consumed.add_value(&utxo.value);
             }
         }
 
@@ -242,10 +242,12 @@ impl TxUTxODeltas {
 
         let total_refund = self.calculate_total_refund(stake_registration_updates);
         let total_withdrawals = self.calculate_total_withdrawals();
-        total_consumed += &Value::new(total_refund + total_withdrawals, vec![]);
+        total_consumed.add_value(&Value::new(total_refund + total_withdrawals, vec![]));
 
         // Add Value Minted
-        total_consumed += &self.get_minted_value();
+        total_consumed.add_value(&self.get_minted_value());
+
+        total_consumed.remove_zero_amounts();
 
         total_consumed
     }
@@ -261,29 +263,29 @@ impl TxUTxODeltas {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    ) -> Value {
-        let mut total_produced = Value::new(0, vec![]);
+    ) -> ValueMap {
+        let mut total_produced = ValueMap::default();
 
         // Add Outputs UTxO values
         for output in &self.produces {
-            total_produced += &output.value;
+            total_produced.add_value(&output.value);
         }
 
         if !self.is_valid {
             // total_collateral is only set since Babbage era.
             match self.stated_total_collateral {
                 Some(stated_total_collateral) => {
-                    total_produced += &Value::new(stated_total_collateral, vec![]);
+                    total_produced.add_value(&Value::new(stated_total_collateral, vec![]));
                     return total_produced;
                 }
                 None => {
                     // if there is no total_collateral set, then collateral inputs are just moved to fee pot
-                    let mut total_collateral = Value::new(0, vec![]);
+                    let mut total_collateral = ValueMap::default();
 
                     // Add Inputs UTxO values
                     for input in self.consumes.iter() {
                         if let Some(utxo) = utxos.get(input) {
-                            total_collateral += &utxo.value;
+                            total_collateral.add_value(&utxo.value);
                         }
                     }
                     return total_collateral;
@@ -293,10 +295,12 @@ impl TxUTxODeltas {
 
         let total_deposit =
             self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
-        total_produced += &Value::new(total_deposit + self.fee, vec![]);
+        total_produced.add_value(&Value::new(total_deposit + self.fee, vec![]));
 
         // Add Value Burnt
-        total_produced += &self.get_burnt_value();
+        total_produced.add_value(&self.get_burnt_value());
+
+        total_produced.remove_zero_amounts();
 
         total_produced
     }

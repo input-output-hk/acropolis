@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier, ValueMap};
 use anyhow::Result;
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
@@ -26,8 +26,8 @@ pub fn validate_bad_inputs_utxo(
 }
 
 pub fn validate_value_not_conserved(
-    total_consumed: Value,
-    total_produced: Value,
+    total_consumed: ValueMap,
+    total_produced: ValueMap,
 ) -> UTxOValidationResult {
     if total_consumed != total_produced {
         return Err(Box::new(UTxOValidationError::ValueNotConservedUTxO {
@@ -40,8 +40,8 @@ pub fn validate_value_not_conserved(
 
 pub fn validate(
     inputs: &[UTxOIdentifier],
-    total_consumed: Value,
-    total_produced: Value,
+    total_consumed: ValueMap,
+    total_produced: ValueMap,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
     validate_bad_inputs_utxo(inputs, utxos)?;
