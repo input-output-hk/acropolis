@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use tokio::sync::watch;
 
 use acropolis_module_block_unpacker::BlockUnpacker;
+use acropolis_module_consensus::Consensus;
 use acropolis_module_custom_indexer::CustomIndexer;
 use acropolis_module_genesis_bootstrapper::GenesisBootstrapper;
 use acropolis_module_peer_network_interface::PeerNetworkInterface;
@@ -45,8 +46,9 @@ async fn main() -> Result<()> {
     // Core modules to fetch blocks and publish decoded transactions
     GenesisBootstrapper::register(&mut process);
     MithrilSnapshotFetcher::register(&mut process);
-    BlockUnpacker::register(&mut process);
     PeerNetworkInterface::register(&mut process);
+    Consensus::register(&mut process);
+    BlockUnpacker::register(&mut process);
 
     let (sender_1, receiver_1) = watch::channel(InMemoryPoolCostState {
         pools: BTreeMap::new(),

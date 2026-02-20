@@ -74,6 +74,18 @@ struct ConsensusRuntime {
     validator_subscriptions: Vec<Box<dyn Subscription<Message>>>,
     validation_timeout: Duration,
     do_validation: bool,
+    stats: ConsensusStats,
+}
+
+/// Periodic logging counters.
+#[derive(Default)]
+struct ConsensusStats {
+    offered: u64,
+    wanted: u64,
+    available: u64,
+    proposed: u64,
+    rollbacks: u64,
+    rejected: u64,
 }
 
 /// Consensus module
@@ -153,6 +165,7 @@ impl Consensus {
             validator_subscriptions,
             validation_timeout,
             do_validation,
+            stats: ConsensusStats::default(),
         };
 
         context.run(async move {
@@ -160,6 +173,24 @@ impl Consensus {
         });
 
         Ok(())
+    }
+}
+
+const STATS_LOG_INTERVAL: u64 = 100;
+
+impl ConsensusStats {
+    fn total(&self) -> u64 {
+        self.offered + self.available
+    }
+
+    fn maybe_log(&self) {
+        let total = self.total();
+        if total > 0 && total % STATS_LOG_INTERVAL == 0 {
+            info!(
+                "Consensus stats: offered={}, wanted={}, available={}, proposed={}, rollbacks={}, rejected={}",
+                self.offered, self.wanted, self.available, self.proposed, self.rollbacks, self.rejected
+            );
+        }
     }
 }
 
@@ -190,6 +221,7 @@ impl ConsensusRuntime {
                             self.handle_block_available(block_info, raw_block.clone())
                                 .instrument(span)
                                 .await;
+                            self.stats.maybe_log();
                         }
 
                         _ => debug!("Ignoring non-BlockAvailable message on blocks topic"),
@@ -205,9 +237,10 @@ impl ConsensusRuntime {
                     match message.as_ref() {
                         Message::Consensus(ConsensusMessage::BlockOffered(offered)) => {
                             let span = info_span!("consensus-offered", hash = %offered.hash);
-                            self.handle_block_offered(offered.hash, offered.parent_hash, offered.slot)
+                            self.handle_block_offered(offered.hash, offered.parent_hash, offered.number, offered.slot)
                                 .instrument(span)
                                 .await;
+                            self.stats.maybe_log();
                         }
 
                         Message::Consensus(ConsensusMessage::BlockRescinded(rescinded)) => {
@@ -321,6 +354,8 @@ impl ConsensusRuntime {
         // Collect and publish observer events
         self.drain_and_publish_events().await;
 
+        self.stats.available += 1;
+
         // Validate only when this call newly supplied body for a favoured block.
         let should_validate = !had_body
             && self
@@ -340,16 +375,39 @@ impl ConsensusRuntime {
         self.prune_block_data();
     }
 
-    /// Handle a BlockOffered message: derive number, check_block_wanted, publish.
-    async fn handle_block_offered(&mut self, hash: BlockHash, parent_hash: BlockHash, slot: u64) {
-        // Derive block number from parent in tree
-        let number = match self.tree.get_block(&parent_hash) {
-            Some(parent) => parent.number + 1,
-            None => {
-                warn!("Parent {parent_hash} not in tree for offered block {hash}");
+    /// Handle a BlockOffered message: check_block_wanted, publish wanted hashes.
+    async fn handle_block_offered(
+        &mut self,
+        hash: BlockHash,
+        parent_hash: BlockHash,
+        number: u64,
+        slot: u64,
+    ) {
+        // Bootstrap the tree with a virtual root when the first offer arrives.
+        if self.tree.is_empty() {
+            let parent_number = number.saturating_sub(1);
+            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
+                error!("Failed to set tree root from offered block: {e}");
                 return;
             }
-        };
+            debug!("Tree root set to parent {parent_hash} (block {parent_number})");
+        }
+
+        if self.tree.get_block(&parent_hash).is_none() {
+            let parent_number = number.saturating_sub(1);
+            warn!(
+                "Parent {parent_hash} not in tree for offered block {hash} — re-rooting tree at block {parent_number}"
+            );
+            self.tree = ConsensusTree::new(
+                self.tree.k(),
+                self.tree.take_observer(),
+            );
+            self.block_data.clear();
+            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
+                error!("Failed to re-root tree: {e}");
+                return;
+            }
+        }
 
         let wanted = match self.tree.check_block_wanted(hash, parent_hash, number, slot) {
             Ok(w) => w,
@@ -358,6 +416,9 @@ impl ConsensusRuntime {
                 return;
             }
         };
+
+        self.stats.offered += 1;
+        self.stats.wanted += wanted.len() as u64;
 
         // Collect and publish observer events
         self.drain_and_publish_events().await;
@@ -384,8 +445,17 @@ impl ConsensusRuntime {
 
     /// Collect observer events, resolve to messages, and publish.
     async fn drain_and_publish_events(&mut self) {
-        let events = collect_observer_events(
-            &self.event_queue,
+        let raw_events: Vec<ObserverEvent> =
+            self.event_queue.lock().unwrap().drain(..).collect();
+        for event in &raw_events {
+            match event {
+                ObserverEvent::BlockProposed { .. } => self.stats.proposed += 1,
+                ObserverEvent::Rollback { .. } => self.stats.rollbacks += 1,
+                ObserverEvent::BlockRejected { .. } => self.stats.rejected += 1,
+            }
+        }
+        let events = resolve_observer_events(
+            raw_events,
             &self.publish_blocks_topic,
             &self.publish_consensus_topic,
             &self.block_data,
@@ -496,17 +566,16 @@ fn extract_parent_hash(block_info: &BlockInfo, header_bytes: &[u8]) -> Result<Op
     Ok(header.previous_hash().map(|h| BlockHash::from(*h)))
 }
 
-/// Collect observer events and resolve them into publishable messages.
+/// Resolve pre-drained observer events into publishable messages.
 ///
 /// Sync function — does not hold tree references across await points.
-fn collect_observer_events(
-    event_queue: &EventQueue,
+fn resolve_observer_events(
+    events: Vec<ObserverEvent>,
     publish_blocks_topic: &str,
     publish_consensus_topic: &str,
     block_data: &HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
     tree: &ConsensusTree,
 ) -> Vec<(String, Arc<Message>)> {
-    let events: Vec<ObserverEvent> = event_queue.lock().unwrap().drain(..).collect();
     let mut messages = Vec::new();
 
     for event in events {

@@ -403,6 +403,7 @@ pub enum CardanoMessage {
 pub struct BlockOfferedMessage {
     pub hash: BlockHash,
     pub slot: u64,
+    pub number: u64,
     pub parent_hash: BlockHash,
 }
 
