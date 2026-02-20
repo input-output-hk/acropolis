@@ -625,7 +625,15 @@ impl Add for Value {
 
 /// Hashmap representation of Value (lovelace + multiasset)
 #[derive(
-    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct ValueMap {
     #[n(0)]
@@ -663,6 +671,13 @@ impl ValueMap {
                     .saturating_add(asset.amount);
             }
         }
+    }
+
+    pub fn remove_zero_amounts(&mut self) {
+        self.assets.retain(|_, assets| {
+            assets.retain(|_, amount| *amount != 0);
+            !assets.is_empty()
+        });
     }
 }
 
