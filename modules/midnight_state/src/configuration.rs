@@ -31,18 +31,13 @@ impl MidnightConfig {
         let full_config = Config::builder().add_source(config.clone()).build()?;
         let mut cfg: MidnightConfig = full_config.try_deserialize()?;
         // Derive the candidate auth token based on the validator address
-        cfg.auth_token_policy_id =
-            extract_policy_id_from_payment_script(&cfg.mapping_validator_address)?;
+        cfg.auth_token_policy_id = PolicyId::from(
+            cfg.mapping_validator_address
+                .get_payment_part()
+                .ok_or_else(|| anyhow!("address is not a Shelley address"))?
+                .to_script_hash()
+                .ok_or_else(|| anyhow!("address is not a script address"))?,
+        );
         Ok(cfg)
     }
-}
-
-fn extract_policy_id_from_payment_script(address: &Address) -> Result<PolicyId> {
-    let payment_part =
-        address.get_payment_part().ok_or_else(|| anyhow!("address is not a Shelley address"))?;
-
-    let script_hash =
-        payment_part.to_script_hash().ok_or_else(|| anyhow!("address is not a script address"))?;
-
-    Ok(PolicyId::from(script_hash))
 }
