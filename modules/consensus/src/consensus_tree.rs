@@ -89,6 +89,12 @@ impl ConsensusTree {
         self.k
     }
 
+    /// Take the observer out for reuse (e.g. when re-creating the tree).
+    /// Replaces the current observer with a no-op stub.
+    pub fn take_observer(&mut self) -> Box<dyn ConsensusTreeObserver + Send> {
+        std::mem::replace(&mut self.observer, Box::new(NoOpObserver))
+    }
+
     /// Returns the number of blocks in the tree.
     pub fn len(&self) -> usize {
         self.blocks.len()
@@ -391,28 +397,43 @@ impl ConsensusTree {
 
         // Compute new favoured chain
         let new_tip = self.get_favoured_chain();
+        self.favoured_tip = new_tip;
 
-        if new_tip != old_tip {
-            // Chain switch detected
-            self.favoured_tip = new_tip;
-            self.handle_chain_switch(old_tip, new_tip)
-        } else {
-            // No chain switch — check if block extends favoured chain
-            self.favoured_tip = new_tip;
-            let tip = match new_tip {
-                Some(t) => t,
-                None => return Ok(Vec::new()),
-            };
-
-            if self.chain_contains(hash, tip) {
-                // Block is on the favoured chain — mark as Wanted
-                if let Some(b) = self.blocks.get_mut(&hash) {
-                    b.status = BlockValidationStatus::Wanted;
+        match (old_tip, new_tip) {
+            (Some(old), Some(new)) if old != new => {
+                if self.chain_contains(old, new) {
+                    // Linear extension: old tip is ancestor of new tip — no rollback.
+                    let new_blocks = self.collect_chain_from_ancestor(old, new);
+                    let mut wanted = Vec::new();
+                    for bh in new_blocks {
+                        if let Some(b) = self.blocks.get_mut(&bh) {
+                            if b.status == BlockValidationStatus::Offered {
+                                b.status = BlockValidationStatus::Wanted;
+                                wanted.push(bh);
+                            }
+                        }
+                    }
+                    Ok(wanted)
+                } else {
+                    // True chain switch: new tip is on a different fork.
+                    self.handle_chain_switch(old_tip, new_tip)
                 }
-                Ok(vec![hash])
-            } else {
-                // Block is on unfavoured fork — stays as Offered
-                Ok(Vec::new())
+            }
+            _ => {
+                // Tip unchanged — check if block is on favoured chain
+                let tip = match new_tip {
+                    Some(t) => t,
+                    None => return Ok(Vec::new()),
+                };
+
+                if self.chain_contains(hash, tip) {
+                    if let Some(b) = self.blocks.get_mut(&hash) {
+                        b.status = BlockValidationStatus::Wanted;
+                    }
+                    Ok(vec![hash])
+                } else {
+                    Ok(Vec::new())
+                }
             }
         }
     }
@@ -799,6 +820,14 @@ impl ConsensusTree {
         }
         result
     }
+}
+
+/// Placeholder observer used when the real observer has been taken via `take_observer`.
+struct NoOpObserver;
+impl ConsensusTreeObserver for NoOpObserver {
+    fn block_proposed(&self, _: u64, _: BlockHash, _: &[u8]) {}
+    fn rollback(&self, _: u64) {}
+    fn block_rejected(&self, _: BlockHash) {}
 }
 
 #[cfg(test)]
