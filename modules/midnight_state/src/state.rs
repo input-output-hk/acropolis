@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 use acropolis_common::{
@@ -62,14 +64,23 @@ impl State {
         self.epoch_totals.observe_deltas(deltas);
 
         let mut cnight_creations = Vec::new();
+        let mut block_created_utxos: HashSet<UTxOIdentifier> = HashSet::new();
         let mut cnight_spends = Vec::new();
         let mut candidate_registrations = Vec::new();
         let mut candidate_deregistrations = Vec::new();
-
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
-            cnight_creations.append(&mut self.collect_cnight_creations(delta, block_info));
-            cnight_spends.append(&mut self.collect_cnight_spends(delta, block_info));
+            self.collect_cnight_creations(
+                delta,
+                block_info,
+                &mut cnight_creations,
+                &mut block_created_utxos,
+            );
+            cnight_spends.extend(self.collect_cnight_spends(
+                delta,
+                block_info,
+                &block_created_utxos,
+            ));
 
             // Collect candidate registrations and deregistrations
             candidate_registrations
@@ -100,43 +111,54 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
-    ) -> Vec<CNightCreation> {
-        delta
-            .created_utxos
-            .iter()
-            .filter_map(|created| {
-                let token_amount = created.value.token_amount(
-                    &self.config.cnight_policy_id,
-                    &self.config.cnight_asset_name,
-                );
+        cnight_creations: &mut Vec<CNightCreation>,
+        block_created_utxos: &mut HashSet<UTxOIdentifier>,
+    ) {
+        if !delta.received.assets.contains_key(&self.config.cnight_policy_id) {
+            return;
+        }
 
-                if token_amount > 0 {
-                    Some(CNightCreation {
-                        address: delta.address.clone(),
-                        quantity: token_amount,
-                        utxo: created.utxo,
-                        block_number: block_info.number,
-                        block_hash: block_info.hash,
-                        tx_index: delta.tx_identifier.tx_index() as u32,
-                        block_timestamp: block_info.to_naive_datetime(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
+        for created in &delta.created_utxos {
+            let token_amount = created
+                .value
+                .assets
+                .get(&self.config.cnight_policy_id)
+                .and_then(|policy_assets| policy_assets.get(&self.config.cnight_asset_name))
+                .copied()
+                .unwrap_or(0);
+
+            if token_amount == 0 {
+                continue;
+            }
+
+            let creation = CNightCreation {
+                address: delta.address.clone(),
+                quantity: token_amount,
+                utxo: created.utxo,
+                block_number: block_info.number,
+                block_hash: block_info.hash,
+                tx_index: delta.tx_identifier.tx_index() as u32,
+                block_timestamp: block_info.to_naive_datetime(),
+            };
+
+            block_created_utxos.insert(created.utxo);
+            cnight_creations.push(creation);
+        }
     }
 
     fn collect_cnight_spends(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
+        cnight_creations: &HashSet<UTxOIdentifier>,
     ) -> Vec<(UTxOIdentifier, CNightSpend)> {
         delta
             .spent_utxos
             .iter()
             .filter_map(|spent| {
-                if self.utxos.utxo_index.contains_key(&spent.utxo) {
+                if self.utxos.utxo_index.contains_key(&spent.utxo)
+                    || cnight_creations.contains(&spent.utxo)
+                {
                     Some((
                         spent.utxo,
                         CNightSpend {
@@ -166,10 +188,14 @@ impl State {
         }
 
         for created in &delta.created_utxos {
-            let has_auth_token = created.value.token_amount(
-                &self.config.auth_token_policy_id,
-                &self.config.auth_token_asset_name,
-            ) > 0;
+            let has_auth_token = created
+                .value
+                .assets
+                .get(&self.config.auth_token_policy_id)
+                .and_then(|policy_assets| policy_assets.get(&self.config.auth_token_asset_name))
+                .copied()
+                .unwrap_or(0)
+                > 0;
 
             if has_auth_token {
                 if let Some(datum) = &created.datum {
@@ -217,10 +243,12 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
-        Datum, Era, ExtendedAddressDelta, NativeAsset, PolicyId, ShelleyAddress, SpentUTxOExtended,
-        TxHash, TxIdentifier, UTxOIdentifier, Value,
+        Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
+        TxIdentifier, UTxOIdentifier, ValueMap,
     };
     use chrono::NaiveDateTime;
 
@@ -268,21 +296,21 @@ mod tests {
         }
     }
 
-    fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> Value {
-        Value::new(
-            0,
-            vec![(
-                policy,
-                vec![NativeAsset {
-                    name: asset,
-                    amount,
-                }],
-            )],
-        )
+    fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> ValueMap {
+        let mut inner = HashMap::new();
+        inner.insert(asset, amount);
+
+        let mut outer = HashMap::new();
+        outer.insert(policy, inner);
+
+        ValueMap {
+            lovelace: 0,
+            assets: outer,
+        }
     }
 
-    fn test_value_no_token() -> Value {
-        Value::new(50, vec![])
+    fn test_value_no_token() -> ValueMap {
+        ValueMap::default()
     }
 
     #[test]
@@ -318,12 +346,14 @@ mod tests {
                 },
             ],
             spent_utxos: vec![],
-            received: Value::default(),
-            sent: Value::default(),
+            received: test_value_with_token(policy, asset, 15),
+            sent: ValueMap::default(),
         };
 
         // Collect the CNight UTxO creations
-        let creations = state.collect_cnight_creations(&delta, &block_info);
+        let mut creations = Vec::new();
+        let mut creations_set = HashSet::new();
+        state.collect_cnight_creations(&delta, &block_info, &mut creations, &mut creations_set);
         assert_eq!(creations.len(), 2);
         assert_eq!(creations[0].quantity, 5);
 
@@ -386,12 +416,12 @@ mod tests {
                     utxo: UTxOIdentifier::new(TxHash::default(), 3),
                 },
             ],
-            received: Value::default(),
-            sent: Value::default(),
+            received: ValueMap::default(),
+            sent: ValueMap::default(),
         };
 
         // Collect the CNight UTxO spends
-        let spends = state.collect_cnight_spends(&delta, &block_info);
+        let spends = state.collect_cnight_spends(&delta, &block_info, &HashSet::new());
         assert_eq!(spends.len(), 1);
         assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
 
@@ -439,8 +469,8 @@ mod tests {
                 },
             ],
             spent_utxos: vec![],
-            received: Value::default(),
-            sent: Value::default(),
+            received: ValueMap::default(),
+            sent: ValueMap::default(),
         };
 
         let registrations = state.collect_candidate_registrations(&delta, &block_info);
@@ -504,8 +534,8 @@ mod tests {
                     spent_by: TxHash::new([5u8; 32]),
                 },
             ],
-            received: Value::default(),
-            sent: Value::default(),
+            received: ValueMap::default(),
+            sent: ValueMap::default(),
         };
 
         let deregistrations = state.collect_candidate_deregistrations(&delta, &block_info);
