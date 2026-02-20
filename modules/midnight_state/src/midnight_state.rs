@@ -13,15 +13,15 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-
 mod epoch_totals;
-mod state;
-use state::State;
 
-use crate::configuration::MidnightConfig;
 mod configuration;
 mod indexes;
+mod state;
 mod types;
+
+use crate::configuration::MidnightConfig;
+use state::State;
 
 declare_cardano_reader!(
     AddressDeltasReader,
@@ -64,7 +64,7 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        let summary = state.handle_new_epoch(blk_info.as_ref());
+                        let summary = state.handle_new_epoch(blk_info.as_ref())?;
                         info!(
                             epoch = summary.epoch,
                             era = ?summary.era,
@@ -77,7 +77,7 @@ impl MidnightState {
                     }
 
                     state.start_block(blk_info.as_ref());
-                    state.handle_address_deltas(deltas.as_ref())?;
+                    state.handle_address_deltas(&blk_info, deltas.as_ref())?;
                     state.finalise_block(blk_info.as_ref());
 
                     history.lock().await.commit(blk_info.number, state);
