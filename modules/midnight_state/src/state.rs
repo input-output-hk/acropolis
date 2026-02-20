@@ -64,7 +64,7 @@ impl State {
         self.epoch_totals.observe_deltas(deltas);
 
         let mut cnight_creations = Vec::new();
-        let mut creations_set: HashSet<UTxOIdentifier> = HashSet::new();
+        let mut block_created_utxos: HashSet<UTxOIdentifier> = HashSet::new();
         let mut cnight_spends = Vec::new();
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
@@ -72,9 +72,13 @@ impl State {
                 delta,
                 block_info,
                 &mut cnight_creations,
-                &mut creations_set,
+                &mut block_created_utxos,
             );
-            cnight_spends.extend(self.collect_cnight_spends(delta, block_info, &creations_set))
+            cnight_spends.extend(self.collect_cnight_spends(
+                delta,
+                block_info,
+                &block_created_utxos,
+            ))
         }
 
         // Add created and spent CNight utxos to state
@@ -91,8 +95,8 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
-        creations_vec: &mut Vec<CNightCreation>,
-        creations_set: &mut HashSet<UTxOIdentifier>,
+        cnight_creations: &mut Vec<CNightCreation>,
+        block_created_utxos: &mut HashSet<UTxOIdentifier>,
     ) {
         if !delta.received.assets.contains_key(&self.config.cnight_policy_id) {
             return;
@@ -121,8 +125,8 @@ impl State {
                 block_timestamp: block_info.to_naive_datetime(),
             };
 
-            creations_set.insert(created.utxo);
-            creations_vec.push(creation);
+            block_created_utxos.insert(created.utxo);
+            cnight_creations.push(creation);
         }
     }
 
