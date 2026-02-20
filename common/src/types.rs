@@ -557,7 +557,7 @@ pub struct NativeAssetDelta {
 }
 
 /// Value (lovelace + multiasset)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Value {
     pub lovelace: u64,
     pub assets: NativeAssets,
@@ -576,44 +576,6 @@ impl Value {
         iter.map(|v| v.lovelace).sum()
     }
 }
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        if self.lovelace != other.lovelace {
-            return false;
-        }
-
-        if self.assets.len() != other.assets.len() {
-            return false;
-        }
-
-        for (policy_id, assets) in &self.assets {
-            let Some((_, other_assets)) = other.assets.iter().find(|(pid, _)| pid == policy_id)
-            else {
-                return false;
-            };
-
-            if assets.len() != other_assets.len() {
-                return false;
-            }
-
-            for asset in assets {
-                let Some(other_amount) =
-                    other_assets.iter().find(|other_asset| other_asset.name == asset.name)
-                else {
-                    return false;
-                };
-
-                if asset.amount != other_amount.amount {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-}
-
-impl Eq for Value {}
 
 impl AddAssign<&Value> for Value {
     fn add_assign(&mut self, other: &Value) {
