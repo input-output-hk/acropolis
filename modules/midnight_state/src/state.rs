@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 use acropolis_common::{
@@ -62,11 +64,17 @@ impl State {
         self.epoch_totals.observe_deltas(deltas);
 
         let mut cnight_creations = Vec::new();
+        let mut creations_set: HashSet<UTxOIdentifier> = HashSet::new();
         let mut cnight_spends = Vec::new();
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
-            cnight_creations.append(&mut self.collect_cnight_creations(delta, block_info));
-            cnight_spends.append(&mut self.collect_cnight_spends(delta, block_info))
+            self.collect_cnight_creations(
+                delta,
+                block_info,
+                &mut cnight_creations,
+                &mut creations_set,
+            );
+            cnight_spends.extend(self.collect_cnight_spends(delta, block_info, &creations_set))
         }
 
         // Add created and spent CNight utxos to state
@@ -83,38 +91,38 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
-    ) -> Vec<CNightCreation> {
-        // Only search UTxOs if the address received any CNight
-        if delta.received.assets.contains_key(&self.config.cnight_policy_id) {
-            delta
-                .created_utxos
-                .iter()
-                .filter_map(|created| {
-                    let token_amount = created
-                        .value
-                        .assets
-                        .get(&self.config.cnight_policy_id)
-                        .and_then(|policy_assets| policy_assets.get(&self.config.cnight_asset_name))
-                        .copied()
-                        .unwrap_or(0);
+        creations_vec: &mut Vec<CNightCreation>,
+        creations_set: &mut HashSet<UTxOIdentifier>,
+    ) {
+        if !delta.received.assets.contains_key(&self.config.cnight_policy_id) {
+            return;
+        }
 
-                    if token_amount > 0 {
-                        Some(CNightCreation {
-                            address: delta.address.clone(),
-                            quantity: token_amount,
-                            utxo: created.utxo,
-                            block_number: block_info.number,
-                            block_hash: block_info.hash,
-                            tx_index: delta.tx_identifier.tx_index() as u32,
-                            block_timestamp: block_info.to_naive_datetime(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            Vec::new()
+        for created in &delta.created_utxos {
+            let token_amount = created
+                .value
+                .assets
+                .get(&self.config.cnight_policy_id)
+                .and_then(|policy_assets| policy_assets.get(&self.config.cnight_asset_name))
+                .copied()
+                .unwrap_or(0);
+
+            if token_amount == 0 {
+                continue;
+            }
+
+            let creation = CNightCreation {
+                address: delta.address.clone(),
+                quantity: token_amount,
+                utxo: created.utxo,
+                block_number: block_info.number,
+                block_hash: block_info.hash,
+                tx_index: delta.tx_identifier.tx_index() as u32,
+                block_timestamp: block_info.to_naive_datetime(),
+            };
+
+            creations_set.insert(created.utxo);
+            creations_vec.push(creation);
         }
     }
 
@@ -122,12 +130,15 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
+        cnight_creations: &HashSet<UTxOIdentifier>,
     ) -> Vec<(UTxOIdentifier, CNightSpend)> {
         delta
             .spent_utxos
             .iter()
             .filter_map(|spent| {
-                if self.utxos.utxo_index.contains_key(&spent.utxo) {
+                if self.utxos.utxo_index.contains_key(&spent.utxo)
+                    || cnight_creations.contains(&spent.utxo)
+                {
                     Some((
                         spent.utxo,
                         CNightSpend {
@@ -148,7 +159,7 @@ impl State {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
@@ -243,7 +254,9 @@ mod tests {
         };
 
         // Collect the CNight UTxO creations
-        let creations = state.collect_cnight_creations(&delta, &block_info);
+        let mut creations = Vec::new();
+        let mut creations_set = HashSet::new();
+        state.collect_cnight_creations(&delta, &block_info, &mut creations, &mut creations_set);
         assert_eq!(creations.len(), 2);
         assert_eq!(creations[0].quantity, 5);
 
@@ -311,7 +324,7 @@ mod tests {
         };
 
         // Collect the CNight UTxO spends
-        let spends = state.collect_cnight_spends(&delta, &block_info);
+        let spends = state.collect_cnight_spends(&delta, &block_info, &HashSet::new());
         assert_eq!(spends.len(), 1);
         assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
 
