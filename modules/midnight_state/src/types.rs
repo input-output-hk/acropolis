@@ -159,25 +159,30 @@ impl From<(BlockNumber, &RegistrationEvent)> for Registration {
 
 #[derive(Clone)]
 pub struct DeregistrationEvent {
-    pub registration: RegistrationEvent,
+    pub registration_utxo: UTxOIdentifier,
     pub spent_block_timestamp: NaiveDateTime,
     pub spent_block_hash: BlockHash,
     pub spent_tx_hash: TxHash,
     pub spent_tx_index: u32,
-    pub datum: Datum,
 }
 
-impl From<(BlockNumber, &DeregistrationEvent)> for Deregistration {
-    fn from((block_number, event): (BlockNumber, &DeregistrationEvent)) -> Self {
+impl From<(BlockNumber, &RegistrationEvent, &DeregistrationEvent)> for Deregistration {
+    fn from(
+        (block_number, registration, event): (
+            BlockNumber,
+            &RegistrationEvent,
+            &DeregistrationEvent,
+        ),
+    ) -> Self {
         Deregistration {
-            full_datum: event.datum.clone(),
+            full_datum: registration.datum.clone(),
             block_number,
             block_hash: event.spent_block_hash,
             block_timestamp: event.spent_block_timestamp,
             tx_index_in_block: event.spent_tx_index,
             tx_hash: event.spent_tx_hash,
-            utxo_tx_hash: event.registration.tx_hash,
-            utxo_index: event.registration.utxo_index,
+            utxo_tx_hash: registration.tx_hash,
+            utxo_index: registration.utxo_index,
         }
     }
 }
