@@ -64,9 +64,11 @@ impl State {
         self.epoch_totals.observe_deltas(deltas);
 
         let mut cnight_creations = Vec::new();
-        let mut block_created_utxos: HashSet<UTxOIdentifier> = HashSet::new();
+        let mut block_created_utxos = HashSet::new();
         let mut cnight_spends = Vec::new();
+
         let mut candidate_registrations = Vec::new();
+        let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
@@ -83,10 +85,17 @@ impl State {
             ));
 
             // Collect candidate registrations and deregistrations
-            candidate_registrations
-                .append(&mut self.collect_candidate_registrations(delta, block_info));
-            candidate_deregistrations
-                .append(&mut self.collect_candidate_deregistrations(delta, block_info));
+            self.collect_candidate_registrations(
+                delta,
+                block_info,
+                &mut candidate_registrations,
+                &mut block_created_registrations,
+            );
+            candidate_deregistrations.extend(self.collect_candidate_deregistrations(
+                delta,
+                block_info,
+                &block_created_registrations,
+            ));
         }
 
         // Add created and spent CNight utxos to state
@@ -180,11 +189,11 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
-    ) -> Vec<RegistrationEvent> {
-        let mut registrations = Vec::new();
-
+        registrations: &mut Vec<RegistrationEvent>,
+        block_created_registrations: &mut HashSet<UTxOIdentifier>,
+    ) {
         if delta.address != self.config.mapping_validator_address {
-            return registrations;
+            return;
         }
 
         for created in &delta.created_utxos {
@@ -197,27 +206,29 @@ impl State {
                 .unwrap_or(0)
                 > 0;
 
-            if has_auth_token {
-                if let Some(datum) = &created.datum {
-                    registrations.push(RegistrationEvent {
-                        block_hash: block_info.hash,
-                        block_timestamp: block_info.to_naive_datetime(),
-                        tx_index: delta.tx_identifier.tx_index() as u32,
-                        tx_hash: created.utxo.tx_hash,
-                        utxo_index: created.utxo.output_index,
-                        datum: datum.clone(),
-                    });
-                }
+            if !has_auth_token {
+                continue;
+            }
+            if let Some(datum) = &created.datum {
+                block_created_registrations.insert(created.utxo);
+
+                registrations.push(RegistrationEvent {
+                    block_hash: block_info.hash,
+                    block_timestamp: block_info.to_naive_datetime(),
+                    tx_index: delta.tx_identifier.tx_index() as u32,
+                    tx_hash: created.utxo.tx_hash,
+                    utxo_index: created.utxo.output_index,
+                    datum: datum.clone(),
+                });
             }
         }
-
-        registrations
     }
 
     fn collect_candidate_deregistrations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
+        block_created_registrations: &HashSet<UTxOIdentifier>,
     ) -> Vec<DeregistrationEvent> {
         let mut deregistrations = Vec::new();
 
@@ -226,7 +237,9 @@ impl State {
         }
 
         for spent in &delta.spent_utxos {
-            if self.candidates.registration_index.contains_key(&spent.utxo) {
+            if self.candidates.registration_index.contains_key(&spent.utxo)
+                || block_created_registrations.contains(&spent.utxo)
+            {
                 deregistrations.push(DeregistrationEvent {
                     registration_utxo: spent.utxo,
                     spent_block_hash: block_info.hash,
@@ -473,7 +486,14 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let registrations = state.collect_candidate_registrations(&delta, &block_info);
+        let mut registrations = Vec::new();
+        let mut block_created_registrations = HashSet::new();
+        state.collect_candidate_registrations(
+            &delta,
+            &block_info,
+            &mut registrations,
+            &mut block_created_registrations,
+        );
         assert_eq!(registrations.len(), 1);
 
         state.candidates.register_candidates(block_info.number, registrations);
@@ -538,7 +558,8 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let deregistrations = state.collect_candidate_deregistrations(&delta, &block_info);
+        let deregistrations =
+            state.collect_candidate_deregistrations(&delta, &block_info, &HashSet::new());
         assert_eq!(deregistrations.len(), 1);
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
