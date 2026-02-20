@@ -83,6 +83,7 @@ struct ConsensusStats {
     offered: u64,
     wanted: u64,
     available: u64,
+    validated: u64,
     proposed: u64,
     rollbacks: u64,
     rejected: u64,
@@ -187,8 +188,8 @@ impl ConsensusStats {
         let total = self.total();
         if total > 0 && total % STATS_LOG_INTERVAL == 0 {
             info!(
-                "Consensus stats: offered={}, wanted={}, available={}, proposed={}, rollbacks={}, rejected={}",
-                self.offered, self.wanted, self.available, self.proposed, self.rollbacks, self.rejected
+                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
+                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
             );
         }
     }
@@ -534,6 +535,7 @@ impl ConsensusRuntime {
         };
 
         if all_say_go {
+            self.stats.validated += 1;
             if let Err(e) = self.tree.mark_validated(block_info.hash) {
                 error!("Failed to mark block validated: {e}");
             }
