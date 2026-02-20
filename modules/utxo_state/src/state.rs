@@ -632,7 +632,7 @@ impl State {
 
             entry.created_utxos.push(CreatedUTxOExtended {
                 utxo: output.utxo_identifier,
-                value: output.value.clone(),
+                value: ValueMap::from(&output.value),
                 datum: output.datum.clone(),
             });
             entry.received.add_value(&output.value);
@@ -645,8 +645,8 @@ impl State {
                 tx_identifier: tx.tx_identifier,
                 spent_utxos: entry.spent_utxos,
                 created_utxos: entry.created_utxos,
-                sent: Value::from(entry.sent),
-                received: Value::from(entry.received),
+                sent: entry.sent,
+                received: entry.received,
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
                 observer.observe_delta(ObservedAddressDelta::Extended(delta)).await;
@@ -756,7 +756,7 @@ impl State {
 
             entry.created_utxos.push(CreatedUTxOExtended {
                 utxo: output.utxo_identifier,
-                value: output.value.clone(),
+                value: ValueMap::from(&output.value),
                 datum: output.datum.clone(),
             });
             entry.received.add_value(&output.value);
@@ -769,8 +769,8 @@ impl State {
                 tx_identifier: tx.tx_identifier,
                 spent_utxos: entry.spent_utxos,
                 created_utxos: entry.created_utxos,
-                sent: Value::from(entry.sent),
-                received: Value::from(entry.received),
+                sent: entry.sent,
+                received: entry.received,
             };
             if let Some(observer) = self.address_delta_observer.as_ref() {
                 observer.observe_delta(ObservedAddressDelta::Extended(delta)).await;
@@ -1271,50 +1271,64 @@ mod tests {
     impl AddressDeltaObserver for TestDeltaObserver {
         async fn start_block(&self, _block: &BlockInfo) {}
         async fn observe_delta(&self, delta: ObservedAddressDelta) {
-            let (address, sent, received) = match &delta {
-                ObservedAddressDelta::Compact(delta) => {
-                    (&delta.address, &delta.sent, &delta.received)
-                }
-                ObservedAddressDelta::Extended(delta) => {
-                    (&delta.address, &delta.sent, &delta.received)
-                }
-            };
-
-            assert!(matches!(
-                address,
-                Address::Byron(ByronAddress { payload }) if payload[0] == 99
-            ));
-            let lovelace_net = (received.lovelace as i64) - (sent.lovelace as i64);
-            assert!(lovelace_net == 42 || lovelace_net == -42);
-
             let mut balance = self.balance.lock().await;
-            *balance += lovelace_net;
-
             let mut asset_balances = self.asset_balances.lock().await;
 
-            for (policy, assets) in &received.assets {
-                assert_eq!(policy_id(), *policy);
-                for asset in assets {
+            let mut apply_asset_delta =
+                |policy: &PolicyId, name: AssetName, amount: u64, sign: i64| {
+                    assert_eq!(policy_id(), *policy);
                     assert!(
-                        (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
-                            || (asset.name == AssetName::new(b"FOO").unwrap()
-                                && asset.amount == 200)
+                        (name == AssetName::new(b"TEST").unwrap() && amount == 100)
+                            || (name == AssetName::new(b"FOO").unwrap() && amount == 200)
                     );
-                    let key = (*policy, asset.name);
-                    *asset_balances.entry(key).or_insert(0) += asset.amount as i64;
-                }
-            }
+                    let key = (*policy, name);
+                    *asset_balances.entry(key).or_insert(0) += (amount as i64) * sign;
+                };
 
-            for (policy, assets) in &sent.assets {
-                assert_eq!(policy_id(), *policy);
-                for asset in assets {
-                    assert!(
-                        (asset.name == AssetName::new(b"TEST").unwrap() && asset.amount == 100)
-                            || (asset.name == AssetName::new(b"FOO").unwrap()
-                                && asset.amount == 200)
-                    );
-                    let key = (*policy, asset.name);
-                    *asset_balances.entry(key).or_insert(0) -= asset.amount as i64;
+            match &delta {
+                ObservedAddressDelta::Compact(delta) => {
+                    assert!(matches!(
+                        delta.address,
+                        Address::Byron(ByronAddress { ref payload }) if payload[0] == 99
+                    ));
+                    let lovelace_net =
+                        (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
+                    assert!(lovelace_net == 42 || lovelace_net == -42);
+                    *balance += lovelace_net;
+
+                    for (policy, assets) in &delta.received.assets {
+                        for asset in assets {
+                            apply_asset_delta(policy, asset.name, asset.amount, 1);
+                        }
+                    }
+
+                    for (policy, assets) in &delta.sent.assets {
+                        for asset in assets {
+                            apply_asset_delta(policy, asset.name, asset.amount, -1);
+                        }
+                    }
+                }
+                ObservedAddressDelta::Extended(delta) => {
+                    assert!(matches!(
+                        delta.address,
+                        Address::Byron(ByronAddress { ref payload }) if payload[0] == 99
+                    ));
+                    let lovelace_net =
+                        (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
+                    assert!(lovelace_net == 42 || lovelace_net == -42);
+                    *balance += lovelace_net;
+
+                    for (policy, assets) in &delta.received.assets {
+                        for (name, amount) in assets {
+                            apply_asset_delta(policy, *name, *amount, 1);
+                        }
+                    }
+
+                    for (policy, assets) in &delta.sent.assets {
+                        for (name, amount) in assets {
+                            apply_asset_delta(policy, *name, *amount, -1);
+                        }
+                    }
                 }
             }
         }

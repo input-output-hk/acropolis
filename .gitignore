@@ -6,6 +6,9 @@ configuration/
 docker-compose.yaml
 .DS_Store
 
+# Jetbrains IDE files
+.idea
+
 # Nix
 result
 result-*

@@ -398,7 +398,7 @@ pub struct CreatedUTxOExtended {
     pub utxo: UTxOIdentifier,
 
     /// Full value of the created UTxO
-    pub value: Value,
+    pub value: ValueMap,
 
     /// Datum attached to the created UTxO, if present
     pub datum: Option<Datum>,
@@ -418,8 +418,8 @@ pub struct ExtendedAddressDelta {
     pub created_utxos: Vec<CreatedUTxOExtended>,
 
     /// Sums of spent and created UTxOs
-    pub sent: Value,
-    pub received: Value,
+    pub sent: ValueMap,
+    pub received: ValueMap,
 }
 
 /// Stake balance change
@@ -663,6 +663,20 @@ impl ValueMap {
                     .saturating_add(asset.amount);
             }
         }
+    }
+}
+
+impl From<&Value> for ValueMap {
+    fn from(value: &Value) -> Self {
+        let mut map = Self::default();
+        map.add_value(value);
+        map
+    }
+}
+
+impl From<Value> for ValueMap {
+    fn from(value: Value) -> Self {
+        Self::from(&value)
     }
 }
 
