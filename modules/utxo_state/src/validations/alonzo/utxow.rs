@@ -217,6 +217,17 @@ mod tests {
         matches Ok(());
         "alonzo - valid transaction 1 - with contracts"
     )]
+    // TODO:
+    // Pass this test case
+    // For now all reference scripts are considered as Plutus V2.
+    // Need to check reference scripts Plutus Language Version
+    // #[test_case(validation_fixture!(
+    //     "conway",
+    //     "502f7a04cf763d681931adc0f20ad3e1f8f5515e78f36d6fcb97f9a374ae76d2"
+    // ) =>
+    //     matches Ok(());
+    //     "conway - valid transaction 1 - with withdraw 0 and smart contracts and reference inputs"
+    // )]
     #[test_case(validation_fixture!(
         "alonzo",
         "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
