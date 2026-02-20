@@ -1291,7 +1291,8 @@ mod tests {
                         delta.address,
                         Address::Byron(ByronAddress { ref payload }) if payload[0] == 99
                     ));
-                    let lovelace_net = (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
+                    let lovelace_net =
+                        (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
                     assert!(lovelace_net == 42 || lovelace_net == -42);
                     *balance += lovelace_net;
 
@@ -1312,7 +1313,8 @@ mod tests {
                         delta.address,
                         Address::Byron(ByronAddress { ref payload }) if payload[0] == 99
                     ));
-                    let lovelace_net = (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
+                    let lovelace_net =
+                        (delta.received.lovelace as i64) - (delta.sent.lovelace as i64);
                     assert!(lovelace_net == 42 || lovelace_net == -42);
                     *balance += lovelace_net;
 
