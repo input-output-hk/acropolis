@@ -84,30 +84,38 @@ impl State {
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
     ) -> Vec<CNightCreation> {
-        delta
-            .created_utxos
-            .iter()
-            .filter_map(|created| {
-                let token_amount = created.value.token_amount(
-                    &self.config.cnight_policy_id,
-                    &self.config.cnight_asset_name,
-                );
+        // Only search UTxOs if the address received any CNight
+        if delta.received.assets.contains_key(&self.config.cnight_policy_id) {
+            delta
+                .created_utxos
+                .iter()
+                .filter_map(|created| {
+                    let token_amount = created
+                        .value
+                        .assets
+                        .get(&self.config.cnight_policy_id)
+                        .and_then(|policy_assets| policy_assets.get(&self.config.cnight_asset_name))
+                        .copied()
+                        .unwrap_or(0);
 
-                if token_amount > 0 {
-                    Some(CNightCreation {
-                        address: delta.address.clone(),
-                        quantity: token_amount,
-                        utxo: created.utxo,
-                        block_number: block_info.number,
-                        block_hash: block_info.hash,
-                        tx_index: delta.tx_identifier.tx_index() as u32,
-                        block_timestamp: block_info.to_naive_datetime(),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
+                    if token_amount > 0 {
+                        Some(CNightCreation {
+                            address: delta.address.clone(),
+                            quantity: token_amount,
+                            utxo: created.utxo,
+                            block_number: block_info.number,
+                            block_hash: block_info.hash,
+                            tx_index: delta.tx_identifier.tx_index() as u32,
+                            block_timestamp: block_info.to_naive_datetime(),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     fn collect_cnight_spends(
@@ -140,10 +148,12 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
-        Era, ExtendedAddressDelta, NativeAsset, PolicyId, SpentUTxOExtended, TxHash, TxIdentifier,
-        UTxOIdentifier, Value,
+        Era, ExtendedAddressDelta, PolicyId, SpentUTxOExtended, TxHash, TxIdentifier,
+        UTxOIdentifier, ValueMap,
     };
     use chrono::NaiveDateTime;
 
@@ -178,21 +188,21 @@ mod tests {
         }
     }
 
-    fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> Value {
-        Value::new(
-            0,
-            vec![(
-                policy,
-                vec![NativeAsset {
-                    name: asset,
-                    amount,
-                }],
-            )],
-        )
+    fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> ValueMap {
+        let mut inner = HashMap::new();
+        inner.insert(asset, amount);
+
+        let mut outer = HashMap::new();
+        outer.insert(policy, inner);
+
+        ValueMap {
+            lovelace: 0,
+            assets: outer,
+        }
     }
 
-    fn test_value_no_token() -> Value {
-        Value::new(50, vec![])
+    fn test_value_no_token() -> ValueMap {
+        ValueMap::default()
     }
 
     #[test]
@@ -228,8 +238,8 @@ mod tests {
                 },
             ],
             spent_utxos: vec![],
-            received: Value::default(),
-            sent: Value::default(),
+            received: test_value_with_token(policy, asset, 15),
+            sent: ValueMap::default(),
         };
 
         // Collect the CNight UTxO creations
@@ -296,8 +306,8 @@ mod tests {
                     utxo: UTxOIdentifier::new(TxHash::default(), 3),
                 },
             ],
-            received: Value::default(),
-            sent: Value::default(),
+            received: ValueMap::default(),
+            sent: ValueMap::default(),
         };
 
         // Collect the CNight UTxO spends
