@@ -11,7 +11,7 @@ Add a `/speckit.feedback` command to the local speckit tooling that extracts les
 
 **Language/Version**: Markdown agent files (VS Code Chat Agents), Bash scripts for automation  
 **Primary Dependencies**: GitHub CLI (`gh`) for PR data retrieval, VS Code Chat Participant API  
-**Storage**: Markdown files with YAML frontmatter (`docs/feedback/lessons.md`, `docs/feedback/pr-<number>-lessons.md`)  
+**Storage**: Markdown files with YAML frontmatter (`.specify/memory/lessons.md`, `.specify/memory/feedback/pr-<number>-lessons.md`)  
 **Testing**: Manual testing via VS Code chat invocation; script validation via bash  
 **Target Platform**: VS Code with GitHub Copilot extension  
 **Project Type**: Single (agent + prompt + supporting scripts)  
@@ -68,7 +68,7 @@ docs/
     └── pr-<number>-lessons.md       # NEW: Per-PR lessons files (generated)
 ```
 
-**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `docs/feedback/` for discoverability. Agent instruction files (`AGENTS.md` + `CLAUDE.md`) co-located with lessons database enable cross-platform integration without modifying existing agents.
+**Structure Decision**: Follows existing speckit agent pattern (agent.md + prompt.md pair). Helper script added to `.specify/scripts/bash/` for reusable PR data fetching. Lessons stored in `.specify/memory/feedback/` for discoverability. Agent instruction files (`AGENTS.md` + `CLAUDE.md`) co-located with lessons database enable cross-platform integration without modifying existing agents.
 
 ## Complexity Tracking
 
@@ -87,9 +87,9 @@ docs/
 | `.github/agents/speckit.feedback.agent.md` | Agent definition with execution workflow |
 | `.github/prompts/speckit.feedback.prompt.md` | Prompt registration (minimal, points to agent) |
 | `.specify/scripts/bash/fetch-pr-feedback.sh` | Helper script to fetch PR data via `gh` CLI |
-| `docs/feedback/lessons.md` | Initial empty lessons database with header template |
-| `docs/feedback/AGENTS.md` | Agent instructions for GitHub Copilot to read lessons database |
-| `docs/feedback/CLAUDE.md` | Agent instructions for Claude Code to read lessons database (identical to AGENTS.md) |
+| `.specify/memory/lessons.md` | Initial empty lessons database with header template |
+| `.specify/memory/feedback/AGENTS.md` | Agent instructions for GitHub Copilot to read lessons database |
+| `.specify/memory/feedback/CLAUDE.md` | Agent instructions for Claude Code to read lessons database (identical to AGENTS.md) |
 
 ## Cross-Platform Agent Integration (FR-011)
 
@@ -97,8 +97,8 @@ Instead of modifying existing agent files, we use co-located instruction files t
 
 | File | AI Assistant | Discovery Mechanism |
 |------|--------------|---------------------|
-| `docs/feedback/AGENTS.md` | GitHub Copilot | "nearest AGENTS.md in directory tree" |
-| `docs/feedback/CLAUDE.md` | Claude Code | "CLAUDE.md from child directories" |
+| `.specify/memory/feedback/AGENTS.md` | GitHub Copilot | "nearest AGENTS.md in directory tree" |
+| `.specify/memory/feedback/CLAUDE.md` | Claude Code | "CLAUDE.md from child directories" |
 
 ### Agent Instruction Content (identical in both files)
 
@@ -109,7 +109,7 @@ When working in this repository, incorporate lessons learned from past PR review
 
 ## Instructions
 
-1. Read `docs/feedback/lessons.md` if it exists
+1. Read `.specify/memory/lessons.md` if it exists
 2. Filter lessons by relevance to current task:
    - For specifications: prioritize architecture, documentation lessons
    - For plans: prioritize architecture, testing, performance lessons

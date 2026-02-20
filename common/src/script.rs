@@ -210,7 +210,7 @@ impl NativeScript {
 }
 
 /// Datum (inline or hash)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Datum {
     Hash(DatumHash),
     Inline(Vec<u8>),

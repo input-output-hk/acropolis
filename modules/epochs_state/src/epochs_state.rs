@@ -170,7 +170,7 @@ impl EpochsState {
         }
 
         loop {
-            let mut ctx = ValidationContext::new(&context, &validation_topic);
+            let mut ctx = ValidationContext::new(&context, &validation_topic, "epochs_state");
 
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
@@ -257,7 +257,7 @@ impl EpochsState {
                 history.lock().await.commit(block_info.number, state);
             }
 
-            ctx.publish("epochs_state").await;
+            ctx.publish().await;
         }
     }
 

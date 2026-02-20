@@ -424,7 +424,7 @@ fn calculate_spo_rewards(
                     // that deregister after the staking snapshot but before the stability window
                     // should NOT receive member rewards. This applies to ALL pre-Babbage eras AFAIK.
                     if deregistrations.contains(delegator_stake_address) {
-                        info!(
+                        debug!(
                             "Recently deregistered member account {}, losing {to_pay}",
                             delegator_stake_address
                         );

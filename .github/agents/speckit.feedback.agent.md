@@ -40,10 +40,10 @@ Parse these optional flags:
 
 ### Step 2: Ensure Directory Structure
 
-Check if `docs/feedback/` directory exists. If not, create it with:
-- `docs/feedback/lessons.md` - Central lessons database (use template from data-model)
-- `docs/feedback/AGENTS.md` - Agent instructions for GitHub Copilot
-- `docs/feedback/CLAUDE.md` - Agent instructions for Claude Code
+Check if `.specify/memory/` directory exists (it should, as it contains `constitution.md`). Create the feedback subdirectory if needed:
+- `.specify/memory/lessons.md` - Central lessons database (alongside constitution.md)
+- `.specify/memory/feedback/` - Directory for PR-specific lesson files
+- `.specify/memory/feedback/pr-<number>-lessons.md` - Per-PR lesson files
 
 ### Step 3: Execute Based on Mode
 
@@ -54,7 +54,7 @@ Check if `docs/feedback/` directory exists. If not, create it with:
    - Mode B: Run `.specify/scripts/bash/fetch-pr-feedback.sh --find-current` to get the open PR for current branch (falls back to most recently merged)
 
 2. **Check for Existing PR Lessons** (Incremental Mode):
-   - If `docs/feedback/pr-<number>-lessons.md` exists:
+   - If `.specify/memory/feedback/pr-<number>-lessons.md` exists:
      - Read existing lessons from the file
      - Track existing lesson IDs for merge later
      - Note: No prompt needed - we will merge new lessons with existing ones
@@ -85,7 +85,7 @@ Check if `docs/feedback/` directory exists. If not, create it with:
      - Add only new lessons (those not matching existing by content)
      - Update `extracted_date` to today
      - Update `lesson_count` to new total
-   - If file is new: Create `docs/feedback/pr-<number>-lessons.md` with YAML frontmatter:
+   - If file is new: Create `.specify/memory/feedback/pr-<number>-lessons.md` with YAML frontmatter:
      ```yaml
      ---
      pr_number: <number>
@@ -123,7 +123,7 @@ Check if `docs/feedback/` directory exists. If not, create it with:
 ### Step 4: Update Central Lessons Database
 
 1. **Read Existing Database**:
-   - Load `docs/feedback/lessons.md`
+   - Load `.specify/memory/lessons.md`
    - Parse YAML frontmatter to get `total_lessons` and `last_updated`
    - Parse existing lesson entries to build lesson ID list
 
@@ -157,8 +157,8 @@ Output a summary to the user:
    - <count> testing lessons
    - ... (other categories with lessons)
 
-📝 Created: docs/feedback/pr-<number>-lessons.md
-📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
+📝 Created: .specify/memory/feedback/pr-<number>-lessons.md
+📊 Updated: .specify/memory/lessons.md (now contains <total> total lessons)
 
 <If any duplicates found in central database>
 ℹ️ <M> lessons matched existing entries (frequency incremented)
@@ -171,8 +171,8 @@ Output a summary to the user:
    - <new> new lessons added
    - <skipped> duplicates skipped
 
-📝 Updated: docs/feedback/pr-<number>-lessons.md (now contains <total> lessons)
-📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
+📝 Updated: .specify/memory/feedback/pr-<number>-lessons.md (now contains <total> lessons)
+📊 Updated: .specify/memory/lessons.md (now contains <total> total lessons)
 ```
 
 **For Manual Entry:**
@@ -180,26 +180,26 @@ Output a summary to the user:
 ✅ Added manual lesson to database
    Category: <category>
 
-📊 Updated: docs/feedback/lessons.md (now contains <total> total lessons)
+📊 Updated: .specify/memory/lessons.md (now contains <total> total lessons)
 ```
 
 ### Step 6: Commit Changes (if --commit flag) or Prompt
 
-**IMPORTANT**: This step runs for ALL modes (PR extraction, manual entry) whenever there are changes to `docs/feedback/`. Always check for uncommitted changes and proceed with commit if `--commit` flag is present.
+**IMPORTANT**: This step runs for ALL modes (PR extraction, manual entry) whenever there are changes to `.specify/memory/lessons.md` or PR lesson files. Always check for uncommitted changes and proceed with commit if `--commit` flag is present.
 
 Since feedback is captured before the PR is merged, the lessons files can be committed directly to the current feature branch.
 
 **If `--commit` flag is present**:
 
-First, check if there are any uncommitted changes to docs/feedback/:
+First, check if there are any uncommitted changes to .specify/memory/ lesson files:
 ```bash
-git status --short docs/feedback/
+git status --short .specify/memory/lessons.md .specify/memory/feedback/
 ```
 
 If there are changes, run the following git commands (get current branch name first):
 
 ```bash
-git add docs/feedback/
+git add .specify/memory/lessons.md .specify/memory/feedback/
 git commit -m "chore(feedback): <describe changes - PR lessons or manual entry>"
 git push origin <current-branch>
 ```
@@ -211,13 +211,13 @@ Use appropriate commit message:
 
 If no changes are pending, skip the commit and report:
 ```
-ℹ️ No uncommitted changes to docs/feedback/ - nothing to commit.
+ℹ️ No uncommitted changes to .specify/memory/ lessons - nothing to commit.
 ```
 
 **Output** (when changes committed):
 ```
 ✅ Changes committed and pushed!
-   git add docs/feedback/
+   git add .specify/memory/lessons.md .specify/memory/feedback/
    git commit -m "chore(feedback): ..."
    git push origin <current-branch>
 
@@ -229,7 +229,7 @@ Your lessons are now part of the PR - ready to merge!
 **Output**:
 ```
 📝 Ready to commit! Run:
-   git add docs/feedback/
+   git add .specify/memory/lessons.md .specify/memory/feedback/pr-<number>-lessons.md
    git commit -m "chore(feedback): capture lessons from PR #<number>"
    git push origin <your-branch>
 
@@ -243,7 +243,7 @@ This simplified workflow means:
 
 ## Lesson Entry Format
 
-Each lesson in the central database uses a markdown heading with a fenced YAML metadata block:
+Each lesson in the central database uses a Markdown heading with a fenced YAML metadata block:
 
 ```markdown
 ### L###

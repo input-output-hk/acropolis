@@ -178,7 +178,7 @@ impl DRepState {
                 h.get_or_init_with(|| State::new(storage_config))
             };
 
-            let mut ctx = ValidationContext::new(&context, &validation_topic);
+            let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
             let (certs_message, new_epoch) =
                 match &ctx.consume_sync(subs.certs.read_with_rollbacks().await)? {
@@ -267,7 +267,7 @@ impl DRepState {
                 history.lock().await.commit(block_info.number, state);
             }
 
-            ctx.publish("drep_state").await;
+            ctx.publish().await;
         }
     }
 

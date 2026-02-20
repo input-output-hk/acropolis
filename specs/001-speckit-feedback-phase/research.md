@@ -127,7 +127,7 @@ frequency: 1
 Prefer `expect()` over `unwrap()` with descriptive messages to improve debugging when panics occur.
 ```
 
-**Schema for lessons database header** (`docs/feedback/lessons.md`):
+**Schema for lessons database header** (`.specify/memory/lessons.md`):
 
 ```yaml
 ---

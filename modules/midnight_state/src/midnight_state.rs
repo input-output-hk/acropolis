@@ -12,9 +12,15 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+
+mod epoch_totals;
 mod state;
 use state::State;
+
+use crate::configuration::MidnightConfig;
+mod configuration;
+mod indexes;
 mod types;
 
 declare_cardano_reader!(
@@ -37,39 +43,63 @@ pub struct MidnightState;
 impl MidnightState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
     ) -> Result<()> {
         loop {
-            // Get a mutable state
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(State::new)
+                h.get_or_init_with(|| State::new(config.clone()))
             };
 
             match address_deltas_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((blk_info, deltas)) => {
                     if blk_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_info.number);
+                        warn!(
+                            block_number = blk_info.number,
+                            block_hash = %blk_info.hash,
+                            "applying rollback"
+                        );
                     }
 
                     if blk_info.new_epoch {
-                        state.handle_new_epoch()?;
+                        let summary = state.handle_new_epoch(blk_info.as_ref());
+                        info!(
+                            epoch = summary.epoch,
+                            era = ?summary.era,
+                            blocks = summary.blocks,
+                            delta_count = summary.delta_count,
+                            created_utxos = summary.created_utxos,
+                            spent_utxos = summary.spent_utxos,
+                            "epoch checkpoint"
+                        );
                     }
 
-                    state.handle_address_deltas(&deltas)?;
+                    state.start_block(blk_info.as_ref());
+                    state.handle_address_deltas(deltas.as_ref())?;
+                    state.finalise_block(blk_info.as_ref());
 
                     history.lock().await.commit(blk_info.number, state);
                 }
-                RollbackWrapper::Rollback(_) => {}
+                RollbackWrapper::Rollback(point) => {
+                    warn!(
+                        rollback_point = ?point,
+                        "received rollback wrapper message"
+                    );
+                }
             };
         }
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Get the config
+        let cfg = MidnightConfig::try_load(&config)?;
+
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
 
-        // Initalize unbounded state history
+        // Initialize unbounded state history for rollback-safe replay.
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "midnight_state",
             StateHistoryStore::Unbounded,
@@ -77,7 +107,7 @@ impl MidnightState {
 
         // Start the run task
         context.run(async move {
-            Self::run(history, address_deltas_reader)
+            Self::run(history, cfg, address_deltas_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });

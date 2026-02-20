@@ -55,7 +55,7 @@ pub struct Transaction {
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
-    pub vkey_witnesses: HashSet<VKeyWitness>,
+    pub vkey_witnesses: Vec<VKeyWitness>,
     pub script_witnesses: Vec<(ScriptHash, ScriptLang)>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: Vec<(DatumHash, Vec<u8>)>,
@@ -185,7 +185,7 @@ pub struct TxUTxODeltas {
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
 
     // VKey Witnesses
-    pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
+    pub vkey_witnesses: Option<Vec<VKeyWitness>>,
 
     // Scripts Witnesses Provided
     pub script_witnesses: Option<Vec<(ScriptHash, ScriptLang)>>,

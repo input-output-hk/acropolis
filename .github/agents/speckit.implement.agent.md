@@ -13,7 +13,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 ## Outline
 
 0. **Load Lessons Context** (if available):
-   - Check if `docs/feedback/lessons.md` exists in the repository
+   - Check if `.specify/memory/lessons.md` exists in the repository
    - If it exists, read the file and filter for lessons with categories: `code-quality`, `security`, `testing`
    - Keep relevant lessons in mind during implementation to avoid repeating past mistakes
    - Apply lessons proactively (e.g., if L007 says "check CLI dependencies", do that in your code)

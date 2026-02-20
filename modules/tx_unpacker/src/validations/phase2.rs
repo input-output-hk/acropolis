@@ -140,13 +140,12 @@ impl ArenaPool {
     ///
     /// Blocks if all arenas are in use, waiting for one to be returned.
     pub fn acquire(&self) -> PooledArena {
-        let arena = loop {
-            let mut guard = self.inner.arenas.lock().unwrap_or_else(|p| p.into_inner());
+        let mut guard = self.inner.arenas.lock().unwrap_or_else(|p| p.into_inner());
 
+        let arena = loop {
             if let Some(arena) = guard.pop_front() {
                 break arena;
             }
-
             guard = self.inner.condvar.wait(guard).unwrap_or_else(|p| p.into_inner());
         };
 
