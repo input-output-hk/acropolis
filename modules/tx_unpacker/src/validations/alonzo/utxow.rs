@@ -250,7 +250,9 @@ mod tests {
 
         let err = validate_script_integrity_hash(&mtx).unwrap_err();
         match *err {
-            UTxOWValidationError::ScriptIntegrityHashMismatch { expected, actual, .. } => {
+            UTxOWValidationError::ScriptIntegrityHashMismatch {
+                expected, actual, ..
+            } => {
                 assert!(expected.is_some(), "expected a computed hash");
                 assert!(actual.is_none(), "expected missing body hash");
             }
