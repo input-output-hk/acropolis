@@ -73,7 +73,6 @@ impl MidnightState {
                         );
                     }
 
-                    state.start_block(blk_info.as_ref());
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;
                     state.finalise_block(blk_info.as_ref());
 

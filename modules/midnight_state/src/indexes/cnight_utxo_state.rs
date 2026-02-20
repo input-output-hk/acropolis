@@ -16,8 +16,8 @@ pub struct CNightUTxOState {
 }
 
 impl CNightUTxOState {
-    /// Add the created UTxOs for one block to state
-    pub fn add_created_utxos(&mut self, block: BlockNumber, utxos: Vec<CNightCreation>) {
+    /// Add the created UTxOs for one block to state and return the number indexed.
+    pub fn add_created_utxos(&mut self, block: BlockNumber, utxos: Vec<CNightCreation>) -> usize {
         let mut identifiers = Vec::with_capacity(utxos.len());
 
         for creation in utxos {
@@ -31,7 +31,9 @@ impl CNightUTxOState {
             );
         }
 
+        let indexed_count = identifiers.len();
         self.created_utxos.insert(block, identifiers);
+        indexed_count
     }
 
     /// Add the spent UTxOs for one block to state

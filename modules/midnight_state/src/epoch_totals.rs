@@ -1,6 +1,4 @@
-use acropolis_common::{
-    AssetName, BlockInfo, CreatedUTxOExtended, Era, ExtendedAddressDelta, PolicyId,
-};
+use acropolis_common::{BlockInfo, Era};
 
 /// Epoch summary emitted by midnight-state logging runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,16 +8,8 @@ pub struct EpochSummary {
     pub indexed_night_utxos: usize,
 }
 
-trait EpochTotalsObserver {
-    fn start_block(&mut self, block: &BlockInfo);
-    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]);
-    fn finalise_block(&mut self, block: &BlockInfo);
-}
-
 #[derive(Clone, Default)]
 pub struct EpochTotals {
-    cnight_policy_id: PolicyId,
-    cnight_asset_name: AssetName,
     indexed_night_utxos: usize,
     last_checkpoint: Option<EpochCheckpoint>,
 }
@@ -40,24 +30,12 @@ impl EpochCheckpoint {
 }
 
 impl EpochTotals {
-    pub fn new(cnight_policy_id: PolicyId, cnight_asset_name: AssetName) -> Self {
-        Self {
-            cnight_policy_id,
-            cnight_asset_name,
-            ..Self::default()
-        }
-    }
-
-    pub fn start_block(&mut self, block: &BlockInfo) {
-        <Self as EpochTotalsObserver>::start_block(self, block);
-    }
-
-    pub fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
-        <Self as EpochTotalsObserver>::observe_deltas(self, deltas);
+    pub fn add_indexed_night_utxos(&mut self, count: usize) {
+        self.indexed_night_utxos += count;
     }
 
     pub fn finalise_block(&mut self, block: &BlockInfo) {
-        <Self as EpochTotalsObserver>::finalise_block(self, block);
+        self.last_checkpoint = Some(EpochCheckpoint::from_block(block));
     }
 
     pub fn summarise_completed_epoch(&self, boundary_block: &BlockInfo) -> EpochSummary {
@@ -78,40 +56,12 @@ impl EpochTotals {
         self.indexed_night_utxos = 0;
         self.last_checkpoint = None;
     }
-
-    fn is_indexed_night_utxo(&self, created: &CreatedUTxOExtended) -> bool {
-        created.value.assets.iter().any(|(policy, assets)| {
-            *policy == self.cnight_policy_id
-                && assets
-                    .iter()
-                    .any(|asset| asset.name == self.cnight_asset_name && asset.amount > 0)
-        })
-    }
-}
-
-impl EpochTotalsObserver for EpochTotals {
-    fn start_block(&mut self, _block: &BlockInfo) {}
-
-    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
-        self.indexed_night_utxos += deltas
-            .iter()
-            .flat_map(|delta| delta.created_utxos.iter())
-            .filter(|created| self.is_indexed_night_utxo(created))
-            .count();
-    }
-
-    fn finalise_block(&mut self, block: &BlockInfo) {
-        self.last_checkpoint = Some(EpochCheckpoint::from_block(block));
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{
-        Address, BlockHash, BlockIntent, BlockStatus, Datum, NativeAsset, TxHash, TxIdentifier,
-        UTxOIdentifier, Value,
-    };
+    use acropolis_common::{BlockHash, BlockIntent, BlockStatus};
 
     fn mk_block(number: u64, epoch: u64, era: Era) -> BlockInfo {
         BlockInfo {
@@ -130,52 +80,32 @@ mod tests {
         }
     }
 
-    fn mk_value(policy: PolicyId, name: AssetName, amount: u64) -> Value {
-        Value::new(0, vec![(policy, vec![NativeAsset { name, amount }])])
-    }
-
-    fn mk_created(index: u16, value: Value) -> CreatedUTxOExtended {
-        CreatedUTxOExtended {
-            utxo: UTxOIdentifier::new(TxHash::from([index as u8; 32]), index),
-            value,
-            datum: None::<Datum>,
-        }
-    }
-
-    fn mk_delta(created_utxos: Vec<CreatedUTxOExtended>) -> ExtendedAddressDelta {
-        ExtendedAddressDelta {
-            address: Address::None,
-            tx_identifier: TxIdentifier::new(1, 0),
-            spent_utxos: Vec::new(),
-            created_utxos,
-            sent: Value::default(),
-            received: Value::default(),
-        }
-    }
-
     #[test]
-    fn observe_deltas_counts_only_matching_cnight_creations() {
-        let cnight_policy = PolicyId::from([1u8; 28]);
-        let other_policy = PolicyId::from([2u8; 28]);
-        let cnight_asset = AssetName::new(b"CNIGHT").expect("valid asset name");
-        let other_asset = AssetName::new(b"OTHER").expect("valid asset name");
-
-        let mut totals = EpochTotals::new(cnight_policy, cnight_asset);
+    fn tracks_indexed_night_utxos_for_epoch() {
+        let mut totals = EpochTotals::default();
         let block = mk_block(10, 100, Era::Conway);
 
-        totals.start_block(&block);
-        totals.observe_deltas(&[mk_delta(vec![
-            mk_created(0, mk_value(cnight_policy, cnight_asset, 1)),
-            mk_created(1, mk_value(cnight_policy, cnight_asset, 0)),
-            mk_created(2, mk_value(cnight_policy, other_asset, 1)),
-            mk_created(3, mk_value(other_policy, cnight_asset, 1)),
-        ])]);
+        totals.add_indexed_night_utxos(2);
+        totals.add_indexed_night_utxos(1);
         totals.finalise_block(&block);
 
         let boundary = mk_block(11, 101, Era::Conway);
         let summary = totals.summarise_completed_epoch(&boundary);
         assert_eq!(summary.epoch, 100);
         assert_eq!(summary.era, Era::Conway);
-        assert_eq!(summary.indexed_night_utxos, 1);
+        assert_eq!(summary.indexed_night_utxos, 3);
+    }
+
+    #[test]
+    fn summarise_uses_boundary_epoch_when_checkpoint_absent() {
+        let mut totals = EpochTotals::default();
+        totals.add_indexed_night_utxos(7);
+
+        let boundary = mk_block(99, 501, Era::Conway);
+        let summary = totals.summarise_completed_epoch(&boundary);
+
+        assert_eq!(summary.epoch, 500);
+        assert_eq!(summary.era, Era::Conway);
+        assert_eq!(summary.indexed_night_utxos, 7);
     }
 }

@@ -18,7 +18,7 @@ use crate::{
 
 #[derive(Clone, Default)]
 pub struct State {
-    // Runtime-active in this PR: epoch totals observer used for logging summaries.
+    // Epoch aggregate emitted as telemetry when crossing an epoch boundary.
     epoch_totals: EpochTotals,
 
     // CNight UTxO spends and creations indexed by block
@@ -47,10 +47,6 @@ impl State {
         Ok(summary)
     }
 
-    pub fn start_block(&mut self, block: &BlockInfo) {
-        self.epoch_totals.start_block(block);
-    }
-
     pub fn finalise_block(&mut self, block: &BlockInfo) {
         self.epoch_totals.finalise_block(block);
     }
@@ -61,7 +57,6 @@ impl State {
         address_deltas: &AddressDeltasMessage,
     ) -> Result<()> {
         let deltas = address_deltas.as_extended_deltas()?;
-        self.epoch_totals.observe_deltas(deltas);
 
         let mut cnight_creations = Vec::new();
         let mut block_created_utxos: HashSet<UTxOIdentifier> = HashSet::new();
@@ -82,9 +77,13 @@ impl State {
         }
 
         // Add created and spent CNight utxos to state
-        if !cnight_creations.is_empty() {
-            self.utxos.add_created_utxos(block_info.number, cnight_creations);
-        }
+        let indexed_night_utxos = if !cnight_creations.is_empty() {
+            self.utxos.add_created_utxos(block_info.number, cnight_creations)
+        } else {
+            0
+        };
+        self.epoch_totals.add_indexed_night_utxos(indexed_night_utxos);
+
         if !cnight_spends.is_empty() {
             self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
         }
