@@ -15,7 +15,7 @@ pub struct AssetCreate {
     pub block_hash: BlockHash,
     pub block_timestamp: NaiveDateTime,
     pub tx_index_in_block: u32,
-    pub quantity: i64,
+    pub quantity: u64,
     pub holder_address: Address,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
@@ -27,7 +27,7 @@ pub struct AssetSpend {
     pub block_hash: BlockHash,
     pub block_timestamp: NaiveDateTime,
     pub tx_index_in_block: u32,
-    pub quantity: i64,
+    pub quantity: u64,
     pub holder_address: Address,
     pub utxo_tx_hash: TxHash,
     pub utxo_index: u16,
@@ -70,11 +70,15 @@ pub struct UTxOMeta {
     pub spend: Option<CNightSpend>,
 }
 
-impl From<&UTxOMeta> for AssetCreate {
-    fn from(meta: &UTxOMeta) -> Self {
+impl TryFrom<Option<&UTxOMeta>> for AssetCreate {
+    type Error = Error;
+
+    fn try_from(meta_opt: Option<&UTxOMeta>) -> Result<Self, Self::Error> {
+        let meta =
+            meta_opt.as_ref().ok_or_else(|| anyhow!("UTxO creation without existing record"))?;
         let creation = &meta.creation;
 
-        AssetCreate {
+        Ok(AssetCreate {
             block_number: creation.block_number,
             block_hash: creation.block_hash,
             block_timestamp: creation.block_timestamp,
@@ -83,14 +87,16 @@ impl From<&UTxOMeta> for AssetCreate {
             holder_address: creation.address.clone(),
             tx_hash: creation.utxo.tx_hash,
             utxo_index: creation.utxo.output_index,
-        }
+        })
     }
 }
 
-impl TryFrom<&UTxOMeta> for AssetSpend {
+impl TryFrom<Option<&UTxOMeta>> for AssetSpend {
     type Error = Error;
 
-    fn try_from(meta: &UTxOMeta) -> Result<Self, Self::Error> {
+    fn try_from(meta_opt: Option<&UTxOMeta>) -> Result<Self, Self::Error> {
+        let meta =
+            meta_opt.as_ref().ok_or_else(|| anyhow!("UTxO spend without existing record"))?;
         let spend = meta.spend.as_ref().ok_or_else(|| anyhow!("UTxO has no spend record"))?;
 
         Ok(AssetSpend {
@@ -110,7 +116,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
     pub address: Address,
-    pub quantity: i64,
+    pub quantity: u64,
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
