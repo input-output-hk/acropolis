@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Clone, Default)]
 pub struct State {
-    // Runtime-active in this PR: epoch totals observer used for logging summaries.
+    // Runtime-active observer: reports indexed CNight UTxO counts per epoch.
     epoch_totals: EpochTotals,
 
     // -----------------------------------------------------------------------
@@ -33,10 +33,14 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(_config: MidnightConfig) -> Self {
+    pub fn new(config: MidnightConfig) -> Self {
         Self {
-            _config,
-            ..Self::default()
+            epoch_totals: EpochTotals::new(config.cnight_policy_id, config.cnight_asset_name),
+            _utxos: CNightUTxOState::default(),
+            _candidates: CandidateState::default(),
+            _governance: GovernanceState::default(),
+            _parameters: ParametersState::default(),
+            _config: config,
         }
     }
 

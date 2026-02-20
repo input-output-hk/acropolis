@@ -68,10 +68,7 @@ impl MidnightState {
                         info!(
                             epoch = summary.epoch,
                             era = ?summary.era,
-                            blocks = summary.blocks,
-                            delta_count = summary.delta_count,
-                            created_utxos = summary.created_utxos,
-                            spent_utxos = summary.spent_utxos,
+                            indexed_night_utxos = summary.indexed_night_utxos,
                             "epoch checkpoint"
                         );
                     }
