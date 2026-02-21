@@ -34,7 +34,7 @@ pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
 use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
-use imbl::{OrdMap, OrdSet};
+use imbl::{HashMap as ImHashMap, OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
 use std::sync::{mpsc, Arc, Mutex};
@@ -132,12 +132,12 @@ pub struct State {
     /// Pending MIRs from reserves to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
-    pending_mir_reserves: HashMap<StakeAddress, i64>,
+    pending_mir_reserves: ImHashMap<StakeAddress, i64>,
 
     /// Pending MIRs from treasury to be applied at epoch boundary
     /// Key is stake address, value is the amount to add (or in Alonzo+, accumulated sum)
     /// Pre-Alonzo: last value wins (override). Alonzo+: values are summed.
-    pending_mir_treasury: HashMap<StakeAddress, i64>,
+    pending_mir_treasury: ImHashMap<StakeAddress, i64>,
 }
 
 impl State {
@@ -968,7 +968,7 @@ impl State {
     ///
     /// Called before SPDD generation (so MIRs are included in active stake) and again
     /// inside enter_epoch() (to ensure reserves are correct for rewards). The second call
-    /// is a no-op because `drain()` empties the pending maps on the first call.
+    /// is a no-op because `take()` replaces the pending maps with empty maps on the first call.
     ///
     /// Only registered accounts receive MIRs; deregistered accounts' MIRs stay in the source pot.
     pub fn apply_pending_mirs(&mut self) {
@@ -978,7 +978,7 @@ impl State {
             let mut total_not_registered: i64 = 0;
             let count = self.pending_mir_reserves.len();
 
-            for (stake_address, value) in self.pending_mir_reserves.drain() {
+            for (stake_address, value) in take(&mut self.pending_mir_reserves) {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
 
                 // Only apply MIR if the account is registered
@@ -1023,7 +1023,7 @@ impl State {
             let mut total_not_registered: i64 = 0;
             let count = self.pending_mir_treasury.len();
 
-            for (stake_address, value) in self.pending_mir_treasury.drain() {
+            for (stake_address, value) in take(&mut self.pending_mir_treasury) {
                 let mut stake_addresses = self.stake_addresses.lock().unwrap();
 
                 // Only apply MIR if the account is registered
