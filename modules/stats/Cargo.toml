@@ -1,0 +1,21 @@
+[package]
+name = "acropolis_module_stats"
+version = "0.1.0"
+edition = "2021"
+authors = ["Alex Woods <alex.woods@iohk.io>"]
+description = "Statistics"
+license = "Apache-2.0"
+
+[dependencies]
+acropolis_common = { path = "../../common" }
+
+caryatid_sdk = { workspace = true }
+anyhow = "1.0"
+config = "0.15.11"
+tracing = { workspace = true }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemalloc-ctl = { version = "0.6.1", features = ["stats"] }
+
+[lib]
+path = "src/stats.rs"

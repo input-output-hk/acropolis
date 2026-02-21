@@ -47,6 +47,8 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
+#[cfg(not(target_env = "msvc"))]
+const DEFAULT_PROFILE: (&str, PauseType) = ("profile", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
 const DEFAULT_DIRECTORY: &str = "../../modules/mithril_snapshot_fetcher/downloads";
 const DEFAULT_NETWORK_NAME: &str = "mainnet";
@@ -273,6 +275,9 @@ impl MithrilSnapshotFetcher {
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
         let stop_constraint =
             PauseType::from_config(&config, DEFAULT_STOP).unwrap_or(PauseType::NoPause);
+        #[cfg(not(target_env = "msvc"))]
+        let profile_constraint =
+            PauseType::from_config(&config, DEFAULT_PROFILE).unwrap_or(PauseType::NoPause);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -359,6 +364,23 @@ impl MithrilSnapshotFetcher {
                             tip_slot: None,
                             era,
                         };
+
+                        // Check profile constraint
+                        #[cfg(not(target_env = "msvc"))]
+                        if profile_constraint.should_pause(&block_info) {
+                            let filename = format!(
+                                "memory-{}.jeprof",
+                                profile_constraint.get_filename_part(&block_info)
+                            );
+                            info!("Dumping jemalloc profile to {} ...", filename);
+                            let cfn = std::ffi::CString::new(filename)?;
+                            unsafe {
+                                let _ = tikv_jemalloc_ctl::raw::write(
+                                    b"prof.dump\0",
+                                    cfn.as_ptr() as *const _,
+                                );
+                            }
+                        }
 
                         // Check pause constraint
                         if pause_constraint.should_pause(&block_info) {
