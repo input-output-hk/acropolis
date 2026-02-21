@@ -17,7 +17,7 @@ block-publish-topic = "cardano.block.proposed"
 
 [module.peer-network-interface]
 block-topic = "cardano.block.proposed" # Skip validation for indexer
-sync-point = "dynamic"
+sync-point = "tip"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
