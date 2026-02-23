@@ -101,14 +101,21 @@ mod tests {
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
     )]
     #[test_case(validation_fixture!(
         "shelley",
         "b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46"
     ) =>
         matches Ok(());
-        "valid transaction 2 - with protocol update"
+        "shelley - valid transaction 2 - with protocol update"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "d8f8be5410a1791a7c82dedf9b9f2d03aa014ea3e81a73b48e65441193017bdc"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - with CCMember Certificate"
     )]
     #[test_case(validation_fixture!(
         "shelley",
