@@ -65,6 +65,8 @@ impl State {
         let mut candidate_registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
+        let mut indexed_governance_technical_committee_datums = 0usize;
+        let mut indexed_governance_council_datums = 0usize;
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             self.collect_cnight_creations(
@@ -92,7 +94,10 @@ impl State {
                 &block_created_registrations,
             ));
 
-            self.collect_governance_datums(delta, block_info.number);
+            let (indexed_technical_committee, indexed_council) =
+                self.collect_governance_datums(delta, block_info.number);
+            indexed_governance_technical_committee_datums += indexed_technical_committee;
+            indexed_governance_council_datums += indexed_council;
         }
 
         // Add created and spent CNight utxos to state
@@ -116,6 +121,10 @@ impl State {
         }
 
         self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
+        self.epoch_totals.add_indexed_governance_datums(
+            indexed_governance_technical_committee_datums,
+            indexed_governance_council_datums,
+        );
         Ok(())
     }
 
@@ -260,14 +269,16 @@ impl State {
         &mut self,
         delta: &ExtendedAddressDelta,
         block_number: BlockNumber,
-    ) {
+    ) -> (usize, usize) {
         let is_technical_committee_address =
             delta.address == self.config.technical_committee_address;
         let is_council_address = delta.address == self.config.council_address;
         if !is_technical_committee_address && !is_council_address {
-            return;
+            return (0, 0);
         }
 
+        let mut indexed_technical_committee = 0usize;
+        let mut indexed_council = 0usize;
         for created in &delta.created_utxos {
             let Some(datum) = &created.datum else {
                 continue;
@@ -276,15 +287,20 @@ impl State {
             if is_technical_committee_address
                 && created.value.assets.contains_key(&self.config.technical_committee_policy_id)
             {
-                self.governance.insert_technical_committee_datum(block_number, datum.clone());
+                if self.governance.insert_technical_committee_datum(block_number, datum.clone()) {
+                    indexed_technical_committee += 1;
+                }
             }
 
             if is_council_address
                 && created.value.assets.contains_key(&self.config.council_policy_id)
             {
-                self.governance.insert_council_datum(block_number, datum.clone());
+                if self.governance.insert_council_datum(block_number, datum.clone()) {
+                    indexed_council += 1;
+                }
             }
         }
+        (indexed_technical_committee, indexed_council)
     }
 }
 
