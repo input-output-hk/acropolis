@@ -14,11 +14,17 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
+async-trait = "0.1"
 config = { workspace = true }
 chrono = { workspace = true }
+prost = "0.13"
 serde = { workspace = true }
 tokio = { workspace = true }
+tonic = { version = "0.12", features = ["transport"] }
 tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.12"
 
 [lib]
 path = "src/midnight_state.rs"

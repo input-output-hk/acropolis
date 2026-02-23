@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package midnight_state;
+
+service MidnightState {
+  rpc GetAssetCreates (AssetCreatesRequest) returns (AssetCreatesResponse);
+  rpc GetAssetSpends (AssetSpendsRequest) returns (AssetSpendsResponse);
+  rpc GetRegistrations (RegistrationsRequest) returns (RegistrationsResponse);
+  rpc GetDeregistrations (DeregistrationsRequest) returns (DeregistrationsResponse);
+  rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
+  rpc GetCouncilDatum (CouncilDatumRequest) returns (CouncilDatumResponse);
+  rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
+}
+
+message AssetCreatesRequest {}
+message AssetCreatesResponse {}
+
+message AssetSpendsRequest {}
+message AssetSpendsResponse {}
+
+message RegistrationsRequest {}
+message RegistrationsResponse {}
+
+message DeregistrationsRequest {}
+message DeregistrationsResponse {}
+
+message TechnicalCommitteeDatumRequest {}
+message TechnicalCommitteeDatumResponse {}
+
+message CouncilDatumRequest {}
+message CouncilDatumResponse {}
+
+message AriadneParametersRequest {}
+message AriadneParametersResponse {}
