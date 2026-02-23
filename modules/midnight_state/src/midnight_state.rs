@@ -68,15 +68,12 @@ impl MidnightState {
                         info!(
                             epoch = summary.epoch,
                             era = ?summary.era,
-                            blocks = summary.blocks,
-                            delta_count = summary.delta_count,
-                            created_utxos = summary.created_utxos,
-                            spent_utxos = summary.spent_utxos,
+                            indexed_night_utxo_creations = summary.indexed_night_utxo_creations,
+                            indexed_night_utxo_spends = summary.indexed_night_utxo_spends,
                             "epoch checkpoint"
                         );
                     }
 
-                    state.start_block(blk_info.as_ref());
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;
                     state.finalise_block(blk_info.as_ref());
 
