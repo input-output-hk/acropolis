@@ -11,27 +11,27 @@ use chrono::NaiveDateTime;
 /// ---------------------------------------------------------------------------
 #[allow(dead_code)]
 pub struct AssetCreate {
-    pub block_number: BlockNumber,
-    pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
-    pub tx_index_in_block: u32,
-    pub quantity: u64,
     pub holder_address: Address,
+    pub quantity: u64,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
+    pub block_number: BlockNumber,
+    pub block_hash: BlockHash,
+    pub tx_index_in_block: u32,
+    pub block_timestamp: i64,
 }
 
 #[allow(dead_code)]
 pub struct AssetSpend {
+    pub holder_address: Address,
+    pub quantity: u64,
+    pub spending_tx_hash: TxHash,
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
     pub tx_index_in_block: u32,
-    pub quantity: u64,
-    pub holder_address: Address,
+    pub block_timestamp: i64,
     pub utxo_tx_hash: TxHash,
     pub utxo_index: u16,
-    pub spending_tx_hash: TxHash,
 }
 
 #[allow(dead_code)]
@@ -121,7 +121,7 @@ pub struct CNightCreation {
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
     pub tx_index: u32,
-    pub block_timestamp: NaiveDateTime,
+    pub block_timestamp: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -130,7 +130,7 @@ pub struct CNightSpend {
     pub block_hash: BlockHash,
     pub tx_hash: TxHash,
     pub tx_index: u32,
-    pub block_timestamp: NaiveDateTime,
+    pub block_timestamp: i64,
 }
 
 #[derive(Clone)]
