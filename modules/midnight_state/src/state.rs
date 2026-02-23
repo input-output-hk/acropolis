@@ -65,6 +65,7 @@ impl State {
         let mut candidate_registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
+        let mut indexed_parameter_datums = 0usize;
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             self.collect_cnight_creations(
@@ -92,7 +93,7 @@ impl State {
                 &block_created_registrations,
             ));
 
-            self.collect_parameter_datums(delta, block_info.epoch);
+            indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
         }
 
         // Add created and spent CNight utxos to state
@@ -116,6 +117,7 @@ impl State {
         }
 
         self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
+        self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
         Ok(())
     }
 
@@ -256,20 +258,24 @@ impl State {
         deregistrations
     }
 
-    fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) {
+    fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) -> usize {
         if !delta.received.assets.contains_key(&self.config.permissioned_candidate_policy) {
-            return;
+            return 0;
         }
 
+        let mut indexed = 0usize;
         for created in &delta.created_utxos {
             if !created.value.assets.contains_key(&self.config.permissioned_candidate_policy) {
                 continue;
             }
 
             if let Some(datum) = &created.datum {
-                self.parameters.add_parameter_datum(epoch, datum.clone());
+                if self.parameters.add_parameter_datum(epoch, datum.clone()) {
+                    indexed += 1;
+                }
             }
         }
+        indexed
     }
 }
 
