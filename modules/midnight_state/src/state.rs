@@ -274,20 +274,13 @@ impl State {
             };
 
             if is_technical_committee_address
-                && created
-                    .value
-                    .assets
-                    .contains_key(&self.config.technical_committee_policy_id)
+                && created.value.assets.contains_key(&self.config.technical_committee_policy_id)
             {
-                self.governance
-                    .insert_technical_committee_datum(block_number, datum.clone());
+                self.governance.insert_technical_committee_datum(block_number, datum.clone());
             }
 
             if is_council_address
-                && created
-                    .value
-                    .assets
-                    .contains_key(&self.config.council_policy_id)
+                && created.value.assets.contains_key(&self.config.council_policy_id)
             {
                 self.governance.insert_council_datum(block_number, datum.clone());
             }
@@ -654,9 +647,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state
-                .governance
-                .get_technical_committee_datum(block_info.number),
+            state.governance.get_technical_committee_datum(block_info.number),
             Some(technical_datum)
         );
         assert_eq!(
@@ -703,9 +694,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state
-                .governance
-                .get_technical_committee_datum(block_info.number),
+            state.governance.get_technical_committee_datum(block_info.number),
             None
         );
     }
@@ -768,19 +757,13 @@ mod tests {
         history.commit(block2.number, state);
 
         assert_eq!(
-            history
-                .current()
-                .unwrap()
-                .governance
-                .get_technical_committee_datum(block2.number),
+            history.current().unwrap().governance.get_technical_committee_datum(block2.number),
             Some(datum_b.clone())
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
-            rolled_back_state
-                .governance
-                .get_technical_committee_datum(block2.number),
+            rolled_back_state.governance.get_technical_committee_datum(block2.number),
             Some(datum_a)
         );
 
@@ -800,11 +783,7 @@ mod tests {
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
-            history
-                .current()
-                .unwrap()
-                .governance
-                .get_technical_committee_datum(block2.number),
+            history.current().unwrap().governance.get_technical_committee_datum(block2.number),
             Some(datum_c)
         );
     }
