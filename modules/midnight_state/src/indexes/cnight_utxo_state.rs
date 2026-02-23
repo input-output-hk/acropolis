@@ -84,3 +84,69 @@ impl CNightUTxOState {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::{Address, BlockHash, TxHash};
+    use chrono::NaiveDateTime;
+
+    fn test_creation(utxo: UTxOIdentifier) -> CNightCreation {
+        CNightCreation {
+            address: Address::default(),
+            quantity: 42,
+            utxo,
+            block_number: 1,
+            block_hash: BlockHash::default(),
+            tx_index: 7,
+            block_timestamp: NaiveDateTime::default(),
+        }
+    }
+
+    #[test]
+    fn add_spent_utxos_fails_without_creation() {
+        let mut state = CNightUTxOState::default();
+        let utxo = UTxOIdentifier::new(TxHash::default(), 0);
+        let spend = CNightSpend {
+            block_number: 2,
+            block_hash: BlockHash::default(),
+            tx_hash: TxHash::default(),
+            tx_index: 3,
+            block_timestamp: NaiveDateTime::default(),
+        };
+
+        let err = state
+            .add_spent_utxos(2, vec![(utxo, spend)])
+            .expect_err("expected missing creation to error");
+        assert!(err.to_string().contains("UTxO spend without existing record"));
+    }
+
+    #[test]
+    fn get_asset_spends_errors_when_spend_missing() {
+        let mut state = CNightUTxOState::default();
+        let utxo = UTxOIdentifier::new(TxHash::default(), 1);
+
+        state
+            .utxo_index
+            .insert(utxo, UTxOMeta { creation: test_creation(utxo), spend: None });
+        state.spent_utxos.insert(1, vec![utxo]);
+
+        match state.get_asset_spends(1, 1) {
+            Ok(_) => panic!("expected missing spend to error"),
+            Err(err) => assert!(err.to_string().contains("UTxO has no spend record")),
+        }
+    }
+
+    #[test]
+    fn get_asset_creates_errors_when_creation_missing() {
+        let mut state = CNightUTxOState::default();
+        let utxo = UTxOIdentifier::new(TxHash::default(), 2);
+
+        state.created_utxos.insert(1, vec![utxo]);
+
+        match state.get_asset_creates(1, 1) {
+            Ok(_) => panic!("expected missing creation to error"),
+            Err(err) => assert!(err.to_string().contains("UTxO creation without existing record")),
+        }
+    }
+}
