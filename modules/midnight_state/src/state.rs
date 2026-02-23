@@ -269,10 +269,11 @@ impl State {
                 continue;
             }
 
-            if let Some(datum) = &created.datum {
-                if self.parameters.add_parameter_datum(epoch, datum.clone()) {
+            match &created.datum {
+                Some(datum) if self.parameters.add_parameter_datum(epoch, datum.clone()) => {
                     indexed += 1;
                 }
+                _ => {}
             }
         }
         indexed
