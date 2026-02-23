@@ -14,7 +14,6 @@ acropolis_common = { path = "../../common" }
 caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
-async-trait = "0.1"
 config = { workspace = true }
 chrono = { workspace = true }
 prost = "0.13"
@@ -25,6 +24,10 @@ tracing = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[package.metadata.cargo-shear]
+ignored = ["prost"]
 
 [lib]
 path = "src/midnight_state.rs"
