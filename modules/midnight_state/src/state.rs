@@ -77,16 +77,17 @@ impl State {
         }
 
         // Add created and spent CNight utxos to state
-        let indexed_night_utxos = if !cnight_creations.is_empty() {
+        let indexed_night_creations = if !cnight_creations.is_empty() {
             self.utxos.add_created_utxos(block_info.number, cnight_creations)
         } else {
             0
         };
-        self.epoch_totals.add_indexed_night_utxos(indexed_night_utxos);
-
-        if !cnight_spends.is_empty() {
-            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
-        }
+        let indexed_night_spends = if !cnight_spends.is_empty() {
+            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?
+        } else {
+            0
+        };
+        self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
         Ok(())
     }
 

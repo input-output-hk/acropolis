@@ -68,7 +68,8 @@ impl MidnightState {
                         info!(
                             epoch = summary.epoch,
                             era = ?summary.era,
-                            indexed_night_utxos = summary.indexed_night_utxos,
+                            indexed_night_utxo_creations = summary.indexed_night_utxo_creations,
+                            indexed_night_utxo_spends = summary.indexed_night_utxo_spends,
                             "epoch checkpoint"
                         );
                     }

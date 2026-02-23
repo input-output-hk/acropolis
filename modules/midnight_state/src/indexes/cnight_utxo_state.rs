@@ -16,7 +16,7 @@ pub struct CNightUTxOState {
 }
 
 impl CNightUTxOState {
-    /// Add the created UTxOs for one block to state and return the number indexed.
+    /// Add the created UTxOs for one block to state and return count inserted.
     pub fn add_created_utxos(&mut self, block: BlockNumber, utxos: Vec<CNightCreation>) -> usize {
         let mut identifiers = Vec::with_capacity(utxos.len());
 
@@ -31,17 +31,17 @@ impl CNightUTxOState {
             );
         }
 
-        let indexed_count = identifiers.len();
+        let inserted = identifiers.len();
         self.created_utxos.insert(block, identifiers);
-        indexed_count
+        inserted
     }
 
-    /// Add the spent UTxOs for one block to state
+    /// Add the spent UTxOs for one block to state and return count inserted.
     pub fn add_spent_utxos(
         &mut self,
         block: BlockNumber,
         utxos: Vec<(UTxOIdentifier, CNightSpend)>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let mut identifiers = Vec::with_capacity(utxos.len());
 
         for (identifier, spend) in utxos {
@@ -53,9 +53,10 @@ impl CNightUTxOState {
             }
         }
 
+        let inserted = identifiers.len();
         self.spent_utxos.insert(block, identifiers);
 
-        Ok(())
+        Ok(inserted)
     }
 
     #[allow(dead_code)]
