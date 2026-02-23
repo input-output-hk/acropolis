@@ -6,7 +6,7 @@
 [global.startup]
 network-name = "preview"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
-sync-mode = "mithril"      # Options: "mithril" | "upstream"
+sync-mode = "upstream"      # Options: "mithril" | "upstream"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -15,6 +15,7 @@ topic = "cardano.sequence.start"
 [module.genesis-bootstrapper]
 
 [module.mithril-snapshot-fetcher]
+sync-mode = "upstream"
 aggregator-url = "https://aggregator.pre-release-preview.api.mithril.network/aggregator"
 genesis-key = "5b3132372c37332c3132342c3136312c362c3133372c3133312c3231332c3230372c3131372c3139382c38352c3137362c3139392c3136322c3234312c36382c3132332c3131392c3134352c31332c3233322c3234332c34392c3232392c322c3234392c3230352c3230352c33392c3233352c34345d"
 # Download max age in hours. E.g. 8 means 8 hours (if there isn't any snapshot within this time range download from Mithril)
@@ -32,18 +33,27 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 # Core Module Configurations
 # ============================================================================
 [module.peer-network-interface]
-sync-point = "dynamic"
+# Use "origin" for genesis+upstream: no bootstrap module sends the sync command.
+# Use "dynamic" for snapshot+upstream or genesis+mithril (bootstrapper/MSF sends it).
+sync-point = "origin"
+block-flow-mode = "consensus"
 node-addresses = [
     "preview-node.play.dev.cardano.org:3001",
 ]
 magic-number = 2
 
 [module.consensus]
+validation-timeout = 60  # seconds (default 60)
+# Security parameter k — maximum fork depth (Praos Common Prefix parameter)
+security-parameter = 2160
+# Match PNI's consensus-mode topics
+consensus-topic = "cardano.consensus.offers"
+publish-consensus-topic = "cardano.consensus.wants"
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
-#           "cardano.validation.vrf",
-#           "cardano.validation.kes",
+           "cardano.validation.vrf",
+           "cardano.validation.kes",
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
@@ -172,9 +182,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-#[module.block-vrf-validator]
+[module.block-vrf-validator]
 
-#[module.block-kes-validator]
+[module.block-kes-validator]
 
 [module.clock]
 

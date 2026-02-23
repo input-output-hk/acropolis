@@ -269,26 +269,21 @@ impl ConsensusRuntime {
                     "Block {} has no parent hash (genesis/EB)",
                     block_info.number
                 );
-                if self.tree.is_empty() {
-                    if let Err(e) =
-                        self.tree.set_root(block_info.hash, block_info.number, block_info.slot)
-                    {
-                        error!("Failed to set root: {e}");
-                        return;
-                    }
-                    self.block_data
-                        .insert(block_info.hash, (block_info.clone(), raw_block.clone()));
-
-                    let msg = Arc::new(Message::Cardano((
-                        block_info.clone(),
-                        CardanoMessage::BlockAvailable(raw_block.clone()),
-                    )));
-                    self.context
-                        .message_bus
-                        .publish(&self.publish_blocks_topic, msg)
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                if self.tree.get_block(&block_info.hash).is_none() {
+                    error!(
+                        "BlockAvailable for unknown block {} (not offered) — dropping",
+                        block_info.hash
+                    );
+                    return;
                 }
+
+                // Tree was bootstrapped from BlockOffered; add genesis body so descendants can fire
+                self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
+
+                if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+                    error!("Failed to add genesis block body: {e}");
+                }
+                self.drain_and_publish_events().await;
                 return;
             }
             Err(e) => {
@@ -297,59 +292,50 @@ impl ConsensusRuntime {
             }
         };
 
-        // If tree is empty, set root using parent as virtual root
-        if self.tree.is_empty() {
-            let parent_number = block_info.number.saturating_sub(1);
-            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
-                error!("Failed to set tree root: {e}");
-                return;
-            }
-            debug!("Tree root set to parent block {parent_number}");
+        if block_info.number <= 2 {
+            info!(
+                block = block_info.number,
+                hash = %block_info.hash,
+                tree_empty = self.tree.is_empty(),
+                parent_hash = %parent_hash,
+                "Received BlockAvailable"
+            );
+        }
+
+        let Some(existing) = self.tree.get_block(&block_info.hash) else {
+            error!(
+                "BlockAvailable for unknown block {} (not offered) — dropping",
+                block_info.hash
+            );
+            return;
+        };
+
+        // If this block was previously offered, guard against conflicting metadata.
+        if existing.parent != Some(parent_hash) || existing.number != block_info.number {
+            warn!(
+                "Ignoring block {} due to conflicting tree metadata",
+                block_info.number
+            );
+            return;
         }
 
         // Store block data for later reconstruction
         self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
 
-        let mut wanted = Vec::new();
-        let block_already_registered = self.tree.get_block(&block_info.hash).is_some();
-        if !block_already_registered {
-            // Register block with the tree (chain selection)
-            wanted = match self.tree.check_block_wanted(
-                block_info.hash,
-                parent_hash,
-                block_info.number,
-                block_info.slot,
-            ) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!("Block {} rejected by tree: {e}", block_info.number);
-                    return;
-                }
-            };
-        }
-
-        // If this block was previously offered, guard against conflicting metadata.
-        if let Some(existing) = self.tree.get_block(&block_info.hash) {
-            if existing.parent != Some(parent_hash) || existing.number != block_info.number {
-                warn!(
-                    "Ignoring block {} due to conflicting tree metadata",
-                    block_info.number
-                );
-                return;
-            }
-        }
-
-        // Notify PNI about any newly-wanted blocks on a chain switch.
-        let newly_wanted: Vec<BlockHash> =
-            wanted.iter().copied().filter(|h| *h != block_info.hash).collect();
-        let wanted_msgs = build_block_wanted_messages(&self.tree, &newly_wanted);
-        self.publish_block_wanted_messages(&wanted_msgs).await;
-
         // We already have the body — store it (idempotent if already stored).
         let had_body =
             self.tree.get_block(&block_info.hash).map(|b| b.body.is_some()).unwrap_or(false);
-        if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
-            error!("Failed to add block body: {e}");
+        match self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+            Ok(()) => {
+                info!(
+                    block = block_info.number,
+                    hash = %block_info.hash,
+                    "add_block succeeded, firing block_proposed"
+                );
+            }
+            Err(e) => {
+                error!("Failed to add block body: {e}");
+            }
         }
 
         // Collect and publish observer events
@@ -385,8 +371,10 @@ impl ConsensusRuntime {
         slot: u64,
     ) {
         // Bootstrap the tree with a virtual root when the first offer arrives.
+        // For block 0 (genesis/first block), use u64::MAX so that 0 == parent_number + 1 (wraparound).
         if self.tree.is_empty() {
-            let parent_number = number.saturating_sub(1);
+            let parent_number = number.wrapping_sub(1);
+
             if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
                 error!("Failed to set tree root from offered block: {e}");
                 return;
@@ -395,14 +383,12 @@ impl ConsensusRuntime {
         }
 
         if self.tree.get_block(&parent_hash).is_none() {
-            let parent_number = number.saturating_sub(1);
+            let parent_number = number.wrapping_sub(1);
+
             warn!(
                 "Parent {parent_hash} not in tree for offered block {hash} — re-rooting tree at block {parent_number}"
             );
-            self.tree = ConsensusTree::new(
-                self.tree.k(),
-                self.tree.take_observer(),
-            );
+            self.tree = ConsensusTree::new(self.tree.k(), self.tree.take_observer());
             self.block_data.clear();
             if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
                 error!("Failed to re-root tree: {e}");
@@ -446,8 +432,7 @@ impl ConsensusRuntime {
 
     /// Collect observer events, resolve to messages, and publish.
     async fn drain_and_publish_events(&mut self) {
-        let raw_events: Vec<ObserverEvent> =
-            self.event_queue.lock().unwrap().drain(..).collect();
+        let raw_events: Vec<ObserverEvent> = self.event_queue.lock().unwrap().drain(..).collect();
         for event in &raw_events {
             match event {
                 ObserverEvent::BlockProposed { .. } => self.stats.proposed += 1,
@@ -584,6 +569,11 @@ fn resolve_observer_events(
         match event {
             ObserverEvent::BlockProposed { hash } => {
                 if let Some((info, raw)) = block_data.get(&hash) {
+                    info!(
+                        block = info.number,
+                        hash = %hash,
+                        "Publishing BlockProposed to validators"
+                    );
                     let msg = Arc::new(Message::Cardano((
                         info.clone(),
                         CardanoMessage::BlockAvailable(raw.clone()),

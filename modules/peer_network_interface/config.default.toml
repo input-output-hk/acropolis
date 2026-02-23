@@ -24,7 +24,7 @@ cache-dir = "upstream-cache"
 # Block flow mode determines how blocks are synchronized:
 # - direct: blocks are auto-fetched as announced, peer-network-interface handles the full flow.
 # - consensus: block headers are published as offers and are only fetched when consensus sends back a BlockWanted message.
-block-flow-mode = "direct"
+block-flow-mode = "consensus"
 
 # The consensus module subscribes to this to receive block announcements
 consensus-topic = "cardano.consensus.offers"

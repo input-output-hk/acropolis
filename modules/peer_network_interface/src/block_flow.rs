@@ -390,9 +390,7 @@ impl ConsensusFlowState {
 
     fn handle_roll_forward(&mut self, peer: PeerId, header: &Header) {
         let parent_hash = header.parent_hash.unwrap_or_default();
-        self.headers
-            .entry((header.slot, header.hash))
-            .or_insert_with(|| header.clone());
+        self.headers.entry((header.slot, header.hash)).or_insert_with(|| header.clone());
         self.tracker.track_announcement(peer, header.slot, header.number, header.hash, parent_hash);
     }
 
@@ -430,14 +428,14 @@ impl ConsensusFlowState {
                         info!("Offered block (consensus) {}", hash);
                     }
 
-                    let message = Arc::new(Message::Consensus(
-                        ConsensusMessage::BlockOffered(BlockOfferedMessage {
+                    let message = Arc::new(Message::Consensus(ConsensusMessage::BlockOffered(
+                        BlockOfferedMessage {
                             hash,
                             slot,
                             number,
                             parent_hash,
-                        }),
-                    ));
+                        },
+                    )));
                     if let Err(e) = self.context.publish(&self.topic, message).await {
                         error!("Failed to publish consensus event: {e}");
                     }
