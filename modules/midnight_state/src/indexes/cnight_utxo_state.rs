@@ -126,9 +126,13 @@ mod tests {
         let mut state = CNightUTxOState::default();
         let utxo = UTxOIdentifier::new(TxHash::default(), 1);
 
-        state
-            .utxo_index
-            .insert(utxo, UTxOMeta { creation: test_creation(utxo), spend: None });
+        state.utxo_index.insert(
+            utxo,
+            UTxOMeta {
+                creation: test_creation(utxo),
+                spend: None,
+            },
+        );
         state.spent_utxos.insert(1, vec![utxo]);
 
         match state.get_asset_spends(1, 1) {
