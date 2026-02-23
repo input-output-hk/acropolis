@@ -286,18 +286,16 @@ impl State {
 
             if is_technical_committee_address
                 && created.value.assets.contains_key(&self.config.technical_committee_policy_id)
+                && self.governance.insert_technical_committee_datum(block_number, datum.clone())
             {
-                if self.governance.insert_technical_committee_datum(block_number, datum.clone()) {
-                    indexed_technical_committee += 1;
-                }
+                indexed_technical_committee += 1;
             }
 
             if is_council_address
                 && created.value.assets.contains_key(&self.config.council_policy_id)
+                && self.governance.insert_council_datum(block_number, datum.clone())
             {
-                if self.governance.insert_council_datum(block_number, datum.clone()) {
-                    indexed_council += 1;
-                }
+                indexed_council += 1;
             }
         }
         (indexed_technical_committee, indexed_council)
