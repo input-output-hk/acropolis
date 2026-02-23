@@ -25,9 +25,11 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use hex::decode;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -307,6 +309,12 @@ impl BlockInfo {
             slot: self.slot,
         }
     }
+
+    pub fn to_naive_datetime(&self) -> NaiveDateTime {
+        DateTime::<Utc>::from_timestamp(self.timestamp as i64, 0)
+            .expect("invalid UNIX timestamp")
+            .naive_utc()
+    }
 }
 
 // For stake address registration/deregistration (handles deposits/refunds)
@@ -397,7 +405,7 @@ pub struct CreatedUTxOExtended {
     pub utxo: UTxOIdentifier,
 
     /// Full value of the created UTxO
-    pub value: Value,
+    pub value: ValueMap,
 
     /// Datum attached to the created UTxO, if present
     pub datum: Option<Datum>,
@@ -417,8 +425,8 @@ pub struct ExtendedAddressDelta {
     pub created_utxos: Vec<CreatedUTxOExtended>,
 
     /// Sums of spent and created UTxOs
-    pub sent: Value,
-    pub received: Value,
+    pub sent: ValueMap,
+    pub received: ValueMap,
 }
 
 /// Stake balance change
@@ -485,6 +493,7 @@ pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
 pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
 
 #[derive(
+    Default,
     Debug,
     Copy,
     Clone,
@@ -492,7 +501,6 @@ pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
     PartialEq,
     Hash,
     serde::Serialize,
-    serde::Deserialize,
     minicbor::Encode,
     minicbor::Decode,
 )]
@@ -526,6 +534,17 @@ impl AssetName {
 
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        AssetName::new(s.as_bytes())
+            .ok_or_else(|| SerdeError::custom("AssetName too long (max 32 bytes)"))
     }
 }
 
@@ -613,7 +632,15 @@ impl Add for Value {
 
 /// Hashmap representation of Value (lovelace + multiasset)
 #[derive(
-    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct ValueMap {
     #[n(0)]
@@ -651,6 +678,27 @@ impl ValueMap {
                     .saturating_add(asset.amount);
             }
         }
+    }
+
+    pub fn remove_zero_amounts(&mut self) {
+        self.assets.retain(|_, assets| {
+            assets.retain(|_, amount| *amount != 0);
+            !assets.is_empty()
+        });
+    }
+}
+
+impl From<&Value> for ValueMap {
+    fn from(value: &Value) -> Self {
+        let mut map = Self::default();
+        map.add_value(value);
+        map
+    }
+}
+
+impl From<Value> for ValueMap {
+    fn from(value: Value) -> Self {
+        Self::from(&value)
     }
 }
 
