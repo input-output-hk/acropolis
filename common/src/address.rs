@@ -125,6 +125,15 @@ pub enum ShelleyAddressPaymentPart {
     ScriptHash(#[n(0)] ScriptHash),
 }
 
+impl ShelleyAddressPaymentPart {
+    pub fn to_script_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ShelleyAddressPaymentPart::PaymentKeyHash(_) => None,
+            ShelleyAddressPaymentPart::ScriptHash(hash) => Some(*hash),
+        }
+    }
+}
+
 impl Default for ShelleyAddressPaymentPart {
     fn default() -> Self {
         Self::PaymentKeyHash(KeyHash::default())

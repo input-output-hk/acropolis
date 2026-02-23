@@ -594,6 +594,20 @@ impl Value {
     pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
         iter.map(|v| v.lovelace).sum()
     }
+
+    pub fn token_amount(&self, policy_id: &PolicyId, asset_name: &AssetName) -> u64 {
+        for (pid, assets) in &self.assets {
+            if pid == policy_id {
+                for asset in assets {
+                    if &asset.name == asset_name {
+                        return asset.amount;
+                    }
+                }
+                return 0;
+            }
+        }
+        0
+    }
 }
 
 impl AddAssign<&Value> for Value {
