@@ -122,7 +122,7 @@ pub fn validate_datums(
     Ok(())
 }
 
-/// THis function validates the redeemers
+/// This function validates the redeemers
 /// Every plutus script must have exactly one Redeemer
 /// But native scripts don't need redeemers
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L263
