@@ -325,17 +325,9 @@ impl ConsensusRuntime {
         // We already have the body — store it (idempotent if already stored).
         let had_body =
             self.tree.get_block(&block_info.hash).map(|b| b.body.is_some()).unwrap_or(false);
-        match self.tree.add_block(block_info.hash, raw_block.body.clone()) {
-            Ok(()) => {
-                info!(
-                    block = block_info.number,
-                    hash = %block_info.hash,
-                    "add_block succeeded, firing block_proposed"
-                );
-            }
-            Err(e) => {
-                error!("Failed to add block body: {e}");
-            }
+
+        if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+            error!("Failed to add block body: {e}");
         }
 
         // Collect and publish observer events
@@ -569,7 +561,7 @@ fn resolve_observer_events(
         match event {
             ObserverEvent::BlockProposed { hash } => {
                 if let Some((info, raw)) = block_data.get(&hash) {
-                    info!(
+                    debug!(
                         block = info.number,
                         hash = %hash,
                         "Publishing BlockProposed to validators"
