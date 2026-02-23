@@ -96,6 +96,7 @@ impl MidnightState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get the config
         let cfg = MidnightConfig::try_load(&config)?;
+        let addr = cfg.grpc_socket_addr()?;
 
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
@@ -116,10 +117,6 @@ impl MidnightState {
 
         // Start the gRPC server
         context.run(async move {
-            use std::net::SocketAddr;
-
-            let addr: SocketAddr = "0.0.0.0:50051".parse().unwrap();
-
             crate::grpc::server::run(grpc_history, addr)
                 .await
                 .unwrap_or_else(|e| error!("gRPC server failed: {e}"));
