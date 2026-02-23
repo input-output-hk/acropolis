@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use acropolis_common::BlockHash;
+use tracing::debug;
 
 use crate::tree_block::{BlockValidationStatus, TreeBlock};
 use crate::tree_error::ConsensusTreeError;
@@ -542,11 +543,19 @@ impl ConsensusTree {
         // Fire block_proposed for contiguous fetched blocks on favoured chain
         let tip = match self.favoured_tip {
             Some(t) => t,
-            None => return Ok(()),
+            None => {
+                debug!("add_block: favoured_tip is None, skipping fire_contiguous_proposed");
+                return Ok(());
+            }
         };
 
         // Only fire if this block is on the favoured chain
         if !self.chain_contains(hash, tip) {
+            debug!(
+                hash = %hash,
+                tip = %tip,
+                "add_block: block not on favoured chain, skipping fire_contiguous_proposed"
+            );
             return Ok(());
         }
 
@@ -582,6 +591,11 @@ impl ConsensusTree {
         for &h in &ancestors {
             let block = &self.blocks[&h];
             if block.body.is_none() {
+                debug!(
+                    start = %start,
+                    gap_at = %h,
+                    "fire_contiguous_proposed: gap (missing body) before start, not proposing"
+                );
                 return; // Gap found — can't propose yet
             }
         }
