@@ -263,13 +263,8 @@ mod tests {
         Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
         TxIdentifier, UTxOIdentifier, ValueMap,
     };
-    use chrono::NaiveDateTime;
 
-    use crate::{
-        configuration::MidnightConfig,
-        state::State,
-        types::{CNightCreation, RegistrationEvent, UTxOMeta},
-    };
+    use crate::{configuration::MidnightConfig, state::State};
 
     fn test_block_info() -> BlockInfo {
         BlockInfo {
@@ -327,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn collects_cnight_creation_when_token_present() {
+    fn collects_cnight_creations_and_spends_when_token_present() {
         let block_info = test_block_info();
         let policy = PolicyId::new([1u8; 28]);
         let asset = AssetName::new(b"").unwrap();
@@ -338,7 +333,8 @@ mod tests {
         let token_value_10 = test_value_with_token(policy, asset, 10);
         let no_token_value = test_value_no_token();
 
-        let delta = ExtendedAddressDelta {
+        // Creation delta
+        let create_delta = ExtendedAddressDelta {
             address: Address::default(),
             tx_identifier: TxIdentifier::default(),
             created_utxos: vec![
@@ -366,7 +362,12 @@ mod tests {
         // Collect the CNight UTxO creations
         let mut creations = Vec::new();
         let mut creations_set = HashSet::new();
-        state.collect_cnight_creations(&delta, &block_info, &mut creations, &mut creations_set);
+        state.collect_cnight_creations(
+            &create_delta,
+            &block_info,
+            &mut creations,
+            &mut creations_set,
+        );
         assert_eq!(creations.len(), 2);
         assert_eq!(creations[0].quantity, 5);
 
@@ -378,47 +379,16 @@ mod tests {
         assert_eq!(utxos.len(), 2);
         assert_eq!(utxos[0].quantity, 5);
         assert_eq!(utxos[1].quantity, 10);
-    }
 
-    #[test]
-    fn collects_cnight_spend_when_token_present() {
-        let block_info = test_block_info();
-        let policy = PolicyId::new([1u8; 28]);
-        let asset = AssetName::new(b"").unwrap();
-
-        let mut state = State::new(test_config_cnight(policy, asset));
-
-        // Preseed the utxo_index with a UTxO creation
-        state.utxos.utxo_index.insert(
-            UTxOIdentifier {
-                tx_hash: TxHash::default(),
-                output_index: 2,
-            },
-            UTxOMeta {
-                creation: CNightCreation {
-                    address: Address::None,
-                    quantity: 5,
-                    utxo: UTxOIdentifier {
-                        tx_hash: TxHash::default(),
-                        output_index: 2,
-                    },
-                    block_number: 5,
-                    block_hash: BlockHash::default(),
-                    block_timestamp: NaiveDateTime::default(),
-                    tx_index: 50,
-                },
-                spend: None,
-            },
-        );
-
-        let delta = ExtendedAddressDelta {
+        // Spend delta
+        let spend_delta = ExtendedAddressDelta {
             address: Address::default(),
             tx_identifier: TxIdentifier::default(),
             created_utxos: vec![],
             spent_utxos: vec![
                 SpentUTxOExtended {
                     spent_by: TxHash::default(),
-                    utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                    utxo: UTxOIdentifier::new(TxHash::default(), 4),
                 },
                 SpentUTxOExtended {
                     spent_by: TxHash::new([2u8; 32]),
@@ -433,8 +403,7 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        // Collect the CNight UTxO spends
-        let spends = state.collect_cnight_spends(&delta, &block_info, &HashSet::new());
+        let spends = state.collect_cnight_spends(&spend_delta, &block_info, &HashSet::new());
         assert_eq!(spends.len(), 1);
         assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
 
@@ -444,11 +413,11 @@ mod tests {
         // Retrieve the UTxO from state using the getter
         let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number).unwrap();
         assert_eq!(utxos.len(), 1);
-        assert_eq!(utxos[0].quantity, 5);
+        assert_eq!(utxos[0].quantity, 10);
     }
 
     #[test]
-    fn collects_candidate_registration() {
+    fn collects_candidate_registrations_and_deregistrations() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -466,14 +435,14 @@ mod tests {
         let value_with_token = test_value_with_token(policy, asset, 1);
         let value_without_token = test_value_no_token();
 
-        let delta = ExtendedAddressDelta {
-            address,
+        let registration_delta = ExtendedAddressDelta {
+            address: address.clone(),
             tx_identifier: TxIdentifier::new(block_info.number as u32, 9),
             created_utxos: vec![
                 CreatedUTxOExtended {
                     utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 1),
                     value: value_with_token,
-                    datum: Some(Datum::Inline(vec![1])),
+                    datum: Some(Datum::Inline(vec![3])),
                 },
                 CreatedUTxOExtended {
                     utxo: UTxOIdentifier::new(TxHash::new([2u8; 32]), 2),
@@ -489,7 +458,7 @@ mod tests {
         let mut registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         state.collect_candidate_registrations(
-            &delta,
+            &registration_delta,
             &block_info,
             &mut registrations,
             &mut block_created_registrations,
@@ -501,52 +470,21 @@ mod tests {
         let indexed = state.candidates.get_registrations(block_info.number, block_info.number);
 
         assert_eq!(indexed.len(), 1);
-        assert_eq!(indexed[0].full_datum, Datum::Inline(vec![1]));
+        assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
         assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
         assert_eq!(indexed[0].tx_index_in_block, 9);
         assert_eq!(indexed[0].tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
-    }
 
-    #[test]
-    fn collects_candidate_deregistration() {
-        let block_info = test_block_info();
-        let address = Address::Shelley(
-            ShelleyAddress::from_string(
-                "addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng",
-            )
-            .unwrap(),
-        );
-        let policy = PolicyId::new([9u8; 28]);
-        let asset = AssetName::new(b"auth").unwrap();
-
-        let config = test_config_candidate(address.clone(), policy, asset);
-
-        let mut state = State::new(config);
-        state.candidates.registration_index.insert(
-            UTxOIdentifier {
-                tx_hash: TxHash::new([2u8; 32]),
-                output_index: 1,
-            },
-            RegistrationEvent {
-                block_hash: BlockHash::new([1u8; 32]),
-                block_timestamp: NaiveDateTime::default(),
-                tx_index: 3,
-                tx_hash: TxHash::new([2u8; 32]),
-                utxo_index: 1,
-                datum: Datum::Inline(vec![3]),
-            },
-        );
-
-        let delta = ExtendedAddressDelta {
+        let deregistration_delta = ExtendedAddressDelta {
             address,
             tx_identifier: TxIdentifier::new(block_info.number as u32, 2),
             created_utxos: vec![],
             spent_utxos: vec![
                 SpentUTxOExtended {
-                    utxo: UTxOIdentifier::new(TxHash::new([2u8; 32]), 1),
+                    utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 1),
                     spent_by: TxHash::new([3u8; 32]),
                 },
                 SpentUTxOExtended {
@@ -558,8 +496,11 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let deregistrations =
-            state.collect_candidate_deregistrations(&delta, &block_info, &HashSet::new());
+        let deregistrations = state.collect_candidate_deregistrations(
+            &deregistration_delta,
+            &block_info,
+            &HashSet::new(),
+        );
         assert_eq!(deregistrations.len(), 1);
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
@@ -576,7 +517,7 @@ mod tests {
         assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
         assert_eq!(indexed[0].tx_index_in_block, 2);
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
-        assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([2u8; 32]));
+        assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
     }
 }
