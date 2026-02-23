@@ -122,7 +122,16 @@ impl BlockKesValidator {
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
-            let _ = protocol_parameters_subscription.read().await?;
+            // When booting from genesis, init params need to be stored
+            let (_, protocol_parameters_msg) = protocol_parameters_subscription.read().await?;
+            match protocol_parameters_msg.as_ref() {
+                Message::Cardano((_, CardanoMessage::ProtocolParams(msg))) => {
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.handle_protocol_parameters(msg);
+                    history.lock().await.commit(0, state);
+                }
+                _ => error!("Unexpected message type for initial protocol params: {protocol_parameters_msg:?}"),
+            }
         }
 
         loop {
