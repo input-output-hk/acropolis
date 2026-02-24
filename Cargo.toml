@@ -69,7 +69,6 @@ pallas = "0.34.0"
 pallas-math = "0.34.0"
 pallas-primitives = "0.34.0"
 pallas-traverse = "0.34.0"
-prost = "0.13"
 rayon = "1.10"
 serde = { version = "1.0.214", features = ["derive"] }
 uplc-turbo = { git = "https://github.com/pragma-org/uplc", package = "uplc-turbo" }
