@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .build_server(true)
-        .file_descriptor_set_path(&descriptor_path) // ← this was missing
+        .file_descriptor_set_path(&descriptor_path)
         .compile_protos(&["proto/midnight_state.proto"], &["proto"])?;
 
     Ok(())
