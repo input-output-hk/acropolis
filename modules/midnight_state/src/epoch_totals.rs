@@ -7,6 +7,7 @@ pub struct EpochSummary {
     pub era: Era,
     pub indexed_night_utxo_creations: usize,
     pub indexed_night_utxo_spends: usize,
+    pub indexed_parameter_datums: usize,
     pub indexed_governance_technical_committee_datums: usize,
     pub indexed_governance_council_datums: usize,
 }
@@ -15,6 +16,7 @@ pub struct EpochSummary {
 pub struct EpochTotals {
     indexed_night_utxo_creations: usize,
     indexed_night_utxo_spends: usize,
+    indexed_parameter_datums: usize,
     indexed_governance_technical_committee_datums: usize,
     indexed_governance_council_datums: usize,
     last_checkpoint: Option<EpochCheckpoint>,
@@ -41,6 +43,10 @@ impl EpochTotals {
         self.indexed_night_utxo_spends += spends;
     }
 
+    pub fn add_indexed_parameter_datums(&mut self, indexed: usize) {
+        self.indexed_parameter_datums += indexed;
+    }
+
     pub fn add_indexed_governance_datums(&mut self, technical_committee: usize, council: usize) {
         self.indexed_governance_technical_committee_datums += technical_committee;
         self.indexed_governance_council_datums += council;
@@ -62,6 +68,7 @@ impl EpochTotals {
             era,
             indexed_night_utxo_creations: self.indexed_night_utxo_creations,
             indexed_night_utxo_spends: self.indexed_night_utxo_spends,
+            indexed_parameter_datums: self.indexed_parameter_datums,
             indexed_governance_technical_committee_datums: self
                 .indexed_governance_technical_committee_datums,
             indexed_governance_council_datums: self.indexed_governance_council_datums,
@@ -71,6 +78,7 @@ impl EpochTotals {
     pub fn reset_epoch(&mut self) {
         self.indexed_night_utxo_creations = 0;
         self.indexed_night_utxo_spends = 0;
+        self.indexed_parameter_datums = 0;
         self.indexed_governance_technical_committee_datums = 0;
         self.indexed_governance_council_datums = 0;
         self.last_checkpoint = None;
@@ -106,6 +114,7 @@ mod tests {
 
         totals.add_indexed_night_utxos(2, 0);
         totals.add_indexed_night_utxos(1, 4);
+        totals.add_indexed_parameter_datums(5);
         totals.add_indexed_governance_datums(2, 6);
         totals.finalise_block(&block);
 
@@ -117,12 +126,14 @@ mod tests {
         assert_eq!(summary.indexed_night_utxo_spends, 4);
         assert_eq!(summary.indexed_governance_technical_committee_datums, 2);
         assert_eq!(summary.indexed_governance_council_datums, 6);
+        assert_eq!(summary.indexed_parameter_datums, 5);
     }
 
     #[test]
     fn summarise_uses_boundary_epoch_when_checkpoint_absent() {
         let mut totals = EpochTotals::default();
         totals.add_indexed_night_utxos(7, 2);
+        totals.add_indexed_parameter_datums(3);
         totals.add_indexed_governance_datums(4, 1);
 
         let boundary = mk_block(99, 501, Era::Conway);
@@ -132,6 +143,7 @@ mod tests {
         assert_eq!(summary.era, Era::Conway);
         assert_eq!(summary.indexed_night_utxo_creations, 7);
         assert_eq!(summary.indexed_night_utxo_spends, 2);
+        assert_eq!(summary.indexed_parameter_datums, 3);
         assert_eq!(summary.indexed_governance_technical_committee_datums, 4);
         assert_eq!(summary.indexed_governance_council_datums, 1);
     }

@@ -831,14 +831,13 @@ impl State {
         let deltas = &deltas_msg.deltas;
 
         // collect utxos needed for validation
-        // NOTE:
-        // Also consider collateral inputs and reference inputs
-        let all_inputs =
+        let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
+        all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
         let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
-            if block.era == Era::Shelley && block.status != BlockStatus::Bootstrap {
+            if block.status != BlockStatus::Bootstrap {
                 if let Err(e) = validations::validate_tx(
                     tx_deltas,
                     pool_registration_updates,

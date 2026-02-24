@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, ExtendedAddressDelta, UTxOIdentifier,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, ExtendedAddressDelta, Epoch, UTxOIdentifier,
 };
 
 use crate::{
@@ -28,7 +28,7 @@ pub struct State {
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
-    _parameters: ParametersState,
+    parameters: ParametersState,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -65,6 +65,7 @@ impl State {
         let mut candidate_registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
+        let mut indexed_parameter_datums = 0usize;
         let mut indexed_governance_technical_committee_datums = 0usize;
         let mut indexed_governance_council_datums = 0usize;
         for delta in deltas {
@@ -94,6 +95,8 @@ impl State {
                 &block_created_registrations,
             ));
 
+            indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
+
             let (indexed_technical_committee, indexed_council) =
                 self.collect_governance_datums(delta, block_info.number);
             indexed_governance_technical_committee_datums += indexed_technical_committee;
@@ -121,6 +124,7 @@ impl State {
         }
 
         self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
+        self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
         self.epoch_totals.add_indexed_governance_datums(
             indexed_governance_technical_committee_datums,
             indexed_governance_council_datums,
@@ -265,6 +269,27 @@ impl State {
         deregistrations
     }
 
+    fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) -> usize {
+        if !delta.received.assets.contains_key(&self.config.permissioned_candidate_policy) {
+            return 0;
+        }
+
+        let mut indexed = 0usize;
+        for created in &delta.created_utxos {
+            if !created.value.assets.contains_key(&self.config.permissioned_candidate_policy) {
+                continue;
+            }
+
+            match &created.datum {
+                Some(datum) if self.parameters.add_parameter_datum(epoch, datum.clone()) => {
+                    indexed += 1;
+                }
+                _ => {}
+            }
+        }
+        indexed
+    }
+
     fn collect_governance_datums(
         &mut self,
         delta: &ExtendedAddressDelta,
@@ -376,6 +401,26 @@ mod tests {
 
     fn test_value_no_token() -> ValueMap {
         ValueMap::default()
+    }
+
+    fn test_parameters_datum_delta(
+        policy: PolicyId,
+        datum: Datum,
+        output_index: u16,
+    ) -> ExtendedAddressDelta {
+        let asset = AssetName::new(b"params").unwrap();
+        ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), output_index),
+                value: test_value_with_token(policy, asset, 1),
+                datum: Some(datum),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(policy, asset, 1),
+            sent: ValueMap::default(),
+        }
     }
 
     fn test_address(value: &str) -> Address {
@@ -601,6 +646,163 @@ mod tests {
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
+    }
+
+    #[test]
+    fn indexes_parameters_from_matching_policy_datums() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let parameter_policy = PolicyId::new([9u8; 28]);
+        let parameter_asset = AssetName::new(b"params").unwrap();
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.permissioned_candidate_policy = parameter_policy;
+        let mut state = State::new(config);
+
+        let expected_datum = Datum::Inline(vec![0xAA, 0xBB, 0xCC]);
+
+        let delta = ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                value: test_value_with_token(parameter_policy, parameter_asset, 1),
+                datum: Some(expected_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(parameter_policy, parameter_asset, 1),
+            sent: ValueMap::default(),
+        };
+
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![delta]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.parameters.get_ariadne_parameters(block_info.epoch),
+            Some(expected_datum)
+        );
+    }
+
+    #[test]
+    fn ignores_parameter_datums_for_non_matching_policy() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let parameter_policy = PolicyId::new([9u8; 28]);
+        let other_policy = PolicyId::new([8u8; 28]);
+        let parameter_asset = AssetName::new(b"params").unwrap();
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.permissioned_candidate_policy = parameter_policy;
+        let mut state = State::new(config);
+
+        let delta = ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                value: test_value_with_token(other_policy, parameter_asset, 1),
+                datum: Some(Datum::Inline(vec![0x01])),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(other_policy, parameter_asset, 1),
+            sent: ValueMap::default(),
+        };
+
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![delta]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.parameters.get_ariadne_parameters(block_info.epoch),
+            None
+        );
+    }
+
+    #[test]
+    fn rollback_restores_previous_parameter_datum_before_replay() {
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let parameter_policy = PolicyId::new([9u8; 28]);
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.permissioned_candidate_policy = parameter_policy;
+
+        let mut history = StateHistory::<State>::new(
+            "midnight_state_parameters_test",
+            StateHistoryStore::Unbounded,
+        );
+
+        let block1 = test_block_info_for(1, 10);
+        let block2 = test_block_info_for(2, 10);
+
+        let datum_a = Datum::Inline(vec![0x0A]);
+        let datum_b = Datum::Inline(vec![0x0B]);
+        let datum_c = Datum::Inline(vec![0x0C]);
+
+        let mut state = history.get_or_init_with(|| State::new(config.clone()));
+        state
+            .handle_address_deltas(
+                &block1,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_parameters_datum_delta(
+                    parameter_policy,
+                    datum_a.clone(),
+                    1,
+                )]),
+            )
+            .unwrap();
+        state.finalise_block(&block1);
+        history.commit(block1.number, state);
+
+        let mut state = history.get_or_init_with(|| State::new(config.clone()));
+        state
+            .handle_address_deltas(
+                &block2,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_parameters_datum_delta(
+                    parameter_policy,
+                    datum_b.clone(),
+                    2,
+                )]),
+            )
+            .unwrap();
+        state.finalise_block(&block2);
+        history.commit(block2.number, state);
+
+        assert_eq!(
+            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
+            Some(datum_b.clone())
+        );
+
+        let mut rolled_back_state = history.get_rolled_back_state(block2.number);
+        assert_eq!(
+            rolled_back_state.parameters.get_ariadne_parameters(block2.epoch),
+            Some(datum_a)
+        );
+
+        rolled_back_state
+            .handle_address_deltas(
+                &block2,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_parameters_datum_delta(
+                    parameter_policy,
+                    datum_c.clone(),
+                    3,
+                )]),
+            )
+            .unwrap();
+        rolled_back_state.finalise_block(&block2);
+        history.commit(block2.number, rolled_back_state);
+
+        assert_eq!(
+            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
+            Some(datum_c)
+        );
     }
 
     #[test]

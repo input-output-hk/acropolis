@@ -51,5 +51,23 @@ pub fn validate_tx(
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
+    let outputs = &tx_deltas.produces;
+    let ref_inputs = &tx_deltas.reference_inputs;
+    let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
+    let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
+    if era >= Era::Alonzo {
+        alonzo::utxow::validate(
+            inputs,
+            outputs,
+            ref_inputs,
+            &scripts_needed,
+            &scripts_provided,
+            plutus_data,
+            redeemers,
+            utxos,
+        )
+        .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
     Ok(())
 }
