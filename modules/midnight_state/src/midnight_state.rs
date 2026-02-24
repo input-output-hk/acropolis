@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 mod epoch_totals;
 
 mod configuration;
+mod grpc;
 mod indexes;
 mod state;
 mod types;
@@ -97,6 +98,7 @@ impl MidnightState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get the config
         let cfg = MidnightConfig::try_load(&config)?;
+        let addr = cfg.grpc_socket_addr()?;
 
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
@@ -106,12 +108,20 @@ impl MidnightState {
             "midnight_state",
             StateHistoryStore::Unbounded,
         )));
+        let grpc_history = history.clone();
 
-        // Start the run task
+        // Start the main run loop
         context.run(async move {
             Self::run(history, cfg, address_deltas_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        // Start the gRPC server
+        context.run(async move {
+            crate::grpc::server::run(grpc_history, addr)
+                .await
+                .unwrap_or_else(|e| error!("gRPC server failed: {e}"));
         });
 
         Ok(())

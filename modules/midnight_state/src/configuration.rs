@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use acropolis_common::{Address, AssetName, PolicyId};
 use anyhow::{anyhow, Result};
 use config::Config;
@@ -24,6 +26,9 @@ pub struct MidnightConfig {
 
     // Parameters config
     pub permissioned_candidate_policy: PolicyId,
+
+    // gRPC config
+    pub grpc_bind_address: String,
 }
 
 impl MidnightConfig {
@@ -39,5 +44,14 @@ impl MidnightConfig {
                 .ok_or_else(|| anyhow!("address is not a script address"))?,
         );
         Ok(cfg)
+    }
+
+    pub fn grpc_socket_addr(&self) -> Result<SocketAddr> {
+        self.grpc_bind_address.parse().map_err(|e| {
+            anyhow!(
+                "invalid grpc_bind_address '{}': {e}",
+                self.grpc_bind_address
+            )
+        })
     }
 }

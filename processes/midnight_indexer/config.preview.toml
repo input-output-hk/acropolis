@@ -60,6 +60,9 @@ council-policy-id = "00eb778279028fa299af3c77db013dc4bf539e5111a1796dd2913b3c"
 # Config for Midnight Ariadne parameters
 permissioned-candidate-policy = "f8625f11a58fa5ab5b85502a8fe5c843ece460c9c5f9273be17d3424"
 
+# Config for Midnight gRPC server
+grpc-bind-address = "0.0.0.0:50051"
+
 [module.block-unpacker]
 
 [module.tx-unpacker]
