@@ -59,7 +59,6 @@ impl CNightUTxOState {
         Ok(inserted)
     }
 
-    #[allow(dead_code)]
     /// Get the CNight UTxO creations within a specified block range
     pub fn get_asset_creates(
         &self,
@@ -73,7 +72,6 @@ impl CNightUTxOState {
             .collect()
     }
 
-    #[allow(dead_code)]
     /// Get the CNight UTxO spends within a specified block range
     pub fn get_asset_spends(
         &self,
