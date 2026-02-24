@@ -26,7 +26,7 @@ pub struct State {
     epoch_totals: EpochTotals,
 
     // CNight UTxO spends and creations indexed by block
-    utxos: CNightUTxOState,
+    pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
     candidates: CandidateState,
     // Governance indexed by block

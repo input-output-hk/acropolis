@@ -59,7 +59,6 @@ impl CNightUTxOState {
         Ok(inserted)
     }
 
-    #[allow(dead_code)]
     /// Get the CNight UTxO creations within a specified block range
     pub fn get_asset_creates(
         &self,
@@ -73,7 +72,6 @@ impl CNightUTxOState {
             .collect()
     }
 
-    #[allow(dead_code)]
     /// Get the CNight UTxO spends within a specified block range
     pub fn get_asset_spends(
         &self,
@@ -92,7 +90,6 @@ impl CNightUTxOState {
 mod tests {
     use super::*;
     use acropolis_common::{Address, BlockHash, TxHash};
-    use chrono::NaiveDateTime;
 
     fn test_creation(utxo: UTxOIdentifier) -> CNightCreation {
         CNightCreation {
@@ -102,7 +99,7 @@ mod tests {
             block_number: 1,
             block_hash: BlockHash::default(),
             tx_index: 7,
-            block_timestamp: NaiveDateTime::default(),
+            block_timestamp: 0,
         }
     }
 
@@ -115,7 +112,7 @@ mod tests {
             block_hash: BlockHash::default(),
             tx_hash: TxHash::default(),
             tx_index: 3,
-            block_timestamp: NaiveDateTime::default(),
+            block_timestamp: 0,
         };
 
         let err = state
