@@ -187,7 +187,7 @@ impl MidnightState for MidnightStateService {
         } else {
             Ok(Response::new(AriadneParametersResponse {
                 found: false,
-                source_epoch: 0,
+                source_epoch: req.epoch,
                 datum: None,
             }))
         }
