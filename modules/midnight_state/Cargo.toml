@@ -16,10 +16,11 @@ caryatid_sdk = { workspace = true }
 anyhow = { workspace = true }
 config = { workspace = true }
 chrono = { workspace = true }
-prost = "0.13"
+prost = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
-tonic = { version = "0.12", features = ["transport"] }
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
 tracing = { workspace = true }
 
 [build-dependencies]
