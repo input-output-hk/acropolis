@@ -12,9 +12,12 @@ impl ParametersState {
     #[allow(dead_code)]
     /// Insert the parameters for an epoch on change, overwriting existing entry if multiple
     /// updates in the same epoch
-    pub fn add_parameter_datum(&mut self, epoch: Epoch, datum: Datum) {
+    pub fn add_parameter_datum(&mut self, epoch: Epoch, datum: Datum) -> bool {
         if self.permissioned_candidates.last_key_value().map(|(_, v)| v) != Some(&datum) {
             self.permissioned_candidates.insert(epoch, datum);
+            true
+        } else {
+            false
         }
     }
 

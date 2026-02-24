@@ -70,6 +70,7 @@ impl MidnightState {
                             era = ?summary.era,
                             indexed_night_utxo_creations = summary.indexed_night_utxo_creations,
                             indexed_night_utxo_spends = summary.indexed_night_utxo_spends,
+                            indexed_parameter_datums = summary.indexed_parameter_datums,
                             "epoch checkpoint"
                         );
                     }
