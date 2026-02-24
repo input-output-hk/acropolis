@@ -19,6 +19,7 @@ chrono = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tracing = { workspace = true }
