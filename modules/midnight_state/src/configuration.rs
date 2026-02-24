@@ -25,7 +25,7 @@ pub struct MidnightConfig {
     pub council_policy_id: PolicyId,
 
     // Parameters config
-    pub permissioned_candidate_policy: PolicyId,    
+    pub permissioned_candidate_policy: PolicyId,
 
     // gRPC config
     #[serde(default = "default_grpc_bind_address")]

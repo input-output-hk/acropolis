@@ -76,18 +76,16 @@ message TechnicalCommitteeDatumRequest {
   uint64 block_number = 1;
 }
 message TechnicalCommitteeDatumResponse {
-  bool found = 1;
-  uint64 source_block_number = 2;
-  Datum datum = 3;
+  uint64 source_block_number = 1;
+  Datum datum = 2;
 }
 
 message CouncilDatumRequest {
   uint64 block_number = 1;
 }
 message CouncilDatumResponse {
-  bool found = 1;
-  uint64 source_block_number = 2;
-  Datum datum = 3;
+  uint64 source_block_number = 1;
+  Datum datum = 2;
 }
 
 message AriadneParametersRequest {}

@@ -160,19 +160,17 @@ impl MidnightState for MidnightStateService {
             state.get_technical_committee_datum(req.block_number)
         };
 
-        if let Some((source_block_number, datum)) = technical_committee {
-            Ok(Response::new(TechnicalCommitteeDatumResponse {
-                found: true,
-                source_block_number,
-                datum: Some(datum_to_proto(datum)),
-            }))
-        } else {
-            Ok(Response::new(TechnicalCommitteeDatumResponse {
-                found: false,
-                source_block_number: 0,
-                datum: None,
-            }))
-        }
+        let (source_block_number, datum) = technical_committee.ok_or_else(|| {
+            Status::not_found(format!(
+                "no technical committee datum found at or before block {}",
+                req.block_number
+            ))
+        })?;
+
+        Ok(Response::new(TechnicalCommitteeDatumResponse {
+            source_block_number,
+            datum: Some(datum_to_proto(datum)),
+        }))
     }
 
     async fn get_council_datum(
@@ -189,19 +187,17 @@ impl MidnightState for MidnightStateService {
             state.get_council_datum(req.block_number)
         };
 
-        if let Some((source_block_number, datum)) = council {
-            Ok(Response::new(CouncilDatumResponse {
-                found: true,
-                source_block_number,
-                datum: Some(datum_to_proto(datum)),
-            }))
-        } else {
-            Ok(Response::new(CouncilDatumResponse {
-                found: false,
-                source_block_number: 0,
-                datum: None,
-            }))
-        }
+        let (source_block_number, datum) = council.ok_or_else(|| {
+            Status::not_found(format!(
+                "no council datum found at or before block {}",
+                req.block_number
+            ))
+        })?;
+
+        Ok(Response::new(CouncilDatumResponse {
+            source_block_number,
+            datum: Some(datum_to_proto(datum)),
+        }))
     }
 
     async fn get_ariadne_parameters(
