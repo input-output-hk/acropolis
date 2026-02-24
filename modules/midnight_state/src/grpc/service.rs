@@ -35,6 +35,10 @@ impl MidnightState for MidnightStateService {
             return Err(Status::invalid_argument("start_block must be <= end_block"));
         }
 
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
+
         let creates = {
             let history = self.history.lock().await;
             let state =
@@ -78,6 +82,10 @@ impl MidnightState for MidnightStateService {
         if req.start_block > req.end_block {
             return Err(Status::invalid_argument("start_block must be <= end_block"));
         }
+
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
 
         let spends = {
             let history = self.history.lock().await;
