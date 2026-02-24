@@ -25,13 +25,22 @@ impl GovernanceState {
 
     #[allow(dead_code)]
     /// Get the latest technical committee datum at a specific block number
-    pub fn get_technical_committee_datum(&self, block_number: BlockNumber) -> Option<Datum> {
-        self.technical_committee.range(..=block_number).next_back().map(|(_, gov)| gov.clone())
+    pub fn get_technical_committee_datum(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<(BlockNumber, Datum)> {
+        self.technical_committee
+            .range(..=block_number)
+            .next_back()
+            .map(|(number, datum)| (*number, datum.clone()))
     }
 
     #[allow(dead_code)]
     /// Get the latest council datum at a specific block number
-    pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<Datum> {
-        self.council.range(..=block_number).next_back().map(|(_, gov)| gov.clone())
+    pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<(BlockNumber, Datum)> {
+        self.council
+            .range(..=block_number)
+            .next_back()
+            .map(|(number, datum)| (*number, datum.clone()))
     }
 }

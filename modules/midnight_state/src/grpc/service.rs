@@ -10,7 +10,7 @@ use crate::{
     },
     state::State,
 };
-use acropolis_common::state_history::StateHistory;
+use acropolis_common::{state_history::StateHistory, Datum};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
@@ -22,6 +22,15 @@ impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
         Self { history }
     }
+}
+
+fn datum_to_proto(datum: Datum) -> midnight_state_proto::Datum {
+    let value = match datum {
+        Datum::Inline(bytes) => midnight_state_proto::datum::Value::Inline(bytes),
+        Datum::Hash(hash) => midnight_state_proto::datum::Value::Hash(hash.to_vec()),
+    };
+
+    midnight_state_proto::Datum { value: Some(value) }
 }
 
 #[tonic::async_trait]
@@ -117,30 +126,131 @@ impl MidnightState for MidnightStateService {
 
     async fn get_registrations(
         &self,
-        _request: Request<RegistrationsRequest>,
+        request: Request<RegistrationsRequest>,
     ) -> Result<Response<RegistrationsResponse>, Status> {
-        Ok(Response::new(RegistrationsResponse {}))
+        let req = request.into_inner();
+        if req.start_block > req.end_block {
+            return Err(Status::invalid_argument("start_block must be <= end_block"));
+        }
+
+        let registrations = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.candidates.get_registrations(req.start_block, req.end_block)
+        };
+
+        let proto_registrations = registrations
+            .into_iter()
+            .map(|r| midnight_state_proto::Registration {
+                full_datum: Some(datum_to_proto(r.full_datum)),
+                block_number: r.block_number,
+                block_hash: r.block_hash.to_vec(),
+                tx_index: r.tx_index_in_block,
+                tx_hash: r.tx_hash.to_vec(),
+                utxo_index: r.utxo_index as u32,
+                block_timestamp_unix: r.block_timestamp.and_utc().timestamp(),
+            })
+            .collect();
+
+        Ok(Response::new(RegistrationsResponse {
+            registrations: proto_registrations,
+        }))
     }
 
     async fn get_deregistrations(
         &self,
-        _request: Request<DeregistrationsRequest>,
+        request: Request<DeregistrationsRequest>,
     ) -> Result<Response<DeregistrationsResponse>, Status> {
-        Ok(Response::new(DeregistrationsResponse {}))
+        let req = request.into_inner();
+        if req.start_block > req.end_block {
+            return Err(Status::invalid_argument("start_block must be <= end_block"));
+        }
+
+        let deregistrations = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.candidates.get_deregistrations(req.start_block, req.end_block)
+        };
+
+        let proto_deregistrations = deregistrations
+            .into_iter()
+            .map(|r| midnight_state_proto::Deregistration {
+                full_datum: Some(datum_to_proto(r.full_datum)),
+                block_number: r.block_number,
+                block_hash: r.block_hash.to_vec(),
+                tx_index: r.tx_index_in_block,
+                tx_hash: r.tx_hash.to_vec(),
+                utxo_tx_hash: r.utxo_tx_hash.to_vec(),
+                utxo_index: r.utxo_index as u32,
+                block_timestamp_unix: r.block_timestamp.and_utc().timestamp(),
+            })
+            .collect();
+
+        Ok(Response::new(DeregistrationsResponse {
+            deregistrations: proto_deregistrations,
+        }))
     }
 
     async fn get_technical_committee_datum(
         &self,
-        _request: Request<TechnicalCommitteeDatumRequest>,
+        request: Request<TechnicalCommitteeDatumRequest>,
     ) -> Result<Response<TechnicalCommitteeDatumResponse>, Status> {
-        Ok(Response::new(TechnicalCommitteeDatumResponse {}))
+        let req = request.into_inner();
+
+        let technical_committee = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.governance.get_technical_committee_datum(req.block_number)
+        };
+
+        if let Some((source_block_number, datum)) = technical_committee {
+            Ok(Response::new(TechnicalCommitteeDatumResponse {
+                found: true,
+                source_block_number,
+                datum: Some(datum_to_proto(datum)),
+            }))
+        } else {
+            Ok(Response::new(TechnicalCommitteeDatumResponse {
+                found: false,
+                source_block_number: 0,
+                datum: None,
+            }))
+        }
     }
 
     async fn get_council_datum(
         &self,
-        _request: Request<CouncilDatumRequest>,
+        request: Request<CouncilDatumRequest>,
     ) -> Result<Response<CouncilDatumResponse>, Status> {
-        Ok(Response::new(CouncilDatumResponse {}))
+        let req = request.into_inner();
+
+        let council = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.governance.get_council_datum(req.block_number)
+        };
+
+        if let Some((source_block_number, datum)) = council {
+            Ok(Response::new(CouncilDatumResponse {
+                found: true,
+                source_block_number,
+                datum: Some(datum_to_proto(datum)),
+            }))
+        } else {
+            Ok(Response::new(CouncilDatumResponse {
+                found: false,
+                source_block_number: 0,
+                datum: None,
+            }))
+        }
     }
 
     async fn get_ariadne_parameters(

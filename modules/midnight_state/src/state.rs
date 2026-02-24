@@ -24,9 +24,9 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    candidates: CandidateState,
+    pub candidates: CandidateState,
     // Governance indexed by block
-    _governance: GovernanceState,
+    pub governance: GovernanceState,
     // Parameters indexed by epoch
     _parameters: ParametersState,
     // Midnight configuration
@@ -96,6 +96,8 @@ impl State {
                 block_info,
                 &block_created_registrations,
             ));
+
+            self.collect_governance_datums(delta, block_info);
         }
 
         // Add created and spent CNight utxos to state
@@ -252,6 +254,37 @@ impl State {
 
         deregistrations
     }
+
+    fn collect_governance_datums(&mut self, delta: &ExtendedAddressDelta, block_info: &BlockInfo) {
+        if delta.address == self.config.technical_committee_address
+            && delta.received.assets.contains_key(&self.config.technical_committee_policy_id)
+        {
+            for created in &delta.created_utxos {
+                if !created.value.assets.contains_key(&self.config.technical_committee_policy_id) {
+                    continue;
+                }
+
+                if let Some(datum) = &created.datum {
+                    self.governance
+                        .insert_technical_committee_datum(block_info.number, datum.clone());
+                }
+            }
+        }
+
+        if delta.address == self.config.council_address
+            && delta.received.assets.contains_key(&self.config.council_policy_id)
+        {
+            for created in &delta.created_utxos {
+                if !created.value.assets.contains_key(&self.config.council_policy_id) {
+                    continue;
+                }
+
+                if let Some(datum) = &created.datum {
+                    self.governance.insert_council_datum(block_info.number, datum.clone());
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +337,21 @@ mod tests {
         }
     }
 
+    fn test_config_governance(
+        technical_committee_address: Address,
+        technical_committee_policy_id: PolicyId,
+        council_address: Address,
+        council_policy_id: PolicyId,
+    ) -> MidnightConfig {
+        MidnightConfig {
+            technical_committee_address,
+            technical_committee_policy_id,
+            council_address,
+            council_policy_id,
+            ..Default::default()
+        }
+    }
+
     fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> ValueMap {
         let mut inner = HashMap::new();
         inner.insert(asset, amount);
@@ -319,6 +367,82 @@ mod tests {
 
     fn test_value_no_token() -> ValueMap {
         ValueMap::default()
+    }
+
+    #[test]
+    fn collects_governance_datums_for_technical_committee_and_council() {
+        let block_info = test_block_info();
+        let technical_committee_policy = PolicyId::new([0x11u8; 28]);
+        let council_policy = PolicyId::new([0x22u8; 28]);
+        let technical_committee_asset = AssetName::new(b"tc").unwrap();
+        let council_asset = AssetName::new(b"council").unwrap();
+        let technical_committee_address = Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j",
+            )
+            .unwrap(),
+        );
+        let council_address = Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr_test1wqqwkauz0ypglg5e4u780kcp8hzt75u72yg6z7td62gnk0qed0p06",
+            )
+            .unwrap(),
+        );
+
+        let mut state = State::new(test_config_governance(
+            technical_committee_address.clone(),
+            technical_committee_policy,
+            council_address.clone(),
+            council_policy,
+        ));
+
+        let technical_committee_datum = Datum::Inline(vec![0xAA]);
+        let council_datum = Datum::Inline(vec![0xBB]);
+
+        let technical_committee_delta = ExtendedAddressDelta {
+            address: technical_committee_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 0),
+                value: test_value_with_token(
+                    technical_committee_policy,
+                    technical_committee_asset,
+                    1,
+                ),
+                datum: Some(technical_committee_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(
+                technical_committee_policy,
+                technical_committee_asset,
+                1,
+            ),
+            sent: ValueMap::default(),
+        };
+        state.collect_governance_datums(&technical_committee_delta, &block_info);
+
+        let council_delta = ExtendedAddressDelta {
+            address: council_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::new([2u8; 32]), 0),
+                value: test_value_with_token(council_policy, council_asset, 1),
+                datum: Some(council_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(council_policy, council_asset, 1),
+            sent: ValueMap::default(),
+        };
+        state.collect_governance_datums(&council_delta, &block_info);
+
+        assert_eq!(
+            state.governance.get_technical_committee_datum(block_info.number),
+            Some((block_info.number, technical_committee_datum))
+        );
+        assert_eq!(
+            state.governance.get_council_datum(block_info.number),
+            Some((block_info.number, council_datum))
+        );
     }
 
     #[test]
