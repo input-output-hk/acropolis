@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Remove packages to free up disk space
-        run:  |
+        run: |
           sudo dpkg -P ant ant-optional azure-cli firefox google-chrome-stable \
             google-cloud-cli google-cloud-cli-anthoscli kubectl \
             microsoft-edge-stable mysql-server mysql-server-8.0 \
