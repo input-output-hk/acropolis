@@ -65,23 +65,10 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        let summary = state.handle_new_epoch(blk_info.as_ref())?;
-                        info!(
-                            epoch = summary.epoch,
-                            era = ?summary.era,
-                            indexed_night_utxo_creations = summary.indexed_night_utxo_creations,
-                            indexed_night_utxo_spends = summary.indexed_night_utxo_spends,
-                            indexed_parameter_datums = summary.indexed_parameter_datums,
-                            indexed_governance_technical_committee_datums =
-                                summary.indexed_governance_technical_committee_datums,
-                            indexed_governance_council_datums =
-                                summary.indexed_governance_council_datums,
-                            "epoch checkpoint"
-                        );
+                        state.handle_new_epoch(blk_info.as_ref());
                     }
 
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;
-                    state.finalise_block(blk_info.as_ref());
 
                     history.lock().await.commit(blk_info.number, state);
                 }
