@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use acropolis_common::{
     protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    DRepRegistrationUpdate, Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas,
+    UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 
@@ -15,15 +16,21 @@ pub fn validate_tx(
     tx_deltas: &TxUTxODeltas,
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
+    drep_registration_updates: &[DRepRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     shelley_params: Option<&ShelleyParams>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
-    let total_consumed = tx_deltas.calculate_total_consumed(stake_registration_updates, utxos);
+    let total_consumed = tx_deltas.calculate_total_consumed(
+        stake_registration_updates,
+        drep_registration_updates,
+        utxos,
+    );
     let total_produced = tx_deltas.calculate_total_produced(
         pool_registration_updates,
         stake_registration_updates,
+        drep_registration_updates,
         utxos,
     );
 

@@ -116,8 +116,8 @@ mod tests {
             to_era(era),
         );
         let tx_delta = mapped_tx.convert_to_utxo_deltas(true);
-        let total_consumed = tx_delta.calculate_total_consumed(&[], &ctx.utxos);
-        let total_produced = tx_delta.calculate_total_produced(&[], &[], &ctx.utxos);
+        let total_consumed = tx_delta.calculate_total_consumed(&[], &[], &ctx.utxos);
+        let total_produced = tx_delta.calculate_total_produced(&[], &[], &[], &ctx.utxos);
 
         validate(&tx_inputs, total_consumed, total_produced, &ctx.utxos).map_err(|e| *e)
     }

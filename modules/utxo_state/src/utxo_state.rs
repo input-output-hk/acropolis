@@ -78,6 +78,7 @@ impl UTXOState {
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
+        mut drep_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
@@ -89,6 +90,10 @@ impl UTXOState {
             }
 
             if let Some(sub) = stake_registration_updates_subscription.as_mut() {
+                let _ = sub.read().await?;
+            }
+
+            if let Some(sub) = drep_registration_updates_subscription.as_mut() {
                 let _ = sub.read().await?;
             }
         }
@@ -160,6 +165,24 @@ impl UTXOState {
                 }
             }
 
+            let mut drep_registration_updates = vec![];
+            if genesis_utxo_consumed {
+                if let Some(subscription) = drep_registration_updates_subscription.as_mut() {
+                    let Ok((_, message)) = subscription.read().await else {
+                        error!("Failed to read DRep registration updates subscription error");
+                        continue;
+                    };
+                    if let Message::Cardano((
+                        block_info,
+                        CardanoMessage::DRepRegistrationUpdates(updates_msg),
+                    )) = message.as_ref()
+                    {
+                        Self::check_sync(&current_block_info, block_info);
+                        drep_registration_updates = updates_msg.updates.clone();
+                    }
+                }
+            }
+
             // Validate UTxODeltas
             // before applying them
             match message.as_ref() {
@@ -174,6 +197,7 @@ impl UTXOState {
                                 deltas_msg,
                                 &pool_registration_updates,
                                 &stake_registration_updates,
+                                &drep_registration_updates,
                                 &current_protocol_params,
                             )
                             .await
@@ -255,6 +279,11 @@ impl UTXOState {
         if let Some(ref topic) = stake_registration_updates_subscribe_topic {
             info!("Creating stake registration updates subscriber on '{topic}'");
         }
+        let drep_registration_updates_subscribe_topic =
+            config.get_string("drep-registration-updates-subscribe-topic").ok();
+        if let Some(ref topic) = drep_registration_updates_subscribe_topic {
+            info!("Creating DRep registration updates subscriber on '{topic}'");
+        }
 
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -321,6 +350,12 @@ impl UTXOState {
             } else {
                 None
             };
+        let drep_registration_updates_subscription =
+            if let Some(topic) = drep_registration_updates_subscribe_topic {
+                Some(context.subscribe(&topic).await?)
+            } else {
+                None
+            };
 
         let state_run = state.clone();
         let context_run = context.clone();
@@ -332,6 +367,7 @@ impl UTXOState {
                 protocol_parameters_subscription,
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
+                drep_registration_updates_subscription,
                 utxo_validation_publish_topic,
                 is_snapshot_mode,
             )
