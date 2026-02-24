@@ -59,13 +59,6 @@ message AssetSpendsResponse {
   repeated AssetSpend spends = 1;
 }
 
-message Datum {
-  oneof value {
-    bytes inline = 1;
-    bytes hash = 2;
-  }
-}
-
 message RegistrationsRequest {}
 message RegistrationsResponse {}
 
@@ -77,7 +70,7 @@ message TechnicalCommitteeDatumRequest {
 }
 message TechnicalCommitteeDatumResponse {
   uint64 source_block_number = 1;
-  Datum datum = 2;
+  bytes datum = 2;
 }
 
 message CouncilDatumRequest {
@@ -85,7 +78,7 @@ message CouncilDatumRequest {
 }
 message CouncilDatumResponse {
   uint64 source_block_number = 1;
-  Datum datum = 2;
+  bytes datum = 2;
 }
 
 message AriadneParametersRequest {}

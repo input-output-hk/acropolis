@@ -10,7 +10,7 @@ use crate::{
     },
     state::State,
 };
-use acropolis_common::{state_history::StateHistory, Datum};
+use acropolis_common::state_history::StateHistory;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
@@ -22,15 +22,6 @@ impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
         Self { history }
     }
-}
-
-fn datum_to_proto(datum: Datum) -> midnight_state_proto::Datum {
-    let value = match datum {
-        Datum::Inline(bytes) => midnight_state_proto::datum::Value::Inline(bytes),
-        Datum::Hash(hash) => midnight_state_proto::datum::Value::Hash(hash.to_vec()),
-    };
-
-    midnight_state_proto::Datum { value: Some(value) }
 }
 
 #[tonic::async_trait]
@@ -166,10 +157,13 @@ impl MidnightState for MidnightStateService {
                 req.block_number
             ))
         })?;
+        let datum = datum
+            .to_bytes()
+            .ok_or_else(|| Status::failed_precondition("only inline datums are supported"))?;
 
         Ok(Response::new(TechnicalCommitteeDatumResponse {
             source_block_number,
-            datum: Some(datum_to_proto(datum)),
+            datum,
         }))
     }
 
@@ -193,10 +187,13 @@ impl MidnightState for MidnightStateService {
                 req.block_number
             ))
         })?;
+        let datum = datum
+            .to_bytes()
+            .ok_or_else(|| Status::failed_precondition("only inline datums are supported"))?;
 
         Ok(Response::new(CouncilDatumResponse {
             source_block_number,
-            datum: Some(datum_to_proto(datum)),
+            datum,
         }))
     }
 
