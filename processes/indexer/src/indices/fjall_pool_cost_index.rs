@@ -1,4 +1,3 @@
-#![allow(unused)]
 use acropolis_codec::to_pool_id;
 use acropolis_common::{BlockInfo, Lovelace, Point, PoolId};
 use acropolis_module_custom_indexer::chain_index::ChainIndex;
