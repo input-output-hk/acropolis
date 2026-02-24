@@ -178,18 +178,16 @@ impl MidnightState for MidnightStateService {
             state.get_ariadne_parameters(req.epoch)
         };
 
-        if let Some((source_epoch, datum)) = params {
-            Ok(Response::new(AriadneParametersResponse {
-                found: true,
-                source_epoch,
-                datum: Some(ariadne_datum_to_proto(datum)),
-            }))
-        } else {
-            Ok(Response::new(AriadneParametersResponse {
-                found: false,
-                source_epoch: req.epoch,
-                datum: None,
-            }))
-        }
+        let (source_epoch, datum) = params.ok_or_else(|| {
+            Status::not_found(format!(
+                "no ariadne parameters found at or before epoch {}",
+                req.epoch
+            ))
+        })?;
+
+        Ok(Response::new(AriadneParametersResponse {
+            source_epoch,
+            datum: Some(ariadne_datum_to_proto(datum)),
+        }))
     }
 }

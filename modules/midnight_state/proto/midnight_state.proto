@@ -82,7 +82,6 @@ message AriadneParametersRequest {
   uint64 epoch = 1;
 }
 message AriadneParametersResponse {
-  bool found = 1;
-  uint64 source_epoch = 2;
-  AriadneParametersDatum datum = 3;
+  uint64 source_epoch = 1;
+  AriadneParametersDatum datum = 2;
 }
