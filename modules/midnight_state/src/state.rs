@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, Epoch, ExtendedAddressDelta, UTxOIdentifier,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Epoch, ExtendedAddressDelta,
+    UTxOIdentifier,
 };
 
 use crate::{
@@ -26,7 +27,7 @@ pub struct State {
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
     candidates: CandidateState,
     // Governance indexed by block
-    _governance: GovernanceState,
+    governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
     // Midnight configuration
@@ -66,6 +67,8 @@ impl State {
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
         let mut indexed_parameter_datums = 0usize;
+        let mut indexed_governance_technical_committee_datums = 0usize;
+        let mut indexed_governance_council_datums = 0usize;
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             self.collect_cnight_creations(
@@ -94,6 +97,11 @@ impl State {
             ));
 
             indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
+
+            let (indexed_technical_committee, indexed_council) =
+                self.collect_governance_datums(delta, block_info.number);
+            indexed_governance_technical_committee_datums += indexed_technical_committee;
+            indexed_governance_council_datums += indexed_council;
         }
 
         // Add created and spent CNight utxos to state
@@ -118,6 +126,10 @@ impl State {
 
         self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
         self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
+        self.epoch_totals.add_indexed_governance_datums(
+            indexed_governance_technical_committee_datums,
+            indexed_governance_council_datums,
+        );
         Ok(())
     }
 
@@ -278,6 +290,42 @@ impl State {
         }
         indexed
     }
+
+    fn collect_governance_datums(
+        &mut self,
+        delta: &ExtendedAddressDelta,
+        block_number: BlockNumber,
+    ) -> (usize, usize) {
+        let is_technical_committee_address =
+            delta.address == self.config.technical_committee_address;
+        let is_council_address = delta.address == self.config.council_address;
+        if !is_technical_committee_address && !is_council_address {
+            return (0, 0);
+        }
+
+        let mut indexed_technical_committee = 0usize;
+        let mut indexed_council = 0usize;
+        for created in &delta.created_utxos {
+            let Some(datum) = &created.datum else {
+                continue;
+            };
+
+            if is_technical_committee_address
+                && created.value.assets.contains_key(&self.config.technical_committee_policy_id)
+                && self.governance.insert_technical_committee_datum(block_number, datum.clone())
+            {
+                indexed_technical_committee += 1;
+            }
+
+            if is_council_address
+                && created.value.assets.contains_key(&self.config.council_policy_id)
+                && self.governance.insert_council_datum(block_number, datum.clone())
+            {
+                indexed_council += 1;
+            }
+        }
+        (indexed_technical_committee, indexed_council)
+    }
 }
 
 #[cfg(test)]
@@ -372,6 +420,31 @@ mod tests {
             }],
             spent_utxos: vec![],
             received: test_value_with_token(policy, asset, 1),
+            sent: ValueMap::default(),
+        }
+    }
+
+    fn test_address(value: &str) -> Address {
+        Address::from_string(value).unwrap()
+    }
+
+    fn test_governance_datum_delta(
+        address: Address,
+        policy: PolicyId,
+        asset_name: AssetName,
+        datum: Datum,
+        output_index: u16,
+    ) -> ExtendedAddressDelta {
+        ExtendedAddressDelta {
+            address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), output_index),
+                value: test_value_with_token(policy, asset_name, 1),
+                datum: Some(datum),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(policy, asset_name, 1),
             sent: ValueMap::default(),
         }
     }
@@ -729,6 +802,205 @@ mod tests {
 
         assert_eq!(
             history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
+            Some(datum_c)
+        );
+    }
+
+    #[test]
+    fn indexes_governance_datums_for_matching_address_and_policy() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let technical_policy = PolicyId::new([7u8; 28]);
+        let council_policy = PolicyId::new([8u8; 28]);
+        let technical_asset = AssetName::new(b"tc").unwrap();
+        let council_asset = AssetName::new(b"council").unwrap();
+        let technical_address =
+            test_address("addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j");
+        let council_address =
+            test_address("addr_test1wqqwkauz0ypglg5e4u780kcp8hzt75u72yg6z7td62gnk0qed0p06");
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.technical_committee_address = technical_address.clone();
+        config.technical_committee_policy_id = technical_policy;
+        config.council_address = council_address.clone();
+        config.council_policy_id = council_policy;
+        let mut state = State::new(config);
+
+        let technical_datum = Datum::Inline(vec![0x10, 0x20]);
+        let council_datum = Datum::Inline(vec![0x30, 0x40]);
+
+        let technical_delta = ExtendedAddressDelta {
+            address: technical_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                value: test_value_with_token(technical_policy, technical_asset, 1),
+                datum: Some(technical_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(technical_policy, technical_asset, 1),
+            sent: ValueMap::default(),
+        };
+
+        let council_delta = ExtendedAddressDelta {
+            address: council_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), 2),
+                value: test_value_with_token(council_policy, council_asset, 1),
+                datum: Some(council_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(council_policy, council_asset, 1),
+            sent: ValueMap::default(),
+        };
+
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![technical_delta, council_delta]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.governance.get_technical_committee_datum(block_info.number),
+            Some(technical_datum)
+        );
+        assert_eq!(
+            state.governance.get_council_datum(block_info.number),
+            Some(council_datum)
+        );
+    }
+
+    #[test]
+    fn ignores_governance_datums_for_non_matching_address() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let technical_policy = PolicyId::new([7u8; 28]);
+        let technical_asset = AssetName::new(b"tc").unwrap();
+        let technical_address =
+            test_address("addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j");
+        let wrong_address =
+            test_address("addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng");
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.technical_committee_address = technical_address;
+        config.technical_committee_policy_id = technical_policy;
+        let mut state = State::new(config);
+
+        let delta = ExtendedAddressDelta {
+            address: wrong_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), 1),
+                value: test_value_with_token(technical_policy, technical_asset, 1),
+                datum: Some(Datum::Inline(vec![0x01])),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(technical_policy, technical_asset, 1),
+            sent: ValueMap::default(),
+        };
+
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![delta]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            state.governance.get_technical_committee_datum(block_info.number),
+            None
+        );
+    }
+
+    #[test]
+    fn rollback_restores_previous_governance_datum_before_replay() {
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let technical_policy = PolicyId::new([7u8; 28]);
+        let technical_asset = AssetName::new(b"tc").unwrap();
+        let technical_address =
+            test_address("addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j");
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.technical_committee_address = technical_address.clone();
+        config.technical_committee_policy_id = technical_policy;
+
+        let mut history = StateHistory::<State>::new(
+            "midnight_state_governance_test",
+            StateHistoryStore::Unbounded,
+        );
+
+        let block1 = test_block_info_for(1, 10);
+        let block2 = test_block_info_for(2, 10);
+
+        let datum_a = Datum::Inline(vec![0x11]);
+        let datum_b = Datum::Inline(vec![0x22]);
+        let datum_c = Datum::Inline(vec![0x33]);
+
+        let mut state = history.get_or_init_with(|| State::new(config.clone()));
+        state
+            .handle_address_deltas(
+                &block1,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_governance_datum_delta(
+                    technical_address.clone(),
+                    technical_policy,
+                    technical_asset,
+                    datum_a.clone(),
+                    1,
+                )]),
+            )
+            .unwrap();
+        state.finalise_block(&block1);
+        history.commit(block1.number, state);
+
+        let mut state = history.get_or_init_with(|| State::new(config.clone()));
+        state
+            .handle_address_deltas(
+                &block2,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_governance_datum_delta(
+                    technical_address.clone(),
+                    technical_policy,
+                    technical_asset,
+                    datum_b.clone(),
+                    2,
+                )]),
+            )
+            .unwrap();
+        state.finalise_block(&block2);
+        history.commit(block2.number, state);
+
+        assert_eq!(
+            history.current().unwrap().governance.get_technical_committee_datum(block2.number),
+            Some(datum_b.clone())
+        );
+
+        let mut rolled_back_state = history.get_rolled_back_state(block2.number);
+        assert_eq!(
+            rolled_back_state.governance.get_technical_committee_datum(block2.number),
+            Some(datum_a)
+        );
+
+        rolled_back_state
+            .handle_address_deltas(
+                &block2,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_governance_datum_delta(
+                    technical_address,
+                    technical_policy,
+                    technical_asset,
+                    datum_c.clone(),
+                    3,
+                )]),
+            )
+            .unwrap();
+        rolled_back_state.finalise_block(&block2);
+        history.commit(block2.number, rolled_back_state);
+
+        assert_eq!(
+            history.current().unwrap().governance.get_technical_committee_datum(block2.number),
             Some(datum_c)
         );
     }

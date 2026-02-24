@@ -71,6 +71,10 @@ impl MidnightState {
                             indexed_night_utxo_creations = summary.indexed_night_utxo_creations,
                             indexed_night_utxo_spends = summary.indexed_night_utxo_spends,
                             indexed_parameter_datums = summary.indexed_parameter_datums,
+                            indexed_governance_technical_committee_datums =
+                                summary.indexed_governance_technical_committee_datums,
+                            indexed_governance_council_datums =
+                                summary.indexed_governance_council_datums,
                             "epoch checkpoint"
                         );
                     }
