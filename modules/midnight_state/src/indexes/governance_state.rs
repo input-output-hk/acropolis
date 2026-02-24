@@ -1,13 +1,12 @@
-use std::collections::BTreeMap;
-
 use acropolis_common::{BlockNumber, Datum};
+use imbl::OrdMap;
 
 #[derive(Clone, Default)]
 pub struct GovernanceState {
     /// Technical Committee datum mapped to the block number it was created
-    pub technical_committee: BTreeMap<BlockNumber, Datum>,
+    pub technical_committee: OrdMap<BlockNumber, Datum>,
     /// Council datum mapped to the block number it was created
-    pub council: BTreeMap<BlockNumber, Datum>,
+    pub council: OrdMap<BlockNumber, Datum>,
 }
 
 impl GovernanceState {
