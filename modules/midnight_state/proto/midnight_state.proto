@@ -1,3 +1,7 @@
+// NOTE:
+// This proto definition is intended to be moved into a separate package/crate
+// in the future. The goal is to publish it as a reusable dependency so that
+// external clients can import and depend on the shared API contract directly.
 syntax = "proto3";
 
 package midnight_state;

@@ -50,7 +50,6 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
                 .get_asset_creates(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
@@ -94,7 +93,6 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
                 .get_asset_spends(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
@@ -138,7 +136,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_registrations(req.start_block, req.end_block)
+            state.get_registrations(req.start_block, req.end_block)
         };
 
         let proto_registrations = registrations
@@ -173,7 +171,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_deregistrations(req.start_block, req.end_block)
+            state.get_deregistrations(req.start_block, req.end_block)
         };
 
         let proto_deregistrations = deregistrations
@@ -206,7 +204,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.governance.get_technical_committee_datum(req.block_number)
+            state.get_technical_committee_datum(req.block_number)
         };
 
         if let Some((source_block_number, datum)) = technical_committee {
@@ -235,7 +233,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.governance.get_council_datum(req.block_number)
+            state.get_council_datum(req.block_number)
         };
 
         if let Some((source_block_number, datum)) = council {

@@ -19,7 +19,9 @@ chrono = { workspace = true }
 prost = "0.13"
 serde = { workspace = true }
 tokio = { workspace = true }
-tonic = { version = "0.12", features = ["transport"] }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
 tracing = { workspace = true }
 
 [build-dependencies]
