@@ -16,11 +16,48 @@ service MidnightState {
   rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
 }
 
-message AssetCreatesRequest {}
-message AssetCreatesResponse {}
+message AssetCreatesRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message AssetCreate {
+  bytes address = 1;
+  uint64 quantity = 2;
 
-message AssetSpendsRequest {}
-message AssetSpendsResponse {}
+  bytes tx_hash = 3;
+  uint32 output_index = 4;
+
+  uint64 block_number = 5;
+  bytes block_hash = 6;
+  uint32 tx_index = 7;
+
+  int64 block_timestamp_unix = 8;
+}
+message AssetCreatesResponse {
+  repeated AssetCreate creates = 1;
+}
+
+message AssetSpendsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message AssetSpend {
+  bytes address = 1;
+  uint64 quantity = 2;
+
+  bytes spending_tx_hash = 3;
+  uint64 block_number = 4;
+  bytes block_hash = 5;
+  uint32 tx_index = 6;
+
+  bytes utxo_tx_hash = 7;
+  uint32 utxo_index = 8;
+
+  int64 block_timestamp_unix = 9;
+}
+message AssetSpendsResponse {
+  repeated AssetSpend spends = 1;
+}
 
 message RegistrationsRequest {}
 message RegistrationsResponse {}

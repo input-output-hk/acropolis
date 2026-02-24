@@ -42,10 +42,10 @@ node-addresses = [
 [module.midnight-state]
 address-deltas-topic = "cardano.address.deltas"
 
-# The below configuration is for `qanet`: https://github.com/midnightntwrk/midnight-node/tree/6b96e5cfb8c200cba66b624837e1c3e6da72cf82/res/qanet
+# The below configuration is for `mainnet`
 # Config for CNight asset
-cnight-policy-id = "d2dbff622e509dda256fedbd31ef6e9fd98ed49ad91d5c0e07f68af1"
-cnight-asset-name = ""
+cnight-policy-id = "0691b2fecca1ac4f53cb6dfb00b7013e561d1f34403b957cbb5af1fa"
+cnight-asset-name = "NIGHT"
 
 # Config for Midnight candidates
 mapping-validator-address = "addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng"

@@ -61,7 +61,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[derive(Debug, clap::Parser)]
 #[command(name = "acropolis_process_midnight")]
 struct Args {
-    #[arg(long, value_name = "PATH", default_values_t = vec![option_env!("ACROPOLIS_MIDNIGHT_DEFAULT_CONFIG").unwrap_or("acropolis.midnight.toml").to_string()])]
+    #[arg(long, value_name = "PATH", default_values_t = vec![option_env!("ACROPOLIS_MIDNIGHT_DEFAULT_CONFIG").unwrap_or("config.mainnet.toml").to_string()])]
     config: Vec<String>,
 }
 
@@ -71,9 +71,10 @@ pub async fn main() -> Result<()> {
     let args = <self::Args as clap::Parser>::parse();
 
     // Standard logging using RUST_LOG for log levels default to INFO for events only
-    let fmt_layer = fmt::layer()
-        .with_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::new("info")))
-        .with_filter(filter::filter_fn(|meta| meta.is_event()));
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("error,acropolis_module_midnight_state=info"));
+    let fmt_layer =
+        fmt::layer().with_filter(filter).with_filter(filter::filter_fn(|meta| meta.is_event()));
 
     // Only turn on tracing if some OTEL environment variables exist
     if std::env::vars().any(|(name, _)| name.starts_with("OTEL_")) {
