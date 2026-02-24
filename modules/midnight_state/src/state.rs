@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, ExtendedAddressDelta, UTxOIdentifier,
+    messages::AddressDeltasMessage, BlockInfo, Epoch, ExtendedAddressDelta, UTxOIdentifier,
 };
 
 use crate::{
@@ -28,7 +28,7 @@ pub struct State {
     // Governance indexed by block
     _governance: GovernanceState,
     // Parameters indexed by epoch
-    _parameters: ParametersState,
+    pub parameters: ParametersState,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -96,6 +96,8 @@ impl State {
                 block_info,
                 &block_created_registrations,
             ));
+
+            self.collect_parameter_datums(delta, block_info.epoch);
         }
 
         // Add created and spent CNight utxos to state
@@ -252,6 +254,22 @@ impl State {
 
         deregistrations
     }
+
+    fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) {
+        if !delta.received.assets.contains_key(&self.config.permissioned_candidate_policy) {
+            return;
+        }
+
+        for created in &delta.created_utxos {
+            if !created.value.assets.contains_key(&self.config.permissioned_candidate_policy) {
+                continue;
+            }
+
+            if let Some(datum) = &created.datum {
+                self.parameters.add_parameter_datum(epoch, datum.clone());
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +337,26 @@ mod tests {
 
     fn test_value_no_token() -> ValueMap {
         ValueMap::default()
+    }
+
+    fn test_parameters_datum_delta(
+        policy: PolicyId,
+        datum: Datum,
+        output_index: u16,
+    ) -> ExtendedAddressDelta {
+        let asset = AssetName::new(b"params").unwrap();
+        ExtendedAddressDelta {
+            address: Address::default(),
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::default(), output_index),
+                value: test_value_with_token(policy, asset, 1),
+                datum: Some(datum),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(policy, asset, 1),
+            sent: ValueMap::default(),
+        }
     }
 
     #[test]
@@ -519,5 +557,47 @@ mod tests {
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
+    }
+
+    #[test]
+    fn indexes_ariadne_parameters_for_matching_policy() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let parameter_policy = PolicyId::new([9u8; 28]);
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.permissioned_candidate_policy = parameter_policy;
+        let mut state = State::new(config);
+
+        let expected_datum = Datum::Inline(vec![0xAA, 0xBB]);
+        let delta = test_parameters_datum_delta(parameter_policy, expected_datum.clone(), 1);
+        state.collect_parameter_datums(&delta, block_info.epoch);
+
+        assert_eq!(
+            state.parameters.get_ariadne_parameters(block_info.epoch),
+            Some((block_info.epoch, expected_datum))
+        );
+    }
+
+    #[test]
+    fn ignores_ariadne_parameters_for_non_matching_policy() {
+        let block_info = test_block_info();
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"").unwrap();
+        let parameter_policy = PolicyId::new([9u8; 28]);
+        let other_policy = PolicyId::new([8u8; 28]);
+
+        let mut config = test_config_cnight(cnight_policy, cnight_asset);
+        config.permissioned_candidate_policy = parameter_policy;
+        let mut state = State::new(config);
+
+        let delta = test_parameters_datum_delta(other_policy, Datum::Inline(vec![0xCC]), 2);
+        state.collect_parameter_datums(&delta, block_info.epoch);
+
+        assert_eq!(
+            state.parameters.get_ariadne_parameters(block_info.epoch),
+            None
+        );
     }
 }

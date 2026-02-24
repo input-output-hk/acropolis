@@ -10,7 +10,7 @@ use crate::{
     },
     state::State,
 };
-use acropolis_common::state_history::StateHistory;
+use acropolis_common::{state_history::StateHistory, Datum};
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
@@ -22,6 +22,19 @@ impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
         Self { history }
     }
+}
+
+fn ariadne_datum_to_proto(datum: Datum) -> midnight_state_proto::AriadneParametersDatum {
+    let value = match datum {
+        Datum::Inline(bytes) => {
+            midnight_state_proto::ariadne_parameters_datum::Value::Inline(bytes)
+        }
+        Datum::Hash(hash) => {
+            midnight_state_proto::ariadne_parameters_datum::Value::Hash(hash.to_vec())
+        }
+    };
+
+    midnight_state_proto::AriadneParametersDatum { value: Some(value) }
 }
 
 #[tonic::async_trait]
@@ -145,8 +158,30 @@ impl MidnightState for MidnightStateService {
 
     async fn get_ariadne_parameters(
         &self,
-        _request: Request<AriadneParametersRequest>,
+        request: Request<AriadneParametersRequest>,
     ) -> Result<Response<AriadneParametersResponse>, Status> {
-        Ok(Response::new(AriadneParametersResponse {}))
+        let req = request.into_inner();
+
+        let params = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.parameters.get_ariadne_parameters(req.epoch)
+        };
+
+        if let Some((source_epoch, datum)) = params {
+            Ok(Response::new(AriadneParametersResponse {
+                found: true,
+                source_epoch,
+                datum: Some(ariadne_datum_to_proto(datum)),
+            }))
+        } else {
+            Ok(Response::new(AriadneParametersResponse {
+                found: false,
+                source_epoch: 0,
+                datum: None,
+            }))
+        }
     }
 }

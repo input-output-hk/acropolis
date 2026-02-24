@@ -67,5 +67,18 @@ message TechnicalCommitteeDatumResponse {}
 message CouncilDatumRequest {}
 message CouncilDatumResponse {}
 
-message AriadneParametersRequest {}
-message AriadneParametersResponse {}
+message AriadneParametersDatum {
+  oneof value {
+    bytes inline = 1;
+    bytes hash = 2;
+  }
+}
+
+message AriadneParametersRequest {
+  uint64 epoch = 1;
+}
+message AriadneParametersResponse {
+  bool found = 1;
+  uint64 source_epoch = 2;
+  AriadneParametersDatum datum = 3;
+}
