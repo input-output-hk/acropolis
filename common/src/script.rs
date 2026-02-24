@@ -21,6 +21,12 @@ pub enum ScriptLang {
     PlutusV3,
 }
 
+impl ScriptLang {
+    pub fn is_native(&self) -> bool {
+        matches!(self, ScriptLang::Native)
+    }
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
@@ -31,12 +37,12 @@ pub enum ReferenceScript {
 }
 
 impl ReferenceScript {
-    pub fn compute_hash(&self) -> Option<ScriptHash> {
+    pub fn compute_hash(&self) -> ScriptHash {
         match self {
-            ReferenceScript::Native(_) => None,
-            ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
-            ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
-            ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+            ReferenceScript::Native(native_script) => native_script.compute_hash(),
+            ReferenceScript::PlutusV1(script) => keyhash_224_tagged(1, script),
+            ReferenceScript::PlutusV2(script) => keyhash_224_tagged(2, script),
+            ReferenceScript::PlutusV3(script) => keyhash_224_tagged(3, script),
         }
     }
 

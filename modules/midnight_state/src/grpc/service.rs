@@ -54,7 +54,6 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
                 .get_asset_creates(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
@@ -98,7 +97,6 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
                 .get_asset_spends(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
@@ -167,7 +165,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.parameters.get_ariadne_parameters(req.epoch)
+            state.get_ariadne_parameters(req.epoch)
         };
 
         if let Some((source_epoch, datum)) = params {

@@ -18,7 +18,10 @@ so reviewers can reproduce. Examples:
 - [ ] My code builds and passes local tests
 - [ ] I added/updated tests for my changes, where applicable
 - [ ] I updated documentation (if applicable)
-- [ ] CI is green for this PR
+- [ ] branch has ≤ 5 commits (honor system)
+- [ ] commit messages tell a coherent story
+- [ ] branch is up to date with main (rebased on main; fast-forward possible)
+- [ ] CI/CD passes on the merged-with-main result
 
 ## Impact / Side effects
 Describe any potential side effects, e.g. performance, compatibility, or security concerns.

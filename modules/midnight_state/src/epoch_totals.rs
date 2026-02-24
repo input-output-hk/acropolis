@@ -1,28 +1,24 @@
-use acropolis_common::{BlockInfo, Era, ExtendedAddressDelta};
+use acropolis_common::{BlockInfo, Era};
 
 /// Epoch summary emitted by midnight-state logging runtime.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EpochSummary {
     pub epoch: u64,
     pub era: Era,
-    pub blocks: usize,
-    pub delta_count: usize,
-    pub created_utxos: usize,
-    pub spent_utxos: usize,
-}
-
-trait EpochTotalsObserver {
-    fn start_block(&mut self, block: &BlockInfo);
-    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]);
-    fn finalise_block(&mut self, block: &BlockInfo);
+    pub indexed_night_utxo_creations: usize,
+    pub indexed_night_utxo_spends: usize,
+    pub indexed_parameter_datums: usize,
+    pub indexed_governance_technical_committee_datums: usize,
+    pub indexed_governance_council_datums: usize,
 }
 
 #[derive(Clone, Default)]
 pub struct EpochTotals {
-    extended_blocks: usize,
-    delta_count: usize,
-    created_utxos: usize,
-    spent_utxos: usize,
+    indexed_night_utxo_creations: usize,
+    indexed_night_utxo_spends: usize,
+    indexed_parameter_datums: usize,
+    indexed_governance_technical_committee_datums: usize,
+    indexed_governance_council_datums: usize,
     last_checkpoint: Option<EpochCheckpoint>,
 }
 
@@ -42,16 +38,22 @@ impl EpochCheckpoint {
 }
 
 impl EpochTotals {
-    pub fn start_block(&mut self, block: &BlockInfo) {
-        <Self as EpochTotalsObserver>::start_block(self, block);
+    pub fn add_indexed_night_utxos(&mut self, creations: usize, spends: usize) {
+        self.indexed_night_utxo_creations += creations;
+        self.indexed_night_utxo_spends += spends;
     }
 
-    pub fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
-        <Self as EpochTotalsObserver>::observe_deltas(self, deltas);
+    pub fn add_indexed_parameter_datums(&mut self, indexed: usize) {
+        self.indexed_parameter_datums += indexed;
+    }
+
+    pub fn add_indexed_governance_datums(&mut self, technical_committee: usize, council: usize) {
+        self.indexed_governance_technical_committee_datums += technical_committee;
+        self.indexed_governance_council_datums += council;
     }
 
     pub fn finalise_block(&mut self, block: &BlockInfo) {
-        <Self as EpochTotalsObserver>::finalise_block(self, block);
+        self.last_checkpoint = Some(EpochCheckpoint::from_block(block));
     }
 
     pub fn summarise_completed_epoch(&self, boundary_block: &BlockInfo) -> EpochSummary {
@@ -64,33 +66,85 @@ impl EpochTotals {
         EpochSummary {
             epoch,
             era,
-            blocks: self.extended_blocks,
-            delta_count: self.delta_count,
-            created_utxos: self.created_utxos,
-            spent_utxos: self.spent_utxos,
+            indexed_night_utxo_creations: self.indexed_night_utxo_creations,
+            indexed_night_utxo_spends: self.indexed_night_utxo_spends,
+            indexed_parameter_datums: self.indexed_parameter_datums,
+            indexed_governance_technical_committee_datums: self
+                .indexed_governance_technical_committee_datums,
+            indexed_governance_council_datums: self.indexed_governance_council_datums,
         }
     }
 
     pub fn reset_epoch(&mut self) {
-        self.extended_blocks = 0;
-        self.delta_count = 0;
-        self.created_utxos = 0;
-        self.spent_utxos = 0;
+        self.indexed_night_utxo_creations = 0;
+        self.indexed_night_utxo_spends = 0;
+        self.indexed_parameter_datums = 0;
+        self.indexed_governance_technical_committee_datums = 0;
+        self.indexed_governance_council_datums = 0;
         self.last_checkpoint = None;
     }
 }
 
-impl EpochTotalsObserver for EpochTotals {
-    fn start_block(&mut self, _block: &BlockInfo) {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::{BlockHash, BlockIntent, BlockStatus};
 
-    fn observe_deltas(&mut self, deltas: &[ExtendedAddressDelta]) {
-        self.extended_blocks += 1;
-        self.delta_count += deltas.len();
-        self.created_utxos += deltas.iter().map(|delta| delta.created_utxos.len()).sum::<usize>();
-        self.spent_utxos += deltas.iter().map(|delta| delta.spent_utxos.len()).sum::<usize>();
+    fn mk_block(number: u64, epoch: u64, era: Era) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Immutable,
+            intent: BlockIntent::Apply,
+            slot: number,
+            number,
+            hash: BlockHash::default(),
+            epoch,
+            epoch_slot: number,
+            new_epoch: false,
+            is_new_era: false,
+            tip_slot: None,
+            timestamp: 0,
+            era,
+        }
     }
 
-    fn finalise_block(&mut self, block: &BlockInfo) {
-        self.last_checkpoint = Some(EpochCheckpoint::from_block(block));
+    #[test]
+    fn tracks_indexed_night_utxos_for_epoch() {
+        let mut totals = EpochTotals::default();
+        let block = mk_block(10, 100, Era::Conway);
+
+        totals.add_indexed_night_utxos(2, 0);
+        totals.add_indexed_night_utxos(1, 4);
+        totals.add_indexed_parameter_datums(5);
+        totals.add_indexed_governance_datums(2, 6);
+        totals.finalise_block(&block);
+
+        let boundary = mk_block(11, 101, Era::Conway);
+        let summary = totals.summarise_completed_epoch(&boundary);
+        assert_eq!(summary.epoch, 100);
+        assert_eq!(summary.era, Era::Conway);
+        assert_eq!(summary.indexed_night_utxo_creations, 3);
+        assert_eq!(summary.indexed_night_utxo_spends, 4);
+        assert_eq!(summary.indexed_governance_technical_committee_datums, 2);
+        assert_eq!(summary.indexed_governance_council_datums, 6);
+        assert_eq!(summary.indexed_parameter_datums, 5);
+    }
+
+    #[test]
+    fn summarise_uses_boundary_epoch_when_checkpoint_absent() {
+        let mut totals = EpochTotals::default();
+        totals.add_indexed_night_utxos(7, 2);
+        totals.add_indexed_parameter_datums(3);
+        totals.add_indexed_governance_datums(4, 1);
+
+        let boundary = mk_block(99, 501, Era::Conway);
+        let summary = totals.summarise_completed_epoch(&boundary);
+
+        assert_eq!(summary.epoch, 500);
+        assert_eq!(summary.era, Era::Conway);
+        assert_eq!(summary.indexed_night_utxo_creations, 7);
+        assert_eq!(summary.indexed_night_utxo_spends, 2);
+        assert_eq!(summary.indexed_parameter_datums, 3);
+        assert_eq!(summary.indexed_governance_technical_committee_datums, 4);
+        assert_eq!(summary.indexed_governance_council_datums, 1);
     }
 }
