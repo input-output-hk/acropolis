@@ -11,7 +11,6 @@ pub struct GovernanceState {
 }
 
 impl GovernanceState {
-    #[allow(dead_code)]
     /// Insert a new technical committee datum
     pub fn insert_technical_committee_datum(
         &mut self,
@@ -21,7 +20,6 @@ impl GovernanceState {
         self.technical_committee.insert(block_number, datum).is_none()
     }
 
-    #[allow(dead_code)]
     /// Insert a new council datum
     pub fn insert_council_datum(&mut self, block_number: BlockNumber, datum: Datum) -> bool {
         self.council.insert(block_number, datum).is_none()

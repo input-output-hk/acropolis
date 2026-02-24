@@ -14,10 +14,7 @@ use crate::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
     },
-    types::{
-        AssetCreate, AssetSpend, CNightCreation, CNightSpend, DeregistrationEvent,
-        RegistrationEvent,
-    },
+    types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
 
 #[derive(Clone, Default)]
@@ -134,22 +131,6 @@ impl State {
             indexed_governance_council_datums,
         );
         Ok(())
-    }
-
-    pub fn get_asset_creates(
-        &self,
-        start: BlockNumber,
-        end: BlockNumber,
-    ) -> Result<Vec<AssetCreate>> {
-        self.utxos.get_asset_creates(start, end)
-    }
-
-    pub fn get_asset_spends(
-        &self,
-        start: BlockNumber,
-        end: BlockNumber,
-    ) -> Result<Vec<AssetSpend>> {
-        self.utxos.get_asset_spends(start, end)
     }
 
     pub fn get_ariadne_parameters(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
