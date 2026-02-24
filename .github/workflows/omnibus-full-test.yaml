@@ -1,0 +1,66 @@
+name: Run omnibus full test
+
+on:
+  schedule:
+    - cron: '15 3 * * *'
+
+  workflow_dispatch:
+    branches:
+      - main
+
+env:
+  ACROPOLIS_REST_URL: http://localhost:4340
+  SPDD_VALIDATION_START_EPOCH: 508
+
+jobs:
+  run-test:
+    name: Run omnibus full test
+    runs-on: self-hosted
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: set up cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release version of omnibus process
+        run: make build-release
+
+      - name: Bootstrap omnibus and wait for target epoch
+        run: ./scripts/run-omnibus-wait-for-epoch.sh
+
+      - name: Run spdd tests
+        run: |
+          cd tests/integration
+          npm install
+          npm run test:spdd
+        env:
+          MAINNET_DB_SYNC_URL: ${{ secrets.MAINNET_DB_SYNC_URL }}
+
+      - name: Run drdd tests
+        run: |
+          cd tests/integration
+          npm run test:spdd
+        env:
+          MAINNET_DB_SYNC_URL: ${{ secrets.MAINNET_DB_SYNC_URL }}
+
+      - name: Run k6 tests
+        run: |
+          cd tests/k6
+          make test-all
+        env:
+          API_URL: $ACROPOLIS_REST_URL
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnibus-artifacts
+          path: tests/k6/results
