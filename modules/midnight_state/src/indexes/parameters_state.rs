@@ -9,7 +9,6 @@ pub struct ParametersState {
 }
 
 impl ParametersState {
-    #[allow(dead_code)]
     /// Insert the parameters for an epoch on change, overwriting existing entry if multiple
     /// updates in the same epoch
     pub fn add_parameter_datum(&mut self, epoch: Epoch, datum: Datum) -> bool {

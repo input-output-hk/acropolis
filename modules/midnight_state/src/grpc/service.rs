@@ -134,73 +134,16 @@ impl MidnightState for MidnightStateService {
 
     async fn get_registrations(
         &self,
-        request: Request<RegistrationsRequest>,
+        _request: Request<RegistrationsRequest>,
     ) -> Result<Response<RegistrationsResponse>, Status> {
-        let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
-
-        let registrations = {
-            let history = self.history.lock().await;
-            let state =
-                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
-
-            state.get_registrations(req.start_block, req.end_block)
-        };
-
-        let proto_registrations = registrations
-            .into_iter()
-            .map(|r| midnight_state_proto::Registration {
-                full_datum: Some(datum_to_proto(r.full_datum)),
-                block_number: r.block_number,
-                block_hash: r.block_hash.to_vec(),
-                tx_index: r.tx_index_in_block,
-                tx_hash: r.tx_hash.to_vec(),
-                utxo_index: r.utxo_index as u32,
-                block_timestamp_unix: r.block_timestamp.and_utc().timestamp(),
-            })
-            .collect();
-
-        Ok(Response::new(RegistrationsResponse {
-            registrations: proto_registrations,
-        }))
+        Ok(Response::new(RegistrationsResponse {}))
     }
 
     async fn get_deregistrations(
         &self,
-        request: Request<DeregistrationsRequest>,
+        _request: Request<DeregistrationsRequest>,
     ) -> Result<Response<DeregistrationsResponse>, Status> {
-        let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
-
-        let deregistrations = {
-            let history = self.history.lock().await;
-            let state =
-                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
-
-            state.get_deregistrations(req.start_block, req.end_block)
-        };
-
-        let proto_deregistrations = deregistrations
-            .into_iter()
-            .map(|r| midnight_state_proto::Deregistration {
-                full_datum: Some(datum_to_proto(r.full_datum)),
-                block_number: r.block_number,
-                block_hash: r.block_hash.to_vec(),
-                tx_index: r.tx_index_in_block,
-                tx_hash: r.tx_hash.to_vec(),
-                utxo_tx_hash: r.utxo_tx_hash.to_vec(),
-                utxo_index: r.utxo_index as u32,
-                block_timestamp_unix: r.block_timestamp.and_utc().timestamp(),
-            })
-            .collect();
-
-        Ok(Response::new(DeregistrationsResponse {
-            deregistrations: proto_deregistrations,
-        }))
+        Ok(Response::new(DeregistrationsResponse {}))
     }
 
     async fn get_technical_committee_datum(

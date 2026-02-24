@@ -66,40 +66,11 @@ message Datum {
   }
 }
 
-message RegistrationsRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
-}
-message Registration {
-  Datum full_datum = 1;
-  uint64 block_number = 2;
-  bytes block_hash = 3;
-  uint32 tx_index = 4;
-  bytes tx_hash = 5;
-  uint32 utxo_index = 6;
-  int64 block_timestamp_unix = 7;
-}
-message RegistrationsResponse {
-  repeated Registration registrations = 1;
-}
+message RegistrationsRequest {}
+message RegistrationsResponse {}
 
-message DeregistrationsRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
-}
-message Deregistration {
-  Datum full_datum = 1;
-  uint64 block_number = 2;
-  bytes block_hash = 3;
-  uint32 tx_index = 4;
-  bytes tx_hash = 5;
-  bytes utxo_tx_hash = 6;
-  uint32 utxo_index = 7;
-  int64 block_timestamp_unix = 8;
-}
-message DeregistrationsResponse {
-  repeated Deregistration deregistrations = 1;
-}
+message DeregistrationsRequest {}
+message DeregistrationsResponse {}
 
 message TechnicalCommitteeDatumRequest {
   uint64 block_number = 1;
