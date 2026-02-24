@@ -34,9 +34,7 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 [module.peer-network-interface]
 sync-point = "dynamic"
 node-addresses = [
-    "backbone.cardano.iog.io:3001",
-    "backbone.mainnet.cardanofoundation.org:3001",
-    "backbone.mainnet.emurgornd.com:3001",
+    "preview-node.play.dev.cardano.org:3001",
 ]
 
 [module.midnight-state]

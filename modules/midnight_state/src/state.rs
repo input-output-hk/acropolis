@@ -25,7 +25,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    candidates: CandidateState,
+    pub candidates: CandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
@@ -227,7 +227,7 @@ impl State {
 
                 registrations.push(RegistrationEvent {
                     block_hash: block_info.hash,
-                    block_timestamp: block_info.to_naive_datetime(),
+                    block_timestamp: block_info.timestamp as i64,
                     tx_index: delta.tx_identifier.tx_index() as u32,
                     tx_hash: created.utxo.tx_hash,
                     utxo_index: created.utxo.output_index,
@@ -256,7 +256,7 @@ impl State {
                 deregistrations.push(DeregistrationEvent {
                     registration_utxo: spent.utxo,
                     spent_block_hash: block_info.hash,
-                    spent_block_timestamp: block_info.to_naive_datetime(),
+                    spent_block_timestamp: block_info.timestamp as i64,
                     spent_tx_hash: spent.spent_by,
                     spent_tx_index: delta.tx_identifier.tx_index() as u32,
                 });
@@ -597,7 +597,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 9);
         assert_eq!(indexed[0].tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
@@ -638,7 +638,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 2);
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
