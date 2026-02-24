@@ -2,6 +2,7 @@ use acropolis_common::{hash::Hash, messages::Message, Point};
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use anyhow::Result;
 use caryatid_process::Process;
+use caryatid_sdk::ModuleRegistry;
 use clap::Parser;
 use config::{Config, Environment, File};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
