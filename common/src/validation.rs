@@ -366,8 +366,11 @@ pub enum UTxOWValidationError {
     /// **Cause:** Unspendable UTxO without datum hash
     /// To spend a UTxO locked at Plutus scripts
     /// datum must be provided
-    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
-    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
+    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}, input_index={input_index}")]
+    UnspendableUTxONoDatumHash {
+        utxo_identifier: UTxOIdentifier,
+        input_index: usize,
+    },
 }
 
 /// Reference

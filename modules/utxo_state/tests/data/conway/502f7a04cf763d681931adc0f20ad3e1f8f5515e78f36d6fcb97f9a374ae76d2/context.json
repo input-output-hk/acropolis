@@ -1,0 +1,216 @@
+{
+  "shelley_params": {
+    "activeSlotsCoeff": 0.05,
+    "epochLength": 432000,
+    "maxKesEvolutions": 62,
+    "maxLovelaceSupply": 45000000000000000,
+    "networkId": "Mainnet",
+    "networkMagic": 764824073,
+    "protocolParams": {
+      "protocolVersion": {
+        "minor": 0,
+        "major": 9
+      },
+      "maxTxSize": 16384,
+      "maxBlockBodySize": 65536,
+      "maxBlockHeaderSize": 1100,
+      "keyDeposit": 2000000,
+      "minUTxOValue": 4310,
+      "minFeeA": 44,
+      "minFeeB": 155381,
+      "poolDeposit": 500000000,
+      "nOpt": 150,
+      "minPoolCost": 340000000,
+      "eMax": 18,
+      "extraEntropy": {
+        "tag": "NeutralNonce"
+      },
+      "decentralisationParam": 0,
+      "rho": 0.003,
+      "tau": 0.2,
+      "a0": 0.3
+    },
+    "securityParam": 2160,
+    "slotLength": 1,
+    "slotsPerKesPeriod": 129600,
+    "systemStart": "2017-09-23T21:44:51Z",
+    "updateQuorum": 5,
+    "genDelegs": {
+      "ad5463153dc3d24b9ff133e46136028bdc1edbb897f5a7cf1b37950c": {
+        "delegate": "d9e5c76ad5ee778960804094a389f0b546b5c2b140a62f8ec43ea54d",
+        "vrf": "64fa87e8b29a5b7bfbd6795677e3e878c505bc4a3649485d366b50abadec92d7"
+      },
+      "b9547b8a57656539a8d9bc42c008e38d9c8bd9c8adbb1e73ad529497": {
+        "delegate": "855d6fc1e54274e331e34478eeac8d060b0b90c1f9e8a2b01167c048",
+        "vrf": "66d5167a1f426bd1adcc8bbf4b88c280d38c148d135cb41e3f5a39f948ad7fcc"
+      },
+      "60baee25cbc90047e83fd01e1e57dc0b06d3d0cb150d0ab40bbfead1": {
+        "delegate": "7f72a1826ae3b279782ab2bc582d0d2958de65bd86b2c4f82d8ba956",
+        "vrf": "c0546d9aa5740afd569d3c2d9c412595cd60822bb6d9a4e8ce6c43d12bd0f674"
+      },
+      "f7b341c14cd58fca4195a9b278cce1ef402dc0e06deb77e543cd1757": {
+        "delegate": "69ae12f9e45c0c9122356c8e624b1fbbed6c22a2e3b4358cf0cb5011",
+        "vrf": "6394a632af51a32768a6f12dac3485d9c0712d0b54e3f389f355385762a478f2"
+      },
+      "162f94554ac8c225383a2248c245659eda870eaa82d0ef25fc7dcd82": {
+        "delegate": "4485708022839a7b9b8b639a939c85ec0ed6999b5b6dc651b03c43f6",
+        "vrf": "aba81e764b71006c515986bf7b37a72fbb5554f78e6775f08e384dbd572a4b32"
+      },
+      "2075a095b3c844a29c24317a94a643ab8e22d54a3a3a72a420260af6": {
+        "delegate": "6535db26347283990a252313a7903a45e3526ec25ddba381c071b25b",
+        "vrf": "fcaca997b8105bd860876348fc2c6e68b13607f9bbd23515cd2193b555d267af"
+      },
+      "268cfc0b89e910ead22e0ade91493d8212f53f3e2164b2e4bef0819b": {
+        "delegate": "1d4f2e1fda43070d71bb22a5522f86943c7c18aeb4fa47a362c27e23",
+        "vrf": "63ef48bc5355f3e7973100c371d6a095251c80ceb40559f4750aa7014a6fb6db"
+      }
+    }
+  },
+  "utxos": {
+    "07de69273aaaa57ca41311d8d7cf9bdf545c2e85c2c19962154a752df97f2d35#0": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 155000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "392768bba2df5cd1e092859060e456091f88e3b9abad81d59562c2ee0c0323de#0": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 5000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "69c9d2a8cad8b5e30c3114028b863cd6f6c371231e30ff323f7bd4dbbfbecb27#0": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 7600000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "9e978adf290e28938588dd04fd69d423eff29b24a4919e3f430fa372540c4b87#0": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 159000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#2": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 596038152879,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#3": {
+      "address": "addr1wxhc9s9uufjkgn4z5teqclywxqzjkhjstrjvhw8zjuykptqmsuqu2",
+      "value": {
+        "lovelace": 2000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [
+          88, 32, 130, 74, 166, 250, 13, 38, 45, 73, 239, 19, 136, 58, 119, 33,
+          216, 171, 15, 175, 152, 69, 68, 244, 186, 64, 15, 40, 98, 56, 146, 35,
+          101, 146
+        ]
+      },
+      "reference_script_hash": null
+    },
+    "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#4": {
+      "address": "addr1vyz5deam6gy5tujg8y3vushnn3wqsc6eumacflxyhh8jggq73ky74",
+      "value": {
+        "lovelace": 605319109,
+        "assets": []
+      },
+      "datum": null,
+      "reference_script_hash": null
+    },
+    "dc5e545b16de18a8d97a0d3c019e6b843df8360a4976f81069bd982c33a546af#0": {
+      "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
+      "value": {
+        "lovelace": 10000000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": null
+    },
+    "2e4508680eebf4357c40e16a09b0aa428bb9f95d63847b9395c3203220e9181d#1": {
+      "address": "addr1w9n8n39lghsvdha5yvuhmxkv25620e9kgdgzhalmap753pq5czu4h",
+      "value": {
+        "lovelace": 2000000,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [216, 121, 128]
+      },
+      "reference_script_hash": "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2"
+    },
+    "cf9b3804fb048391cd98016024b9f4d86a4cddbdc493a324729765dec6063533#0": {
+      "address": "addr1w8ypa9x3ffz6p4gmwux36agrtcvqen9wplzqqrath87vjjcwjxvp9",
+      "value": {
+        "lovelace": 3098890,
+        "assets": []
+      },
+      "datum": {
+        "Inline": [
+          216, 121, 159, 159, 216, 121, 159, 64, 64, 255, 216, 121, 159, 88, 28,
+          162, 148, 69, 115, 233, 157, 46, 211, 5, 91, 128, 142, 170, 38, 79,
+          11, 241, 25, 224, 31, 198, 177, 136, 99, 6, 124, 99, 228, 68, 77, 69,
+          76, 68, 255, 255, 159, 88, 28, 176, 103, 41, 21, 130, 16, 191, 27,
+          161, 63, 143, 61, 125, 66, 42, 145, 141, 62, 170, 130, 86, 26, 112,
+          85, 82, 162, 86, 139, 255, 26, 0, 30, 132, 128, 159, 216, 121, 159,
+          216, 122, 159, 88, 28, 127, 115, 179, 135, 156, 147, 16, 199, 160, 47,
+          65, 209, 102, 143, 119, 186, 177, 99, 100, 8, 19, 252, 35, 137, 73,
+          170, 249, 47, 255, 255, 216, 121, 159, 216, 122, 159, 88, 28, 13, 142,
+          31, 251, 113, 211, 94, 88, 202, 240, 147, 186, 116, 20, 228, 197, 178,
+          211, 108, 135, 244, 196, 32, 231, 202, 107, 196, 163, 255, 255, 216,
+          121, 159, 216, 122, 159, 88, 28, 95, 69, 185, 30, 89, 98, 129, 245,
+          169, 122, 125, 54, 247, 206, 0, 3, 76, 147, 144, 107, 6, 184, 192,
+          113, 249, 23, 204, 218, 255, 255, 216, 121, 159, 216, 122, 159, 88,
+          28, 77, 131, 161, 145, 35, 191, 143, 220, 192, 165, 33, 140, 237, 58,
+          222, 140, 132, 198, 121, 247, 67, 191, 9, 239, 76, 71, 23, 213, 255,
+          255, 216, 121, 159, 216, 122, 159, 88, 28, 190, 60, 133, 157, 86, 10,
+          83, 194, 175, 37, 236, 251, 241, 127, 118, 88, 129, 194, 96, 174, 191,
+          21, 57, 133, 40, 94, 223, 185, 255, 255, 216, 121, 159, 216, 122, 159,
+          88, 28, 135, 120, 244, 115, 238, 191, 224, 228, 132, 95, 101, 214,
+          241, 250, 40, 76, 118, 219, 12, 129, 74, 180, 171, 99, 18, 85, 216,
+          134, 255, 255, 216, 121, 159, 216, 122, 159, 88, 28, 140, 49, 13, 200,
+          248, 39, 121, 194, 41, 231, 227, 83, 109, 7, 142, 159, 212, 27, 217,
+          216, 117, 117, 204, 165, 5, 11, 71, 45, 255, 255, 216, 121, 159, 216,
+          122, 159, 88, 28, 87, 254, 178, 112, 55, 123, 51, 244, 43, 239, 24,
+          57, 105, 223, 201, 69, 134, 24, 165, 19, 189, 130, 252, 191, 113, 168,
+          12, 159, 255, 255, 216, 121, 159, 216, 122, 159, 88, 28, 47, 48, 188,
+          123, 125, 253, 202, 173, 1, 201, 101, 44, 150, 45, 153, 153, 17, 252,
+          78, 179, 33, 181, 151, 17, 66, 225, 113, 177, 255, 255, 216, 121, 159,
+          216, 122, 159, 88, 28, 48, 247, 208, 59, 15, 65, 113, 82, 71, 186, 22,
+          86, 109, 214, 63, 248, 177, 156, 244, 247, 186, 123, 31, 245, 67, 216,
+          40, 178, 255, 255, 255, 255
+        ]
+      },
+      "reference_script_hash": "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2"
+    }
+  }
+}
