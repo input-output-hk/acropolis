@@ -23,7 +23,7 @@ pub struct State {
     epoch_totals: EpochTotals,
 
     // CNight UTxO spends and creations indexed by block
-    utxos: CNightUTxOState,
+    pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
     candidates: CandidateState,
     // Governance indexed by block
@@ -164,7 +164,7 @@ impl State {
                 block_number: block_info.number,
                 block_hash: block_info.hash,
                 tx_index: delta.tx_identifier.tx_index() as u32,
-                block_timestamp: block_info.to_naive_datetime(),
+                block_timestamp: block_info.timestamp as i64,
             };
 
             block_created_utxos.insert(created.utxo);
@@ -192,7 +192,7 @@ impl State {
                             block_hash: block_info.hash,
                             tx_hash: spent.spent_by,
                             tx_index: delta.tx_identifier.tx_index() as u32,
-                            block_timestamp: block_info.to_naive_datetime(),
+                            block_timestamp: block_info.timestamp as i64,
                         },
                     ))
                 } else {
