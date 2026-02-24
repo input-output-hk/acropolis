@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn collects_governance_datums_for_technical_committee_and_council() {
+    fn should_collect_governance_datums_when_technical_committee_and_council_deltas_present() {
         let block_info = test_block_info();
         let technical_committee_policy = PolicyId::new([0x11u8; 28]);
         let council_policy = PolicyId::new([0x22u8; 28]);
@@ -545,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn collects_cnight_creations_and_spends_when_token_present() {
+    fn should_collect_cnight_creations_and_spends_when_token_present() {
         let block_info = test_block_info();
         let policy = PolicyId::new([1u8; 28]);
         let asset = AssetName::new(b"").unwrap();
@@ -640,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn collects_candidate_registrations_and_deregistrations() {
+    fn should_collect_candidate_registrations_and_deregistrations_when_mapping_events_present() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn indexes_parameters_from_matching_policy_datums() {
+    fn should_index_parameters_when_policy_matches() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -785,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_parameter_datums_for_non_matching_policy() {
+    fn should_ignore_parameters_when_policy_does_not_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -824,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_restores_previous_parameter_datum_before_replay() {
+    fn should_restore_previous_parameter_datum_when_rollback_and_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let parameter_policy = PolicyId::new([9u8; 28]);
@@ -902,7 +902,7 @@ mod tests {
     }
 
     #[test]
-    fn indexes_governance_datums_for_matching_address_and_policy() {
+    fn should_index_governance_datums_when_address_and_policy_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -969,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_governance_datums_for_non_matching_address() {
+    fn should_ignore_governance_datums_when_address_does_not_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -1012,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_restores_previous_governance_datum_before_replay() {
+    fn should_restore_previous_governance_datum_when_rollback_and_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let technical_policy = PolicyId::new([7u8; 28]);
