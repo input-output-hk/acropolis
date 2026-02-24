@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, ExtendedAddressDelta, Epoch, UTxOIdentifier,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Epoch, ExtendedAddressDelta,
+    UTxOIdentifier,
 };
 
 use crate::{
