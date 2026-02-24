@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-acropolis_url=${ACROPOLIS_REST_URL:-http://localhost:4340}
+acropolis_rest_url=${ACROPOLIS_REST_URL:-http://localhost:4340}
 
 # Calculate current epoch
 # no leap seconds since genesis, and none planned
