@@ -9,8 +9,9 @@ use acropolis_common::{
         governance::{DRepActionUpdate, DRepUpdateEvent, VoteRecord},
     },
     validation::ValidationOutcomes,
-    Anchor, DRepChoice, DRepCredential, DRepRecord, GovActionId, Lovelace, ProposalProcedure,
-    StakeAddress, TxCertificate, TxCertificateWithPos, TxHash, Voter, VotingProcedures,
+    Anchor, DRepChoice, DRepCredential, DRepRecord, DRepRegistrationOutcome,
+    DRepRegistrationUpdate, GovActionId, Lovelace, ProposalProcedure, StakeAddress, TxCertificate,
+    TxCertificateWithPos, TxHash, Voter, VotingProcedures,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
@@ -323,8 +324,10 @@ impl State {
         tx_certs: &Vec<TxCertificateWithPos>,
         epoch: u64,
         drep_activity: Option<u32>,
-    ) -> Result<ValidationOutcomes> {
+    ) -> Result<(ValidationOutcomes, Vec<DRepRegistrationUpdate>)> {
         let mut vld = ValidationOutcomes::new();
+        let mut drep_registration_updates = Vec::new();
+
         let mut batched_delegators = Vec::new();
         let store_delegators = self.config.store_delegators;
 
@@ -336,8 +339,13 @@ impl State {
                 }
             }
 
-            if let Err(e) = self.process_one_cert(tx_cert, epoch, &mut vld, drep_activity) {
-                vld.push_anyhow(anyhow!("Error processing tx_cert: {e}"));
+            match self.process_one_cert(tx_cert, epoch, &mut vld, drep_activity) {
+                Ok(update) => {
+                    if let Some(update) = update {
+                        drep_registration_updates.push(update);
+                    }
+                }
+                Err(e) => vld.push_anyhow(anyhow!("Error processing tx_cert: {e}")),
             }
         }
 
@@ -348,7 +356,7 @@ impl State {
             }
         }
 
-        Ok(vld)
+        Ok((vld, drep_registration_updates))
     }
 
     pub fn process_votes(
@@ -449,7 +457,7 @@ impl State {
         epoch: u64,
         vld: &mut ValidationOutcomes,
         drep_activity: Option<u32>,
-    ) -> Result<bool> {
+    ) -> Result<Option<DRepRegistrationUpdate>> {
         match &tx_cert.cert {
             TxCertificate::DRepRegistration(reg) => {
                 let drep_activity = drep_activity.ok_or_else(|| {
@@ -457,7 +465,7 @@ impl State {
                         "Missing Conway parameter d_rep_activity (required to compute drepExpiry)"
                     )
                 })?;
-                let new = match self.dreps.get_mut(&reg.credential) {
+                let registration_update = match self.dreps.get_mut(&reg.credential) {
                     Some(drep) => {
                         if reg.deposit != 0 {
                             return Err(anyhow!(
@@ -467,14 +475,21 @@ impl State {
                             ));
                         }
                         drep.anchor = reg.anchor.clone();
-                        false
+
+                        DRepRegistrationUpdate {
+                            cert_identifier: tx_cert.tx_certificate_identifier(),
+                            outcome: DRepRegistrationOutcome::Updated,
+                        }
                     }
                     None => {
                         self.dreps.insert(
                             reg.credential.clone(),
                             DRepRecord::new(reg.deposit, reg.anchor.clone()),
                         );
-                        true
+                        DRepRegistrationUpdate {
+                            cert_identifier: tx_cert.tx_certificate_identifier(),
+                            outcome: DRepRegistrationOutcome::Registered(reg.deposit),
+                        }
                     }
                 };
 
@@ -507,7 +522,7 @@ impl State {
                     }
                 }
 
-                Ok(new)
+                Ok(Some(registration_update))
             }
 
             TxCertificate::DRepDeregistration(reg) => {
@@ -543,7 +558,10 @@ impl State {
                     }
                 }
 
-                Ok(true)
+                Ok(Some(DRepRegistrationUpdate {
+                    cert_identifier: tx_cert.tx_certificate_identifier(),
+                    outcome: DRepRegistrationOutcome::Deregistered(reg.refund),
+                }))
             }
 
             TxCertificate::DRepUpdate(reg) => {
@@ -585,10 +603,13 @@ impl State {
                     vld.push_anyhow(anyhow!("Historical update failed: {err}"));
                 }
 
-                Ok(false)
+                Ok(Some(DRepRegistrationUpdate {
+                    cert_identifier: tx_cert.tx_certificate_identifier(),
+                    outcome: DRepRegistrationOutcome::Updated,
+                }))
             }
 
-            _ => Ok(false),
+            _ => Ok(None),
         }
     }
 
@@ -748,9 +769,9 @@ mod tests {
     use crate::state::{DRepRecord, DRepStorageConfig, State};
     use acropolis_common::{
         validation::ValidationOutcomes, Anchor, Credential, DRepDeregistration, DRepKeyHash,
-        DRepRegistration, DRepUpdate, GovActionId, GovernanceAction, NetworkId, ProposalProcedure,
-        SingleVoterVotes, StakeAddress, TxCertificate, TxCertificateWithPos, TxHash, TxIdentifier,
-        Vote, Voter, VotingProcedure, VotingProcedures,
+        DRepRegistration, DRepRegistrationOutcome, DRepUpdate, GovActionId, GovernanceAction,
+        NetworkId, ProposalProcedure, SingleVoterVotes, StakeAddress, TxCertificate,
+        TxCertificateWithPos, TxHash, TxIdentifier, Vote, Voter, VotingProcedure, VotingProcedures,
     };
     use std::collections::HashMap;
 
@@ -784,7 +805,10 @@ mod tests {
         };
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
             deposit: 500000000,
@@ -813,7 +837,10 @@ mod tests {
 
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
 
         let bad_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepRegistration(DRepRegistration {
@@ -853,7 +880,10 @@ mod tests {
         };
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -868,7 +898,14 @@ mod tests {
             cert_index: 1,
         };
 
-        assert!(!state.process_one_cert(&update_anchor_tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state
+                .process_one_cert(&update_anchor_tx_cert, 1, &mut vld, Some(20))
+                .unwrap()
+                .unwrap()
+                .outcome,
+            DRepRegistrationOutcome::Updated
+        ),);
 
         assert_eq!(state.get_count(), 1);
         let tx_cert_record = DRepRecord {
@@ -897,7 +934,10 @@ mod tests {
         };
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
 
         let anchor = Anchor {
             url: "https://poop.bike".into(),
@@ -940,7 +980,10 @@ mod tests {
         };
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -950,7 +993,14 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 1,
         };
-        assert!(state.process_one_cert(&unregister_tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state
+                .process_one_cert(&unregister_tx_cert, 1, &mut vld, Some(20))
+                .unwrap()
+                .unwrap()
+                .outcome,
+            DRepRegistrationOutcome::Deregistered(_)
+        ),);
         assert_eq!(state.get_count(), 0);
         assert!(state.get_drep(&tx_cred).is_none());
         vld.as_result().unwrap();
@@ -979,7 +1029,14 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        assert!(state.process_one_cert(&register_cert, 10, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state
+                .process_one_cert(&register_cert, 10, &mut vld, Some(20))
+                .unwrap()
+                .unwrap()
+                .outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
         assert_eq!(
             state.drep_expiry.get(&tx_cred).copied(),
             Some(30),
@@ -1050,7 +1107,10 @@ mod tests {
         };
         let mut state = State::new(DRepStorageConfig::default());
         set_params(&mut state);
-        assert!(state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state.process_one_cert(&tx_cert, 1, &mut vld, Some(20)).unwrap().unwrap().outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
 
         let unregister_tx_cert = TxCertificateWithPos {
             cert: TxCertificate::DRepDeregistration(DRepDeregistration {
@@ -1085,7 +1145,14 @@ mod tests {
             tx_identifier: TxIdentifier::default(),
             cert_index: 0,
         };
-        assert!(state.process_one_cert(&register_cert, 10, &mut vld, Some(20)).unwrap());
+        assert!(matches!(
+            state
+                .process_one_cert(&register_cert, 10, &mut vld, Some(20))
+                .unwrap()
+                .unwrap()
+                .outcome,
+            DRepRegistrationOutcome::Registered(_)
+        ),);
         assert_eq!(state.drep_expiry.get(&drep_cred).copied(), Some(30));
 
         // Simulate dormancy accumulation. Votes should compute expiry with subtraction.
