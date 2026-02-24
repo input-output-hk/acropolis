@@ -44,12 +44,17 @@ impl MidnightState for MidnightStateService {
             return Err(Status::invalid_argument("start_block must be <= end_block"));
         }
 
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
+
         let creates = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
+                .utxos
                 .get_asset_creates(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
@@ -87,12 +92,17 @@ impl MidnightState for MidnightStateService {
             return Err(Status::invalid_argument("start_block must be <= end_block"));
         }
 
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
+
         let spends = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
+                .utxos
                 .get_asset_spends(req.start_block, req.end_block)
                 .map_err(|e| Status::internal(e.to_string()))?
         };

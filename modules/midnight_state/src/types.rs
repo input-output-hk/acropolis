@@ -9,7 +9,6 @@ use chrono::NaiveDateTime;
 /// These structs represent the asset data returned by this module's
 /// public getter methods.
 /// ---------------------------------------------------------------------------
-#[allow(dead_code)]
 pub struct AssetCreate {
     pub holder_address: Address,
     pub quantity: u64,
@@ -21,7 +20,6 @@ pub struct AssetCreate {
     pub block_timestamp: i64,
 }
 
-#[allow(dead_code)]
 pub struct AssetSpend {
     pub holder_address: Address,
     pub quantity: u64,
