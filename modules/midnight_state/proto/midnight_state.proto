@@ -71,17 +71,10 @@ message TechnicalCommitteeDatumResponse {}
 message CouncilDatumRequest {}
 message CouncilDatumResponse {}
 
-message AriadneParametersDatum {
-  oneof value {
-    bytes inline = 1;
-    bytes hash = 2;
-  }
-}
-
 message AriadneParametersRequest {
   uint64 epoch = 1;
 }
 message AriadneParametersResponse {
   uint64 source_epoch = 1;
-  AriadneParametersDatum datum = 2;
+  bytes datum = 2;
 }

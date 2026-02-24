@@ -10,7 +10,7 @@ use crate::{
     },
     state::State,
 };
-use acropolis_common::{state_history::StateHistory, Datum};
+use acropolis_common::state_history::StateHistory;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
@@ -22,19 +22,6 @@ impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
         Self { history }
     }
-}
-
-fn ariadne_datum_to_proto(datum: Datum) -> midnight_state_proto::AriadneParametersDatum {
-    let value = match datum {
-        Datum::Inline(bytes) => {
-            midnight_state_proto::ariadne_parameters_datum::Value::Inline(bytes)
-        }
-        Datum::Hash(hash) => {
-            midnight_state_proto::ariadne_parameters_datum::Value::Hash(hash.to_vec())
-        }
-    };
-
-    midnight_state_proto::AriadneParametersDatum { value: Some(value) }
 }
 
 #[tonic::async_trait]
@@ -184,10 +171,13 @@ impl MidnightState for MidnightStateService {
                 req.epoch
             ))
         })?;
+        let datum = datum
+            .to_bytes()
+            .ok_or_else(|| Status::failed_precondition("only inline datums are supported"))?;
 
         Ok(Response::new(AriadneParametersResponse {
             source_epoch,
-            datum: Some(ariadne_datum_to_proto(datum)),
+            datum,
         }))
     }
 }
