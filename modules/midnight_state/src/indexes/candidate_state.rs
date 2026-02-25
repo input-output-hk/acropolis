@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use imbl::{HashMap, OrdMap};
 
 use acropolis_common::{BlockNumber, UTxOIdentifier};
 
@@ -7,9 +7,9 @@ use crate::types::{Deregistration, DeregistrationEvent, Registration, Registrati
 #[derive(Clone, Default)]
 pub struct CandidateState {
     // Candidate registrations by block enabling range lookups
-    registrations: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
+    registrations: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
     // Candidate deregistrations by block enabling range lookups
-    deregistrations: BTreeMap<BlockNumber, Vec<DeregistrationEvent>>,
+    deregistrations: OrdMap<BlockNumber, Vec<DeregistrationEvent>>,
     // Registration index to avoid duplicating in deregistrations
     pub registration_index: HashMap<UTxOIdentifier, RegistrationEvent>,
 }
