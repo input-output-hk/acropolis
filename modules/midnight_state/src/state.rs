@@ -52,6 +52,10 @@ impl State {
         self.epoch_totals.finalise_block(block);
     }
 
+    pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
+        self.parameters.get_ariadne_parameters_with_epoch(epoch)
+    }
+
     pub fn handle_address_deltas(
         &mut self,
         block_info: &BlockInfo,
@@ -131,10 +135,6 @@ impl State {
             indexed_governance_council_datums,
         );
         Ok(())
-    }
-
-    pub fn get_ariadne_parameters(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
-        self.parameters.get_ariadne_parameters(epoch)
     }
 
     fn collect_cnight_creations(
@@ -391,21 +391,6 @@ mod tests {
         }
     }
 
-    fn test_config_governance(
-        technical_committee_address: Address,
-        technical_committee_policy_id: PolicyId,
-        council_address: Address,
-        council_policy_id: PolicyId,
-    ) -> MidnightConfig {
-        MidnightConfig {
-            technical_committee_address,
-            technical_committee_policy_id,
-            council_address,
-            council_policy_id,
-            ..Default::default()
-        }
-    }
-
     fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> ValueMap {
         let mut inner = HashMap::new();
         inner.insert(asset, amount);
@@ -469,83 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn should_collect_governance_datums_when_technical_committee_and_council_deltas_present() {
-        let block_info = test_block_info();
-        let technical_committee_policy = PolicyId::new([0x11u8; 28]);
-        let council_policy = PolicyId::new([0x22u8; 28]);
-        let technical_committee_asset = AssetName::new(b"tc").unwrap();
-        let council_asset = AssetName::new(b"council").unwrap();
-        let technical_committee_address = Address::Shelley(
-            ShelleyAddress::from_string(
-                "addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j",
-            )
-            .unwrap(),
-        );
-        let council_address = Address::Shelley(
-            ShelleyAddress::from_string(
-                "addr_test1wqqwkauz0ypglg5e4u780kcp8hzt75u72yg6z7td62gnk0qed0p06",
-            )
-            .unwrap(),
-        );
-
-        let mut state = State::new(test_config_governance(
-            technical_committee_address.clone(),
-            technical_committee_policy,
-            council_address.clone(),
-            council_policy,
-        ));
-
-        let technical_committee_datum = Datum::Inline(vec![0xAA]);
-        let council_datum = Datum::Inline(vec![0xBB]);
-
-        let technical_committee_delta = ExtendedAddressDelta {
-            address: technical_committee_address,
-            tx_identifier: TxIdentifier::default(),
-            created_utxos: vec![CreatedUTxOExtended {
-                utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 0),
-                value: test_value_with_token(
-                    technical_committee_policy,
-                    technical_committee_asset,
-                    1,
-                ),
-                datum: Some(technical_committee_datum.clone()),
-            }],
-            spent_utxos: vec![],
-            received: test_value_with_token(
-                technical_committee_policy,
-                technical_committee_asset,
-                1,
-            ),
-            sent: ValueMap::default(),
-        };
-        state.collect_governance_datums(&technical_committee_delta, block_info.number);
-
-        let council_delta = ExtendedAddressDelta {
-            address: council_address,
-            tx_identifier: TxIdentifier::default(),
-            created_utxos: vec![CreatedUTxOExtended {
-                utxo: UTxOIdentifier::new(TxHash::new([2u8; 32]), 0),
-                value: test_value_with_token(council_policy, council_asset, 1),
-                datum: Some(council_datum.clone()),
-            }],
-            spent_utxos: vec![],
-            received: test_value_with_token(council_policy, council_asset, 1),
-            sent: ValueMap::default(),
-        };
-        state.collect_governance_datums(&council_delta, block_info.number);
-
-        assert_eq!(
-            state.governance.get_technical_committee_datum(block_info.number),
-            Some(technical_committee_datum)
-        );
-        assert_eq!(
-            state.governance.get_council_datum(block_info.number),
-            Some(council_datum)
-        );
-    }
-
-    #[test]
-    fn should_collect_cnight_creations_and_spends_when_token_present() {
+    fn collects_cnight_creations_and_spends_when_token_present() {
         let block_info = test_block_info();
         let policy = PolicyId::new([1u8; 28]);
         let asset = AssetName::new(b"").unwrap();
@@ -640,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn should_collect_candidate_registrations_and_deregistrations_when_mapping_events_present() {
+    fn collects_candidate_registrations_and_deregistrations() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -745,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn should_index_parameters_when_policy_matches() {
+    fn indexes_parameters_from_matching_policy_datums() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -779,13 +688,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
             Some((block_info.epoch, expected_datum))
         );
     }
 
     #[test]
-    fn should_ignore_parameters_when_policy_does_not_match() {
+    fn ignores_parameter_datums_for_non_matching_policy() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -818,13 +727,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
             None
         );
     }
 
     #[test]
-    fn should_restore_previous_parameter_datum_when_rollback_and_replay() {
+    fn rollback_restores_previous_parameter_datum_before_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let parameter_policy = PolicyId::new([9u8; 28]);
@@ -872,13 +781,13 @@ mod tests {
         history.commit(block2.number, state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
             Some((block2.epoch, datum_b.clone()))
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
-            rolled_back_state.parameters.get_ariadne_parameters(block2.epoch),
+            rolled_back_state.parameters.get_ariadne_parameters_with_epoch(block2.epoch),
             Some((block2.epoch, datum_a))
         );
 
@@ -896,13 +805,13 @@ mod tests {
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
             Some((block2.epoch, datum_c))
         );
     }
 
     #[test]
-    fn should_index_governance_datums_when_address_and_policy_match() {
+    fn indexes_governance_datums_for_matching_address_and_policy() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -969,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn should_ignore_governance_datums_when_address_does_not_match() {
+    fn ignores_governance_datums_for_non_matching_address() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -1012,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn should_restore_previous_governance_datum_when_rollback_and_replay() {
+    fn rollback_restores_previous_governance_datum_before_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let technical_policy = PolicyId::new([7u8; 28]);

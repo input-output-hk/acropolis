@@ -20,8 +20,8 @@ impl ParametersState {
         }
     }
 
-    /// Get the Ariadne parameters valid at a specific epoch
-    pub fn get_ariadne_parameters(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
+    /// Get the Ariadne parameters and source epoch valid at a specific epoch
+    pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
         self.permissioned_candidates
             .range(..=epoch)
             .next_back()
