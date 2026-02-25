@@ -1,26 +1,29 @@
-use std::collections::BTreeMap;
-
 use acropolis_common::{BlockNumber, Datum};
+use imbl::OrdMap;
 
 #[derive(Clone, Default)]
 pub struct GovernanceState {
     /// Technical Committee datum mapped to the block number it was created
-    pub technical_committee: BTreeMap<BlockNumber, Datum>,
+    pub technical_committee: OrdMap<BlockNumber, Datum>,
     /// Council datum mapped to the block number it was created
-    pub council: BTreeMap<BlockNumber, Datum>,
+    pub council: OrdMap<BlockNumber, Datum>,
 }
 
 impl GovernanceState {
     #[allow(dead_code)]
     /// Insert a new technical committee datum
-    pub fn insert_technical_committee_datum(&mut self, block_number: BlockNumber, datum: Datum) {
-        self.technical_committee.insert(block_number, datum);
+    pub fn insert_technical_committee_datum(
+        &mut self,
+        block_number: BlockNumber,
+        datum: Datum,
+    ) -> bool {
+        self.technical_committee.insert(block_number, datum).is_none()
     }
 
     #[allow(dead_code)]
     /// Insert a new council datum
-    pub fn insert_council_datum(&mut self, block_number: BlockNumber, datum: Datum) {
-        self.council.insert(block_number, datum);
+    pub fn insert_council_datum(&mut self, block_number: BlockNumber, datum: Datum) -> bool {
+        self.council.insert(block_number, datum).is_none()
     }
 
     #[allow(dead_code)]
