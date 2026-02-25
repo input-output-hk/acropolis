@@ -60,7 +60,7 @@ impl MidnightState for MidnightStateService {
                     address,
                     quantity: c.quantity,
                     tx_hash: c.tx_hash.to_vec(),
-                    output_index: c.utxo_index as u32,
+                    output_index: c.utxo_index.into(),
                     block_number: c.block_number,
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
@@ -112,7 +112,7 @@ impl MidnightState for MidnightStateService {
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
                     utxo_tx_hash: c.utxo_tx_hash.to_vec(),
-                    utxo_index: c.utxo_index as u32,
+                    utxo_index: c.utxo_index.into(),
                     block_timestamp_unix: c.block_timestamp,
                 })
             })
@@ -125,16 +125,94 @@ impl MidnightState for MidnightStateService {
 
     async fn get_registrations(
         &self,
-        _request: Request<RegistrationsRequest>,
+        request: Request<RegistrationsRequest>,
     ) -> Result<Response<RegistrationsResponse>, Status> {
-        Ok(Response::new(RegistrationsResponse {}))
+        let req = request.into_inner();
+        if req.start_block > req.end_block {
+            return Err(Status::invalid_argument("start_block must be <= end_block"));
+        }
+
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
+
+        let registrations = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.candidates.get_registrations(req.start_block, req.end_block)
+        };
+
+        let proto_registrations = registrations
+            .into_iter()
+            .map(|c| {
+                let full_datum = c
+                    .full_datum
+                    .to_bytes()
+                    .ok_or_else(|| Status::internal("full_datum is not inline"))?;
+
+                Ok(midnight_state_proto::Registration {
+                    full_datum,
+                    tx_hash: c.tx_hash.to_vec(),
+                    output_index: c.utxo_index.into(),
+                    block_number: c.block_number,
+                    block_hash: c.block_hash.to_vec(),
+                    tx_index: c.tx_index_in_block,
+                    block_timestamp_unix: c.block_timestamp,
+                })
+            })
+            .collect::<Result<Vec<_>, Status>>()?;
+
+        Ok(Response::new(RegistrationsResponse {
+            registrations: proto_registrations,
+        }))
     }
 
     async fn get_deregistrations(
         &self,
-        _request: Request<DeregistrationsRequest>,
+        request: Request<DeregistrationsRequest>,
     ) -> Result<Response<DeregistrationsResponse>, Status> {
-        Ok(Response::new(DeregistrationsResponse {}))
+        let req = request.into_inner();
+        if req.start_block > req.end_block {
+            return Err(Status::invalid_argument("start_block must be <= end_block"));
+        }
+
+        // TODO: Add additional request parameter constraints:
+        // 1. end_block <= tip
+        // 2. (end_block - start_block) < some_max_blocks
+
+        let deregistrations = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.candidates.get_deregistrations(req.start_block, req.end_block)
+        };
+
+        let proto_deregistrations = deregistrations
+            .into_iter()
+            .map(|c| {
+                let full_datum = c
+                    .full_datum
+                    .to_bytes()
+                    .ok_or_else(|| Status::internal("full_datum is not inline"))?;
+
+                Ok(midnight_state_proto::Deregistration {
+                    full_datum,
+                    tx_hash: c.tx_hash.to_vec(),
+                    block_number: c.block_number,
+                    block_hash: c.block_hash.to_vec(),
+                    tx_index: c.tx_index_in_block,
+                    utxo_tx_hash: c.utxo_tx_hash.to_vec(),
+                    utxo_index: c.utxo_index.into(),
+                    block_timestamp_unix: c.block_timestamp,
+                })
+            })
+            .collect::<Result<Vec<_>, Status>>()?;
+        Ok(Response::new(DeregistrationsResponse {
+            deregistrations: proto_deregistrations,
+        }))
     }
 
     async fn get_technical_committee_datum(

@@ -80,3 +80,7 @@ tonic = { version = "0.12", features = ["transport"] }
 tonic-reflection = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.31.0"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

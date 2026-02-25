@@ -25,7 +25,6 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
-use chrono::{DateTime, NaiveDateTime, Utc};
 use hex::decode;
 use regex::Regex;
 use serde::de::Error as SerdeError;
@@ -308,12 +307,6 @@ impl BlockInfo {
             hash: self.hash,
             slot: self.slot,
         }
-    }
-
-    pub fn to_naive_datetime(&self) -> NaiveDateTime {
-        DateTime::<Utc>::from_timestamp(self.timestamp as i64, 0)
-            .expect("invalid UNIX timestamp")
-            .naive_utc()
     }
 }
 
