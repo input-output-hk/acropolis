@@ -1083,7 +1083,7 @@ mod tests {
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
             rolled_back_state.governance.get_technical_committee_datum(block2.number),
-            Some((block2.number, datum_a))
+            Some((block1.number, datum_a))
         );
 
         rolled_back_state
