@@ -354,6 +354,7 @@ impl TxUTxODeltas {
             return 0;
         };
 
+        // Check certificates
         for cert in certs.iter() {
             let cert_identifier = cert.tx_certificate_identifier();
 
@@ -376,6 +377,14 @@ impl TxUTxODeltas {
                 total_deposit += reg.deposit;
             }
         }
+
+        // Check Governance Proposals
+        if let Some(proposals) = self.proposal_procedures.as_ref() {
+            for proposal in proposals.iter() {
+                total_deposit += proposal.deposit;
+            }
+        }
+
         total_deposit
     }
 
