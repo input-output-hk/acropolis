@@ -364,7 +364,6 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "caryatid_sdk",
- "chrono",
  "config",
  "imbl",
  "prost",

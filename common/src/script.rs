@@ -222,6 +222,15 @@ pub enum Datum {
     Inline(Vec<u8>),
 }
 
+impl Datum {
+    pub fn to_bytes(&self) -> Option<Vec<u8>> {
+        match self {
+            Datum::Hash(_) => None,
+            Datum::Inline(bytes) => Some(bytes.clone()),
+        }
+    }
+}
+
 #[derive(
     serde::Serialize,
     serde::Deserialize,
