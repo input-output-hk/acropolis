@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     types::{BlockInfo, Point},
     validation::ValidationStatus,
-    BlockHash, BlockIntent,
+    BlockHash, BlockIntent, BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
@@ -21,7 +21,11 @@ use config::Config;
 use consensus_tree::ConsensusTree;
 use futures::future::try_join_all;
 use pallas::ledger::traverse::MultiEraHeader;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{sync::Mutex, time::timeout};
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use tree_observer::ConsensusTreeObserver;
@@ -270,20 +274,60 @@ impl ConsensusRuntime {
                     block_info.number
                 );
                 if self.tree.get_block(&block_info.hash).is_none() {
-                    error!(
-                        "BlockAvailable for unknown block {} (not offered) — dropping",
-                        block_info.hash
-                    );
-                    return;
+                    if block_info.status == BlockStatus::Immutable {
+                        // Mithril bootstrap: genesis block arrives as BlockAvailable without prior BlockOffered.
+                        // Use synthetic root so we can add the block with its real body.
+                        let genesis_root = BlockHash::default();
+                        debug!(
+                            "Adding Immutable genesis block {} from Mithril bootstrap",
+                            block_info.number
+                        );
+                        if let Err(e) = self.tree.set_root(
+                            genesis_root,
+                            block_info.number.wrapping_sub(1),
+                            0,
+                        ) {
+                            error!("Failed to set root for Immutable genesis: {e}");
+                            return;
+                        }
+                        if let Err(e) = self.tree.check_block_wanted(
+                            block_info.hash,
+                            genesis_root,
+                            block_info.number,
+                            block_info.slot,
+                        ) {
+                            error!("Failed to add Immutable genesis block: {e}");
+                            return;
+                        }
+                        self.stats.offered += 1;
+                    } else {
+                        error!(
+                            "BlockAvailable for unknown block {} (not offered) — dropping",
+                            block_info.hash
+                        );
+                        return;
+                    }
                 }
 
-                // Tree was bootstrapped from BlockOffered; add genesis body so descendants can fire
+                // Tree was bootstrapped from BlockOffered (or Mithril); add genesis body so descendants can fire
                 self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
 
                 if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
                     error!("Failed to add genesis block body: {e}");
                 }
+                self.stats.available += 1;
                 self.drain_and_publish_events().await;
+
+                // Must consume validation results for any block we proposed, otherwise
+                // the validator subscriptions drift out of sync (off-by-one).
+                if self.do_validation {
+                    if self.tree.favoured_tip()
+                        .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
+                    {
+                        self.handle_validation(&block_info).await;
+                    }
+                }
+
                 return;
             }
             Err(e) => {
@@ -302,12 +346,22 @@ impl ConsensusRuntime {
             );
         }
 
-        let Some(existing) = self.tree.get_block(&block_info.hash) else {
-            error!(
-                "BlockAvailable for unknown block {} (not offered) — dropping",
-                block_info.hash
-            );
-            return;
+        let existing = self.tree.get_block(&block_info.hash);
+        let existing = match existing {
+            Some(e) => e,
+            None => {
+                if block_info.status == BlockStatus::Immutable {
+                    // Mithril bootstrap: block arrives as BlockAvailable without prior BlockOffered
+                    return self
+                        .handle_immutable_bootstrap(block_info, raw_block, parent_hash)
+                        .await;
+                }
+                error!(
+                    "BlockAvailable for unknown block {} (not offered) — dropping",
+                    block_info.hash
+                );
+                return;
+            }
         };
 
         // If this block was previously offered, guard against conflicting metadata.
@@ -348,6 +402,66 @@ impl ConsensusRuntime {
         self.prune_block_data();
 
         // Prune periodically
+        if let Err(e) = self.tree.prune() {
+            error!("Prune failed: {e}");
+        }
+        self.prune_block_data();
+    }
+
+    /// Handle BlockAvailable for Immutable blocks from Mithril bootstrap (no prior BlockOffered).
+    async fn handle_immutable_bootstrap(
+        &mut self,
+        block_info: BlockInfo,
+        raw_block: RawBlockMessage,
+        parent_hash: BlockHash,
+    ) {
+        if self.tree.is_empty() {
+            let parent_number = block_info.number.wrapping_sub(1);
+            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
+                error!("Failed to set root for Mithril bootstrap: {e}");
+                return;
+            }
+            debug!(
+                "Tree root set to parent {parent_hash} (block {}) for Mithril bootstrap",
+                block_info.number.wrapping_sub(1)
+            );
+        }
+
+        let wanted = match self.tree.check_block_wanted(
+            block_info.hash,
+            parent_hash,
+            block_info.number,
+            block_info.slot,
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("Immutable bootstrap block {} rejected: {e}", block_info.number);
+                return;
+            }
+        };
+
+        self.stats.offered += 1;
+        self.stats.wanted += wanted.len() as u64;
+        self.block_data
+            .insert(block_info.hash, (block_info.clone(), raw_block.clone()));
+
+        if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+            error!("Failed to add Immutable block body: {e}");
+        }
+
+        self.drain_and_publish_events().await;
+        self.stats.available += 1;
+
+        if self.do_validation
+            && self
+                .tree
+                .favoured_tip()
+                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
+        {
+            self.handle_validation(&block_info).await;
+        }
+
+        self.prune_block_data();
         if let Err(e) = self.tree.prune() {
             error!("Prune failed: {e}");
         }
