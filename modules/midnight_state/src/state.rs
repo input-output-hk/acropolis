@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Epoch, ExtendedAddressDelta,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta,
     UTxOIdentifier,
 };
 
@@ -44,6 +44,10 @@ impl State {
 
     pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
         self.epoch_totals.summarise_completed_epoch(block_info);
+    }
+
+    pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
+        self.parameters.get_ariadne_parameters_with_epoch(epoch)
     }
 
     pub fn handle_address_deltas(
@@ -689,8 +693,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
-            Some(expected_datum)
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
+            Some((block_info.epoch, expected_datum))
         );
     }
 
@@ -728,7 +732,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
             None
         );
     }
@@ -780,14 +784,14 @@ mod tests {
         history.commit(block2.number, state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_b.clone())
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_b.clone()))
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
-            rolled_back_state.parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_a)
+            rolled_back_state.parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_a))
         );
 
         rolled_back_state
@@ -803,8 +807,8 @@ mod tests {
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_c)
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_c))
         );
     }
 
