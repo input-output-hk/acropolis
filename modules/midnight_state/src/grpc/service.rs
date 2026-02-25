@@ -60,7 +60,7 @@ impl MidnightState for MidnightStateService {
                     address,
                     quantity: c.quantity,
                     tx_hash: c.tx_hash.to_vec(),
-                    output_index: c.utxo_index as u32,
+                    output_index: c.utxo_index.into(),
                     block_number: c.block_number,
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
@@ -112,7 +112,7 @@ impl MidnightState for MidnightStateService {
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
                     utxo_tx_hash: c.utxo_tx_hash.to_vec(),
-                    utxo_index: c.utxo_index as u32,
+                    utxo_index: c.utxo_index.into(),
                     block_timestamp_unix: c.block_timestamp,
                 })
             })
@@ -155,7 +155,7 @@ impl MidnightState for MidnightStateService {
                 Ok(midnight_state_proto::Registration {
                     full_datum,
                     tx_hash: c.tx_hash.to_vec(),
-                    output_index: c.utxo_index as u32,
+                    output_index: c.utxo_index.into(),
                     block_number: c.block_number,
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
@@ -205,7 +205,7 @@ impl MidnightState for MidnightStateService {
                     block_hash: c.block_hash.to_vec(),
                     tx_index: c.tx_index_in_block,
                     utxo_tx_hash: c.utxo_tx_hash.to_vec(),
-                    utxo_index: c.utxo_index as u32,
+                    utxo_index: c.utxo_index.into(),
                     block_timestamp_unix: c.block_timestamp,
                 })
             })
