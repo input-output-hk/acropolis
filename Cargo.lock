@@ -364,8 +364,8 @@ dependencies = [
  "acropolis_common",
  "anyhow",
  "caryatid_sdk",
- "chrono",
  "config",
+ "imbl",
  "prost",
  "protoc-bin-vendored",
  "serde",
@@ -393,6 +393,7 @@ dependencies = [
  "pallas",
  "pallas-traverse",
  "serde_json",
+ "tikv-jemalloc-ctl",
  "tokio",
  "tracing",
 ]
@@ -523,6 +524,18 @@ dependencies = [
  "serde_json",
  "serde_with 3.16.1",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "acropolis_module_stats"
+version = "0.1.0"
+dependencies = [
+ "acropolis_common",
+ "anyhow",
+ "caryatid_sdk",
+ "config",
+ "tikv-jemalloc-ctl",
  "tracing",
 ]
 
@@ -683,6 +696,7 @@ dependencies = [
  "acropolis_module_spdd_state",
  "acropolis_module_spo_state",
  "acropolis_module_stake_delta_filter",
+ "acropolis_module_stats",
  "acropolis_module_tx_unpacker",
  "acropolis_module_utxo_state",
  "anyhow",
@@ -6783,6 +6797,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
+]
+
+[[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "661f1f6a57b3a36dc9174a2c10f19513b4866816e13425d3e418b11cc37bc24c"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

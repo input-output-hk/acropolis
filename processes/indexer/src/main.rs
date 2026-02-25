@@ -2,7 +2,7 @@ use acropolis_common::{hash::Hash, messages::Message, Point};
 use acropolis_module_mithril_snapshot_fetcher::MithrilSnapshotFetcher;
 use anyhow::Result;
 use caryatid_process::Process;
-use caryatid_sdk::module_registry::ModuleRegistry;
+use caryatid_sdk::ModuleRegistry;
 use clap::Parser;
 use config::{Config, Environment, File};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
@@ -15,12 +15,9 @@ use acropolis_module_peer_network_interface::PeerNetworkInterface;
 
 mod indices;
 
-#[allow(unused_imports)]
 use crate::indices::fjall_pool_cost_index::{FjallPoolCostIndex, FjallPoolCostState};
-#[allow(unused_imports)]
 use crate::indices::in_memory_pool_cost_index::{InMemoryPoolCostIndex, InMemoryPoolCostState};
-#[allow(unused_imports)]
-use acropolis_module_custom_indexer::cursor_store::{FjallCursorStore, InMemoryCursorStore};
+use acropolis_module_custom_indexer::cursor_store::InMemoryCursorStore;
 
 #[derive(Debug, clap::Parser)]
 struct Args {

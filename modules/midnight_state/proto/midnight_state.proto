@@ -59,11 +59,47 @@ message AssetSpendsResponse {
   repeated AssetSpend spends = 1;
 }
 
-message RegistrationsRequest {}
-message RegistrationsResponse {}
+message RegistrationsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message Registration {
+  bytes full_datum = 1;
 
-message DeregistrationsRequest {}
-message DeregistrationsResponse {}
+  bytes tx_hash = 2;
+  uint32 output_index = 3;
+
+  uint64 block_number = 4;
+  bytes block_hash = 5;
+  uint32 tx_index = 6;
+
+  int64 block_timestamp_unix = 7;
+}
+message RegistrationsResponse {
+  repeated Registration registrations = 1;
+}
+
+message DeregistrationsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message Deregistration {
+  bytes full_datum = 1;
+
+  bytes tx_hash = 2;
+
+  uint64 block_number = 3;
+  bytes block_hash = 4;
+  uint32 tx_index = 5;
+
+  bytes utxo_tx_hash = 6;
+  uint32 utxo_index = 7;
+
+  int64 block_timestamp_unix = 8;
+}
+message DeregistrationsResponse {
+  repeated Deregistration deregistrations = 1;
+}
 
 message TechnicalCommitteeDatumRequest {
   uint64 block_number = 1;

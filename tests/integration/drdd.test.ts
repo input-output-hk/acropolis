@@ -196,7 +196,7 @@ async function validateEpoch(db: Client, epoch: number) {
                 `   - ${smallestTotal.id} (db: ${smallestTotal.db}, drdd: ${smallestTotal.spdd}, diff: ${diff2})`
             );
         }
-        await pause();
+        if (process.env.CI === undefined) await pause();
     }
 
     return true;

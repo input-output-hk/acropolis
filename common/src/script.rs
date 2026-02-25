@@ -225,8 +225,8 @@ pub enum Datum {
 impl Datum {
     pub fn to_bytes(&self) -> Option<Vec<u8>> {
         match self {
-            Self::Hash(_) => None,
-            Self::Inline(bytes) => Some(bytes.clone()),
+            Datum::Hash(_) => None,
+            Datum::Inline(bytes) => Some(bytes.clone()),
         }
     }
 }

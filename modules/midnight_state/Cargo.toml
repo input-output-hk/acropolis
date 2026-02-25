@@ -15,7 +15,7 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-chrono = { workspace = true }
+imbl = { workspace = true }
 prost = "0.13"
 serde = { workspace = true }
 tokio = { workspace = true }

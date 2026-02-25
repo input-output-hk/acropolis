@@ -9,7 +9,7 @@ use acropolis_common::{
 
 use crate::{
     configuration::MidnightConfig,
-    epoch_totals::{EpochSummary, EpochTotals},
+    epoch_totals::EpochTotals,
     indexes::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
@@ -25,7 +25,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    candidates: CandidateState,
+    pub candidates: CandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
@@ -42,14 +42,8 @@ impl State {
         }
     }
 
-    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<EpochSummary> {
-        let summary = self.epoch_totals.summarise_completed_epoch(block_info);
-        self.epoch_totals.reset_epoch();
-        Ok(summary)
-    }
-
-    pub fn finalise_block(&mut self, block: &BlockInfo) {
-        self.epoch_totals.finalise_block(block);
+    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
+        self.epoch_totals.summarise_completed_epoch(block_info);
     }
 
     pub fn handle_address_deltas(
@@ -66,9 +60,11 @@ impl State {
         let mut candidate_registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
+
         let mut indexed_parameter_datums = 0usize;
         let mut indexed_governance_technical_committee_datums = 0usize;
         let mut indexed_governance_council_datums = 0usize;
+
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             self.collect_cnight_creations(
@@ -76,12 +72,12 @@ impl State {
                 block_info,
                 &mut cnight_creations,
                 &mut block_created_utxos,
-            );
+            )?;
             cnight_spends.extend(self.collect_cnight_spends(
                 delta,
                 block_info,
                 &block_created_utxos,
-            ));
+            )?);
 
             // Collect candidate registrations and deregistrations
             self.collect_candidate_registrations(
@@ -89,12 +85,12 @@ impl State {
                 block_info,
                 &mut candidate_registrations,
                 &mut block_created_registrations,
-            );
+            )?;
             candidate_deregistrations.extend(self.collect_candidate_deregistrations(
                 delta,
                 block_info,
                 &block_created_registrations,
-            ));
+            )?);
 
             indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
 
@@ -105,18 +101,19 @@ impl State {
         }
 
         // Add created and spent CNight utxos to state
-        let indexed_night_creations = if !cnight_creations.is_empty() {
-            self.utxos.add_created_utxos(block_info.number, cnight_creations)
-        } else {
-            0
-        };
-        let indexed_night_spends = if !cnight_spends.is_empty() {
-            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?
-        } else {
-            0
-        };
+        self.epoch_totals.add_indexed_night_utxos(cnight_creations.len(), cnight_spends.len());
+        if !cnight_creations.is_empty() {
+            self.utxos.add_created_utxos(block_info.number, cnight_creations);
+        }
+        if !cnight_spends.is_empty() {
+            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
+        }
 
         // Add registered and deregistered candidates to state
+        self.epoch_totals.add_indexed_candidates(
+            candidate_registrations.len(),
+            candidate_deregistrations.len(),
+        );
         if !candidate_registrations.is_empty() {
             self.candidates.register_candidates(block_info.number, candidate_registrations);
         }
@@ -124,7 +121,6 @@ impl State {
             self.candidates.deregister_candidates(block_info.number, candidate_deregistrations);
         }
 
-        self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
         self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
         self.epoch_totals.add_indexed_governance_datums(
             indexed_governance_technical_committee_datums,
@@ -150,9 +146,9 @@ impl State {
         block_info: &BlockInfo,
         cnight_creations: &mut Vec<CNightCreation>,
         block_created_utxos: &mut HashSet<UTxOIdentifier>,
-    ) {
+    ) -> Result<()> {
         if !delta.received.assets.contains_key(&self.config.cnight_policy_id) {
-            return;
+            return Ok(());
         }
 
         for created in &delta.created_utxos {
@@ -174,13 +170,15 @@ impl State {
                 utxo: created.utxo,
                 block_number: block_info.number,
                 block_hash: block_info.hash,
-                tx_index: delta.tx_identifier.tx_index() as u32,
-                block_timestamp: block_info.timestamp as i64,
+                tx_index: delta.tx_identifier.tx_index().into(),
+                block_timestamp: i64::try_from(block_info.timestamp)?,
             };
 
             block_created_utxos.insert(created.utxo);
             cnight_creations.push(creation);
         }
+
+        Ok(())
     }
 
     fn collect_cnight_spends(
@@ -188,8 +186,10 @@ impl State {
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
         cnight_creations: &HashSet<UTxOIdentifier>,
-    ) -> Vec<(UTxOIdentifier, CNightSpend)> {
-        delta
+    ) -> Result<Vec<(UTxOIdentifier, CNightSpend)>> {
+        let timestamp = i64::try_from(block_info.timestamp)?;
+
+        Ok(delta
             .spent_utxos
             .iter()
             .filter_map(|spent| {
@@ -202,15 +202,15 @@ impl State {
                             block_number: block_info.number,
                             block_hash: block_info.hash,
                             tx_hash: spent.spent_by,
-                            tx_index: delta.tx_identifier.tx_index() as u32,
-                            block_timestamp: block_info.timestamp as i64,
+                            tx_index: delta.tx_identifier.tx_index().into(),
+                            block_timestamp: timestamp,
                         },
                     ))
                 } else {
                     None
                 }
             })
-            .collect()
+            .collect())
     }
 
     fn collect_candidate_registrations(
@@ -219,9 +219,9 @@ impl State {
         block_info: &BlockInfo,
         registrations: &mut Vec<RegistrationEvent>,
         block_created_registrations: &mut HashSet<UTxOIdentifier>,
-    ) {
+    ) -> Result<()> {
         if delta.address != self.config.mapping_validator_address {
-            return;
+            return Ok(());
         }
 
         for created in &delta.created_utxos {
@@ -242,14 +242,16 @@ impl State {
 
                 registrations.push(RegistrationEvent {
                     block_hash: block_info.hash,
-                    block_timestamp: block_info.to_naive_datetime(),
-                    tx_index: delta.tx_identifier.tx_index() as u32,
+                    block_timestamp: i64::try_from(block_info.timestamp)?,
+                    tx_index: delta.tx_identifier.tx_index().into(),
                     tx_hash: created.utxo.tx_hash,
                     utxo_index: created.utxo.output_index,
                     datum: datum.clone(),
                 });
             }
         }
+
+        Ok(())
     }
 
     fn collect_candidate_deregistrations(
@@ -257,11 +259,11 @@ impl State {
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
         block_created_registrations: &HashSet<UTxOIdentifier>,
-    ) -> Vec<DeregistrationEvent> {
+    ) -> Result<Vec<DeregistrationEvent>> {
         let mut deregistrations = Vec::new();
 
         if delta.address != self.config.mapping_validator_address {
-            return deregistrations;
+            return Ok(deregistrations);
         }
 
         for spent in &delta.spent_utxos {
@@ -271,14 +273,14 @@ impl State {
                 deregistrations.push(DeregistrationEvent {
                     registration_utxo: spent.utxo,
                     spent_block_hash: block_info.hash,
-                    spent_block_timestamp: block_info.to_naive_datetime(),
+                    spent_block_timestamp: i64::try_from(block_info.timestamp)?,
                     spent_tx_hash: spent.spent_by,
-                    spent_tx_index: delta.tx_identifier.tx_index() as u32,
+                    spent_tx_index: delta.tx_identifier.tx_index().into(),
                 });
             }
         }
 
-        deregistrations
+        Ok(deregistrations)
     }
 
     fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) -> usize {
@@ -592,12 +594,14 @@ mod tests {
         // Collect the CNight UTxO creations
         let mut creations = Vec::new();
         let mut creations_set = HashSet::new();
-        state.collect_cnight_creations(
-            &create_delta,
-            &block_info,
-            &mut creations,
-            &mut creations_set,
-        );
+        state
+            .collect_cnight_creations(
+                &create_delta,
+                &block_info,
+                &mut creations,
+                &mut creations_set,
+            )
+            .unwrap();
         assert_eq!(creations.len(), 2);
         assert_eq!(creations[0].quantity, 5);
 
@@ -633,7 +637,8 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let spends = state.collect_cnight_spends(&spend_delta, &block_info, &HashSet::new());
+        let spends =
+            state.collect_cnight_spends(&spend_delta, &block_info, &HashSet::new()).unwrap();
         assert_eq!(spends.len(), 1);
         assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
 
@@ -687,12 +692,14 @@ mod tests {
 
         let mut registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
-        state.collect_candidate_registrations(
-            &registration_delta,
-            &block_info,
-            &mut registrations,
-            &mut block_created_registrations,
-        );
+        state
+            .collect_candidate_registrations(
+                &registration_delta,
+                &block_info,
+                &mut registrations,
+                &mut block_created_registrations,
+            )
+            .unwrap();
         assert_eq!(registrations.len(), 1);
 
         state.candidates.register_candidates(block_info.number, registrations);
@@ -703,7 +710,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 9);
         assert_eq!(indexed[0].tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
@@ -726,11 +733,9 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let deregistrations = state.collect_candidate_deregistrations(
-            &deregistration_delta,
-            &block_info,
-            &HashSet::new(),
-        );
+        let deregistrations = state
+            .collect_candidate_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
+            .unwrap();
         assert_eq!(deregistrations.len(), 1);
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
@@ -744,7 +749,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 2);
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
@@ -861,7 +866,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block1);
         history.commit(block1.number, state);
 
         let mut state = history.get_or_init_with(|| State::new(config.clone()));
@@ -875,7 +879,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block2);
         history.commit(block2.number, state);
 
         assert_eq!(
@@ -899,7 +902,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        rolled_back_state.finalise_block(&block2);
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
@@ -1056,7 +1058,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block1);
         history.commit(block1.number, state);
 
         let mut state = history.get_or_init_with(|| State::new(config.clone()));
@@ -1072,7 +1073,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block2);
         history.commit(block2.number, state);
 
         assert_eq!(
@@ -1098,7 +1098,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        rolled_back_state.finalise_block(&block2);
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(

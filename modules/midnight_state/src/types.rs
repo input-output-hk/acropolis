@@ -1,6 +1,5 @@
 use acropolis_common::{Address, BlockHash, BlockNumber, Datum, TxHash, UTxOIdentifier};
 use anyhow::{anyhow, Error};
-use chrono::NaiveDateTime;
 
 /// ---------------------------------------------------------------------------
 /// Getter Return Types
@@ -32,23 +31,21 @@ pub struct AssetSpend {
     pub utxo_index: u16,
 }
 
-#[allow(dead_code)]
 pub struct Registration {
     pub full_datum: Datum,
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
+    pub block_timestamp: i64,
     pub tx_index_in_block: u32,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
 }
 
-#[allow(dead_code)]
 pub struct Deregistration {
     pub full_datum: Datum,
     pub block_number: BlockNumber,
     pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
+    pub block_timestamp: i64,
     pub tx_index_in_block: u32,
     pub tx_hash: TxHash,
     pub utxo_tx_hash: TxHash,
@@ -134,7 +131,7 @@ pub struct CNightSpend {
 #[derive(Clone)]
 pub struct RegistrationEvent {
     pub block_hash: BlockHash,
-    pub block_timestamp: NaiveDateTime,
+    pub block_timestamp: i64,
     pub tx_index: u32,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
@@ -158,7 +155,7 @@ impl From<(BlockNumber, &RegistrationEvent)> for Registration {
 #[derive(Clone)]
 pub struct DeregistrationEvent {
     pub registration_utxo: UTxOIdentifier,
-    pub spent_block_timestamp: NaiveDateTime,
+    pub spent_block_timestamp: i64,
     pub spent_block_hash: BlockHash,
     pub spent_tx_hash: TxHash,
     pub spent_tx_index: u32,
