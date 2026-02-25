@@ -9,7 +9,7 @@ use acropolis_common::{
 
 use crate::{
     configuration::MidnightConfig,
-    epoch_totals::{EpochSummary, EpochTotals},
+    epoch_totals::EpochTotals,
     indexes::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
@@ -42,14 +42,8 @@ impl State {
         }
     }
 
-    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) -> Result<EpochSummary> {
-        let summary = self.epoch_totals.summarise_completed_epoch(block_info);
-        self.epoch_totals.reset_epoch();
-        Ok(summary)
-    }
-
-    pub fn finalise_block(&mut self, block: &BlockInfo) {
-        self.epoch_totals.finalise_block(block);
+    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
+        self.epoch_totals.summarise_completed_epoch(block_info);
     }
 
     pub fn handle_address_deltas(
@@ -66,9 +60,11 @@ impl State {
         let mut candidate_registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         let mut candidate_deregistrations = Vec::new();
+
         let mut indexed_parameter_datums = 0usize;
         let mut indexed_governance_technical_committee_datums = 0usize;
         let mut indexed_governance_council_datums = 0usize;
+
         for delta in deltas {
             // Collect CNight UTxO creations and spends for the block
             self.collect_cnight_creations(
@@ -105,18 +101,19 @@ impl State {
         }
 
         // Add created and spent CNight utxos to state
-        let indexed_night_creations = if !cnight_creations.is_empty() {
-            self.utxos.add_created_utxos(block_info.number, cnight_creations)
-        } else {
-            0
-        };
-        let indexed_night_spends = if !cnight_spends.is_empty() {
-            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?
-        } else {
-            0
-        };
+        self.epoch_totals.add_indexed_night_utxos(cnight_creations.len(), cnight_spends.len());
+        if !cnight_creations.is_empty() {
+            self.utxos.add_created_utxos(block_info.number, cnight_creations);
+        }
+        if !cnight_spends.is_empty() {
+            self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
+        }
 
         // Add registered and deregistered candidates to state
+        self.epoch_totals.add_indexed_candidates(
+            candidate_registrations.len(),
+            candidate_deregistrations.len(),
+        );
         if !candidate_registrations.is_empty() {
             self.candidates.register_candidates(block_info.number, candidate_registrations);
         }
@@ -124,7 +121,6 @@ impl State {
             self.candidates.deregister_candidates(block_info.number, candidate_deregistrations);
         }
 
-        self.epoch_totals.add_indexed_night_utxos(indexed_night_creations, indexed_night_spends);
         self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
         self.epoch_totals.add_indexed_governance_datums(
             indexed_governance_technical_committee_datums,
@@ -759,7 +755,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block1);
         history.commit(block1.number, state);
 
         let mut state = history.get_or_init_with(|| State::new(config.clone()));
@@ -773,7 +768,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block2);
         history.commit(block2.number, state);
 
         assert_eq!(
@@ -797,7 +791,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        rolled_back_state.finalise_block(&block2);
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
@@ -954,7 +947,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block1);
         history.commit(block1.number, state);
 
         let mut state = history.get_or_init_with(|| State::new(config.clone()));
@@ -970,7 +962,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        state.finalise_block(&block2);
         history.commit(block2.number, state);
 
         assert_eq!(
@@ -996,7 +987,6 @@ mod tests {
                 )]),
             )
             .unwrap();
-        rolled_back_state.finalise_block(&block2);
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
