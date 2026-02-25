@@ -109,6 +109,13 @@ mod tests {
         matches Ok(());
         "conway - valid transaction 1 - transaction with DRep Registration Certificate"
     )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "7fd6429add8f2611ad8d48c0cc49101463093aec285faea402e8cfde78ea58d7"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 2 - transaction with Governance Proposal"
+    )]
     #[allow(clippy::result_large_err)]
     fn shelley_utxo_test(
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
