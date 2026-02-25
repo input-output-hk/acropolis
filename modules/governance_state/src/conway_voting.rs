@@ -156,7 +156,7 @@ pub struct ConwayVoting {
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
-    verification_votes_pattern: Option<String>,
+    verify_votes_files: Option<String>,
     verification_output_file: Option<String>,
     action_proposal_count: usize,
     votes_count: usize,
@@ -164,8 +164,8 @@ pub struct ConwayVoting {
 
 impl ConwayVoting {
     pub fn new(
-        verification_votes_pattern: Option<String>,
-        verification_output_file: Option<String>
+        verification_output_file: Option<String>,
+        verify_votes_files: Option<String>,
     ) -> Self {
         Self {
             conway: None,
@@ -175,7 +175,7 @@ impl ConwayVoting {
             action_status: Default::default(),
             action_proposal_count: 0,
             votes_count: 0,
-            verification_votes_pattern,
+            verify_votes_files,
             verification_output_file,
         }
     }
@@ -459,9 +459,9 @@ impl ConwayVoting {
     /// Replaces {action_id} with first 8 characters of transaction_id in hex and
     /// action_id.action_index, and {epoch} with epoch number.
     fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
-        let pattern = self.verification_votes_pattern.as_ref()?;
+        let pattern = self.verify_votes_files.as_ref()?;
         let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
-        let act_id = format!("{tx_hash}_{action_id}");
+        let act_id = format!("{tx_hash}_{}", action_id.action_index);
         let applied = pattern.replace("{action_id}", &act_id)
             .replace("{epoch}", &new_epoch.to_string());
         Some(applied)
@@ -482,8 +482,12 @@ impl ConwayVoting {
         if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
+                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
                 let reference_votes = CastVotes::new_from_file(ref_path)?;
                 cast_votes.compare(new_epoch, action_id, &reference_votes);
+            }
+            else {
+                info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}' not found, skipping");
             }
         }
 
@@ -592,7 +596,6 @@ impl ConwayVoting {
         voting_state: &VotingRegistrationState,
         drep_stake: &HashMap<DRepCredential, Lovelace>,
         spo_stake: &HashMap<PoolId, DelegatedStake>,
-        vld: &mut ValidationOutcomes,
     ) -> Result<Vec<GovernanceOutcome>> {
         let mut outcome = Vec::<GovernanceOutcome>::new();
         let actions = self.proposals.keys().cloned().collect::<Vec<_>>();
