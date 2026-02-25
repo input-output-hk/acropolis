@@ -101,11 +101,21 @@ message DeregistrationsResponse {
   repeated Deregistration deregistrations = 1;
 }
 
-message TechnicalCommitteeDatumRequest {}
-message TechnicalCommitteeDatumResponse {}
+message TechnicalCommitteeDatumRequest {
+  uint64 block_number = 1;
+}
+message TechnicalCommitteeDatumResponse {
+  uint64 source_block_number = 1;
+  bytes datum = 2;
+}
 
-message CouncilDatumRequest {}
-message CouncilDatumResponse {}
+message CouncilDatumRequest {
+  uint64 block_number = 1;
+}
+message CouncilDatumResponse {
+  uint64 source_block_number = 1;
+  bytes datum = 2;
+}
 
 message AriadneParametersRequest {
   uint64 epoch = 1;

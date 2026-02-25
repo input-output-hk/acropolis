@@ -217,16 +217,62 @@ impl MidnightState for MidnightStateService {
 
     async fn get_technical_committee_datum(
         &self,
-        _request: Request<TechnicalCommitteeDatumRequest>,
+        request: Request<TechnicalCommitteeDatumRequest>,
     ) -> Result<Response<TechnicalCommitteeDatumResponse>, Status> {
-        Ok(Response::new(TechnicalCommitteeDatumResponse {}))
+        let req = request.into_inner();
+
+        let technical_committee = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.get_technical_committee_datum(req.block_number)
+        };
+
+        let (source_block_number, datum) = technical_committee.ok_or_else(|| {
+            Status::not_found(format!(
+                "no technical committee datum found at or before block {}",
+                req.block_number
+            ))
+        })?;
+        let datum = datum
+            .to_bytes()
+            .ok_or_else(|| Status::failed_precondition("only inline datums are supported"))?;
+
+        Ok(Response::new(TechnicalCommitteeDatumResponse {
+            source_block_number,
+            datum,
+        }))
     }
 
     async fn get_council_datum(
         &self,
-        _request: Request<CouncilDatumRequest>,
+        request: Request<CouncilDatumRequest>,
     ) -> Result<Response<CouncilDatumResponse>, Status> {
-        Ok(Response::new(CouncilDatumResponse {}))
+        let req = request.into_inner();
+
+        let council = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.get_council_datum(req.block_number)
+        };
+
+        let (source_block_number, datum) = council.ok_or_else(|| {
+            Status::not_found(format!(
+                "no council datum found at or before block {}",
+                req.block_number
+            ))
+        })?;
+        let datum = datum
+            .to_bytes()
+            .ok_or_else(|| Status::failed_precondition("only inline datums are supported"))?;
+
+        Ok(Response::new(CouncilDatumResponse {
+            source_block_number,
+            datum,
+        }))
     }
 
     async fn get_ariadne_parameters(
