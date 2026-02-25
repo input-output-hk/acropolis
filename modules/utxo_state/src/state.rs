@@ -10,9 +10,9 @@ use acropolis_common::{
     messages::UTXODeltasMessage, params::SECURITY_PARAMETER_K, BlockInfo, BlockStatus, TxOutput,
 };
 use acropolis_common::{
-    Address, AddressDelta, CreatedUTxOExtended, DRepRegistrationUpdate, Era, ExtendedAddressDelta,
-    PoolRegistrationUpdate, ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate,
-    TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, ValueMap,
+    Address, AddressDelta, CreatedUTxOExtended, Era, ExtendedAddressDelta, PoolRegistrationUpdate,
+    ShelleyAddressPointer, SpentUTxOExtended, StakeRegistrationUpdate, TxHash, TxUTxODeltas,
+    UTXOValue, UTxOIdentifier, Value, ValueMap,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -825,7 +825,6 @@ impl State {
         deltas_msg: &UTXODeltasMessage,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
-        drep_registration_updates: &[DRepRegistrationUpdate],
         protocol_params: &ProtocolParams,
     ) -> Result<(), Box<ValidationError>> {
         let mut bad_transactions = Vec::new();
@@ -843,7 +842,6 @@ impl State {
                     tx_deltas,
                     pool_registration_updates,
                     stake_registration_updates,
-                    drep_registration_updates,
                     &utxos,
                     protocol_params.shelley.as_ref(),
                     block.era,

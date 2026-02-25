@@ -6,9 +6,9 @@ use acropolis_common::{
     configuration::StartupMode,
     declare_cardano_reader,
     messages::{
-        CardanoMessage, DRepRegistrationUpdatesMessage, GovernanceProceduresMessage, Message,
-        ProtocolParamsMessage, SnapshotMessage, SnapshotStateMessage, StateQuery,
-        StateQueryResponse, StateTransitionMessage, TxCertificatesMessage,
+        CardanoMessage, GovernanceProceduresMessage, Message, ProtocolParamsMessage,
+        SnapshotMessage, SnapshotStateMessage, StateQuery, StateQueryResponse,
+        StateTransitionMessage, TxCertificatesMessage,
     },
     queries::{
         errors::QueryError,
@@ -31,8 +31,6 @@ mod state;
 use state::State;
 mod drep_state_publisher;
 use drep_state_publisher::DRepStatePublisher;
-mod registration_updates_publisher;
-use registration_updates_publisher::DRepRegistrationUpdatesPublisher;
 
 use crate::state::DRepStorageConfig;
 
@@ -66,10 +64,6 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
 
 // Publisher topic
 const DEFAULT_DREP_STATE_TOPIC: &str = "cardano.drep.state";
-const DEFAULT_DREP_REGISTRATION_UPDATES_TOPIC: (&str, &str) = (
-    "drep-registration-updates-publish-topic",
-    "cardano.drep.registration.updates",
-);
 
 const DEFAULT_VALIDATION_OUTPUT_TOPIC: (&str, &str) =
     ("validation-output-topic", "cardano.validation.drep");
@@ -159,7 +153,6 @@ impl DRepState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut subs: Box<DRepSubscriptions>,
         mut drep_state_publisher: DRepStatePublisher,
-        mut drep_registration_updates_publisher: DRepRegistrationUpdatesPublisher,
         validation_topic: String,
         context: Arc<Context<Message>>,
         storage_config: DRepStorageConfig,
@@ -202,10 +195,6 @@ impl DRepState {
                             "drep_state_rollback",
                             drep_state_publisher.publish_rollback(msg.clone()).await,
                         );
-                        ctx.handle(
-                            "drep_registration_updates_rollback",
-                            drep_registration_updates_publisher.publish_rollback(msg.clone()).await,
-                        );
                         (None, None)
                     }
                 };
@@ -233,37 +222,17 @@ impl DRepState {
             if let Some((block_info, tx_certs)) = certs_message {
                 let span = info_span!("drep_state.handle_certs", block = block_info.number);
                 async {
-                    let result = state
-                        .process_certificates(
-                            context.clone(),
-                            &tx_certs.certificates,
-                            block_info.epoch,
-                            state.conway_d_rep_activity,
-                        )
-                        .await;
-                    match result {
-                        Ok((vld, updates)) => {
-                            ctx.merge("certs", Ok(vld));
-
-                            let message = Arc::new(Message::Cardano((
-                                block_info.as_ref().clone(),
-                                CardanoMessage::DRepRegistrationUpdates(
-                                    DRepRegistrationUpdatesMessage { updates },
-                                ),
-                            )));
-                            if let Err(e) =
-                                drep_registration_updates_publisher.publish(message).await
-                            {
-                                ctx.merge(
-                                    "publish_drep_registration_updates",
-                                    Err(anyhow::anyhow!(
-                                        "Error publishing DRep registration updates: {e:#}"
-                                    )),
-                                );
-                            };
-                        }
-                        Err(e) => ctx.merge("certs", Err(e)),
-                    }
+                    ctx.merge(
+                        "certs",
+                        state
+                            .process_certificates(
+                                context.clone(),
+                                &tx_certs.certificates,
+                                block_info.epoch,
+                                state.conway_d_rep_activity,
+                            )
+                            .await,
+                    )
                 }
                 .instrument(span)
                 .await;
@@ -343,13 +312,6 @@ impl DRepState {
             .get_string("publish-drep-state-topic")
             .unwrap_or(DEFAULT_DREP_STATE_TOPIC.to_string());
         info!("Creating DRep state publisher on '{drep_state_topic}'");
-
-        let drep_registration_updates_topic = config
-            .get_string(DEFAULT_DREP_REGISTRATION_UPDATES_TOPIC.0)
-            .unwrap_or(DEFAULT_DREP_REGISTRATION_UPDATES_TOPIC.1.to_string());
-        info!(
-            "Creating DRep registration updates publisher on '{drep_registration_updates_topic}'"
-        );
 
         let drep_query_topic = get_string_flag(&config, DEFAULT_DREPS_QUERY_TOPIC);
         info!("Creating DRep query handler on '{drep_query_topic}'");
@@ -570,17 +532,12 @@ impl DRepState {
         // Publisher for DRep State
         let drep_state_publisher = DRepStatePublisher::new(context.clone(), drep_state_topic);
 
-        // Publisher for DRep Registration Updates
-        let drep_registration_updates_publisher =
-            DRepRegistrationUpdatesPublisher::new(context.clone(), drep_registration_updates_topic);
-
         // Start run task
         context.run(async move {
             Self::run(
                 history_run,
                 Box::new(subscriptions),
                 drep_state_publisher,
-                drep_registration_updates_publisher,
                 validation_topic,
                 ctx_run,
                 storage_config,

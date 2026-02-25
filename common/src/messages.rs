@@ -187,12 +187,6 @@ pub struct PoolRegistrationUpdatesMessage {
     pub updates: Vec<PoolRegistrationUpdate>,
 }
 
-/// DRep registration updates message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationUpdatesMessage {
-    pub updates: Vec<DRepRegistrationUpdate>,
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockTxsMessage {
     /// Total transactions
@@ -402,7 +396,6 @@ pub enum CardanoMessage {
     // Certificates deltas
     StakeRegistrationUpdates(StakeRegistrationUpdatesMessage), // Stake registration updates
     PoolRegistrationUpdates(PoolRegistrationUpdatesMessage),   // Pool registration updates
-    DRepRegistrationUpdates(DRepRegistrationUpdatesMessage),   // DRep registration updates
 }
 
 /// A new block has been announced by some peer

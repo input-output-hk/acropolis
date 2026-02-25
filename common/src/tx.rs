@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal,
-    DRepRegistrationUpdate, Datum, DatumHash, KeyHash, Lovelace, NativeAsset, NativeAssetsDelta,
-    PoolRegistrationUpdate, ProposalProcedure, Redeemer, ScriptHash, ScriptLang,
-    StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier,
-    VKeyWitness, Value, ValueMap, VotingProcedures, Withdrawal,
+    validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
+    KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificate, TxCertificateWithPos,
+    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures,
+    Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -224,7 +224,6 @@ impl TxUTxODeltas {
     pub fn calculate_total_consumed(
         &self,
         stake_registration_updates: &[StakeRegistrationUpdate],
-        drep_registration_updates: &[DRepRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> ValueMap {
         let mut total_consumed = ValueMap::default();
@@ -242,8 +241,7 @@ impl TxUTxODeltas {
             return total_consumed;
         }
 
-        let total_refund =
-            self.calculate_total_refund(stake_registration_updates, drep_registration_updates);
+        let total_refund = self.calculate_total_refund(stake_registration_updates);
         let total_withdrawals = self.calculate_total_withdrawals();
         total_consumed.add_value(&Value::new(total_refund + total_withdrawals, vec![]));
 
@@ -265,7 +263,6 @@ impl TxUTxODeltas {
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
-        drep_registration_updates: &[DRepRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
     ) -> ValueMap {
         let mut total_produced = ValueMap::default();
@@ -297,11 +294,8 @@ impl TxUTxODeltas {
             }
         }
 
-        let total_deposit = self.calculate_total_deposit(
-            pool_registration_updates,
-            stake_registration_updates,
-            drep_registration_updates,
-        );
+        let total_deposit =
+            self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
         total_produced.add_value(&Value::new(total_deposit + self.fee, vec![]));
 
         // Add Value Burnt
@@ -310,34 +304,6 @@ impl TxUTxODeltas {
         total_produced.remove_zero_amounts();
 
         total_produced
-    }
-
-    pub fn calculate_total_refund(
-        &self,
-        stake_registration_updates: &[StakeRegistrationUpdate],
-        drep_registration_updates: &[DRepRegistrationUpdate],
-    ) -> Lovelace {
-        let mut total_refund: Lovelace = 0;
-        let Some(certs) = self.certs.as_ref() else {
-            return 0;
-        };
-
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
-
-        for cert_identifier in certs_identifiers.iter() {
-            total_refund += stake_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.refund())
-                .unwrap_or(0);
-            total_refund += drep_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.refund())
-                .unwrap_or(0);
-        }
-        total_refund
     }
 
     pub fn calculate_total_withdrawals(&self) -> Lovelace {
@@ -351,36 +317,64 @@ impl TxUTxODeltas {
         total_withdrawals
     }
 
+    pub fn calculate_total_refund(
+        &self,
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Lovelace {
+        let mut total_refund: Lovelace = 0;
+        let Some(certs) = self.certs.as_ref() else {
+            return 0;
+        };
+
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
+
+            // Stake Deregistration Cert
+            total_refund += stake_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier == cert_identifier)
+                .map(|delta| delta.outcome.refund())
+                .unwrap_or(0);
+
+            // DRep Deregistration Cert
+            if let TxCertificate::DRepDeregistration(dereg) = &cert.cert {
+                total_refund += dereg.refund;
+            }
+        }
+        total_refund
+    }
+
     pub fn calculate_total_deposit(
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
-        drep_registration_updates: &[DRepRegistrationUpdate],
     ) -> Lovelace {
         let mut total_deposit: Lovelace = 0;
         let Some(certs) = self.certs.as_ref() else {
             return 0;
         };
 
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
 
-        for cert_identifier in certs_identifiers.iter() {
+            // Pool Registration Cert
             total_deposit += pool_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
+
+            // Stake Registration Cert
             total_deposit += stake_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
-            total_deposit += drep_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.deposit())
-                .unwrap_or(0);
+
+            // DRep Registration Cert
+            if let TxCertificate::DRepRegistration(reg) = &cert.cert {
+                total_deposit += reg.deposit;
+            }
         }
         total_deposit
     }

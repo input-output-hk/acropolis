@@ -369,36 +369,6 @@ impl PoolRegistrationOutcome {
     }
 }
 
-// For DRep registration/deregistration (handles deposits/refunds)
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum DRepRegistrationOutcome {
-    Registered(Lovelace),   // New registration → deposit taken
-    Deregistered(Lovelace), // Valid deregistration → refund given
-    Updated,                // Existing update → no deposit
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DRepRegistrationUpdate {
-    pub cert_identifier: TxCertificateIdentifier,
-    pub outcome: DRepRegistrationOutcome,
-}
-
-impl DRepRegistrationOutcome {
-    pub fn deposit(&self) -> Lovelace {
-        match self {
-            DRepRegistrationOutcome::Registered(deposit) => *deposit,
-            _ => 0,
-        }
-    }
-
-    pub fn refund(&self) -> Lovelace {
-        match self {
-            DRepRegistrationOutcome::Deregistered(refund) => *refund,
-            _ => 0,
-        }
-    }
-}
-
 /// Individual address balance change
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AddressDelta {

@@ -79,7 +79,6 @@ address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
-drep-registration-updates-subscribe-topic = "cardano.drep.registration.updates"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
