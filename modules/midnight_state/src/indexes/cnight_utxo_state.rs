@@ -1,16 +1,16 @@
 use anyhow::{anyhow, Result};
-use std::collections::{BTreeMap, HashMap};
 
 use acropolis_common::{BlockNumber, UTxOIdentifier};
+use imbl::{HashMap, OrdMap};
 
 use crate::types::{AssetCreate, AssetSpend, CNightCreation, CNightSpend, UTxOMeta};
 
 #[derive(Clone, Default)]
 pub struct CNightUTxOState {
     // Created UTxOs receiving CNight indexed by block
-    created_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
+    created_utxos: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
     // Spent UTxOs sending CNight indexed by block
-    spent_utxos: BTreeMap<BlockNumber, Vec<UTxOIdentifier>>,
+    spent_utxos: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
     // An index mapping UTxO identifiers to their corresponding metadata
     pub utxo_index: HashMap<UTxOIdentifier, UTxOMeta>,
 }

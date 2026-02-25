@@ -366,6 +366,7 @@ dependencies = [
  "caryatid_sdk",
  "chrono",
  "config",
+ "imbl",
  "prost",
  "protoc-bin-vendored",
  "serde",
