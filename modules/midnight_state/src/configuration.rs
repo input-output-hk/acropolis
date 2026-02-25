@@ -27,7 +27,12 @@ pub struct MidnightConfig {
     pub permissioned_candidate_policy: PolicyId,
 
     // gRPC config
+    #[serde(default = "default_grpc_bind_address")]
     pub grpc_bind_address: String,
+}
+
+fn default_grpc_bind_address() -> String {
+    "0.0.0.0:50051".to_string()
 }
 
 impl MidnightConfig {

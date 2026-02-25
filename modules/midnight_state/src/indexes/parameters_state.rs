@@ -8,7 +8,6 @@ pub struct ParametersState {
 }
 
 impl ParametersState {
-    #[allow(dead_code)]
     /// Insert the parameters for an epoch on change, overwriting existing entry if multiple
     /// updates in the same epoch
     pub fn add_parameter_datum(&mut self, epoch: Epoch, datum: Datum) -> bool {
@@ -20,9 +19,11 @@ impl ParametersState {
         }
     }
 
-    #[allow(dead_code)]
-    /// Get the Ariadne parameters valid at a specific epoch
-    pub fn get_ariadne_parameters(&self, epoch: Epoch) -> Option<Datum> {
-        self.permissioned_candidates.range(..=epoch).next_back().map(|(_, datum)| datum.clone())
+    /// Get the Ariadne parameters and source epoch valid at a specific epoch
+    pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
+        self.permissioned_candidates
+            .range(..=epoch)
+            .next_back()
+            .map(|(epoch, datum)| (*epoch, datum.clone()))
     }
 }
