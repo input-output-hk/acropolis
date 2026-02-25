@@ -25,7 +25,7 @@ impl GovernanceState {
     }
 
     /// Get the latest technical committee datum entry at a specific block number
-    pub fn get_technical_committee_datum_with_block(
+    pub fn get_technical_committee_datum(
         &self,
         block_number: BlockNumber,
     ) -> Option<(BlockNumber, Datum)> {
@@ -35,26 +35,11 @@ impl GovernanceState {
             .map(|(number, datum)| (*number, datum.clone()))
     }
 
-    #[allow(dead_code)]
-    /// Get the latest technical committee datum at a specific block number
-    pub fn get_technical_committee_datum(&self, block_number: BlockNumber) -> Option<Datum> {
-        self.get_technical_committee_datum_with_block(block_number).map(|(_, datum)| datum)
-    }
-
     /// Get the latest council datum entry at a specific block number
-    pub fn get_council_datum_with_block(
-        &self,
-        block_number: BlockNumber,
-    ) -> Option<(BlockNumber, Datum)> {
+    pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<(BlockNumber, Datum)> {
         self.council
             .range(..=block_number)
             .next_back()
             .map(|(number, datum)| (*number, datum.clone()))
-    }
-
-    #[allow(dead_code)]
-    /// Get the latest council datum at a specific block number
-    pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<Datum> {
-        self.get_council_datum_with_block(block_number).map(|(_, datum)| datum)
     }
 }

@@ -133,11 +133,11 @@ impl State {
         &self,
         block_number: BlockNumber,
     ) -> Option<(BlockNumber, Datum)> {
-        self.governance.get_technical_committee_datum_with_block(block_number)
+        self.governance.get_technical_committee_datum(block_number)
     }
 
     pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<(BlockNumber, Datum)> {
-        self.governance.get_council_datum_with_block(block_number)
+        self.governance.get_council_datum(block_number)
     }
 
     fn collect_cnight_creations(
@@ -545,11 +545,11 @@ mod tests {
 
         assert_eq!(
             state.governance.get_technical_committee_datum(block_info.number),
-            Some(technical_committee_datum)
+            Some((block_info.number, technical_committee_datum))
         );
         assert_eq!(
             state.governance.get_council_datum(block_info.number),
-            Some(council_datum)
+            Some((block_info.number, council_datum))
         );
     }
 
@@ -969,11 +969,11 @@ mod tests {
 
         assert_eq!(
             state.governance.get_technical_committee_datum(block_info.number),
-            Some(technical_datum)
+            Some((block_info.number, technical_datum))
         );
         assert_eq!(
             state.governance.get_council_datum(block_info.number),
-            Some(council_datum)
+            Some((block_info.number, council_datum))
         );
     }
 
@@ -1077,13 +1077,13 @@ mod tests {
 
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
-            Some(datum_b.clone())
+            Some((block2.number, datum_b.clone()))
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
             rolled_back_state.governance.get_technical_committee_datum(block2.number),
-            Some(datum_a)
+            Some((block2.number, datum_a))
         );
 
         rolled_back_state
@@ -1102,7 +1102,7 @@ mod tests {
 
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
-            Some(datum_c)
+            Some((block2.number, datum_c))
         );
     }
 }
