@@ -6,7 +6,6 @@ use config::Config;
 
 #[derive(Debug, serde::Deserialize, Default, Clone)]
 #[serde(rename_all = "kebab-case")]
-#[allow(dead_code)]
 pub struct MidnightConfig {
     // CNight Token
     pub cnight_policy_id: PolicyId,
