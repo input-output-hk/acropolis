@@ -33,6 +33,9 @@ publish-block-txs-topic = "cardano.block.txs"
 [module.utxo-state]
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
+block-totals-topic = "cardano.block.txs"
+pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
+stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 
 [module.spo-state]
 # Enables /pools/{pool_id}/history endpoint, enables to query active_stakes
