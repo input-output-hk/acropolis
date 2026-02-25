@@ -43,6 +43,7 @@ node-addresses = [
 magic-number = 2
 
 [module.consensus]
+consensus-flow-mode = "direct"   # or "consensus"
 validation-timeout = 60  # seconds (default 60)
 # Security parameter k — maximum fork depth (Praos Common Prefix parameter)
 security-parameter = 2160
