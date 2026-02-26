@@ -42,7 +42,7 @@ fn get_aux_data(mtx: &babbage::MintedTx) -> Option<Vec<u8>> {
 pub fn validate(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &HashSet<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
     metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,
@@ -82,7 +82,7 @@ fn has_mir_certificate(mtx: &babbage::MintedTx) -> bool {
 fn shelley_wrapper(
     mtx: &babbage::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &HashSet<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
     metadata: &Option<Metadata>,
     genesis_delegs: &GenesisDelegates,

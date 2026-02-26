@@ -38,6 +38,7 @@ members = [
 
     # Process builds
     "processes/omnibus",            # All-inclusive omnibus process
+    "processes/midnight_indexer",   # All-inclusive process to index Midnight state
     "processes/replayer",           # All-inclusive process to replay messages
     "processes/golden_tests",       # All-inclusive golden tests process
     "processes/tx_submitter_cli",   # CLI wrapper for TX submitter
@@ -57,7 +58,7 @@ chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "string"] }
 config = "0.15.11"
 dashmap = "6.1.0"
-fjall = "3.0.1"
+fjall = "3.0.2"
 hex = "0.4"
 imbl = { version = "5.0.0", features = ["serde"] }
 minicbor = { version = "0.25.1", features = ["alloc", "std", "derive"] }
@@ -75,5 +76,12 @@ serde_json = "1.0.132"
 serde_with = { version = "3.12.0", features = ["hex"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "2.0.17"
+tokio-stream = "0.1"
+tonic = { version = "0.12", features = ["transport"] }
+tonic-reflection = "0.12"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.31.0"
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true

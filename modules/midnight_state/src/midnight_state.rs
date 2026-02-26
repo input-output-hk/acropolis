@@ -13,12 +13,16 @@ use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-
 mod epoch_totals;
-mod state;
-use state::State;
+
+mod configuration;
+mod grpc;
 mod indexes;
+mod state;
 mod types;
+
+use crate::configuration::MidnightConfig;
+use state::State;
 
 declare_cardano_reader!(
     AddressDeltasReader,
@@ -40,12 +44,13 @@ pub struct MidnightState;
 impl MidnightState {
     async fn run(
         history: Arc<Mutex<StateHistory<State>>>,
+        config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
     ) -> Result<()> {
         loop {
             let mut state = {
                 let mut h = history.lock().await;
-                h.get_or_init_with(State::new)
+                h.get_or_init_with(|| State::new(config.clone()))
             };
 
             match address_deltas_reader.read_with_rollbacks().await? {
@@ -60,21 +65,10 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch {
-                        let summary = state.handle_new_epoch(blk_info.as_ref());
-                        info!(
-                            epoch = summary.epoch,
-                            era = ?summary.era,
-                            blocks = summary.blocks,
-                            delta_count = summary.delta_count,
-                            created_utxos = summary.created_utxos,
-                            spent_utxos = summary.spent_utxos,
-                            "epoch checkpoint"
-                        );
+                        state.handle_new_epoch(blk_info.as_ref());
                     }
 
-                    state.start_block(blk_info.as_ref());
-                    state.handle_address_deltas(deltas.as_ref())?;
-                    state.finalise_block(blk_info.as_ref());
+                    state.handle_address_deltas(&blk_info, deltas.as_ref())?;
 
                     history.lock().await.commit(blk_info.number, state);
                 }
@@ -89,6 +83,10 @@ impl MidnightState {
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
+        // Get the config
+        let cfg = MidnightConfig::try_load(&config)?;
+        let addr = cfg.grpc_socket_addr()?;
+
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
 
@@ -97,12 +95,20 @@ impl MidnightState {
             "midnight_state",
             StateHistoryStore::Unbounded,
         )));
+        let grpc_history = history.clone();
 
-        // Start the run task
+        // Start the main run loop
         context.run(async move {
-            Self::run(history, address_deltas_reader)
+            Self::run(history, cfg, address_deltas_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
+        });
+
+        // Start the gRPC server
+        context.run(async move {
+            crate::grpc::server::run(grpc_history, addr)
+                .await
+                .unwrap_or_else(|e| error!("gRPC server failed: {e}"));
         });
 
         Ok(())

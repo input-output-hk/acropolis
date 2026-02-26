@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
-    UTXOValue, UTxOIdentifier, VKeyWitness, Value, VotingProcedures, Withdrawal,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificate, TxCertificateWithPos,
+    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures,
+    Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -55,7 +56,7 @@ pub struct Transaction {
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
-    pub vkey_witnesses: HashSet<VKeyWitness>,
+    pub vkey_witnesses: Vec<VKeyWitness>,
     pub script_witnesses: Vec<(ScriptHash, ScriptLang)>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: Vec<(DatumHash, Vec<u8>)>,
@@ -185,7 +186,7 @@ pub struct TxUTxODeltas {
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
 
     // VKey Witnesses
-    pub vkey_witnesses: Option<HashSet<VKeyWitness>>,
+    pub vkey_witnesses: Option<Vec<VKeyWitness>>,
 
     // Scripts Witnesses Provided
     pub script_witnesses: Option<Vec<(ScriptHash, ScriptLang)>>,
@@ -224,13 +225,13 @@ impl TxUTxODeltas {
         &self,
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    ) -> Value {
-        let mut total_consumed = Value::new(0, vec![]);
+    ) -> ValueMap {
+        let mut total_consumed = ValueMap::default();
 
         // Add Inputs UTxO values
         for input in self.consumes.iter() {
             if let Some(utxo) = utxos.get(input) {
-                total_consumed += &utxo.value;
+                total_consumed.add_value(&utxo.value);
             }
         }
 
@@ -242,10 +243,12 @@ impl TxUTxODeltas {
 
         let total_refund = self.calculate_total_refund(stake_registration_updates);
         let total_withdrawals = self.calculate_total_withdrawals();
-        total_consumed += &Value::new(total_refund + total_withdrawals, vec![]);
+        total_consumed.add_value(&Value::new(total_refund + total_withdrawals, vec![]));
 
         // Add Value Minted
-        total_consumed += &self.get_minted_value();
+        total_consumed.add_value(&self.get_minted_value());
+
+        total_consumed.remove_zero_amounts();
 
         total_consumed
     }
@@ -261,29 +264,29 @@ impl TxUTxODeltas {
         pool_registration_updates: &[PoolRegistrationUpdate],
         stake_registration_updates: &[StakeRegistrationUpdate],
         utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    ) -> Value {
-        let mut total_produced = Value::new(0, vec![]);
+    ) -> ValueMap {
+        let mut total_produced = ValueMap::default();
 
         // Add Outputs UTxO values
         for output in &self.produces {
-            total_produced += &output.value;
+            total_produced.add_value(&output.value);
         }
 
         if !self.is_valid {
             // total_collateral is only set since Babbage era.
             match self.stated_total_collateral {
                 Some(stated_total_collateral) => {
-                    total_produced += &Value::new(stated_total_collateral, vec![]);
+                    total_produced.add_value(&Value::new(stated_total_collateral, vec![]));
                     return total_produced;
                 }
                 None => {
                     // if there is no total_collateral set, then collateral inputs are just moved to fee pot
-                    let mut total_collateral = Value::new(0, vec![]);
+                    let mut total_collateral = ValueMap::default();
 
                     // Add Inputs UTxO values
                     for input in self.consumes.iter() {
                         if let Some(utxo) = utxos.get(input) {
-                            total_collateral += &utxo.value;
+                            total_collateral.add_value(&utxo.value);
                         }
                     }
                     return total_collateral;
@@ -293,34 +296,14 @@ impl TxUTxODeltas {
 
         let total_deposit =
             self.calculate_total_deposit(pool_registration_updates, stake_registration_updates);
-        total_produced += &Value::new(total_deposit + self.fee, vec![]);
+        total_produced.add_value(&Value::new(total_deposit + self.fee, vec![]));
 
         // Add Value Burnt
-        total_produced += &self.get_burnt_value();
+        total_produced.add_value(&self.get_burnt_value());
+
+        total_produced.remove_zero_amounts();
 
         total_produced
-    }
-
-    pub fn calculate_total_refund(
-        &self,
-        stake_registration_updates: &[StakeRegistrationUpdate],
-    ) -> Lovelace {
-        let mut total_refund: Lovelace = 0;
-        let Some(certs) = self.certs.as_ref() else {
-            return 0;
-        };
-
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
-
-        for cert_identifier in certs_identifiers.iter() {
-            total_refund += stake_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.refund())
-                .unwrap_or(0);
-        }
-        total_refund
     }
 
     pub fn calculate_total_withdrawals(&self) -> Lovelace {
@@ -334,6 +317,33 @@ impl TxUTxODeltas {
         total_withdrawals
     }
 
+    pub fn calculate_total_refund(
+        &self,
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Lovelace {
+        let mut total_refund: Lovelace = 0;
+        let Some(certs) = self.certs.as_ref() else {
+            return 0;
+        };
+
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
+
+            // Stake Deregistration Cert
+            total_refund += stake_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier == cert_identifier)
+                .map(|delta| delta.outcome.refund())
+                .unwrap_or(0);
+
+            // DRep Deregistration Cert
+            if let TxCertificate::DRepDeregistration(dereg) = &cert.cert {
+                total_refund += dereg.refund;
+            }
+        }
+        total_refund
+    }
+
     pub fn calculate_total_deposit(
         &self,
         pool_registration_updates: &[PoolRegistrationUpdate],
@@ -344,21 +354,37 @@ impl TxUTxODeltas {
             return 0;
         };
 
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+        // Check certificates
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
 
-        for cert_identifier in certs_identifiers.iter() {
+            // Pool Registration Cert
             total_deposit += pool_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
+
+            // Stake Registration Cert
             total_deposit += stake_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
+
+            // DRep Registration Cert
+            if let TxCertificate::DRepRegistration(reg) = &cert.cert {
+                total_deposit += reg.deposit;
+            }
         }
+
+        // Check Governance Proposals
+        if let Some(proposals) = self.proposal_procedures.as_ref() {
+            for proposal in proposals.iter() {
+                total_deposit += proposal.deposit;
+            }
+        }
+
         total_deposit
     }
 

@@ -1,0 +1,126 @@
+// NOTE:
+// This proto definition is intended to be moved into a separate package/crate
+// in the future. The goal is to publish it as a reusable dependency so that
+// external clients can import and depend on the shared API contract directly.
+syntax = "proto3";
+
+package midnight_state;
+
+service MidnightState {
+  rpc GetAssetCreates (AssetCreatesRequest) returns (AssetCreatesResponse);
+  rpc GetAssetSpends (AssetSpendsRequest) returns (AssetSpendsResponse);
+  rpc GetRegistrations (RegistrationsRequest) returns (RegistrationsResponse);
+  rpc GetDeregistrations (DeregistrationsRequest) returns (DeregistrationsResponse);
+  rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
+  rpc GetCouncilDatum (CouncilDatumRequest) returns (CouncilDatumResponse);
+  rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
+}
+
+message AssetCreatesRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message AssetCreate {
+  bytes address = 1;
+  uint64 quantity = 2;
+
+  bytes tx_hash = 3;
+  uint32 output_index = 4;
+
+  uint64 block_number = 5;
+  bytes block_hash = 6;
+  uint32 tx_index = 7;
+
+  int64 block_timestamp_unix = 8;
+}
+message AssetCreatesResponse {
+  repeated AssetCreate creates = 1;
+}
+
+message AssetSpendsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message AssetSpend {
+  bytes address = 1;
+  uint64 quantity = 2;
+
+  bytes spending_tx_hash = 3;
+  uint64 block_number = 4;
+  bytes block_hash = 5;
+  uint32 tx_index = 6;
+
+  bytes utxo_tx_hash = 7;
+  uint32 utxo_index = 8;
+
+  int64 block_timestamp_unix = 9;
+}
+message AssetSpendsResponse {
+  repeated AssetSpend spends = 1;
+}
+
+message RegistrationsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message Registration {
+  bytes full_datum = 1;
+
+  bytes tx_hash = 2;
+  uint32 output_index = 3;
+
+  uint64 block_number = 4;
+  bytes block_hash = 5;
+  uint32 tx_index = 6;
+
+  int64 block_timestamp_unix = 7;
+}
+message RegistrationsResponse {
+  repeated Registration registrations = 1;
+}
+
+message DeregistrationsRequest {
+  uint64 start_block = 1;
+  uint64 end_block = 2;
+}
+message Deregistration {
+  bytes full_datum = 1;
+
+  bytes tx_hash = 2;
+
+  uint64 block_number = 3;
+  bytes block_hash = 4;
+  uint32 tx_index = 5;
+
+  bytes utxo_tx_hash = 6;
+  uint32 utxo_index = 7;
+
+  int64 block_timestamp_unix = 8;
+}
+message DeregistrationsResponse {
+  repeated Deregistration deregistrations = 1;
+}
+
+message TechnicalCommitteeDatumRequest {
+  uint64 block_number = 1;
+}
+message TechnicalCommitteeDatumResponse {
+  uint64 source_block_number = 1;
+  bytes datum = 2;
+}
+
+message CouncilDatumRequest {
+  uint64 block_number = 1;
+}
+message CouncilDatumResponse {
+  uint64 source_block_number = 1;
+  bytes datum = 2;
+}
+
+message AriadneParametersRequest {
+  uint64 epoch = 1;
+}
+message AriadneParametersResponse {
+  uint64 source_epoch = 1;
+  bytes datum = 2;
+}

@@ -10,7 +10,8 @@ use crate::{
     rational_number::RationalNumber,
     Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
     KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
-    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValueMap, Voter,
+    VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -231,7 +232,10 @@ pub enum UTxOValidationError {
     /// **Cause:** The value of the UTXO is not conserved.
     /// Consumed = inputs + withdrawals + refunds, Produced = outputs + fees + deposits
     #[error("Value not conserved: consumed={consumed:?}, produced={produced:?}]")]
-    ValueNotConservedUTxO { consumed: Value, produced: Value },
+    ValueNotConservedUTxO {
+        consumed: ValueMap,
+        produced: ValueMap,
+    },
 
     /// **Cause:** Some of the outputs don't have minimum required lovelace
     #[error(
@@ -362,8 +366,11 @@ pub enum UTxOWValidationError {
     /// **Cause:** Unspendable UTxO without datum hash
     /// To spend a UTxO locked at Plutus scripts
     /// datum must be provided
-    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
-    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
+    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}, input_index={input_index}")]
+    UnspendableUTxONoDatumHash {
+        utxo_identifier: UTxOIdentifier,
+        input_index: usize,
+    },
 }
 
 /// Reference

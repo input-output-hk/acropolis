@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier, Value};
+use acropolis_common::{validation::UTxOValidationError, UTXOValue, UTxOIdentifier, ValueMap};
 use anyhow::Result;
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
@@ -26,8 +26,8 @@ pub fn validate_bad_inputs_utxo(
 }
 
 pub fn validate_value_not_conserved(
-    total_consumed: Value,
-    total_produced: Value,
+    total_consumed: ValueMap,
+    total_produced: ValueMap,
 ) -> UTxOValidationResult {
     if total_consumed != total_produced {
         return Err(Box::new(UTxOValidationError::ValueNotConservedUTxO {
@@ -40,8 +40,8 @@ pub fn validate_value_not_conserved(
 
 pub fn validate(
     inputs: &[UTxOIdentifier],
-    total_consumed: Value,
-    total_produced: Value,
+    total_consumed: ValueMap,
+    total_produced: ValueMap,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
 ) -> UTxOValidationResult {
     validate_bad_inputs_utxo(inputs, utxos)?;
@@ -101,6 +101,20 @@ mod tests {
     ) =>
         matches Ok(());
         "babbage - valid transaction 2 - failed transaction without collateral return"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "fd7ba73b225deafa5157ad8475802bed4e15a26e0376298d1ce37574acbb6527"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - transaction with DRep Registration Certificate"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "7fd6429add8f2611ad8d48c0cc49101463093aec285faea402e8cfde78ea58d7"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 2 - transaction with Governance Proposal"
     )]
     #[allow(clippy::result_large_err)]
     fn shelley_utxo_test(

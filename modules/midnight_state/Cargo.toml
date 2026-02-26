@@ -15,9 +15,21 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
-chrono = { workspace = true }
+imbl = { workspace = true }
+prost = "0.13"
+serde = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
 tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[package.metadata.cargo-shear]
+ignored = ["prost"]
 
 [lib]
 path = "src/midnight_state.rs"

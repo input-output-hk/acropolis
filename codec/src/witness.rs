@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use acropolis_common::{AddrKeyhash, NativeScript, Signature, VKey, VKeyWitness};
 use anyhow::{Result, anyhow};
 use pallas_primitives::{KeepRaw, alonzo};
@@ -14,13 +12,13 @@ fn map_vkey_witness(vkey_witness: &alonzo::VKeyWitness) -> Result<VKeyWitness> {
 
 pub fn map_vkey_witnesses(
     vkey_witnesses: &[alonzo::VKeyWitness],
-) -> (HashSet<VKeyWitness>, Vec<String>) {
-    let mut wits = HashSet::new();
+) -> (Vec<VKeyWitness>, Vec<String>) {
+    let mut wits = Vec::new();
     let mut errors = Vec::new();
     for (index, vkey_witness) in vkey_witnesses.iter().enumerate() {
         match map_vkey_witness(vkey_witness) {
             Ok(vkey_witness) => {
-                wits.insert(vkey_witness);
+                wits.push(vkey_witness);
             }
             Err(e) => {
                 errors.push(format!("Invalid vkey witness {index}: {e}"));

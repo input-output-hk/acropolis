@@ -51,7 +51,7 @@ The central aggregated file containing all lessons.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| path | string | Fixed: `docs/feedback/lessons.md` |
+| path | string | Fixed: `.specify/memory/lessons.md` |
 | title | string | "Lessons Learned Database" |
 | last_updated | date | Date of most recent update |
 | total_lessons | integer | Count of lessons in database |
@@ -73,7 +73,7 @@ A per-PR file containing lessons extracted from a specific pull request.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| path | string | `docs/feedback/pr-<number>-lessons.md` |
+| path | string | `.specify/memory/feedback/pr-<number>-lessons.md` |
 | pr_number | integer | GitHub PR number |
 | pr_title | string | Title of the PR |
 | pr_url | string | URL to the PR on GitHub |
@@ -94,7 +94,7 @@ A per-PR file containing lessons extracted from a specific pull request.
 ```
 ┌─────────────────────┐
 │   LessonsDatabase   │
-│  (docs/feedback/    │
+│  (.specify/memory/feedback/    │
 │    lessons.md)      │
 └──────────┬──────────┘
            │ contains (aggregated)
@@ -108,7 +108,7 @@ A per-PR file containing lessons extracted from a specific pull request.
            │                            │
 ┌──────────┴──────────┐                 │
 │   PRLessonsFile     │                 │
-│  (docs/feedback/    │                 │
+│  (.specify/memory/feedback/    │                 │
 │   pr-<N>-lessons.md)│                 │
 └─────────────────────┘                 │
                                         │

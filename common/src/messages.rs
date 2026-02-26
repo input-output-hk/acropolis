@@ -138,8 +138,8 @@ impl AddressDeltasMessage {
                         tx_identifier: delta.tx_identifier,
                         spent_utxos: delta.spent_utxos.iter().map(|u| u.utxo).collect(),
                         created_utxos: delta.created_utxos.iter().map(|u| u.utxo).collect(),
-                        sent: delta.sent.clone(),
-                        received: delta.received.clone(),
+                        sent: Value::from(delta.sent.clone()),
+                        received: Value::from(delta.received.clone()),
                     })
                     .collect(),
             ),
@@ -757,7 +757,9 @@ pub enum CommandResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, CreatedUTxOExtended, SpentUTxOExtended, TxHash, TxIdentifier, Value};
+    use crate::{
+        Address, CreatedUTxOExtended, SpentUTxOExtended, TxHash, TxIdentifier, Value, ValueMap,
+    };
 
     fn sample_address_delta() -> AddressDelta {
         AddressDelta {
@@ -780,11 +782,11 @@ mod tests {
             }],
             created_utxos: vec![CreatedUTxOExtended {
                 utxo: UTxOIdentifier::new(TxHash::from([5u8; 32]), 3),
-                value: Value::new(40, Vec::new()),
+                value: ValueMap::from(Value::new(40, Vec::new())),
                 datum: None,
             }],
-            sent: Value::new(30, Vec::new()),
-            received: Value::new(40, Vec::new()),
+            sent: ValueMap::from(Value::new(30, Vec::new())),
+            received: ValueMap::from(Value::new(40, Vec::new())),
         }
     }
 
@@ -844,8 +846,8 @@ mod tests {
             compact[0].created_utxos,
             vec![extended.created_utxos[0].utxo]
         );
-        assert_eq!(compact[0].sent, extended.sent);
-        assert_eq!(compact[0].received, extended.received);
+        assert_eq!(compact[0].sent, Value::from(extended.sent.clone()));
+        assert_eq!(compact[0].received, Value::from(extended.received.clone()));
     }
 
     #[test]

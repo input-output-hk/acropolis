@@ -21,7 +21,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 ## Outline
 
 0. **Load Lessons Context** (if available):
-   - Check if `docs/feedback/lessons.md` exists in the repository
+   - Check if `.specify/memory/lessons.md` exists in the repository
    - If it exists, read the file and filter for lessons with categories: `architecture`, `testing`, `performance`
    - Keep relevant lessons in mind when creating the technical plan to avoid repeating past mistakes
    - You may reference applied lessons in the plan (e.g., "Per L003: ...")

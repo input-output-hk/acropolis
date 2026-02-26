@@ -8,6 +8,8 @@ use crate::{Credential, KeyHash, NetworkId, ScriptHash, StakeCredential};
 use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
@@ -121,6 +123,15 @@ pub enum ShelleyAddressPaymentPart {
     /// Payment to a script
     #[n(1)]
     ScriptHash(#[n(0)] ScriptHash),
+}
+
+impl ShelleyAddressPaymentPart {
+    pub fn to_script_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ShelleyAddressPaymentPart::PaymentKeyHash(_) => None,
+            ShelleyAddressPaymentPart::ScriptHash(hash) => Some(*hash),
+        }
+    }
 }
 
 impl Default for ShelleyAddressPaymentPart {
@@ -636,7 +647,7 @@ impl Default for StakeAddress {
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, Default)]
 pub enum Address {
     #[default]
     None,
@@ -732,6 +743,16 @@ impl Address {
             Address::Byron(byron) => byron.is_redeem_address(),
             _ => false,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Address::from_string(&s).map_err(|e| SerdeError::custom(format!("Invalid address: {}", e)))
     }
 }
 
