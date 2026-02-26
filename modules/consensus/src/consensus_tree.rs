@@ -466,38 +466,7 @@ impl ConsensusTree {
 
         // Walk from ancestor to new tip, collecting blocks to process
         let blocks_on_new_chain = self.collect_chain_from_ancestor(ancestor, new_tip_hash);
-
-        let mut wanted = Vec::new();
-
-        for block_hash in blocks_on_new_chain {
-            let block = match self.blocks.get(&block_hash) {
-                Some(b) => b,
-                None => continue,
-            };
-
-            match block.status {
-                BlockValidationStatus::Offered => {
-                    // Transition to Wanted
-                    if let Some(b) = self.blocks.get_mut(&block_hash) {
-                        b.status = BlockValidationStatus::Wanted;
-                    }
-                    wanted.push(block_hash);
-                }
-                BlockValidationStatus::Wanted => {
-                    wanted.push(block_hash);
-                }
-                BlockValidationStatus::Fetched | BlockValidationStatus::Validated => {
-                    // Already fetched — fire block_proposed
-                    let b = &self.blocks[&block_hash];
-                    if let Some(ref body) = b.body {
-                        self.observer.block_proposed(b.number, b.hash, body);
-                    }
-                }
-                BlockValidationStatus::Rejected => {}
-            }
-        }
-
-        Ok(wanted)
+        Ok(self.process_chain_after_switch(blocks_on_new_chain))
     }
 
     /// Collect block hashes on the chain from ancestor (exclusive) to tip (inclusive),
@@ -514,6 +483,38 @@ impl ConsensusTree {
         }
         chain.reverse();
         chain
+    }
+
+    /// Process blocks on the new chain after a switch: transition Offered→Wanted,
+    /// fire block_proposed for already-fetched blocks, and return the list of wanted hashes.
+    fn process_chain_after_switch(&mut self, blocks_on_new_chain: Vec<BlockHash>) -> Vec<BlockHash> {
+        let mut wanted = Vec::new();
+        for block_hash in blocks_on_new_chain {
+            let block = match self.blocks.get(&block_hash) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            match block.status {
+                BlockValidationStatus::Offered => {
+                    if let Some(b) = self.blocks.get_mut(&block_hash) {
+                        b.status = BlockValidationStatus::Wanted;
+                    }
+                    wanted.push(block_hash);
+                }
+                BlockValidationStatus::Wanted => {
+                    wanted.push(block_hash);
+                }
+                BlockValidationStatus::Fetched | BlockValidationStatus::Validated => {
+                    let b = &self.blocks[&block_hash];
+                    if let Some(ref body) = b.body {
+                        self.observer.block_proposed(b.number, b.hash, body);
+                    }
+                }
+                BlockValidationStatus::Rejected => {}
+            }
+        }
+        wanted
     }
 
     // ── Phase 4: User Story 2 — add_block (T030) ──────────────────
@@ -694,34 +695,7 @@ impl ConsensusTree {
 
                         let blocks_on_new_chain =
                             self.collect_chain_from_ancestor(ancestor, new_tip_hash);
-
-                        let mut wanted = Vec::new();
-                        for block_hash in blocks_on_new_chain {
-                            let block = match self.blocks.get(&block_hash) {
-                                Some(b) => b,
-                                None => continue,
-                            };
-                            match block.status {
-                                BlockValidationStatus::Offered => {
-                                    if let Some(b) = self.blocks.get_mut(&block_hash) {
-                                        b.status = BlockValidationStatus::Wanted;
-                                    }
-                                    wanted.push(block_hash);
-                                }
-                                BlockValidationStatus::Wanted => {
-                                    wanted.push(block_hash);
-                                }
-                                BlockValidationStatus::Fetched
-                                | BlockValidationStatus::Validated => {
-                                    let b = &self.blocks[&block_hash];
-                                    if let Some(ref body) = b.body {
-                                        self.observer.block_proposed(b.number, b.hash, body);
-                                    }
-                                }
-                                BlockValidationStatus::Rejected => {}
-                            }
-                        }
-                        return Ok(wanted);
+                        return Ok(self.process_chain_after_switch(blocks_on_new_chain));
                     }
                 }
             }
@@ -735,7 +709,7 @@ impl ConsensusTree {
     /// Internal: remove a block and all descendants without chain switch handling.
     fn remove_block_internal(&mut self, hash: BlockHash) {
         // Collect all descendants
-        let descendants = self.collect_descendants(hash);
+        let descendants = self.collect_all_from(hash, false);
 
         // Remove from parent's children list
         if let Some(block) = self.blocks.get(&hash) {
@@ -753,9 +727,10 @@ impl ConsensusTree {
         self.blocks.remove(&hash);
     }
 
-    /// Collect all descendant hashes of a block (not including the block itself).
-    fn collect_descendants(&self, hash: BlockHash) -> Vec<BlockHash> {
-        let mut result = Vec::new();
+    /// Collect all hashes reachable from a block.
+    /// If `inclusive` is true, includes the block itself; otherwise only its descendants.
+    fn collect_all_from(&self, hash: BlockHash, inclusive: bool) -> Vec<BlockHash> {
+        let mut result = if inclusive { vec![hash] } else { Vec::new() };
         let mut stack = vec![hash];
         while let Some(h) = stack.pop() {
             if let Some(block) = self.blocks.get(&h) {
@@ -801,7 +776,7 @@ impl ConsensusTree {
         }
 
         // Collect all blocks to keep: blocks reachable from new_root
-        let blocks_to_keep = self.collect_reachable(new_root);
+        let blocks_to_keep = self.collect_all_from(new_root, true);
 
         // Remove all blocks not in the keep set
         let all_hashes: Vec<BlockHash> = self.blocks.keys().copied().collect();
@@ -820,20 +795,6 @@ impl ConsensusTree {
         Ok(())
     }
 
-    /// Collect all hashes reachable from a given root (inclusive).
-    fn collect_reachable(&self, root: BlockHash) -> Vec<BlockHash> {
-        let mut result = vec![root];
-        let mut stack = vec![root];
-        while let Some(h) = stack.pop() {
-            if let Some(block) = self.blocks.get(&h) {
-                for &child in &block.children {
-                    result.push(child);
-                    stack.push(child);
-                }
-            }
-        }
-        result
-    }
 }
 
 /// Placeholder observer used when the real observer has been taken via `take_observer`.
