@@ -13,7 +13,7 @@ use acropolis_common::{
     },
     types::{BlockInfo, Point},
     validation::ValidationStatus,
-    BlockHash, BlockIntent, BlockStatus,
+    BlockHash, BlockIntent, BlockStatus, Era,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context, Subscription};
@@ -31,13 +31,13 @@ const DEFAULT_PUBLISH_BLOCKS_TOPIC: &str = "cardano.block.proposed";
 const DEFAULT_CONSENSUS_TOPIC: &str = "cardano.consensus";
 const DEFAULT_PUBLISH_CONSENSUS_TOPIC: &str = "cardano.consensus";
 const DEFAULT_VALIDATION_TIMEOUT: i64 = 60; // seconds
-const DEFAULT_SECURITY_PARAMETER: u64 = 2160;
+const DEFAULT_SECURITY_PARAMETER: u64 = 2160; // k
 
 /// Consensus flow handling strategies.
 #[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum ConsensusFlowMode {
-    /// Direct flow: pass-through like main branch (no chain selection).
+    /// Direct flow (pass-through, no chain selection).
     #[default]
     Direct,
     /// Consensus flow: use offers/wants with chain selection.
@@ -69,12 +69,16 @@ enum ObserverEvent {
 /// Shared event queue between the observer and the main loop.
 type EventQueue = Arc<std::sync::Mutex<Vec<ObserverEvent>>>;
 
+/// Return type of a timed-out validator read batch: outer `Err` = timeout, inner `Err` = read failure.
+type ValidationBatchResult =
+    Result<anyhow::Result<Vec<(String, Arc<Message>)>>, tokio::time::error::Elapsed>;
+
 /// Observer that queues tree events for later async publishing.
-struct QueueObserver {
+struct QueuingConsensusTreeObserver {
     events: EventQueue,
 }
 
-impl ConsensusTreeObserver for QueueObserver {
+impl ConsensusTreeObserver for QueuingConsensusTreeObserver {
     fn block_proposed(&self, _number: u64, hash: BlockHash, _body: &[u8]) {
         self.events.lock().unwrap().push(ObserverEvent::BlockProposed { hash });
     }
@@ -126,6 +130,18 @@ struct ConsensusStats {
     rejected: u64,
 }
 
+impl ConsensusStats {
+    fn maybe_log(&self) {
+        const STATS_LOG_INTERVAL: u64 = 100;
+        if self.available > 0 && self.available.is_multiple_of(STATS_LOG_INTERVAL) {
+            info!(
+                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
+                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
+            );
+        }
+    }
+}
+
 /// Consensus module
 /// Parameterised by the outer message enum used on the bus
 #[module(
@@ -173,13 +189,13 @@ impl Consensus {
             .unwrap_or(DEFAULT_SECURITY_PARAMETER as i64) as u64;
         info!("Security parameter k={security_parameter}");
 
-        // Subscribe for incoming blocks (PNI → CON: BlockAvailable)
+        // Subscribe for incoming blocks (BlockAvailable)
         let block_subscription = context.subscribe(&subscribe_blocks_topic).await?;
 
         let flow_mode = ConsensusFlowMode::from_config(&config);
         info!("Consensus flow mode: {flow_mode}");
 
-        // Subscribe for consensus messages (PNI → CON: BlockOffered, BlockRescinded)
+        // Subscribe for consensus messages (BlockOffered, BlockRescinded)
         // TODO: Temporary until consensus flow fully works.
         let consensus_subscription = if flow_mode == ConsensusFlowMode::Consensus {
             Some(context.subscribe(&consensus_topic).await?)
@@ -195,7 +211,7 @@ impl Consensus {
 
         // Create the consensus tree with a queue-based observer
         let event_queue: EventQueue = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let observer = Box::new(QueueObserver {
+        let observer = Box::new(QueuingConsensusTreeObserver {
             events: event_queue.clone(),
         });
         let tree = ConsensusTree::new(security_parameter, observer);
@@ -229,19 +245,6 @@ impl Consensus {
         });
 
         Ok(())
-    }
-}
-
-const STATS_LOG_INTERVAL: u64 = 100;
-
-impl ConsensusStats {
-    fn maybe_log(&self) {
-        if self.available > 0 && self.available.is_multiple_of(STATS_LOG_INTERVAL) {
-            info!(
-                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
-                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
-            );
-        }
     }
 }
 
@@ -307,128 +310,6 @@ impl ConsensusRuntime {
         }
     }
 
-    /// Direct flow: pass-through BlockAvailable and Rollback (main-branch behavior).
-    /// TODO: Temporary until consensus flow fully works
-    async fn run_direct(&mut self, mut block_subscription: Box<dyn Subscription<Message>>) {
-        loop {
-            let Ok((_, message)) = block_subscription.read().await else {
-                error!("Block message read failed");
-                return;
-            };
-
-            match message.as_ref() {
-                Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                    let block_info = if self.do_validation {
-                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                    } else {
-                        raw_blk_info.clone()
-                    };
-
-                    let span = info_span!("consensus", block = block_info.number);
-                    self.handle_block_available_direct(block_info, raw_block.clone())
-                        .instrument(span)
-                        .await;
-                }
-
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // Pass rollback to all validators and state modules.
-                    self.context
-                        .message_bus
-                        .publish(&self.publish_blocks_topic, message.clone())
-                        .await
-                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-                }
-
-                _ => error!("Unexpected message type: {message:?}"),
-            }
-        }
-    }
-
-    /// Direct flow: pass-through like main branch.
-    /// TODO: Temporary until consensus flow fully works
-    async fn handle_block_available_direct(
-        &mut self,
-        block_info: BlockInfo,
-        raw_block: RawBlockMessage,
-    ) {
-        // Send to all validators and state modules
-        let block = Arc::new(Message::Cardano((
-            block_info.clone(),
-            CardanoMessage::BlockAvailable(raw_block),
-        )));
-
-        self.context
-            .message_bus
-            .publish(&self.publish_blocks_topic, block)
-            .await
-            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
-
-        if !self.do_validation {
-            return;
-        }
-
-        let completed_tasks = Arc::new(Mutex::new(
-            HashMap::<String, Option<Arc<Message>>>::from_iter(
-                self.validator_topics.iter().map(|s| (s.clone(), None)),
-            ),
-        ));
-
-        let all_say_go = match timeout(
-            self.validation_timeout,
-            try_join_all(self.validator_subscriptions.iter_mut().map(|s| async {
-                let (topic, res) = s.read().await?;
-                completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
-                Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
-            })),
-        )
-        .await
-        {
-            Ok(Ok(results)) => {
-                results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::BlockValidation(status))) => {
-                        match status {
-                            ValidationStatus::Go => all_ok,
-                            ValidationStatus::NoGo(err) => {
-                                error!(
-                                    block = block_info.number,
-                                    ?err,
-                                    "Validation failure: {topic}, result {msg:?}"
-                                );
-                                false
-                            }
-                        }
-                    }
-                    _ => {
-                        error!("Unexpected validation message type: {msg:?}");
-                        false
-                    }
-                })
-            }
-            Ok(Err(e)) => {
-                error!("Failed to read validations: {e}");
-                false
-            }
-            Err(_) => {
-                error!("Timeout waiting for validation responses");
-                false
-            }
-        };
-
-        if !all_say_go {
-            error!(
-                block = block_info.number,
-                "Validation rejected block, results available:"
-            );
-            let completed_tasks = completed_tasks.lock().await;
-            for (topic, msg) in completed_tasks.iter() {
-                error!("Topic {topic}, result {msg:?}");
-            }
-        }
-    }
-
     /// Consensus flow: require BlockOffered before BlockAvailable (except Mithril bootstrap).
     async fn handle_block_available_consensus(
         &mut self,
@@ -436,7 +317,7 @@ impl ConsensusRuntime {
         raw_block: RawBlockMessage,
     ) {
         // Parse header to extract parent hash
-        let parent_hash = match extract_parent_hash(&block_info, &raw_block.header) {
+        let parent_hash = match Self::extract_parent_hash(block_info.era, &raw_block.header) {
             Ok(Some(h)) => h,
             Ok(None) => {
                 // Genesis/epoch boundary block — no parent
@@ -453,6 +334,9 @@ impl ConsensusRuntime {
                             "Adding Immutable genesis block {} from Mithril bootstrap",
                             block_info.number
                         );
+                        // Use wrapping subtraction so block 0 gets a synthetic parent number
+                        // of u64::MAX. That preserves the tree invariant:
+                        // child.number == parent.number + 1 (with wraparound at genesis).
                         if let Err(e) =
                             self.tree.set_root(genesis_root, block_info.number.wrapping_sub(1), 0)
                         {
@@ -574,6 +458,8 @@ impl ConsensusRuntime {
         parent_hash: BlockHash,
     ) {
         if self.tree.is_empty() {
+            // Same rule as offered flow: for block 0 we need parent_number = u64::MAX,
+            // so use wrapping_sub(1) instead of saturating_sub(1).
             let parent_number = block_info.number.wrapping_sub(1);
             if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
                 error!("Failed to set root for Mithril bootstrap: {e}");
@@ -581,7 +467,7 @@ impl ConsensusRuntime {
             }
             debug!(
                 "Tree root set to parent {parent_hash} (block {}) for Mithril bootstrap",
-                block_info.number.wrapping_sub(1)
+                parent_number
             );
         }
 
@@ -630,7 +516,8 @@ impl ConsensusRuntime {
         slot: u64,
     ) {
         // Bootstrap the tree with a virtual root when the first offer arrives.
-        // For block 0 (genesis/first block), use u64::MAX so that 0 == parent_number + 1 (wraparound).
+        // For block 0 (genesis/first block), wrapping_sub(1) yields u64::MAX, so
+        // 0 == parent_number + 1 remains true under wrapping arithmetic.
         if self.tree.is_empty() {
             let parent_number = number.wrapping_sub(1);
 
@@ -642,6 +529,8 @@ impl ConsensusRuntime {
         }
 
         if self.tree.get_block(&parent_hash).is_none() {
+            // Keep the same parent-number convention while re-rooting, including
+            // block 0 -> u64::MAX for genesis alignment.
             let parent_number = number.wrapping_sub(1);
 
             warn!(
@@ -669,7 +558,7 @@ impl ConsensusRuntime {
         // Collect and publish observer events
         self.drain_and_publish_events().await;
 
-        let wanted_msgs = build_block_wanted_messages(&self.tree, &wanted);
+        let wanted_msgs = self.build_block_wanted_messages(&wanted);
         self.publish_block_wanted_messages(&wanted_msgs).await;
     }
 
@@ -679,7 +568,7 @@ impl ConsensusRuntime {
             Ok(newly_wanted) => {
                 self.drain_and_publish_events().await;
 
-                let wanted_msgs = build_block_wanted_messages(&self.tree, &newly_wanted);
+                let wanted_msgs = self.build_block_wanted_messages(&newly_wanted);
                 self.publish_block_wanted_messages(&wanted_msgs).await;
                 self.prune_block_data();
             }
@@ -699,14 +588,16 @@ impl ConsensusRuntime {
                 ObserverEvent::BlockRejected { .. } => self.stats.rejected += 1,
             }
         }
-        let events = resolve_observer_events(
-            raw_events,
-            &self.publish_blocks_topic,
-            &self.publish_consensus_topic,
-            &self.block_data,
-            &self.tree,
-        );
-        publish_messages(&self.context, events).await;
+        let events = self.resolve_observer_events(raw_events);
+
+        // Publish all events
+        for (topic, msg) in events {
+            self.context
+                .message_bus
+                .publish(&topic, msg)
+                .await
+                .unwrap_or_else(|e| error!("Failed to publish to {topic}: {e}"));
+        }
     }
 
     /// Publish `BlockWanted` messages for each hash.
@@ -748,47 +639,19 @@ impl ConsensusRuntime {
             ),
         ));
 
-        let mut validation_results: Vec<(String, Arc<Message>)> = Vec::new();
-        let all_say_go = match timeout(self.validation_timeout, async {
-            for sub in self.validator_subscriptions.iter_mut() {
-                let (topic, res) = sub.read().await?;
-                completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
-                validation_results.push((topic, res));
-            }
-            Ok::<(), anyhow::Error>(())
-        })
-        .await
-        {
-            Ok(Ok(())) => {
-                validation_results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
-                    Message::Cardano((_, CardanoMessage::BlockValidation(status))) => {
-                        match status {
-                            ValidationStatus::Go => all_ok,
-                            ValidationStatus::NoGo(err) => {
-                                error!(
-                                    block = block_info.number,
-                                    ?err,
-                                    "Validation failure: {topic}, result {msg:?}"
-                                );
-                                false
-                            }
-                        }
-                    }
-                    _ => {
-                        error!("Unexpected validation message type: {msg:?}");
-                        false
-                    }
-                })
-            }
-            Ok(Err(e)) => {
-                error!("Failed to read validations: {e}");
-                false
-            }
-            Err(_) => {
-                error!("Timeout waiting for validation responses");
-                false
-            }
-        };
+        let all_say_go = Self::all_validators_say_go(
+            block_info.number,
+            timeout(self.validation_timeout, async {
+                let mut results = Vec::new();
+                for sub in self.validator_subscriptions.iter_mut() {
+                    let (topic, res) = sub.read().await?;
+                    completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
+                    results.push((topic, res));
+                }
+                Ok::<Vec<(String, Arc<Message>)>, anyhow::Error>(results)
+            })
+            .await,
+        );
 
         if all_say_go {
             self.stats.validated += 1;
@@ -816,154 +679,271 @@ impl ConsensusRuntime {
             self.prune_block_data();
         }
     }
-}
 
-/// Extract the parent hash from a raw block header using pallas.
-fn extract_parent_hash(block_info: &BlockInfo, header_bytes: &[u8]) -> Result<Option<BlockHash>> {
-    let header = MultiEraHeader::decode(block_info.era as u8, None, header_bytes)?;
-    Ok(header.previous_hash().map(|h| BlockHash::from(*h)))
-}
+    /// Resolve pre-drained observer events into publishable messages.
+    ///
+    /// Sync function — does not hold tree references across await points.
+    fn resolve_observer_events(&self, events: Vec<ObserverEvent>) -> Vec<(String, Arc<Message>)> {
+        let mut messages = Vec::new();
 
-/// Resolve pre-drained observer events into publishable messages.
-///
-/// Sync function — does not hold tree references across await points.
-fn resolve_observer_events(
-    events: Vec<ObserverEvent>,
-    publish_blocks_topic: &str,
-    publish_consensus_topic: &str,
-    block_data: &HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
-    tree: &ConsensusTree,
-) -> Vec<(String, Arc<Message>)> {
-    let mut messages = Vec::new();
-
-    for event in events {
-        match event {
-            ObserverEvent::BlockProposed { hash } => {
-                if let Some((info, raw)) = block_data.get(&hash) {
-                    debug!(
-                        block = info.number,
-                        hash = %hash,
-                        "Publishing BlockProposed to validators"
-                    );
-                    // Reconstruct the original BlockAvailable payload from the cache:
-                    // the consensus tree does not store full BlockInfo, only chain metadata.
+        for event in events {
+            match event {
+                ObserverEvent::BlockProposed { hash } => {
+                    if let Some((info, raw)) = self.block_data.get(&hash) {
+                        debug!(
+                            block = info.number,
+                            hash = %hash,
+                            "Publishing BlockProposed to validators"
+                        );
+                        // Reconstruct the original BlockAvailable payload from the cache:
+                        // the consensus tree does not store full BlockInfo, only chain metadata.
+                        let msg = Arc::new(Message::Cardano((
+                            info.clone(),
+                            CardanoMessage::BlockAvailable(raw.clone()),
+                        )));
+                        messages.push((self.publish_blocks_topic.to_string(), msg));
+                    } else {
+                        warn!("No block data found for proposed block {hash}");
+                    }
+                }
+                ObserverEvent::Rollback { to_block_number } => {
+                    let point = self.find_point_at_number(to_block_number);
+                    let block_info = self.find_block_info_at_number(to_block_number);
                     let msg = Arc::new(Message::Cardano((
-                        info.clone(),
-                        CardanoMessage::BlockAvailable(raw.clone()),
+                        block_info,
+                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
                     )));
-                    messages.push((publish_blocks_topic.to_string(), msg));
-                } else {
-                    warn!("No block data found for proposed block {hash}");
+                    messages.push((self.publish_blocks_topic.to_string(), msg));
+                    info!("Rollback to block number {to_block_number}");
+                }
+                ObserverEvent::BlockRejected { hash } => {
+                    let slot = self
+                        .block_data
+                        .get(&hash)
+                        .map(|(info, _)| info.slot)
+                        .or_else(|| self.tree.get_block(&hash).map(|b| b.slot))
+                        .unwrap_or(0);
+                    let msg = Arc::new(Message::Consensus(ConsensusMessage::BlockRejected(
+                        BlockRejectedMessage { hash, slot },
+                    )));
+                    messages.push((self.publish_consensus_topic.to_string(), msg));
                 }
             }
-            ObserverEvent::Rollback { to_block_number } => {
-                let point = find_point_at_number(tree, to_block_number);
-                let block_info = find_block_info_at_number(block_data, tree, to_block_number);
-                let msg = Arc::new(Message::Cardano((
-                    block_info,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
-                )));
-                messages.push((publish_blocks_topic.to_string(), msg));
-                info!("Rollback to block number {to_block_number}");
+        }
+
+        messages
+    }
+
+    // Validator responses are accepted without checking that response BlockInfo.hash
+    // matches the block currently being validated. Correctness therefore relies on a
+    // strict FIFO invariant across all paths: each published block yields exactly one
+    // response per validator, and consensus consumes exactly one response per validator
+    // per published block.
+    //
+    // If that invariant is broken (for example, a block is published to validators but
+    // not consumed in consensus), queues can drift and responses may be applied to the
+    // wrong block silently. The hardening path is hash correlation at read time plus an
+    // audit that all produced responses are eventually consumed.
+    //
+    // This helper is shared by direct and consensus flows.
+    fn all_validators_say_go(block_number: u64, result: ValidationBatchResult) -> bool {
+        match result {
+            Ok(Ok(results)) => {
+                results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
+                    Message::Cardano((_, CardanoMessage::BlockValidation(status))) => {
+                        match status {
+                            ValidationStatus::Go => all_ok,
+                            ValidationStatus::NoGo(err) => {
+                                error!(
+                                    block = block_number,
+                                    ?err,
+                                    "Validation failure: {topic}, result {msg:?}"
+                                );
+                                false
+                            }
+                        }
+                    }
+                    _ => {
+                        error!("Unexpected validation message type: {msg:?}");
+                        false
+                    }
+                })
             }
-            ObserverEvent::BlockRejected { hash } => {
-                let slot = block_data
-                    .get(&hash)
-                    .map(|(info, _)| info.slot)
-                    .or_else(|| tree.get_block(&hash).map(|b| b.slot))
-                    .unwrap_or(0);
-                let msg = Arc::new(Message::Consensus(ConsensusMessage::BlockRejected(
-                    BlockRejectedMessage { hash, slot },
-                )));
-                messages.push((publish_consensus_topic.to_string(), msg));
+            Ok(Err(e)) => {
+                error!("Failed to read validations: {e}");
+                false
+            }
+            Err(_) => {
+                error!("Timeout waiting for validation responses");
+                false
             }
         }
     }
 
-    messages
-}
+    /// Decode the parent hash from a raw block header.
+    fn extract_parent_hash(era: Era, header_bytes: &[u8]) -> Result<Option<BlockHash>> {
+        let header = MultiEraHeader::decode(era as u8, None, header_bytes)?;
+        Ok(header.previous_hash().map(|h| BlockHash::from(*h)))
+    }
 
-/// Publish a batch of collected messages to the bus.
-async fn publish_messages(context: &Arc<Context<Message>>, messages: Vec<(String, Arc<Message>)>) {
-    for (topic, msg) in messages {
-        context
+    /// Build `BlockWanted` payloads from tree metadata.
+    fn build_block_wanted_messages(&self, wanted: &[BlockHash]) -> Vec<BlockWantedMessage> {
+        wanted
+            .iter()
+            .map(|hash| BlockWantedMessage {
+                hash: *hash,
+                slot: self.tree.get_block(hash).map_or(0, |b| b.slot),
+            })
+            .collect()
+    }
+
+    /// Find the Point for a block at a given number by walking the tree.
+    fn find_point_at_number(&self, number: u64) -> Point {
+        let mut current = self.tree.favoured_tip();
+        while let Some(h) = current {
+            if let Some(b) = self.tree.get_block(&h) {
+                if b.number == number {
+                    return Point::Specific {
+                        hash: b.hash,
+                        slot: b.slot,
+                    };
+                }
+                current = b.parent;
+            } else {
+                break;
+            }
+        }
+        Point::Origin
+    }
+
+    /// Find or construct a BlockInfo for a block at a given number.
+    fn find_block_info_at_number(&self, number: u64) -> BlockInfo {
+        let mut current = self.tree.favoured_tip();
+        while let Some(h) = current {
+            if let Some(b) = self.tree.get_block(&h) {
+                if b.number == number {
+                    if let Some((info, _)) = self.block_data.get(&h) {
+                        return info.clone();
+                    }
+                    return Self::default_block_info(b.number, b.slot, b.hash);
+                }
+                current = b.parent;
+            } else {
+                break;
+            }
+        }
+        Self::default_block_info(number, 0, BlockHash::default())
+    }
+
+    /// Construct a default BlockInfo with minimal fields populated.
+    fn default_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
+        BlockInfo {
+            status: BlockStatus::Volatile,
+            intent: BlockIntent::Apply,
+            slot,
+            number,
+            hash,
+            epoch: 0,
+            epoch_slot: 0,
+            new_epoch: false,
+            is_new_era: false,
+            tip_slot: None,
+            timestamp: 0,
+            era: Era::Conway,
+        }
+    }
+
+    /// Direct flow: pass-through BlockAvailable and Rollback (main-branch behavior).
+    /// TODO: Temporary until consensus flow fully works
+    async fn run_direct(&mut self, mut block_subscription: Box<dyn Subscription<Message>>) {
+        loop {
+            let Ok((_, message)) = block_subscription.read().await else {
+                error!("Block message read failed");
+                return;
+            };
+
+            match message.as_ref() {
+                Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
+                    let block_info = if self.do_validation {
+                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
+                    } else {
+                        raw_blk_info.clone()
+                    };
+
+                    let span = info_span!("consensus", block = block_info.number);
+                    self.handle_block_available_direct(block_info, raw_block.clone())
+                        .instrument(span)
+                        .await;
+                }
+
+                Message::Cardano((
+                    _,
+                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
+                )) => {
+                    // Pass rollback to all validators and state modules.
+                    self.context
+                        .message_bus
+                        .publish(&self.publish_blocks_topic, message.clone())
+                        .await
+                        .unwrap_or_else(|e| error!("Failed to publish: {e}"));
+                }
+
+                _ => error!("Unexpected message type: {message:?}"),
+            }
+        }
+    }
+
+    /// Direct flow: pass-through like main branch.
+    /// TODO: Temporary until consensus flow fully works
+    async fn handle_block_available_direct(
+        &mut self,
+        block_info: BlockInfo,
+        raw_block: RawBlockMessage,
+    ) {
+        // Send to all validators and state modules
+        let block = Arc::new(Message::Cardano((
+            block_info.clone(),
+            CardanoMessage::BlockAvailable(raw_block),
+        )));
+
+        self.context
             .message_bus
-            .publish(&topic, msg)
+            .publish(&self.publish_blocks_topic, block)
             .await
-            .unwrap_or_else(|e| error!("Failed to publish to {topic}: {e}"));
-    }
-}
+            .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-/// Build `BlockWanted` payloads from tree metadata.
-fn build_block_wanted_messages(
-    tree: &ConsensusTree,
-    wanted: &[BlockHash],
-) -> Vec<BlockWantedMessage> {
-    wanted
-        .iter()
-        .map(|hash| BlockWantedMessage {
-            hash: *hash,
-            slot: tree.get_block(hash).map_or(0, |b| b.slot),
-        })
-        .collect()
-}
+        if !self.do_validation {
+            return;
+        }
 
-/// Find the Point for a block at a given number by walking the tree.
-fn find_point_at_number(tree: &ConsensusTree, number: u64) -> Point {
-    let mut current = tree.favoured_tip();
-    while let Some(h) = current {
-        if let Some(b) = tree.get_block(&h) {
-            if b.number == number {
-                return Point::Specific {
-                    hash: b.hash,
-                    slot: b.slot,
-                };
+        let completed_tasks = Arc::new(Mutex::new(
+            HashMap::<String, Option<Arc<Message>>>::from_iter(
+                self.validator_topics.iter().map(|s| (s.clone(), None)),
+            ),
+        ));
+
+        let all_say_go = Self::all_validators_say_go(
+            block_info.number,
+            timeout(
+                self.validation_timeout,
+                try_join_all(self.validator_subscriptions.iter_mut().map(|s| async {
+                    let (topic, res) = s.read().await?;
+                    completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
+                    Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
+                })),
+            )
+            .await,
+        );
+
+        if !all_say_go {
+            error!(
+                block = block_info.number,
+                "Validation rejected block, results available:"
+            );
+            let completed_tasks = completed_tasks.lock().await;
+            for (topic, msg) in completed_tasks.iter() {
+                error!("Topic {topic}, result {msg:?}");
             }
-            current = b.parent;
-        } else {
-            break;
         }
     }
-    Point::Origin
-}
-
-/// Construct a default BlockInfo with minimal fields populated.
-fn default_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
-    BlockInfo {
-        status: acropolis_common::BlockStatus::Volatile,
-        intent: BlockIntent::Apply,
-        slot,
-        number,
-        hash,
-        epoch: 0,
-        epoch_slot: 0,
-        new_epoch: false,
-        is_new_era: false,
-        tip_slot: None,
-        timestamp: 0,
-        era: acropolis_common::Era::Conway,
-    }
-}
-
-/// Find or construct a BlockInfo for a block at a given number.
-fn find_block_info_at_number(
-    block_data: &HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
-    tree: &ConsensusTree,
-    number: u64,
-) -> BlockInfo {
-    let mut current = tree.favoured_tip();
-    while let Some(h) = current {
-        if let Some(b) = tree.get_block(&h) {
-            if b.number == number {
-                if let Some((info, _)) = block_data.get(&h) {
-                    return info.clone();
-                }
-                return default_block_info(b.number, b.slot, b.hash);
-            }
-            current = b.parent;
-        } else {
-            break;
-        }
-    }
-    default_block_info(number, 0, BlockHash::default())
 }
