@@ -4,9 +4,8 @@
 //! longest valid chain, with ties broken in favour of the current chain.
 //! The bounded variant rejects chains forking deeper than k blocks.
 
-use std::collections::HashMap;
-
 use acropolis_common::BlockHash;
+use std::collections::HashMap;
 use tracing::debug;
 
 use crate::tree_block::{BlockValidationStatus, TreeBlock};
@@ -105,8 +104,6 @@ impl ConsensusTree {
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
-
-    // ── Foundational helpers (Phase 2) ─────────────────────────────
 
     /// Find the tip of the longest chain starting from the root.
     ///
@@ -302,8 +299,6 @@ impl ConsensusTree {
     pub(crate) fn update_favoured_tip(&mut self) {
         self.favoured_tip = self.get_favoured_chain();
     }
-
-    // ── Phase 3: User Story 1 — check_block_wanted (T023) ─────────
 
     /// Evaluate an offered block and decide whether it is wanted.
     ///
@@ -520,8 +515,6 @@ impl ConsensusTree {
         wanted
     }
 
-    // ── Phase 4: User Story 2 — add_block (T030) ──────────────────
-
     /// Store a block body and fire observers for contiguous fetched blocks.
     ///
     /// The block must already be in the tree (registered via
@@ -635,8 +628,6 @@ impl ConsensusTree {
         }
     }
 
-    // ── Phase 5: User Story 3 — validation + removal (T039-T042) ──
-
     /// Transition a block from Fetched to Validated.
     ///
     /// This confirms the block passed validation.
@@ -745,8 +736,6 @@ impl ConsensusTree {
         }
         result
     }
-
-    // ── Phase 6: User Story 4 — prune (T047) ──────────────────────
 
     /// Remove blocks older than (tip - k) and dead forks.
     ///
@@ -882,8 +871,6 @@ mod tests {
         tree.insert_block(hash(h), number, number, hash(parent), status).unwrap();
     }
 
-    // ── Phase 1 tests ─────────────────────────────────────────────
-
     #[test]
     fn test_set_root_creates_single_block_tree() {
         let (mut tree, _) = make_tree(2160);
@@ -900,18 +887,14 @@ mod tests {
         assert!(block.parent.is_none());
     }
 
-    // ── Phase 2 tests: Foundational helpers (T008-T013) ───────────
-
-    /// T008: get_favoured_chain returns root tip for single-block tree.
     #[test]
-    fn test_get_favoured_chain_single_block_returns_root() {
+    fn test_get_favoured_chain_single_block_returns_root_for_single_block_tree() {
         let (mut tree, _) = make_tree(2160);
         tree.set_root(hash(1), 0, 0).unwrap();
 
         assert_eq!(tree.get_favoured_chain(), Some(hash(1)));
     }
 
-    /// T009: get_favoured_chain returns longer branch tip for forked tree.
     #[test]
     fn test_get_favoured_chain_returns_longer_branch() {
         let (mut tree, _) = make_tree(2160);
@@ -928,7 +911,6 @@ mod tests {
         assert_eq!(tree.get_favoured_chain(), Some(hash(6)));
     }
 
-    /// T010: get_favoured_chain retains current tip on equal-length forks.
     #[test]
     fn test_get_favoured_chain_equal_length_retains_current_tip() {
         let (mut tree, _) = make_tree(2160);
@@ -949,7 +931,6 @@ mod tests {
         assert_eq!(tree.get_favoured_chain(), Some(hash(3)));
     }
 
-    /// T011: find_common_ancestor returns correct ancestor for diverging tips.
     #[test]
     fn test_find_common_ancestor_for_diverging_tips() {
         let (mut tree, _) = make_tree(2160);
@@ -969,7 +950,6 @@ mod tests {
         assert_eq!(ancestor, hash(2));
     }
 
-    /// T012: chain_contains returns true for block on chain, false otherwise.
     #[test]
     fn test_chain_contains() {
         let (mut tree, _) = make_tree(2160);
@@ -992,7 +972,6 @@ mod tests {
         assert!(tree.chain_contains(hash(3), hash(3)));
     }
 
-    /// T013: fork_depth returns correct depth for various fork positions.
     #[test]
     fn test_fork_depth() {
         let (mut tree, _) = make_tree(2160);
@@ -1021,9 +1000,6 @@ mod tests {
         assert_eq!(tree.fork_depth(hash(7)).unwrap(), 3);
     }
 
-    // ── Phase 3 tests: US1 — Fork tracking (T018-T022) ───────────
-
-    /// T018: 10+ fork topologies — linear, single fork, multi-fork, etc.
     #[test]
     fn test_fork_topologies() {
         // 1. Linear chain
@@ -1126,7 +1102,6 @@ mod tests {
         assert_eq!(tree.favoured_tip(), Some(hash(22)));
     }
 
-    /// T019: Bounded maxvalid rejects block with fork depth > k.
     #[test]
     fn test_bounded_maxvalid_rejects_deep_fork() {
         let (mut tree, _) = make_tree(3); // k=3 for easy testing
@@ -1148,9 +1123,8 @@ mod tests {
         assert!(tree.get_block(&hash(10)).is_none());
     }
 
-    /// T020: Determinism — same insertion sequence always produces same tip.
     #[test]
-    fn test_deterministic_chain_selection() {
+    fn test_deterministic_chain_selection_same_insert_same_tip() {
         for _ in 0..10 {
             let (mut tree, _) = make_tree(2160);
             tree.set_root(hash(1), 0, 0).unwrap();
@@ -1164,7 +1138,6 @@ mod tests {
         }
     }
 
-    /// T021: Block with unknown parent returns ParentNotFound.
     #[test]
     fn test_unknown_parent_returns_error() {
         let (mut tree, _) = make_tree(2160);
@@ -1177,7 +1150,6 @@ mod tests {
         ));
     }
 
-    /// T022: Block with invalid number returns InvalidBlockNumber.
     #[test]
     fn test_invalid_block_number_returns_error() {
         let (mut tree, _) = make_tree(2160);
@@ -1194,9 +1166,6 @@ mod tests {
         ));
     }
 
-    // ── Phase 4 tests: US2 — Block ingestion (T024-T029) ──────────
-
-    /// T024: check_block_wanted returns hash as wanted when extending favoured chain.
     #[test]
     fn test_check_block_wanted_returns_wanted_for_favoured_chain() {
         let (mut tree, _) = make_tree(2160);
@@ -1209,7 +1178,6 @@ mod tests {
         assert_eq!(block.status, BlockValidationStatus::Wanted);
     }
 
-    /// T025: check_block_wanted does NOT return wanted for unfavoured fork.
     #[test]
     fn test_check_block_wanted_not_wanted_for_unfavoured_fork() {
         let (mut tree, _) = make_tree(2160);
@@ -1229,7 +1197,6 @@ mod tests {
         assert_eq!(block.status, BlockValidationStatus::Offered);
     }
 
-    /// T026: add_block stores body and fires block_proposed for contiguous fetched blocks.
     #[test]
     fn test_add_block_fires_block_proposed() {
         let (mut tree, obs) = make_tree(2160);
@@ -1254,7 +1221,6 @@ mod tests {
         assert_eq!(proposed[1], (2, hash(3)));
     }
 
-    /// T027: add_block with out-of-order delivery: block_proposed fires only up to first gap.
     #[test]
     fn test_add_block_out_of_order_stops_at_gap() {
         let (mut tree, obs) = make_tree(2160);
@@ -1288,7 +1254,6 @@ mod tests {
         assert_eq!(proposed[2], (3, hash(4)));
     }
 
-    /// T028: add_block for already-fetched block is idempotent.
     #[test]
     fn test_add_block_idempotent() {
         let (mut tree, obs) = make_tree(2160);
@@ -1306,7 +1271,6 @@ mod tests {
         assert_eq!(count_before, count_after);
     }
 
-    /// Duplicate check_block_wanted should not duplicate parent children.
     #[test]
     fn test_check_block_wanted_idempotent_for_existing_header() {
         let (mut tree, _) = make_tree(2160);
@@ -1322,7 +1286,6 @@ mod tests {
         assert_eq!(root_children[0], hash(2));
     }
 
-    /// T029: add_block for hash not in tree returns BlockNotInTree.
     #[test]
     fn test_add_block_not_in_tree_returns_error() {
         let (mut tree, _) = make_tree(2160);
@@ -1335,9 +1298,6 @@ mod tests {
         ));
     }
 
-    // ── Phase 5 tests: US3 — Rollbacks + validation (T031-T038) ──
-
-    /// T031: Chain switch fires rollback with correct common ancestor.
     #[test]
     fn test_chain_switch_fires_rollback() {
         let (mut tree, obs) = make_tree(2160);
@@ -1366,7 +1326,6 @@ mod tests {
         assert!(rollbacks.contains(&0)); // Common ancestor is root
     }
 
-    /// T032: Multi-level rollback fires correct ancestor.
     #[test]
     fn test_multi_level_rollback() {
         let (mut tree, obs) = make_tree(2160);
@@ -1391,7 +1350,6 @@ mod tests {
         assert!(rollbacks.contains(&1));
     }
 
-    /// T033: After rollback, block_proposed fires for fetched blocks on new chain.
     #[test]
     fn test_rollback_fires_proposed_for_fetched_blocks_on_new_chain() {
         let (mut tree, obs) = make_tree(2160);
@@ -1419,7 +1377,6 @@ mod tests {
         assert!(!rollbacks.is_empty());
     }
 
-    /// T034: Chain switch transitions Offered→Wanted and returns them.
     #[test]
     fn test_chain_switch_transitions_offered_to_wanted() {
         let (mut tree, _) = make_tree(2160);
@@ -1450,7 +1407,6 @@ mod tests {
         assert!(!wanted.is_empty());
     }
 
-    /// T035: mark_validated transitions status to Validated.
     #[test]
     fn test_mark_validated() {
         let (mut tree, _) = make_tree(2160);
@@ -1465,7 +1421,6 @@ mod tests {
         );
     }
 
-    /// T036: mark_rejected fires block_rejected, removes block + descendants.
     #[test]
     fn test_mark_rejected() {
         let (mut tree, obs) = make_tree(2160);
@@ -1488,7 +1443,6 @@ mod tests {
         assert!(tree.get_block(&hash(3)).is_none());
     }
 
-    /// T037: remove_block removes block and all descendants.
     #[test]
     fn test_remove_block_removes_descendants() {
         let (mut tree, _) = make_tree(2160);
@@ -1508,9 +1462,8 @@ mod tests {
         assert_eq!(tree.len(), 1); // Only root remains
     }
 
-    /// T038: remove_block causing chain switch fires rollback and returns wanted.
     #[test]
-    fn test_remove_block_chain_switch() {
+    fn test_remove_block_chain_switch_fires_rollback() {
         let (mut tree, obs) = make_tree(2160);
         tree.set_root(hash(1), 0, 0).unwrap();
 
@@ -1540,9 +1493,6 @@ mod tests {
         assert!(!wanted.is_empty());
     }
 
-    // ── Phase 6 tests: US4 — Pruning (T043-T046) ─────────────────
-
-    /// T043: prune removes blocks with number < (tip - k).
     #[test]
     fn test_prune_removes_old_blocks() {
         let (mut tree, _) = make_tree(3); // k=3
@@ -1564,9 +1514,8 @@ mod tests {
         assert!(tree.get_block(&hash(6)).is_some()); // tip
     }
 
-    /// T044: prune removes non-favoured branch rooted before prune boundary.
     #[test]
-    fn test_prune_removes_unfavoured_branch() {
+    fn test_prune_removes_unfavoured_branch_rooted_before_prune_boundary() {
         let (mut tree, _) = make_tree(3); // k=3
 
         tree.set_root(hash(1), 0, 0).unwrap();
@@ -1591,9 +1540,8 @@ mod tests {
         assert!(tree.get_block(&hash(10)).is_none());
     }
 
-    /// T045: prune preserves both branches of fork after prune boundary.
     #[test]
-    fn test_prune_preserves_fork_after_boundary() {
+    fn test_prune_preserves_fork_after_prune_boundary() {
         let (mut tree, _) = make_tree(3); // k=3
 
         tree.set_root(hash(1), 0, 0).unwrap();
@@ -1612,9 +1560,8 @@ mod tests {
         assert!(tree.get_block(&hash(4)).is_some());
     }
 
-    /// T046: prune updates root to new oldest block.
     #[test]
-    fn test_prune_updates_root() {
+    fn test_prune_updates_root_to_new_oldest_block() {
         let (mut tree, _) = make_tree(3); // k=3
 
         tree.set_root(hash(1), 0, 0).unwrap();
