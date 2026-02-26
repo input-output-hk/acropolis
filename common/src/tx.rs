@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificateWithPos, TxIdentifier,
-    UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures, Withdrawal,
+    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificate, TxCertificateWithPos,
+    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures,
+    Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -305,28 +306,6 @@ impl TxUTxODeltas {
         total_produced
     }
 
-    pub fn calculate_total_refund(
-        &self,
-        stake_registration_updates: &[StakeRegistrationUpdate],
-    ) -> Lovelace {
-        let mut total_refund: Lovelace = 0;
-        let Some(certs) = self.certs.as_ref() else {
-            return 0;
-        };
-
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
-
-        for cert_identifier in certs_identifiers.iter() {
-            total_refund += stake_registration_updates
-                .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
-                .map(|delta| delta.outcome.refund())
-                .unwrap_or(0);
-        }
-        total_refund
-    }
-
     pub fn calculate_total_withdrawals(&self) -> Lovelace {
         let mut total_withdrawals: Lovelace = 0;
         let Some(withdrawals) = self.withdrawals.as_ref() else {
@@ -336,6 +315,33 @@ impl TxUTxODeltas {
             total_withdrawals += withdrawal.value;
         }
         total_withdrawals
+    }
+
+    pub fn calculate_total_refund(
+        &self,
+        stake_registration_updates: &[StakeRegistrationUpdate],
+    ) -> Lovelace {
+        let mut total_refund: Lovelace = 0;
+        let Some(certs) = self.certs.as_ref() else {
+            return 0;
+        };
+
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
+
+            // Stake Deregistration Cert
+            total_refund += stake_registration_updates
+                .iter()
+                .find(|delta| delta.cert_identifier == cert_identifier)
+                .map(|delta| delta.outcome.refund())
+                .unwrap_or(0);
+
+            // DRep Deregistration Cert
+            if let TxCertificate::DRepDeregistration(dereg) = &cert.cert {
+                total_refund += dereg.refund;
+            }
+        }
+        total_refund
     }
 
     pub fn calculate_total_deposit(
@@ -348,21 +354,37 @@ impl TxUTxODeltas {
             return 0;
         };
 
-        let certs_identifiers =
-            certs.iter().map(|c| c.tx_certificate_identifier()).collect::<Vec<_>>();
+        // Check certificates
+        for cert in certs.iter() {
+            let cert_identifier = cert.tx_certificate_identifier();
 
-        for cert_identifier in certs_identifiers.iter() {
+            // Pool Registration Cert
             total_deposit += pool_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
+
+            // Stake Registration Cert
             total_deposit += stake_registration_updates
                 .iter()
-                .find(|delta| delta.cert_identifier.eq(cert_identifier))
+                .find(|delta| delta.cert_identifier == cert_identifier)
                 .map(|delta| delta.outcome.deposit())
                 .unwrap_or(0);
+
+            // DRep Registration Cert
+            if let TxCertificate::DRepRegistration(reg) = &cert.cert {
+                total_deposit += reg.deposit;
+            }
         }
+
+        // Check Governance Proposals
+        if let Some(proposals) = self.proposal_procedures.as_ref() {
+            for proposal in proposals.iter() {
+                total_deposit += proposal.deposit;
+            }
+        }
+
         total_deposit
     }
 

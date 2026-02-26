@@ -357,8 +357,7 @@ impl PoolRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
             PoolRegistrationOutcome::Registered(deposit) => *deposit,
-            PoolRegistrationOutcome::Updated => 0,
-            PoolRegistrationOutcome::RetirementQueued => 0,
+            _ => 0,
         }
     }
 }
