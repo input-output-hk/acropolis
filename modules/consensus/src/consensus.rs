@@ -95,6 +95,17 @@ struct ConsensusRuntime {
     publish_consensus_topic: String,
     event_queue: EventQueue,
     tree: ConsensusTree,
+    /// Cache of full block payloads for re-publication.
+    ///
+    /// The consensus tree intentionally stores only chain-selection metadata
+    /// (hash/number/slot/parent/status/body) and is kept message-agnostic.
+    /// `BlockInfo` carries Cardano-specific metadata (era/epoch flags, status,
+    /// timestamps) and we *mutate intent* before validation, so keeping the
+    /// original `Arc<Message>` would re-publish the wrong intent. This cache
+    /// lets us reconstruct a correct `BlockAvailable` when `block_proposed`
+    /// fires without coupling the tree to message schemas.
+    /// This might be a subject for optimization should the size of the cache
+    /// turns out to be unacceptable.
     block_data: HashMap<BlockHash, (BlockInfo, RawBlockMessage)>,
     validator_topics: Vec<String>,
     validator_subscriptions: Vec<Box<dyn Subscription<Message>>>,
@@ -467,7 +478,7 @@ impl ConsensusRuntime {
                     }
                 }
 
-                // Tree was bootstrapped from BlockOffered (or Mithril); add genesis body so descendants can fire
+                // Preserve full payload for downstream re-publication; the tree does not own BlockInfo.
                 self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
 
                 if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
@@ -533,7 +544,7 @@ impl ConsensusRuntime {
             return;
         }
 
-        // Store block data for later reconstruction
+        // Store full payload for later re-publication (tree only tracks chain metadata).
         self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
 
         // We already have the body — store it (idempotent if already stored).
@@ -842,6 +853,8 @@ fn resolve_observer_events(
                         hash = %hash,
                         "Publishing BlockProposed to validators"
                     );
+                    // Reconstruct the original BlockAvailable payload from the cache:
+                    // the consensus tree does not store full BlockInfo, only chain metadata.
                     let msg = Arc::new(Message::Cardano((
                         info.clone(),
                         CardanoMessage::BlockAvailable(raw.clone()),
