@@ -487,7 +487,10 @@ impl ConsensusTree {
 
     /// Process blocks on the new chain after a switch: transition Offered→Wanted,
     /// fire block_proposed for already-fetched blocks, and return the list of wanted hashes.
-    fn process_chain_after_switch(&mut self, blocks_on_new_chain: Vec<BlockHash>) -> Vec<BlockHash> {
+    fn process_chain_after_switch(
+        &mut self,
+        blocks_on_new_chain: Vec<BlockHash>,
+    ) -> Vec<BlockHash> {
         let mut wanted = Vec::new();
         for block_hash in blocks_on_new_chain {
             let block = match self.blocks.get(&block_hash) {
@@ -794,7 +797,6 @@ impl ConsensusTree {
 
         Ok(())
     }
-
 }
 
 /// Placeholder observer used when the real observer has been taken via `take_observer`.
