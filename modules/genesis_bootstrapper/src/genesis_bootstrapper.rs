@@ -21,6 +21,7 @@ use pallas::ledger::configs::{
     byron::{genesis_utxos, GenesisFile as ByronGenesisFile},
     shelley::GenesisFile as ShelleyGenesisFile,
 };
+use std::borrow::Cow;
 use std::sync::Arc;
 use tracing::{error, info, info_span, Instrument};
 
@@ -97,38 +98,72 @@ impl GenesisBootstrapper {
                     .get_string("startup.network-name")
                     .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
 
-                let (byron_genesis, shelley_genesis, shelley_start_epoch, first_block_era) =
-                    match network_name.as_ref() {
-                        "mainnet" => (
-                            MAINNET_BYRON_GENESIS,
-                            MAINNET_SHELLEY_GENESIS,
-                            MAINNET_SHELLEY_START_EPOCH,
-                            MAINNET_FIRST_BLOCK_ERA,
-                        ),
-                        "preview" => (
-                            PREVIEW_BYRON_GENESIS,
-                            PREVIEW_SHELLEY_GENESIS,
-                            PREVIEW_SHELLEY_START_EPOCH,
-                            PREVIEW_FIRST_BLOCK_ERA,
-                        ),
-                        "sanchonet" => (
-                            SANCHONET_BYRON_GENESIS,
-                            SANCHONET_SHELLEY_GENESIS,
-                            SANCHONET_SHELLEY_START_EPOCH,
-                            SANCHONET_FIRST_BLOCK_ERA,
-                        ),
-                        _ => {
-                            error!("Cannot find genesis for {network_name}");
-                            return;
+                let (byron_genesis_bytes, shelley_genesis_bytes, shelley_start_epoch, first_block_era):
+                    (Cow<'static, [u8]>, Cow<'static, [u8]>, u64, Era) = match network_name.as_ref()
+                {
+                    "mainnet" => (
+                        Cow::Borrowed(MAINNET_BYRON_GENESIS),
+                        Cow::Borrowed(MAINNET_SHELLEY_GENESIS),
+                        MAINNET_SHELLEY_START_EPOCH,
+                        MAINNET_FIRST_BLOCK_ERA,
+                    ),
+                    "preview" => (
+                        Cow::Borrowed(PREVIEW_BYRON_GENESIS),
+                        Cow::Borrowed(PREVIEW_SHELLEY_GENESIS),
+                        PREVIEW_SHELLEY_START_EPOCH,
+                        PREVIEW_FIRST_BLOCK_ERA,
+                    ),
+                    "sanchonet" => (
+                        Cow::Borrowed(SANCHONET_BYRON_GENESIS),
+                        Cow::Borrowed(SANCHONET_SHELLEY_GENESIS),
+                        SANCHONET_SHELLEY_START_EPOCH,
+                        SANCHONET_FIRST_BLOCK_ERA,
+                    ),
+                    _ => {
+                        let byron_path = config.get_string("byron-genesis-file");
+                        let shelley_path = config.get_string("shelley-genesis-file");
+                        match (byron_path, shelley_path) {
+                            (Ok(bp), Ok(sp)) => {
+                                info!("Loading custom genesis files: byron={bp}, shelley={sp}");
+                                let byron = match std::fs::read(&bp) {
+                                    Ok(data) => data,
+                                    Err(e) => { error!("Cannot read byron genesis file {bp}: {e}"); return; }
+                                };
+                                let shelley = match std::fs::read(&sp) {
+                                    Ok(data) => data,
+                                    Err(e) => { error!("Cannot read shelley genesis file {sp}: {e}"); return; }
+                                };
+                                let shelley_start_epoch = config.get::<u64>("shelley-start-epoch").unwrap_or(0);
+                                let first_block_era = config.get_string("first-block-era")
+                                    .ok()
+                                    .and_then(|s| match s.as_ref() {
+                                        "byron" => Some(Era::Byron),
+                                        "shelley" => Some(Era::Shelley),
+                                        "allegra" => Some(Era::Allegra),
+                                        "mary" => Some(Era::Mary),
+                                        "alonzo" => Some(Era::Alonzo),
+                                        "babbage" => Some(Era::Babbage),
+                                        "conway" => Some(Era::Conway),
+                                        _ => None,
+                                    })
+                                    .unwrap_or(Era::Byron);
+                                (Cow::Owned(byron), Cow::Owned(shelley), shelley_start_epoch, first_block_era)
+                            }
+                            _ => {
+                                error!("Cannot find genesis for {network_name}; set byron-genesis-file and shelley-genesis-file for custom networks");
+                                return;
+                            }
                         }
-                    };
+                    }
+                };
+
                 info!("Reading genesis for '{network_name}'");
-                let shelley_genesis_hash = hash_genesis_bytes(shelley_genesis);
+                let shelley_genesis_hash = hash_genesis_bytes(&shelley_genesis_bytes);
 
                 // Read genesis data
-                let byron_genesis: ByronGenesisFile = serde_json::from_slice(byron_genesis)
+                let byron_genesis: ByronGenesisFile = serde_json::from_slice(&byron_genesis_bytes)
                     .expect("Invalid JSON in BYRON_GENESIS file");
-                let shelley_genesis: ShelleyGenesisFile = serde_json::from_slice(shelley_genesis)
+                let shelley_genesis: ShelleyGenesisFile = serde_json::from_slice(&shelley_genesis_bytes)
                     .expect("Invalid JSON in SHELLEY_GENESIS file");
                 let initial_reserves = shelley_genesis
                     .max_lovelace_supply
