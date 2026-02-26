@@ -224,13 +224,8 @@ impl Consensus {
 const STATS_LOG_INTERVAL: u64 = 100;
 
 impl ConsensusStats {
-    fn total(&self) -> u64 {
-        self.offered + self.available
-    }
-
     fn maybe_log(&self) {
-        let total = self.total();
-        if total > 0 && total % STATS_LOG_INTERVAL == 0 {
+        if self.available > 0 && self.available % STATS_LOG_INTERVAL == 0 {
             info!(
                 "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
                 self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
@@ -285,7 +280,6 @@ impl ConsensusRuntime {
                             self.handle_block_offered(offered.hash, offered.parent_hash, offered.number, offered.slot)
                                 .instrument(span)
                                 .await;
-                            self.stats.maybe_log();
                         }
 
                         Message::Consensus(ConsensusMessage::BlockRescinded(rescinded)) => {
