@@ -75,6 +75,17 @@ impl IndexActor {
     }
 
     pub async fn apply_txs(&mut self, block: Arc<BlockInfo>, txs: &[Arc<[u8]>]) {
+        // Origin is a virtual starting point (slot 0, no hash). Replace it with
+        // the actual first block we receive so that rollback detection doesn't
+        // confuse it with a different block at slot 0.
+        if self.points.len() == 1 && matches!(self.points.front(), Some(Point::Origin)) {
+            self.points[0] = Point::Specific {
+                hash: block.hash,
+                slot: block.slot,
+            };
+            self.next_tx = Some(0);
+        }
+
         if self.points.front().is_none_or(|p| p.slot() > block.slot) {
             // this block is from before our recent history
             return;
