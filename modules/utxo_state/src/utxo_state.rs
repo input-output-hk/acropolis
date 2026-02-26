@@ -81,17 +81,7 @@ impl UTXOState {
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let mut genesis_utxo_consumed = false;
-
-        if is_snapshot_mode {
-            if let Some(sub) = pool_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-
-            if let Some(sub) = stake_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-        }
+        let mut bootstrap_block_processed = false;
 
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
@@ -124,7 +114,7 @@ impl UTXOState {
 
             // Read from pool registration updates subscription if available
             let mut pool_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read pool registration updates subscription error");
@@ -143,7 +133,7 @@ impl UTXOState {
 
             // Read from stake registration updates subscription if available
             let mut stake_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read stake registration updates subscription error");
@@ -201,8 +191,8 @@ impl UTXOState {
                     .instrument(span)
                     .await;
 
-                    if !genesis_utxo_consumed {
-                        genesis_utxo_consumed = true;
+                    if !bootstrap_block_processed {
+                        bootstrap_block_processed = true;
                     }
                 }
 
