@@ -236,7 +236,7 @@ const STATS_LOG_INTERVAL: u64 = 100;
 
 impl ConsensusStats {
     fn maybe_log(&self) {
-        if self.available > 0 && self.available % STATS_LOG_INTERVAL == 0 {
+        if self.available > 0 && self.available.is_multiple_of(STATS_LOG_INTERVAL) {
             info!(
                 "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
                 self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
@@ -489,15 +489,7 @@ impl ConsensusRuntime {
 
                 // Must consume validation results for any block we proposed, otherwise
                 // the validator subscriptions drift out of sync (off-by-one).
-                if self.do_validation {
-                    if self
-                        .tree
-                        .favoured_tip()
-                        .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
-                    {
-                        self.handle_validation(&block_info).await;
-                    }
-                }
+                self.maybe_validate_if_on_favoured_chain(&block_info).await;
 
                 return;
             }
@@ -561,13 +553,8 @@ impl ConsensusRuntime {
         self.stats.available += 1;
 
         // Validate only when this call newly supplied body for a favoured block.
-        let should_validate = !had_body
-            && self
-                .tree
-                .favoured_tip()
-                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip));
-        if self.do_validation && should_validate {
-            self.handle_validation(&block_info).await;
+        if !had_body {
+            self.maybe_validate_if_on_favoured_chain(&block_info).await;
         }
 
         self.prune_block_data();
@@ -625,14 +612,7 @@ impl ConsensusRuntime {
         self.drain_and_publish_events().await;
         self.stats.available += 1;
 
-        if self.do_validation
-            && self
-                .tree
-                .favoured_tip()
-                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
-        {
-            self.handle_validation(&block_info).await;
-        }
+        self.maybe_validate_if_on_favoured_chain(&block_info).await;
 
         self.prune_block_data();
         if let Err(e) = self.tree.prune() {
@@ -746,6 +726,18 @@ impl ConsensusRuntime {
     /// Keep only metadata for blocks still present in the tree.
     fn prune_block_data(&mut self) {
         self.block_data.retain(|hash, _| self.tree.get_block(hash).is_some());
+    }
+
+    /// Run validation if enabled and the block is on the favoured chain.
+    async fn maybe_validate_if_on_favoured_chain(&mut self, block_info: &BlockInfo) {
+        if self.do_validation
+            && self
+                .tree
+                .favoured_tip()
+                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
+        {
+            self.handle_validation(block_info).await;
+        }
     }
 
     /// Collect validation responses and update the tree accordingly.
