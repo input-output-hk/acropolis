@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
-    map_mint_burn, map_redeemer, map_reference_script_hash, map_value, witness::map_vkey_witnesses,
+    map_mint_burn, map_redeemer, map_reference_script, map_value, witness::map_vkey_witnesses,
 };
 use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
@@ -29,18 +31,24 @@ pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHa
 }
 
 /// Parse transaction consumes and produces,
-/// and return the parsed consumes, produces and errors
+/// and return the parsed consumes, produces, reference scripts and errors
 /// NOTE:
 /// This function returns consumes sorted lexicographically by UTxO identifier
 pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
-) -> (Vec<UTxOIdentifier>, Vec<TxOutput>, Vec<String>) {
+) -> (
+    Vec<UTxOIdentifier>,
+    Vec<TxOutput>,
+    HashMap<ScriptHash, ReferenceScript>,
+    Vec<String>,
+) {
     let consumed = match tx.is_valid() {
         true => tx.inputs_sorted_set(),
         false => tx.collateral(),
     };
     let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
+    let mut reference_scripts = HashMap::new();
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
@@ -50,13 +58,22 @@ pub fn map_transaction_consumes_produces(
         match output.address() {
             Ok(pallas_address) => match map_address(&pallas_address) {
                 Ok(address) => {
+                    let reference_script = map_reference_script(&output.script_ref());
+                    let script_ref = reference_script.as_ref().map(|s| s.get_script_ref());
+
+                    if let (Some(r_script), Some(s_ref)) =
+                        (reference_script.as_ref(), script_ref.as_ref())
+                    {
+                        reference_scripts.insert(s_ref.script_hash, r_script.clone());
+                    }
+
                     // Add TxOutput to utxo_deltas
                     parsed_produces.push(TxOutput {
                         utxo_identifier: utxo,
                         address,
                         value: map_value(&output.value()),
                         datum: map_datum(&output.datum()),
-                        reference_script_hash: map_reference_script_hash(&output.script_ref()),
+                        script_ref,
                     });
                 }
                 Err(e) => {
@@ -69,7 +86,7 @@ pub fn map_transaction_consumes_produces(
         }
     }
 
-    (parsed_consumes, parsed_produces, errors)
+    (parsed_consumes, parsed_produces, reference_scripts, errors)
 }
 
 pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
@@ -141,7 +158,8 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (mut consumes, produces, input_output_errors) = map_transaction_consumes_produces(tx);
+    let (mut consumes, produces, reference_scripts, input_output_errors) =
+        map_transaction_consumes_produces(tx);
     consumes.sort();
 
     let reference_inputs = map_transaction_inputs(&tx.reference_inputs());
@@ -278,6 +296,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
+        reference_scripts,
         stated_total_collateral,
         is_valid,
         certs,

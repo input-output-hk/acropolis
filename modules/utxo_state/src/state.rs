@@ -390,13 +390,7 @@ impl State {
 
         // Insert the UTXO, checking if it already existed
         let key = output.utxo_identifier;
-
-        let value = UTXOValue {
-            address: output.address.clone(),
-            value: output.value.clone(),
-            datum: output.datum.clone(),
-            reference_script_hash: output.reference_script_hash,
-        };
+        let value = output.utxo_value();
 
         // Add to volatile or immutable maps
         match block.status {
@@ -890,7 +884,7 @@ mod tests {
     use crate::InMemoryImmutableUTXOStore;
     use acropolis_common::{
         Address, AssetName, BlockHash, BlockIntent, ByronAddress, Datum, Era, NativeAsset,
-        PolicyId, ScriptHash, TxHash, TxIdentifier, TxUTxODeltas, Value,
+        PolicyId, ScriptHash, ScriptLang, ScriptRef, TxHash, TxIdentifier, TxUTxODeltas, Value,
     };
     use config::Config;
     use tokio::sync::Mutex;
@@ -967,7 +961,10 @@ mod tests {
                 )],
             ),
             datum: Some(Datum::Inline(datum_data.clone())),
-            reference_script_hash: Some(ScriptHash::default()),
+            script_ref: Some(ScriptRef {
+                script_hash: ScriptHash::default(),
+                script_lang: ScriptLang::PlutusV1,
+            }),
         };
 
         let block = create_block(BlockStatus::Immutable, 1, 1);
@@ -1011,8 +1008,8 @@ mod tests {
                     Some(Datum::Inline(ref data)) if data == &datum_data
                 ));
                 assert!(matches!(
-                    value.reference_script_hash,
-                    Some(h) if h == ScriptHash::default()
+                    value.script_ref,
+                    Some(s_ref) if s_ref.script_hash == ScriptHash::default() && s_ref.script_lang == ScriptLang::PlutusV1
                 ));
             }
 
@@ -1043,7 +1040,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -1082,7 +1079,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -1123,7 +1120,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block10 = create_block(BlockStatus::Volatile, 10, 10);
@@ -1173,7 +1170,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -1221,7 +1218,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block1 = create_block(BlockStatus::Volatile, 1, 1);
@@ -1363,7 +1360,7 @@ mod tests {
                 )],
             ),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let block1 = create_block(BlockStatus::Immutable, 1, 1);
@@ -1450,7 +1447,7 @@ mod tests {
             address: create_address(99),
             value: Value::new(42, vec![]),
             datum: Some(datum.clone()),
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let create_deltas = UTXODeltasMessage {
@@ -1474,7 +1471,7 @@ mod tests {
             address: create_address(99),
             value: Value::new(1, vec![]),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
         let spend_deltas = UTXODeltasMessage {
             deltas: vec![TxUTxODeltas {
@@ -1513,7 +1510,7 @@ mod tests {
             address: create_address(99),
             value: Value::new(10, vec![]),
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         };
 
         let create_deltas = UTXODeltasMessage {
