@@ -114,7 +114,7 @@ pub fn map_metadata(metadata: &MultiEraMeta) -> Option<Metadata> {
     }
 }
 
-pub fn map_scripts_provided(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
+pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     let mut scripts_provided = Vec::new();
 
     for script in tx.native_scripts() {
@@ -274,7 +274,7 @@ pub fn map_transaction(
     let (vkey_witnesses, vkey_witness_errors) = map_vkey_witnesses(tx.vkey_witnesses());
     errors.extend(vkey_witness_errors);
 
-    let script_witnesses = map_scripts_provided(tx);
+    let script_witnesses = map_scripts_witnesses(tx);
 
     let mut redeemers = Vec::new();
     for redeemer in tx.redeemers() {
