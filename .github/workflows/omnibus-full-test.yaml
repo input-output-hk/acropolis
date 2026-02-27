@@ -25,12 +25,11 @@ jobs:
         uses: actions/cache@v5
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build release version of omnibus process
         run: make build-release
@@ -64,3 +63,6 @@ jobs:
         with:
           name: omnibus-artifacts
           path: tests/k6/results
+
+      - name: Stop omnibus process
+        run: pkill -f acropolis_process_omnibus
