@@ -94,6 +94,10 @@ pub struct State {
     /// Volatile UTXOs
     volatile_utxos: HashMap<UTxOIdentifier, UTXOValue>,
 
+    /// TODO:
+    /// Store reference scripts for volatile ones and immutable one.
+    /// The inline scripts are coming directly from the transaction.
+
     /// Index of volatile UTXOs by created block
     volatile_created: VolatileIndex,
 

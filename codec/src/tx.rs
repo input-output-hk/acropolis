@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     address::map_address, certs::map_certificate, map_all_governance_voting_procedures,
     map_alonzo_update, map_babbage_update, map_datum, map_governance_proposals_procedure,
@@ -34,12 +32,13 @@ pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHa
 /// and return the parsed consumes, produces, reference scripts and errors
 /// NOTE:
 /// This function returns consumes sorted lexicographically by UTxO identifier
+#[allow(clippy::type_complexity)]
 pub fn map_transaction_consumes_produces(
     tx: &MultiEraTx,
 ) -> (
     Vec<UTxOIdentifier>,
     Vec<TxOutput>,
-    HashMap<ScriptHash, ReferenceScript>,
+    Vec<(ScriptHash, ReferenceScript)>,
     Vec<String>,
 ) {
     let consumed = match tx.is_valid() {
@@ -48,7 +47,7 @@ pub fn map_transaction_consumes_produces(
     };
     let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
-    let mut reference_scripts = HashMap::new();
+    let mut reference_scripts = Vec::new();
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
@@ -64,7 +63,7 @@ pub fn map_transaction_consumes_produces(
                     if let (Some(r_script), Some(s_ref)) =
                         (reference_script.as_ref(), script_ref.as_ref())
                     {
-                        reference_scripts.insert(s_ref.script_hash, r_script.clone());
+                        reference_scripts.push((s_ref.script_hash, r_script.clone()));
                     }
 
                     // Add TxOutput to utxo_deltas
@@ -296,7 +295,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
-        reference_scripts: reference_scripts.into_iter().collect::<Vec<_>>(),
+        reference_scripts,
         stated_total_collateral,
         is_valid,
         certs,
