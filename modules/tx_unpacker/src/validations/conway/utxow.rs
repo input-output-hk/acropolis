@@ -6,8 +6,32 @@
 use std::collections::HashSet;
 
 use crate::validations::shelley;
-use acropolis_common::{validation::UTxOWValidationError, NativeScript, TxHash, VKeyWitness};
-use pallas::ledger::primitives::conway;
+use acropolis_common::{
+    protocol_params::ProtocolVersion, validation::UTxOWValidationError, DataHash, Metadata,
+    NativeScript, TxHash, VKeyWitness,
+};
+use pallas::{codec::utils::Nullable, ledger::primitives::conway};
+
+fn get_aux_data_hash(
+    mtx: &conway::MintedTx,
+) -> Result<Option<DataHash>, Box<UTxOWValidationError>> {
+    let aux_data_hash = match mtx.transaction_body.auxiliary_data_hash.as_ref() {
+        Some(x) => Some(DataHash::try_from(x.to_vec()).map_err(|_| {
+            Box::new(UTxOWValidationError::InvalidMetadataHash {
+                reason: "invalid metadata hash".to_string(),
+            })
+        })?),
+        None => None,
+    };
+    Ok(aux_data_hash)
+}
+
+fn get_aux_data(mtx: &conway::MintedTx) -> Option<Vec<u8>> {
+    match &mtx.auxiliary_data {
+        Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
+        _ => None,
+    }
+}
 
 /// MIRInsufficientGenesisSigsUTXOW from Shelley UTxOW rules
 /// is removed in Conway Era (no MIR in conway)
@@ -16,8 +40,17 @@ pub fn validate(
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    shelley_wrapper(mtx, tx_hash, vkey_witnesses, native_scripts)?;
+    shelley_wrapper(
+        mtx,
+        tx_hash,
+        vkey_witnesses,
+        native_scripts,
+        metadata,
+        protocol_version,
+    )?;
 
     // TODO:
     // Add Babbage UTxOW transition here
@@ -31,6 +64,8 @@ fn shelley_wrapper(
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    metadata: &Option<Metadata>,
+    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;
 
@@ -48,9 +83,13 @@ fn shelley_wrapper(
     // validate vkey witnesses signatures
     shelley::utxow::validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
-    // TODO:
-    // Validate metadata
-    // issue: https://github.com/input-output-hk/acropolis/issues/489
+    // validate metadata
+    shelley::utxow::validate_metadata(
+        get_aux_data_hash(mtx)?,
+        get_aux_data(mtx),
+        metadata,
+        protocol_version,
+    )?;
 
     Ok(())
 }
@@ -86,17 +125,22 @@ mod tests {
     )]
     #[allow(clippy::result_large_err)]
     fn conway_utxow_test(
-        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let mtx = tx.as_conway().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+        let metadata = acropolis_codec::map_metadata(&tx.metadata());
+        let protocol_version = ctx.shelley_params.protocol_params.protocol_version;
+
         validate(
             mtx,
             TxHash::from(*tx.hash()),
             &vkey_witnesses,
             &native_scripts,
+            &metadata,
+            &protocol_version,
         )
         .map_err(|e| *e)
     }
