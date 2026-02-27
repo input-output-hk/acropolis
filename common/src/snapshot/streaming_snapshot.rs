@@ -20,21 +20,22 @@
 //! specified - see: https://github.com/IntersectMBO/cardano-ledger/blob/33e90ea03447b44a389985ca2b158568e5f4ad65/eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/Types.hs#L121-L131
 //! and https://github.com/rrruko/nes-cddl-hs/blob/main/nes.cddl
 
-use anyhow::{Context, Result, anyhow};
-use minicbor::Decoder;
+use anyhow::{anyhow, Context, Result};
 use minicbor::data::Type;
+use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::path::{Path, PathBuf};
 use tracing::{error, info};
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
 use crate::ledger_state::SPOState;
-use crate::snapshot::RawSnapshot;
 use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
+use crate::snapshot::RawSnapshot;
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::{
     Constitution, DRepChoice, DRepCredential, DRepRecord, EpochBootstrapData, Lovelace,
@@ -1104,6 +1105,13 @@ struct ChunkedCborReader {
     file_size: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddedUtxoProbe {
+    Missing,
+    EmptyMap { bytes_consumed: u64 },
+    NonEmptyMap,
+}
+
 impl ChunkedCborReader {
     fn new(mut file: File, _chunk_size: usize) -> Result<Self> {
         let file_size = file.seek(SeekFrom::End(0))?;
@@ -1114,6 +1122,67 @@ impl ChunkedCborReader {
 }
 
 impl StreamingSnapshotParser {
+    fn utxo_sidecar_path(snapshot_path: &Path) -> Option<PathBuf> {
+        let file_name = snapshot_path.file_name()?.to_str()?;
+
+        // If parser is already pointed at a UTxO file, keep it as-is.
+        if file_name.starts_with("utxos.") {
+            return Some(snapshot_path.to_path_buf());
+        }
+
+        let suffix = file_name.strip_prefix("nes.").unwrap_or(file_name);
+        let parent = snapshot_path.parent().unwrap_or_else(|| Path::new(""));
+        Some(parent.join(format!("utxos.{suffix}")))
+    }
+
+    fn find_utxo_sidecar_path(&self) -> Option<PathBuf> {
+        let snapshot_path = Path::new(&self.file_path);
+        let candidate = Self::utxo_sidecar_path(snapshot_path);
+
+        match candidate {
+            Some(path) if path.exists() => Some(path),
+            _ => None,
+        }
+    }
+
+    fn probe_embedded_utxos_at(file: &mut File, offset: u64) -> Result<EmbeddedUtxoProbe> {
+        const PROBE_SIZE: usize = 8 * 1024 * 1024;
+
+        file.seek(SeekFrom::Start(offset))?;
+        let mut buffer = vec![0u8; PROBE_SIZE];
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            return Ok(EmbeddedUtxoProbe::Missing);
+        }
+        buffer.truncate(bytes_read);
+
+        let mut decoder = Decoder::new(&buffer);
+        match decoder.datatype()? {
+            Type::Map | Type::MapIndef => {}
+            _ => return Ok(EmbeddedUtxoProbe::Missing),
+        }
+
+        let map_len = decoder.map()?;
+        if matches!(map_len, Some(0)) {
+            return Ok(EmbeddedUtxoProbe::EmptyMap {
+                bytes_consumed: decoder.position() as u64,
+            });
+        }
+
+        if map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
+            decoder.skip()?;
+            return Ok(EmbeddedUtxoProbe::EmptyMap {
+                bytes_consumed: decoder.position() as u64,
+            });
+        }
+
+        if Self::parse_single_utxo(&mut decoder).is_ok() {
+            Ok(EmbeddedUtxoProbe::NonEmptyMap)
+        } else {
+            Ok(EmbeddedUtxoProbe::Missing)
+        }
+    }
+
     /// Create a new streaming parser for the given snapshot file
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
@@ -1399,22 +1468,67 @@ impl StreamingSnapshotParser {
             )
         }; // decoder goes out of scope here
 
-        // Read only the UTXO section from the file (not the entire file!)
-        let mut utxo_file = File::open(&self.file_path).context(format!(
-            "Failed to open snapshot file for UTXO reading: {}",
+        let snapshot_path = Path::new(&self.file_path);
+        let utxo_sidecar_path = self.find_utxo_sidecar_path();
+
+        // Continue remainder parsing from the snapshot file.
+        // Split-file snapshots have deposits at utxo_file_position (no embedded UTxO map),
+        // while monolithic snapshots require skipping the embedded UTxO map first.
+        let mut snapshot_file = File::open(&self.file_path).context(format!(
+            "Failed to open snapshot file for remainder parsing: {}",
             self.file_path
+        ))?;
+        let embedded_utxo_probe =
+            Self::probe_embedded_utxos_at(&mut snapshot_file, utxo_file_position)?;
+        let snapshot_has_embedded_utxos =
+            matches!(embedded_utxo_probe, EmbeddedUtxoProbe::NonEmptyMap);
+
+        let use_external_utxo_file = !snapshot_has_embedded_utxos && utxo_sidecar_path.is_some();
+        let utxo_file_path = if let Some(path) = utxo_sidecar_path {
+            if use_external_utxo_file {
+                info!("Using external UTXO file: {}", path.display());
+                path
+            } else {
+                if path != snapshot_path {
+                    info!("Using embedded UTXOs from snapshot file (sidecar ignored)");
+                } else {
+                    info!("Using embedded UTXOs from snapshot file");
+                }
+                snapshot_path.to_path_buf()
+            }
+        } else {
+            if !snapshot_has_embedded_utxos {
+                if matches!(embedded_utxo_probe, EmbeddedUtxoProbe::EmptyMap { .. }) {
+                    info!("Snapshot contains an empty embedded UTXO map");
+                } else {
+                    return Err(anyhow!(
+                        "Snapshot does not contain embedded UTXOs and no sidecar UTXO file was found"
+                    ));
+                }
+            }
+            info!("Using embedded UTXOs from snapshot file");
+            snapshot_path.to_path_buf()
+        };
+
+        let mut utxo_file = File::open(&utxo_file_path).context(format!(
+            "Failed to open UTXO source file: {}",
+            utxo_file_path.display()
         ))?;
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
-        utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
+        if !use_external_utxo_file {
+            utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
+        }
         let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
             Self::stream_utxos(&mut utxo_file, callbacks)
                 .context("Failed to stream UTXOs with true streaming")?;
 
-        // After UTXOs, parse deposits from UTxOState[1]
-        // Reset our file pointer to a position after UTXOs
-        let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
-        utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
+        let position_after_utxos = match embedded_utxo_probe {
+            EmbeddedUtxoProbe::NonEmptyMap => utxo_file_position + bytes_consumed_from_file,
+            EmbeddedUtxoProbe::EmptyMap { bytes_consumed } => utxo_file_position + bytes_consumed,
+            EmbeddedUtxoProbe::Missing => utxo_file_position,
+        };
+        snapshot_file.seek(SeekFrom::Start(position_after_utxos))?;
 
         info!(
             "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
@@ -1445,7 +1559,7 @@ impl StreamingSnapshotParser {
         // ========================================================================
 
         // Calculate remaining file size from current position
-        let current_file_size = utxo_file.metadata()?.len();
+        let current_file_size = snapshot_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
         info!(
@@ -1456,7 +1570,7 @@ impl StreamingSnapshotParser {
 
         // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
-        utxo_file.read_to_end(&mut remainder_buffer)?;
+        snapshot_file.read_to_end(&mut remainder_buffer)?;
 
         info!(
             "    Successfully loaded {:.1} MB remainder buffer for parsing",
@@ -2941,6 +3055,8 @@ impl SnapshotsCallback for CollectingCallbacks {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use crate::{Address, NativeAssets, TxHash, UTXOValue, UTxOIdentifier, Value};
     use minicbor::Encoder;
 
@@ -2989,6 +3105,33 @@ mod tests {
 
         assert_eq!(callbacks.utxos.len(), 1);
         assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_from_nes_filename() {
+        let path = Path::new("preview/nes.1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(
+            sidecar,
+            Path::new("preview/utxos.1234.abcdef.cbor").to_path_buf()
+        );
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_from_legacy_snapshot_filename() {
+        let path = Path::new("preview/1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(
+            sidecar,
+            Path::new("preview/utxos.1234.abcdef.cbor").to_path_buf()
+        );
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_keeps_utxo_filename() {
+        let path = Path::new("preview/utxos.1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(sidecar, path.to_path_buf());
     }
 
     #[test]
