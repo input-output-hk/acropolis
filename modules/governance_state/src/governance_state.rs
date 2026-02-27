@@ -378,7 +378,9 @@ impl GovernanceState {
             .instrument(span)
             .await;
 
-            vld.publish().await;
+            if blk_g.intent.do_validation() {
+                vld.publish().await;
+            }
         }
     }
 

@@ -155,29 +155,38 @@ impl UTXOState {
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
                     let span = info_span!("utxo_state.validate", block = block.number);
-                    async {
-                        let mut state = state.lock().await;
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state
-                            .validate(
-                                block,
-                                deltas_msg,
-                                &pool_registration_updates,
-                                &stake_registration_updates,
-                                &current_protocol_params,
-                            )
-                            .await
-                        {
-                            validation_outcomes.push(*e);
-                        }
+                    if block.intent.do_validation() {
+                        async {
+                            let mut state = state.lock().await;
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state
+                                .validate(
+                                    block,
+                                    deltas_msg,
+                                    &pool_registration_updates,
+                                    &stake_registration_updates,
+                                    &current_protocol_params,
+                                )
+                                .await
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(&context, "utxo_state", &publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
+                            validation_outcomes
+                                .publish(
+                                    &context,
+                                    "utxo_state",
+                                    &publish_tx_validation_topic,
+                                    block,
+                                )
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to publish UTxO validation: {e}")
+                                });
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
 
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
