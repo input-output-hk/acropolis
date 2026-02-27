@@ -1,4 +1,4 @@
-name: Run tests on push/PR to main
+name: Run tests
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Remove packages to free up disk space
-        run:  |
+        run: |
           sudo dpkg -P ant ant-optional azure-cli firefox google-chrome-stable \
             google-cloud-cli google-cloud-cli-anthoscli kubectl \
             microsoft-edge-stable mysql-server mysql-server-8.0 \
@@ -27,6 +27,16 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: set up cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Shear
         run: cargo install cargo-shear

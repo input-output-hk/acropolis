@@ -1,4 +1,4 @@
-name: Run test coverage report on push to main
+name: Run test coverage
 
 on:
   push:
@@ -19,6 +19,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: set up cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
