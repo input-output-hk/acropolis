@@ -89,11 +89,6 @@ pub fn map_reference_script(script: &Option<conway::MintedScriptRef>) -> Option<
     }
 }
 
-pub fn map_reference_script_hash(script: &Option<conway::MintedScriptRef>) -> Option<ScriptHash> {
-    let script = map_reference_script(script);
-    script.map(|s| s.compute_hash())
-}
-
 pub fn map_mint_burn(
     policy_group: &MultiEraPolicyAssets<'_>,
 ) -> Option<(PolicyId, Vec<NativeAssetDelta>)> {

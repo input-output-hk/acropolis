@@ -125,11 +125,14 @@ pub fn validate_datums(
 /// This function validates the redeemers
 /// Every plutus script must have exactly one Redeemer
 /// But native scripts don't need redeemers
+///
+/// When is_valid is false, we don't check for extra redeemers
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L263
 pub fn validate_redeemers(
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
     redeemers: &[Redeemer],
+    is_valid: bool,
 ) -> Result<(), Box<UTxOWValidationError>> {
     let redeemers_needed = scripts_needed
         .iter()
@@ -154,12 +157,14 @@ pub fn validate_redeemers(
     }
 
     // Check extra redeemers
-    let needed_redeemer_pointers = redeemers_needed.keys().cloned().collect::<HashSet<_>>();
-    for redeemer_pointer in redeemers_provided.iter() {
-        if !needed_redeemer_pointers.contains(redeemer_pointer) {
-            return Err(Box::new(UTxOWValidationError::ExtraRedeemers {
-                redeemer_pointer: redeemer_pointer.clone(),
-            }));
+    if is_valid {
+        let needed_redeemer_pointers = redeemers_needed.keys().cloned().collect::<HashSet<_>>();
+        for redeemer_pointer in redeemers_provided.iter() {
+            if !needed_redeemer_pointers.contains(redeemer_pointer) {
+                return Err(Box::new(UTxOWValidationError::ExtraRedeemers {
+                    redeemer_pointer: redeemer_pointer.clone(),
+                }));
+            }
         }
     }
 
@@ -182,6 +187,7 @@ pub fn validate(
     plutus_data: &[(DatumHash, Vec<u8>)],
     redeemers: &[Redeemer],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    is_valid: bool,
 ) -> Result<(), Box<UTxOWValidationError>> {
     validate_datums(
         inputs,
@@ -192,7 +198,7 @@ pub fn validate(
         utxos,
     )?;
 
-    validate_redeemers(scripts_needed, scripts_provided, redeemers)?;
+    validate_redeemers(scripts_needed, scripts_provided, redeemers, is_valid)?;
 
     Ok(())
 }
@@ -217,17 +223,13 @@ mod tests {
         matches Ok(());
         "alonzo - valid transaction 1 - with contracts"
     )]
-    // TODO:
-    // Pass this test case
-    // For now all reference scripts are considered as Plutus V2.
-    // Need to check reference scripts Plutus Language Version
-    // #[test_case(validation_fixture!(
-    //     "conway",
-    //     "502f7a04cf763d681931adc0f20ad3e1f8f5515e78f36d6fcb97f9a374ae76d2"
-    // ) =>
-    //     matches Ok(());
-    //     "conway - valid transaction 1 - with withdraw 0 and smart contracts and reference inputs"
-    // )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "502f7a04cf763d681931adc0f20ad3e1f8f5515e78f36d6fcb97f9a374ae76d2"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - with withdraw 0 and smart contracts and reference inputs"
+    )]
     #[test_case(validation_fixture!(
         "alonzo",
         "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
@@ -311,6 +313,7 @@ mod tests {
             plutus_data,
             redeemers,
             &ctx.utxos,
+            tx_deltas.is_valid,
         )
         .map_err(|e| *e)
     }
