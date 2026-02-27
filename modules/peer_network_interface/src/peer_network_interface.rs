@@ -311,7 +311,7 @@ impl BlockSink {
             } else {
                 BlockStatus::Volatile
             },
-            intent: BlockIntent::Apply,
+            intent: BlockIntent::ValidateAndApply,
             slot,
             number: header.number,
             hash: header.hash,
