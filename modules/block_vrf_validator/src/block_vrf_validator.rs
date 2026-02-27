@@ -225,26 +225,31 @@ impl BlockVrfValidator {
                         });
                     }
 
-                    let span =
-                        info_span!("block_vrf_validator.validate", block = block_info.number);
-                    async {
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state.validate(block_info, &block_msg.header, &genesis) {
-                            validation_outcomes.push(*e);
-                        }
+                    if block_info.intent.do_validation() {
+                        let span =
+                            info_span!("block_vrf_validator.validate", block = block_info.number);
+                        async {
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state.validate(block_info, &block_msg.header, &genesis)
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(
-                                &context,
-                                "block_vrf_validator",
-                                &publish_vrf_validation_topic,
-                                block_info,
-                            )
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
+                            validation_outcomes
+                                .publish(
+                                    &context,
+                                    "block_vrf_validator",
+                                    &publish_vrf_validation_topic,
+                                    block_info,
+                                )
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to publish VRF validation: {e}")
+                                });
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }

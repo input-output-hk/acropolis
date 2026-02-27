@@ -91,7 +91,7 @@ impl TxUnpacker {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let new_epoch = match message.as_ref() {
+            let (new_epoch, validate) = match message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
@@ -100,12 +100,12 @@ impl TxUnpacker {
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    block_info.new_epoch
+                    (block_info.new_epoch, block_info.intent.do_validation())
                 }
 
                 _ => {
                     error!("Unexpected message type: {message:?}");
-                    false
+                    (false, false)
                 }
             };
 
@@ -331,31 +331,36 @@ impl TxUnpacker {
                 }
             }
 
-            if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                if let Some(ref genesis) = genesis {
-                    if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                        message.as_ref()
-                    {
-                        let span = info_span!("tx_unpacker.validate", block = block.number);
-                        async {
-                            let mut validation_outcomes = ValidationOutcomes::new();
-                            if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs)
-                            {
-                                validation_outcomes.push(*e);
-                            }
+            if validate {
+                if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
+                    if let Some(ref genesis) = genesis {
+                        if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                            message.as_ref()
+                        {
+                            let span = info_span!("tx_unpacker.validate", block = block.number);
+                            async {
+                                let mut validation_outcomes = ValidationOutcomes::new();
+                                if let Err(e) =
+                                    state.validate(block, txs_msg, &genesis.genesis_delegs)
+                                {
+                                    validation_outcomes.push(*e);
+                                }
 
-                            validation_outcomes
-                                .publish(
-                                    &context,
-                                    "tx_unpacker",
-                                    publish_tx_validation_topic,
-                                    block,
-                                )
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                                validation_outcomes
+                                    .publish(
+                                        &context,
+                                        "tx_unpacker",
+                                        publish_tx_validation_topic,
+                                        block,
+                                    )
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to publish tx validation: {e}")
+                                    });
+                            }
+                            .instrument(span)
+                            .await;
                         }
-                        .instrument(span)
-                        .await;
                     }
                 }
             }
