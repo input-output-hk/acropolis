@@ -17,6 +17,9 @@ be configured - if empty, no validation is performed
 subscribe-blocks-topic = "cardano.block.available"
 publish-blocks-topic = "cardano.block.proposed"
 
+# Block flow mode: "direct" (pass-through) or "consensus" (offers/wants + chain selection)
+consensus-flow-mode = "consensus"
+
 # Validation result topics
 validators = [
            "cardano.validation.vrf",
@@ -57,4 +60,3 @@ pub struct RawBlockMessage {
     pub body: Vec<u8>,
 }
 ```
-
