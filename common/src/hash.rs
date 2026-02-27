@@ -1,5 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, ops::Deref, str::FromStr};
+use tracing::error;
 
 /// data that is a cryptographic [`struct@Hash`] of `BYTES` long.
 ///
@@ -166,12 +167,22 @@ impl<'a, C, const BYTES: usize> minicbor::Decode<'a, C> for Hash<BYTES> {
         d: &mut minicbor::Decoder<'a>,
         _ctx: &mut C,
     ) -> Result<Self, minicbor::decode::Error> {
+        let byte_offset = d.position();
         let bytes = d.bytes()?;
         if bytes.len() == BYTES {
             let mut hash = [0; BYTES];
             hash.copy_from_slice(bytes);
             Ok(Self::new(hash))
         } else {
+            let preview_len = bytes.len().min(32);
+            let preview = hex::encode(&bytes[..preview_len]);
+            error!(
+                expected_bytes = BYTES,
+                actual_bytes = bytes.len(),
+                byte_offset,
+                hash_preview = %preview,
+                "Invalid hash size while decoding CBOR hash"
+            );
             // TODO: minicbor does not allow for expecting a specific size byte array
             //       (in fact cbor is not good at it at all anyway)
             Err(minicbor::decode::Error::message("Invalid hash size"))

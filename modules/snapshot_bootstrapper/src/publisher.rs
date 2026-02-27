@@ -487,9 +487,7 @@ impl EpochCallback for SnapshotPublisher {
     fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
         info!(
             "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
-            data.epoch,
-            data.total_blocks_current,
-            data.total_blocks_previous
+            data.epoch, data.total_blocks_current, data.total_blocks_previous
         );
 
         let epoch_bootstrap_data = self.build_epoch_bootstrap_message(&data);
