@@ -27,6 +27,12 @@ impl ScriptLang {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScriptRef {
+    pub script_hash: ScriptHash,
+    pub script_lang: ScriptLang,
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
@@ -52,6 +58,13 @@ impl ReferenceScript {
             ReferenceScript::PlutusV1(_) => ScriptLang::PlutusV1,
             ReferenceScript::PlutusV2(_) => ScriptLang::PlutusV2,
             ReferenceScript::PlutusV3(_) => ScriptLang::PlutusV3,
+        }
+    }
+
+    pub fn get_script_ref(&self) -> ScriptRef {
+        ScriptRef {
+            script_hash: self.compute_hash(),
+            script_lang: self.get_script_lang(),
         }
     }
 }
