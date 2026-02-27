@@ -77,6 +77,7 @@ publish-tx-validation-topic = "cardano.validation.tx"
 store = "memory" # "memory", "dashmap", "fjall", "fjall-async", "sled", "sled-async", "fake"
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
+# Subscriptions needed for validation
 pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
 stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 
