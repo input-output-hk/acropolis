@@ -66,6 +66,8 @@ network-name = "mainnet"
 [module.utxo-state]
 address-delta-topic = "cardano.address.deltas"
 block-totals-topic = "cardano.block.txs"
+pool-registration-updates-subscribe-topic = "cardano.pool.registration.updates"
+stake-registration-updates-subscribe-topic = "cardano.stake.registration.updates"
 
 [module.spo-state]
 
