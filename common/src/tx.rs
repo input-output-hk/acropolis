@@ -45,7 +45,7 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
-    pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
+    pub reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
     pub stated_total_collateral: Option<u64>,
@@ -164,7 +164,7 @@ pub struct TxUTxODeltas {
     // State needed for validation
 
     // Reference scripts (needed for phase 2 validation)
-    pub reference_scripts: Option<HashMap<ScriptHash, ReferenceScript>>,
+    pub reference_scripts: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Certificates
     // NOTE:

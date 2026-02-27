@@ -296,7 +296,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
-        reference_scripts,
+        reference_scripts: reference_scripts.into_iter().collect::<Vec<_>>(),
         stated_total_collateral,
         is_valid,
         certs,
