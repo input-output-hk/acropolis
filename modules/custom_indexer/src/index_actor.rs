@@ -8,6 +8,10 @@ use tracing::warn;
 use crate::{chain_index::ChainIndex, cursor_store::CursorEntry};
 
 enum IndexCommand {
+    HandleBlock {
+        block: Arc<BlockInfo>,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
     ApplyTx {
         block: Arc<BlockInfo>,
         tx: Arc<[u8]>,
@@ -146,6 +150,12 @@ impl IndexActor {
             }
         }
 
+        if let Err(error) = self.call_handle_block(block.clone()).await {
+            self.halted = true;
+            warn!(index = self.name, "error in handle_block: {error:#}");
+            return;
+        }
+
         for (idx, tx) in txs.iter().enumerate() {
             if self.next_tx.is_some_and(|i| i as usize > idx) {
                 continue;
@@ -188,6 +198,13 @@ impl IndexActor {
         }
     }
 
+    async fn call_handle_block(&self, block: Arc<BlockInfo>) -> Result<()> {
+        let (response_tx, response_rx) = oneshot::channel();
+        let cmd = IndexCommand::HandleBlock { block, response_tx };
+        self.tx.send(cmd).await.context("channel closed")?;
+        response_rx.await.context("sender closed")?
+    }
+
     async fn call_apply_tx(&self, block: Arc<BlockInfo>, tx: Arc<[u8]>) -> Result<()> {
         let (response_tx, response_rx) = oneshot::channel();
         let cmd = IndexCommand::ApplyTx {
@@ -210,6 +227,10 @@ impl IndexActor {
 async fn index_actor(mut index: Box<dyn ChainIndex>, mut rx: mpsc::Receiver<IndexCommand>) {
     while let Some(cmd) = rx.recv().await {
         match cmd {
+            IndexCommand::HandleBlock { block, response_tx } => {
+                let res = index.handle_block(&block).await;
+                let _ = response_tx.send(res);
+            }
             IndexCommand::ApplyTx {
                 block,
                 tx,
