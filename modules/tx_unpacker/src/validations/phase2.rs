@@ -247,8 +247,8 @@ fn budget_to_ex_units(budget: uplc_turbo::machine::ExBudget) -> ExUnits {
 /// Result of a successful script evaluation including timing metrics.
 ///
 /// This struct captures both the execution budget consumed and the wall-clock
-/// time taken for evaluation, enabling performance monitoring and SC-001
-/// compliance verification (<0.1s per script at p95).
+/// time taken for evaluation, enabling performance monitoring (SC-001).
+/// Thresholds are machine-calibrated; see `tests/common/mod.rs`.
 #[derive(Debug, Clone, Copy)]
 pub struct EvalResult {
     /// Execution budget consumed by the script
@@ -266,9 +266,10 @@ impl EvalResult {
         }
     }
 
-    /// Check if the evaluation completed within the performance target.
+    /// Check if the evaluation completed within the legacy performance target (100ms).
     ///
-    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
+    /// **Deprecated**: Prefer calibrated thresholds via `tests/common/mod.rs`
+    /// `get_calibration().default_threshold_ms()` which adapts to machine speed.
     pub fn within_target(&self) -> bool {
         self.elapsed < Duration::from_millis(100)
     }
@@ -551,9 +552,10 @@ impl RawEvalResult {
         Self { elapsed }
     }
 
-    /// Check if the evaluation completed within the performance target.
+    /// Check if the evaluation completed within the legacy performance target (100ms).
     ///
-    /// Per SC-001: script evaluation should complete in under 0.1 seconds.
+    /// **Deprecated**: Prefer calibrated thresholds via `tests/common/mod.rs`
+    /// `get_calibration().default_threshold_ms()` which adapts to machine speed.
     pub fn within_target(&self) -> bool {
         self.elapsed < Duration::from_millis(100)
     }
