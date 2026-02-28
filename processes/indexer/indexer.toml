@@ -16,13 +16,24 @@ download-max-age = "never"
 block-publish-topic = "cardano.block.proposed"
 
 [module.peer-network-interface]
-block-topic = "cardano.block.proposed" # Skip validation for indexer
 sync-point = "dynamic"
+block-flow-mode = "consensus"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
     "backbone.mainnet.emurgornd.com:3001",
 ]
+# Publishes to cardano.block.available (default) — consumed by consensus
+
+[module.consensus]
+# Security parameter k — maximum fork depth (Praos Common Prefix parameter)
+security-parameter = 2160
+# Match PNI's consensus-mode topics
+consensus-topic = "cardano.consensus.offers"
+publish-consensus-topic = "cardano.consensus.wants"
+# No validators yet
+validators = []
+# Publishes favoured chain to cardano.block.proposed — consumed by block-unpacker
 
 [module.block-unpacker]
 

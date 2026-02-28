@@ -126,7 +126,7 @@ impl BlockFlowHandler {
     pub fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash, body: Vec<u8>) {
         match self {
             BlockFlowHandler::Direct { chain } => chain.handle_body_fetched(slot, hash, body),
-            BlockFlowHandler::Consensus(state) => state.handle_block_fetched(slot, hash),
+            BlockFlowHandler::Consensus(state) => state.handle_block_fetched(slot, hash, body),
         }
     }
 
@@ -236,7 +236,7 @@ impl BlockFlowHandler {
                 }
             }
             BlockFlowHandler::Consensus(state) => {
-                state.publish_pending().await?;
+                state.publish_pending(block_sink, published_blocks).await?;
             }
         }
         Ok(())
@@ -248,7 +248,12 @@ enum ConsensusEvent {
     BlockOffered {
         hash: BlockHash,
         slot: u64,
+        number: u64,
         parent_hash: BlockHash,
+    },
+    BlockFetched {
+        header: Header,
+        body: Vec<u8>,
     },
     // TODO: BlockRescinded would be sent when NO peers have a block anymore.
     // TODO: This requires tracking when all announcers disconnect/rollback - not implemented yet.
@@ -280,6 +285,7 @@ impl BlockTracker {
         &mut self,
         peer: PeerId,
         slot: u64,
+        number: u64,
         hash: BlockHash,
         parent_hash: BlockHash,
     ) {
@@ -292,6 +298,7 @@ impl BlockTracker {
             self.pending_events.push(ConsensusEvent::BlockOffered {
                 hash,
                 slot,
+                number,
                 parent_hash,
             });
         }
@@ -365,6 +372,8 @@ pub struct ConsensusFlowState {
     topic: String,
     tracker: BlockTracker,
     blocks_offered_count: u64,
+    blocks_published_count: u64,
+    headers: HashMap<(u64, BlockHash), Header>,
 }
 
 impl ConsensusFlowState {
@@ -374,12 +383,15 @@ impl ConsensusFlowState {
             topic,
             tracker: BlockTracker::new(),
             blocks_offered_count: 0,
+            blocks_published_count: 0,
+            headers: HashMap::new(),
         }
     }
 
     fn handle_roll_forward(&mut self, peer: PeerId, header: &Header) {
         let parent_hash = header.parent_hash.unwrap_or_default();
-        self.tracker.track_announcement(peer, header.slot, header.hash, parent_hash);
+        self.headers.entry((header.slot, header.hash)).or_insert_with(|| header.clone());
+        self.tracker.track_announcement(peer, header.slot, header.number, header.hash, parent_hash);
     }
 
     fn handle_roll_backward(&mut self, peer: PeerId, point: Point) {
@@ -398,12 +410,17 @@ impl ConsensusFlowState {
         self.tracker.announcers(slot, hash)
     }
 
-    async fn publish_pending(&mut self) -> Result<()> {
+    async fn publish_pending(
+        &mut self,
+        block_sink: &mut BlockSink,
+        published_blocks: &mut u64,
+    ) -> Result<()> {
         for event in self.tracker.take_events() {
-            let consensus_message = match event {
+            match event {
                 ConsensusEvent::BlockOffered {
                     hash,
                     slot,
+                    number,
                     parent_hash,
                 } => {
                     self.blocks_offered_count += 1;
@@ -411,30 +428,43 @@ impl ConsensusFlowState {
                         info!("Offered block (consensus) {}", hash);
                     }
 
-                    ConsensusMessage::BlockOffered(BlockOfferedMessage {
-                        hash,
-                        slot,
-                        parent_hash,
-                    })
+                    let message = Arc::new(Message::Consensus(ConsensusMessage::BlockOffered(
+                        BlockOfferedMessage {
+                            hash,
+                            slot,
+                            number,
+                            parent_hash,
+                        },
+                    )));
+                    if let Err(e) = self.context.publish(&self.topic, message).await {
+                        error!("Failed to publish consensus event: {e}");
+                    }
                 }
-            };
-
-            let message = Arc::new(Message::Consensus(consensus_message));
-
-            if let Err(e) = self.context.publish(&self.topic, message).await {
-                error!("Failed to publish consensus event: {e}");
-                continue;
+                ConsensusEvent::BlockFetched { header, body } => {
+                    block_sink.announce_roll_forward(&header, &body, None).await?;
+                    *published_blocks += 1;
+                    self.blocks_published_count += 1;
+                    if self.blocks_published_count.is_multiple_of(100) {
+                        info!("Published block {} (consensus)", header.number);
+                    }
+                }
             }
         }
         Ok(())
     }
 
-    fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash) {
+    fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash, body: Vec<u8>) {
         self.tracker.block_fetched(slot, hash);
+        if let Some(header) = self.headers.remove(&(slot, hash)) {
+            self.tracker.pending_events.push(ConsensusEvent::BlockFetched { header, body });
+        } else {
+            warn!("No stored header for fetched block {hash} at slot {slot}");
+        }
     }
 
     fn handle_sync_reset(&mut self) {
         self.tracker.reset();
+        self.headers.clear();
     }
 }
 
@@ -459,13 +489,13 @@ mod tests {
     fn first_announcement_emits_offer() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
 
         assert!(tracker.blocks.contains_key(&(100, BLOCK_HASH_A)));
         let events = tracker.take_events();
         assert!(matches!(
             &events[..],
-            [ConsensusEvent::BlockOffered { slot: 100, hash, parent_hash }]
+            [ConsensusEvent::BlockOffered { slot: 100, number: 1, hash, parent_hash }]
                 if *hash == BLOCK_HASH_A && *parent_hash == GENESIS_HASH
         ));
     }
@@ -476,8 +506,8 @@ mod tests {
 
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
         tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
 
         assert_eq!(tracker.blocks.len(), 1);
         assert_eq!(tracker.announcers(100, BLOCK_HASH_A).len(), 2);
@@ -488,8 +518,8 @@ mod tests {
     fn fork_at_same_slot_tracks_both_blocks() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_B, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_B, GENESIS_HASH);
 
         assert_eq!(tracker.blocks.len(), 2);
         assert_eq!(tracker.take_events().len(), 2);
@@ -499,8 +529,8 @@ mod tests {
     fn block_fetched_removes_from_tracking() {
         let mut tracker = BlockTracker::new();
 
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_1, 101, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 101, 2, BLOCK_HASH_B, BLOCK_HASH_A);
         tracker.block_fetched(100, BLOCK_HASH_A);
 
         assert!(!tracker.blocks.contains_key(&(100, BLOCK_HASH_A)));
@@ -513,9 +543,9 @@ mod tests {
 
         tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
         tracker.handle_tip(PEER_2, point(200, BLOCK_HASH_B));
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
-        tracker.track_announcement(PEER_2, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_2, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
         tracker.handle_rollback(PEER_1, &point(100, BLOCK_HASH_A));
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
 
@@ -529,9 +559,9 @@ mod tests {
 
         tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
         tracker.handle_tip(PEER_2, point(200, BLOCK_HASH_B));
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
-        tracker.track_announcement(PEER_2, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_2, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
         tracker.handle_disconnect(PEER_1);
 
         assert!(tracker.announcers(100, BLOCK_HASH_A).is_empty());
@@ -543,8 +573,8 @@ mod tests {
         let mut tracker = BlockTracker::new();
 
         tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
-        tracker.track_announcement(PEER_2, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
 
         assert_eq!(tracker.announcers(100, BLOCK_HASH_A), vec![PEER_2]);
     }
@@ -554,7 +584,7 @@ mod tests {
         let mut tracker = BlockTracker::new();
 
         tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
-        tracker.track_announcement(PEER_1, 200, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_1, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
 
         assert!(tracker.announcers(200, BLOCK_HASH_B).is_empty());
@@ -565,7 +595,7 @@ mod tests {
         let mut tracker = BlockTracker::new();
 
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
-        tracker.track_announcement(PEER_1, 100, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
         tracker.reset();
 
         assert!(tracker.blocks.is_empty());

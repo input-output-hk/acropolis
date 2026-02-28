@@ -15,9 +15,12 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
+pallas = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 futures = "0.3.31"
+serde = { workspace = true }
 
 [lib]
 path = "src/consensus.rs"

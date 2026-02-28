@@ -195,6 +195,9 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "futures",
+ "pallas",
+ "serde",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -607,6 +610,7 @@ dependencies = [
  "acropolis_codec",
  "acropolis_common",
  "acropolis_module_block_unpacker",
+ "acropolis_module_consensus",
  "acropolis_module_custom_indexer",
  "acropolis_module_genesis_bootstrapper",
  "acropolis_module_mithril_snapshot_fetcher",
