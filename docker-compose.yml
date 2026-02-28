@@ -2,10 +2,22 @@ x-omnibus-base: &omnibus-base
   build:
     context: .
     dockerfile: Dockerfile
+    target: runtime-omnibus
   working_dir: /app/processes/omnibus
   environment:
     RUST_LOG: ${RUST_LOG:-info}
   user: "${OMNIBUS_UID:-0}:${OMNIBUS_GID:-0}"
+  restart: unless-stopped
+
+x-midnight-indexer-base: &midnight-indexer-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime-midnight-indexer
+  working_dir: /app/processes/midnight_indexer
+  environment:
+    RUST_LOG: ${RUST_LOG:-info}
+  user: "${MIDNIGHT_UID:-0}:${MIDNIGHT_GID:-0}"
   restart: unless-stopped
 
 services:
@@ -37,6 +49,26 @@ services:
       - ${HISTORICAL_ACCOUNTS_DB_DIR_MAINNET:-omnibus_mainnet_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
       - omnibus_mainnet_spdd:/app/processes/omnibus/fjall-spdd
 
+  midnight-indexer-preview:
+    <<: *midnight-indexer-base
+    container_name: midnight-indexer-preview
+    command: ["--config", "config.preview.toml"]
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_PREVIEW:-midnight_indexer_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_PREVIEW:-midnight_indexer_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${CHAIN_STORE_DB_DIR_PREVIEW:-midnight_indexer_preview_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-preview
+      - ${SPDD_DB_DIR_PREVIEW:-midnight_indexer_preview_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
+
+  midnight-indexer-mainnet:
+    <<: *midnight-indexer-base
+    container_name: midnight-indexer-mainnet
+    command: ["--config", "config.mainnet.toml"]
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_MAINNET:-midnight_indexer_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_MAINNET:-midnight_indexer_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${CHAIN_STORE_DB_DIR_MAINNET:-midnight_indexer_mainnet_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-mainnet
+      - ${SPDD_DB_DIR_MAINNET:-midnight_indexer_mainnet_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
+
 volumes:
   omnibus_preview_spdd:
   omnibus_preview_downloads:
@@ -48,3 +80,11 @@ volumes:
   omnibus_mainnet_snapshot_data:
   omnibus_mainnet_address_state_db:
   omnibus_mainnet_historical_accounts_state_db:
+  midnight_indexer_preview_downloads:
+  midnight_indexer_preview_snapshot_data:
+  midnight_indexer_preview_chain_store_db:
+  midnight_indexer_preview_spdd_db:
+  midnight_indexer_mainnet_downloads:
+  midnight_indexer_mainnet_snapshot_data:
+  midnight_indexer_mainnet_chain_store_db:
+  midnight_indexer_mainnet_spdd_db:
