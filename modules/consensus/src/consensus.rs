@@ -165,8 +165,9 @@ impl Consensus {
             .unwrap_or(DEFAULT_BLOCKS_PROPOSED_TOPIC.to_string());
         info!("Publishing proposed blocks on '{blocks_proposed_topic}'");
 
-        let consensus_offers_topic =
-            config.get_string("consensus-offers-topic").unwrap_or(DEFAULT_CONSENSUS_OFFERS_TOPIC.to_string());
+        let consensus_offers_topic = config
+            .get_string("consensus-offers-topic")
+            .unwrap_or(DEFAULT_CONSENSUS_OFFERS_TOPIC.to_string());
         info!("Subscribing to consensus offers on '{consensus_offers_topic}'");
 
         let consensus_wants_topic = config
