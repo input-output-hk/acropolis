@@ -151,6 +151,7 @@ pub fn get_scripts_provided(
 ) -> HashMap<ScriptHash, ScriptLang> {
     let mut scripts_provided = HashMap::new();
 
+    // Check scripts witnesses
     if let Some(script_witnesses) = tx_deltas.script_witnesses.as_ref() {
         scripts_provided.extend(
             script_witnesses
@@ -159,13 +160,20 @@ pub fn get_scripts_provided(
         );
     }
 
+    // for each input, get the script hash (for reference scripts)
+    for input in tx_deltas.consumes.iter() {
+        if let Some(utxo) = utxos.get(input) {
+            if let Some(script_ref) = utxo.script_ref.as_ref() {
+                scripts_provided.insert(script_ref.script_hash, script_ref.script_lang.clone());
+            }
+        }
+    }
+
     // for each reference input, get the script hash
     for input in tx_deltas.reference_inputs.iter() {
         if let Some(utxo) = utxos.get(input) {
-            if let Some(reference_script_hash) = utxo.reference_script_hash {
-                // TODO:
-                // Using PlutusV2 as a placeholder for now
-                scripts_provided.insert(reference_script_hash, ScriptLang::PlutusV2);
+            if let Some(script_ref) = utxo.script_ref.as_ref() {
+                scripts_provided.insert(script_ref.script_hash, script_ref.script_lang.clone());
             }
         }
     }
