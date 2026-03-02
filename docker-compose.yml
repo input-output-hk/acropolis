@@ -1,24 +1,29 @@
-x-omnibus-base: &omnibus-base
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  environment: &service-env
+    RUST_LOG: ${RUST_LOG:-info}
+
+x-omnibus-build: &omnibus-build
   build:
     context: .
     dockerfile: Dockerfile
     target: runtime-omnibus
-  working_dir: /app/processes/omnibus
-  environment:
-    RUST_LOG: ${RUST_LOG:-info}
-  user: "${OMNIBUS_UID:-0}:${OMNIBUS_GID:-0}"
-  restart: unless-stopped
 
-x-midnight-indexer-base: &midnight-indexer-base
+x-midnight-indexer-build: &midnight-indexer-build
   build:
     context: .
     dockerfile: Dockerfile
     target: runtime-midnight-indexer
+
+x-omnibus-base: &omnibus-base
+  <<: [*service-defaults, *omnibus-build]
+  working_dir: /app/processes/omnibus
+  user: "${OMNIBUS_UID:-0}:${OMNIBUS_GID:-0}"
+
+x-midnight-indexer-base: &midnight-indexer-base
+  <<: [*service-defaults, *midnight-indexer-build]
   working_dir: /app/processes/midnight_indexer
-  environment:
-    RUST_LOG: ${RUST_LOG:-info}
   user: "${MIDNIGHT_UID:-0}:${MIDNIGHT_GID:-0}"
-  restart: unless-stopped
 
 services:
   omnibus-preview:
@@ -53,6 +58,8 @@ services:
     <<: *midnight-indexer-base
     container_name: midnight-indexer-preview
     command: ["--config", "config.preview.toml"]
+    ports:
+      - "${MIDNIGHT_PREVIEW_GRPC_PORT:-50051}:50051"
     volumes:
       - ${MITHRIL_DOWNLOADS_DIR_PREVIEW:-midnight_indexer_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
       - ${SNAPSHOT_DATA_DIR_PREVIEW:-midnight_indexer_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
@@ -63,6 +70,8 @@ services:
     <<: *midnight-indexer-base
     container_name: midnight-indexer-mainnet
     command: ["--config", "config.mainnet.toml"]
+    ports:
+      - "${MIDNIGHT_MAINNET_GRPC_PORT:-60051}:50051"
     volumes:
       - ${MITHRIL_DOWNLOADS_DIR_MAINNET:-midnight_indexer_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
       - ${SNAPSHOT_DATA_DIR_MAINNET:-midnight_indexer_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
