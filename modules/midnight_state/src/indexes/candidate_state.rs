@@ -42,7 +42,6 @@ impl CandidateState {
         self.deregistrations.insert(block, deregistrations);
     }
 
-    #[allow(dead_code)]
     /// Get the candidate registrations within a specified block range
     pub fn get_registrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Registration> {
         self.registrations
@@ -57,7 +56,6 @@ impl CandidateState {
             .collect()
     }
 
-    #[allow(dead_code)]
     /// Get the candidate deregistrations within a specified block range
     pub fn get_deregistrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Deregistration> {
         self.deregistrations

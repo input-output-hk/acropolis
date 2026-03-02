@@ -25,7 +25,6 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Error, Result};
 use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
-use chrono::{DateTime, NaiveDateTime, Utc};
 use hex::decode;
 use regex::Regex;
 use serde::de::Error as SerdeError;
@@ -309,12 +308,6 @@ impl BlockInfo {
             slot: self.slot,
         }
     }
-
-    pub fn to_naive_datetime(&self) -> NaiveDateTime {
-        DateTime::<Utc>::from_timestamp(self.timestamp as i64, 0)
-            .expect("invalid UNIX timestamp")
-            .naive_utc()
-    }
 }
 
 // For stake address registration/deregistration (handles deposits/refunds)
@@ -364,8 +357,7 @@ impl PoolRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
             PoolRegistrationOutcome::Registered(deposit) => *deposit,
-            PoolRegistrationOutcome::Updated => 0,
-            PoolRegistrationOutcome::RetirementQueued => 0,
+            _ => 0,
         }
     }
 }

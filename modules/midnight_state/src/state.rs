@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Epoch, ExtendedAddressDelta,
+    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta,
     UTxOIdentifier,
 };
 
@@ -25,7 +25,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    candidates: CandidateState,
+    pub candidates: CandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
@@ -44,6 +44,10 @@ impl State {
 
     pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
         self.epoch_totals.summarise_completed_epoch(block_info);
+    }
+
+    pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
+        self.parameters.get_ariadne_parameters_with_epoch(epoch)
     }
 
     pub fn handle_address_deltas(
@@ -72,12 +76,12 @@ impl State {
                 block_info,
                 &mut cnight_creations,
                 &mut block_created_utxos,
-            );
+            )?;
             cnight_spends.extend(self.collect_cnight_spends(
                 delta,
                 block_info,
                 &block_created_utxos,
-            ));
+            )?);
 
             // Collect candidate registrations and deregistrations
             self.collect_candidate_registrations(
@@ -85,12 +89,12 @@ impl State {
                 block_info,
                 &mut candidate_registrations,
                 &mut block_created_registrations,
-            );
+            )?;
             candidate_deregistrations.extend(self.collect_candidate_deregistrations(
                 delta,
                 block_info,
                 &block_created_registrations,
-            ));
+            )?);
 
             indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
 
@@ -129,15 +133,26 @@ impl State {
         Ok(())
     }
 
+    pub fn get_technical_committee_datum(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<(BlockNumber, Datum)> {
+        self.governance.get_technical_committee_datum(block_number)
+    }
+
+    pub fn get_council_datum(&self, block_number: BlockNumber) -> Option<(BlockNumber, Datum)> {
+        self.governance.get_council_datum(block_number)
+    }
+
     fn collect_cnight_creations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
         cnight_creations: &mut Vec<CNightCreation>,
         block_created_utxos: &mut HashSet<UTxOIdentifier>,
-    ) {
+    ) -> Result<()> {
         if !delta.received.assets.contains_key(&self.config.cnight_policy_id) {
-            return;
+            return Ok(());
         }
 
         for created in &delta.created_utxos {
@@ -159,13 +174,15 @@ impl State {
                 utxo: created.utxo,
                 block_number: block_info.number,
                 block_hash: block_info.hash,
-                tx_index: delta.tx_identifier.tx_index() as u32,
-                block_timestamp: block_info.timestamp as i64,
+                tx_index: delta.tx_identifier.tx_index().into(),
+                block_timestamp: i64::try_from(block_info.timestamp)?,
             };
 
             block_created_utxos.insert(created.utxo);
             cnight_creations.push(creation);
         }
+
+        Ok(())
     }
 
     fn collect_cnight_spends(
@@ -173,8 +190,10 @@ impl State {
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
         cnight_creations: &HashSet<UTxOIdentifier>,
-    ) -> Vec<(UTxOIdentifier, CNightSpend)> {
-        delta
+    ) -> Result<Vec<(UTxOIdentifier, CNightSpend)>> {
+        let timestamp = i64::try_from(block_info.timestamp)?;
+
+        Ok(delta
             .spent_utxos
             .iter()
             .filter_map(|spent| {
@@ -187,15 +206,15 @@ impl State {
                             block_number: block_info.number,
                             block_hash: block_info.hash,
                             tx_hash: spent.spent_by,
-                            tx_index: delta.tx_identifier.tx_index() as u32,
-                            block_timestamp: block_info.timestamp as i64,
+                            tx_index: delta.tx_identifier.tx_index().into(),
+                            block_timestamp: timestamp,
                         },
                     ))
                 } else {
                     None
                 }
             })
-            .collect()
+            .collect())
     }
 
     fn collect_candidate_registrations(
@@ -204,9 +223,9 @@ impl State {
         block_info: &BlockInfo,
         registrations: &mut Vec<RegistrationEvent>,
         block_created_registrations: &mut HashSet<UTxOIdentifier>,
-    ) {
+    ) -> Result<()> {
         if delta.address != self.config.mapping_validator_address {
-            return;
+            return Ok(());
         }
 
         for created in &delta.created_utxos {
@@ -227,14 +246,16 @@ impl State {
 
                 registrations.push(RegistrationEvent {
                     block_hash: block_info.hash,
-                    block_timestamp: block_info.to_naive_datetime(),
-                    tx_index: delta.tx_identifier.tx_index() as u32,
+                    block_timestamp: i64::try_from(block_info.timestamp)?,
+                    tx_index: delta.tx_identifier.tx_index().into(),
                     tx_hash: created.utxo.tx_hash,
                     utxo_index: created.utxo.output_index,
                     datum: datum.clone(),
                 });
             }
         }
+
+        Ok(())
     }
 
     fn collect_candidate_deregistrations(
@@ -242,11 +263,11 @@ impl State {
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
         block_created_registrations: &HashSet<UTxOIdentifier>,
-    ) -> Vec<DeregistrationEvent> {
+    ) -> Result<Vec<DeregistrationEvent>> {
         let mut deregistrations = Vec::new();
 
         if delta.address != self.config.mapping_validator_address {
-            return deregistrations;
+            return Ok(deregistrations);
         }
 
         for spent in &delta.spent_utxos {
@@ -256,14 +277,14 @@ impl State {
                 deregistrations.push(DeregistrationEvent {
                     registration_utxo: spent.utxo,
                     spent_block_hash: block_info.hash,
-                    spent_block_timestamp: block_info.to_naive_datetime(),
+                    spent_block_timestamp: i64::try_from(block_info.timestamp)?,
                     spent_tx_hash: spent.spent_by,
-                    spent_tx_index: delta.tx_identifier.tx_index() as u32,
+                    spent_tx_index: delta.tx_identifier.tx_index().into(),
                 });
             }
         }
 
-        deregistrations
+        Ok(deregistrations)
     }
 
     fn collect_parameter_datums(&mut self, delta: &ExtendedAddressDelta, epoch: Epoch) -> usize {
@@ -383,6 +404,21 @@ mod tests {
         }
     }
 
+    fn test_config_governance(
+        technical_committee_address: Address,
+        technical_committee_policy_id: PolicyId,
+        council_address: Address,
+        council_policy_id: PolicyId,
+    ) -> MidnightConfig {
+        MidnightConfig {
+            technical_committee_address,
+            technical_committee_policy_id,
+            council_address,
+            council_policy_id,
+            ..Default::default()
+        }
+    }
+
     fn test_value_with_token(policy: PolicyId, asset: AssetName, amount: u64) -> ValueMap {
         let mut inner = HashMap::new();
         inner.insert(asset, amount);
@@ -446,7 +482,83 @@ mod tests {
     }
 
     #[test]
-    fn collects_cnight_creations_and_spends_when_token_present() {
+    fn should_collect_governance_datums_when_technical_committee_and_council_deltas_present() {
+        let block_info = test_block_info();
+        let technical_committee_policy = PolicyId::new([0x11u8; 28]);
+        let council_policy = PolicyId::new([0x22u8; 28]);
+        let technical_committee_asset = AssetName::new(b"tc").unwrap();
+        let council_asset = AssetName::new(b"council").unwrap();
+        let technical_committee_address = Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j",
+            )
+            .unwrap(),
+        );
+        let council_address = Address::Shelley(
+            ShelleyAddress::from_string(
+                "addr_test1wqqwkauz0ypglg5e4u780kcp8hzt75u72yg6z7td62gnk0qed0p06",
+            )
+            .unwrap(),
+        );
+
+        let mut state = State::new(test_config_governance(
+            technical_committee_address.clone(),
+            technical_committee_policy,
+            council_address.clone(),
+            council_policy,
+        ));
+
+        let technical_committee_datum = Datum::Inline(vec![0xAA]);
+        let council_datum = Datum::Inline(vec![0xBB]);
+
+        let technical_committee_delta = ExtendedAddressDelta {
+            address: technical_committee_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 0),
+                value: test_value_with_token(
+                    technical_committee_policy,
+                    technical_committee_asset,
+                    1,
+                ),
+                datum: Some(technical_committee_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(
+                technical_committee_policy,
+                technical_committee_asset,
+                1,
+            ),
+            sent: ValueMap::default(),
+        };
+        state.collect_governance_datums(&technical_committee_delta, block_info.number);
+
+        let council_delta = ExtendedAddressDelta {
+            address: council_address,
+            tx_identifier: TxIdentifier::default(),
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(TxHash::new([2u8; 32]), 0),
+                value: test_value_with_token(council_policy, council_asset, 1),
+                datum: Some(council_datum.clone()),
+            }],
+            spent_utxos: vec![],
+            received: test_value_with_token(council_policy, council_asset, 1),
+            sent: ValueMap::default(),
+        };
+        state.collect_governance_datums(&council_delta, block_info.number);
+
+        assert_eq!(
+            state.governance.get_technical_committee_datum(block_info.number),
+            Some((block_info.number, technical_committee_datum))
+        );
+        assert_eq!(
+            state.governance.get_council_datum(block_info.number),
+            Some((block_info.number, council_datum))
+        );
+    }
+
+    #[test]
+    fn should_collect_cnight_creations_and_spends_when_token_present() {
         let block_info = test_block_info();
         let policy = PolicyId::new([1u8; 28]);
         let asset = AssetName::new(b"").unwrap();
@@ -486,12 +598,14 @@ mod tests {
         // Collect the CNight UTxO creations
         let mut creations = Vec::new();
         let mut creations_set = HashSet::new();
-        state.collect_cnight_creations(
-            &create_delta,
-            &block_info,
-            &mut creations,
-            &mut creations_set,
-        );
+        state
+            .collect_cnight_creations(
+                &create_delta,
+                &block_info,
+                &mut creations,
+                &mut creations_set,
+            )
+            .unwrap();
         assert_eq!(creations.len(), 2);
         assert_eq!(creations[0].quantity, 5);
 
@@ -527,7 +641,8 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let spends = state.collect_cnight_spends(&spend_delta, &block_info, &HashSet::new());
+        let spends =
+            state.collect_cnight_spends(&spend_delta, &block_info, &HashSet::new()).unwrap();
         assert_eq!(spends.len(), 1);
         assert_eq!(*spends[0].1.tx_hash, [2u8; 32]);
 
@@ -541,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn collects_candidate_registrations_and_deregistrations() {
+    fn should_collect_candidate_registrations_and_deregistrations_when_mapping_events_present() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -581,12 +696,14 @@ mod tests {
 
         let mut registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
-        state.collect_candidate_registrations(
-            &registration_delta,
-            &block_info,
-            &mut registrations,
-            &mut block_created_registrations,
-        );
+        state
+            .collect_candidate_registrations(
+                &registration_delta,
+                &block_info,
+                &mut registrations,
+                &mut block_created_registrations,
+            )
+            .unwrap();
         assert_eq!(registrations.len(), 1);
 
         state.candidates.register_candidates(block_info.number, registrations);
@@ -597,7 +714,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 9);
         assert_eq!(indexed[0].tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
@@ -620,11 +737,9 @@ mod tests {
             sent: ValueMap::default(),
         };
 
-        let deregistrations = state.collect_candidate_deregistrations(
-            &deregistration_delta,
-            &block_info,
-            &HashSet::new(),
-        );
+        let deregistrations = state
+            .collect_candidate_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
+            .unwrap();
         assert_eq!(deregistrations.len(), 1);
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
@@ -638,7 +753,7 @@ mod tests {
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
         assert_eq!(indexed[0].block_number, block_info.number);
         assert_eq!(indexed[0].block_hash, block_info.hash);
-        assert_eq!(indexed[0].block_timestamp, block_info.to_naive_datetime());
+        assert_eq!(indexed[0].block_timestamp, block_info.timestamp as i64);
         assert_eq!(indexed[0].tx_index_in_block, 2);
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
@@ -646,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn indexes_parameters_from_matching_policy_datums() {
+    fn should_index_parameters_when_policy_matches() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -680,13 +795,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
-            Some(expected_datum)
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
+            Some((block_info.epoch, expected_datum))
         );
     }
 
     #[test]
-    fn ignores_parameter_datums_for_non_matching_policy() {
+    fn should_ignore_parameters_when_policy_does_not_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -719,13 +834,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            state.parameters.get_ariadne_parameters(block_info.epoch),
+            state.parameters.get_ariadne_parameters_with_epoch(block_info.epoch),
             None
         );
     }
 
     #[test]
-    fn rollback_restores_previous_parameter_datum_before_replay() {
+    fn should_restore_previous_parameter_datum_when_rollback_and_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let parameter_policy = PolicyId::new([9u8; 28]);
@@ -771,14 +886,14 @@ mod tests {
         history.commit(block2.number, state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_b.clone())
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_b.clone()))
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
-            rolled_back_state.parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_a)
+            rolled_back_state.parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_a))
         );
 
         rolled_back_state
@@ -794,13 +909,13 @@ mod tests {
         history.commit(block2.number, rolled_back_state);
 
         assert_eq!(
-            history.current().unwrap().parameters.get_ariadne_parameters(block2.epoch),
-            Some(datum_c)
+            history.current().unwrap().parameters.get_ariadne_parameters_with_epoch(block2.epoch),
+            Some((block2.epoch, datum_c))
         );
     }
 
     #[test]
-    fn indexes_governance_datums_for_matching_address_and_policy() {
+    fn should_index_governance_datums_when_address_and_policy_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -858,16 +973,16 @@ mod tests {
 
         assert_eq!(
             state.governance.get_technical_committee_datum(block_info.number),
-            Some(technical_datum)
+            Some((block_info.number, technical_datum))
         );
         assert_eq!(
             state.governance.get_council_datum(block_info.number),
-            Some(council_datum)
+            Some((block_info.number, council_datum))
         );
     }
 
     #[test]
-    fn ignores_governance_datums_for_non_matching_address() {
+    fn should_ignore_governance_datums_when_address_does_not_match() {
         let block_info = test_block_info();
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
@@ -910,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_restores_previous_governance_datum_before_replay() {
+    fn should_restore_previous_governance_datum_when_rollback_and_replay() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"").unwrap();
         let technical_policy = PolicyId::new([7u8; 28]);
@@ -966,13 +1081,13 @@ mod tests {
 
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
-            Some(datum_b.clone())
+            Some((block2.number, datum_b.clone()))
         );
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         assert_eq!(
             rolled_back_state.governance.get_technical_committee_datum(block2.number),
-            Some(datum_a)
+            Some((block1.number, datum_a))
         );
 
         rolled_back_state
@@ -991,7 +1106,7 @@ mod tests {
 
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
-            Some(datum_c)
+            Some((block2.number, datum_c))
         );
     }
 }
