@@ -4,12 +4,14 @@ x-service-defaults: &service-defaults
     RUST_LOG: ${RUST_LOG:-info}
 
 x-omnibus-build: &omnibus-build
+  image: acropolis/omnibus:local
   build:
     context: .
     dockerfile: Dockerfile
     target: runtime-omnibus
 
 x-midnight-indexer-build: &midnight-indexer-build
+  image: acropolis/midnight-indexer:local
   build:
     context: .
     dockerfile: Dockerfile

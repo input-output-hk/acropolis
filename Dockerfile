@@ -27,13 +27,14 @@ COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
-    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
+    --mount=type=cache,id=acropolis-target-omnibus-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_omnibus
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
-    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
-    cargo build --locked --release --package acropolis_process_omnibus
+    --mount=type=cache,id=acropolis-target-omnibus-${TARGETPLATFORM},target=/app/target \
+    cargo build --locked --release --package acropolis_process_omnibus \
+    && install -D /app/target/release/acropolis_process_omnibus /out/acropolis_process_omnibus
 
 FROM chef AS builder-midnight-indexer
 ARG TARGETPLATFORM
@@ -43,13 +44,14 @@ COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
-    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
+    --mount=type=cache,id=acropolis-target-midnight-indexer-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_midnight_indexer
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
-    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
-    cargo build --locked --release --package acropolis_process_midnight_indexer
+    --mount=type=cache,id=acropolis-target-midnight-indexer-${TARGETPLATFORM},target=/app/target \
+    cargo build --locked --release --package acropolis_process_midnight_indexer \
+    && install -D /app/target/release/acropolis_process_midnight_indexer /out/acropolis_process_midnight_indexer
 
 FROM debian:bookworm-slim AS runtime-base
 
@@ -63,7 +65,7 @@ FROM runtime-base AS runtime-omnibus
 
 WORKDIR /app/processes/omnibus
 
-COPY --from=builder-omnibus /app/target/release/acropolis_process_omnibus /usr/local/bin/acropolis_process_omnibus
+COPY --from=builder-omnibus /out/acropolis_process_omnibus /usr/local/bin/acropolis_process_omnibus
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus-preview.toml /app/processes/omnibus/omnibus-preview.toml
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus.toml /app/processes/omnibus/omnibus.toml
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus-local.toml /app/processes/omnibus/omnibus-local.toml
@@ -91,7 +93,7 @@ FROM runtime-base AS runtime-midnight-indexer
 
 WORKDIR /app/processes/midnight_indexer
 
-COPY --from=builder-midnight-indexer /app/target/release/acropolis_process_midnight_indexer /usr/local/bin/acropolis_process_midnight_indexer
+COPY --from=builder-midnight-indexer /out/acropolis_process_midnight_indexer /usr/local/bin/acropolis_process_midnight_indexer
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.mainnet.toml /app/processes/midnight_indexer/config.mainnet.toml
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.toml /app/processes/midnight_indexer/config.preview.toml
 COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
