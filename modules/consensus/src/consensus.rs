@@ -180,6 +180,9 @@ impl Consensus {
             info!("Validator: {topic}");
         }
 
+        let flow_mode = ConsensusFlowMode::from_config(&config);
+        info!("Consensus flow mode: {flow_mode}");
+
         let validation_timeout = Duration::from_secs(
             config.get_int("validation-timeout").unwrap_or(DEFAULT_VALIDATION_TIMEOUT) as u64,
         );
@@ -192,9 +195,6 @@ impl Consensus {
 
         // Subscribe for incoming blocks (BlockAvailable)
         let block_subscription = context.subscribe(&blocks_available_topic).await?;
-
-        let flow_mode = ConsensusFlowMode::from_config(&config);
-        info!("Consensus flow mode: {flow_mode}");
 
         // Subscribe for consensus messages (BlockOffered, BlockRescinded)
         // TODO: Temporary until consensus flow fully works.
