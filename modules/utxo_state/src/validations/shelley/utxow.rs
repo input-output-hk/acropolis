@@ -69,16 +69,20 @@ pub fn validate(
     vkey_witness_hashes: &HashSet<KeyHash>,
     script_witness_hashes: &HashSet<ScriptHash>,
     script_hashes_provided: &HashSet<ScriptHash>,
+    is_valid: bool,
 ) -> Result<(), Box<UTxOWValidationError>> {
     // validate missing vkey witnesses
     validate_needed_witnesses(vkey_hashes_needed, vkey_witness_hashes)?;
 
     // validate missing & extra scripts
-    validate_missing_extra_scripts(
-        script_hashes_needed,
-        script_witness_hashes,
-        script_hashes_provided,
-    )?;
+    // only when the transaction is valid
+    if is_valid {
+        validate_missing_extra_scripts(
+            script_hashes_needed,
+            script_witness_hashes,
+            script_hashes_provided,
+        )?;
+    }
 
     Ok(())
 }
@@ -168,6 +172,7 @@ mod tests {
             &vkey_witness_hashes,
             &script_witness_hashes,
             &script_hashes_provided,
+            tx_deltas.is_valid,
         )
         .map_err(|e| *e)
     }
