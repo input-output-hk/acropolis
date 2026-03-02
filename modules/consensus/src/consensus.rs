@@ -599,7 +599,7 @@ impl ConsensusRuntime {
             )));
             self.context
                 .message_bus
-                .publish(&self.publish_consensus_topic, msg)
+                .publish(&self.consensus_wants_topic, msg)
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish BlockWanted: {e}"));
         }
