@@ -6,13 +6,16 @@ ENV CARGO_HOME=/cargo
 
 RUN cargo install cargo-chef --locked
 
-FROM chef AS planner
+FROM chef AS workspace-src
 COPY Cargo.toml Cargo.lock ./
 COPY common ./common
 COPY codec ./codec
 COPY cardano ./cardano
 COPY modules ./modules
 COPY processes ./processes
+
+FROM chef AS planner
+COPY --from=workspace-src /app /app
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -20,40 +23,32 @@ FROM chef AS builder-omnibus
 ARG TARGETPLATFORM
 
 COPY --from=planner /app/recipe.json /app/recipe.json
+COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
+    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_omnibus
 
-COPY Cargo.toml Cargo.lock ./
-COPY common ./common
-COPY codec ./codec
-COPY cardano ./cardano
-COPY modules ./modules
-COPY processes ./processes
-
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
+    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
     cargo build --locked --release --package acropolis_process_omnibus
 
 FROM chef AS builder-midnight-indexer
 ARG TARGETPLATFORM
 
 COPY --from=planner /app/recipe.json /app/recipe.json
+COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
+    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_midnight_indexer
 
-COPY Cargo.toml Cargo.lock ./
-COPY common ./common
-COPY codec ./codec
-COPY cardano ./cardano
-COPY modules ./modules
-COPY processes ./processes
-
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
+    --mount=type=cache,id=acropolis-target-${TARGETPLATFORM},target=/app/target \
     cargo build --locked --release --package acropolis_process_midnight_indexer
 
 FROM debian:bookworm-slim AS runtime-base
@@ -77,6 +72,7 @@ COPY --from=builder-omnibus /app/processes/omnibus/omnibus-sancho.toml /app/proc
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus.bootstrap.toml /app/processes/omnibus/omnibus.bootstrap.toml
 COPY --from=builder-omnibus /app/processes/omnibus/configs /app/processes/omnibus/configs
 COPY --from=builder-omnibus /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
+COPY --from=builder-omnibus /app/modules/accounts_state/test-data/pots.preview.csv /app/modules/accounts_state/test-data/pots.preview.csv
 
 RUN mkdir -p /app/modules/mithril_snapshot_fetcher/downloads \
     /app/modules/snapshot_bootstrapper/data \
@@ -98,6 +94,8 @@ WORKDIR /app/processes/midnight_indexer
 COPY --from=builder-midnight-indexer /app/target/release/acropolis_process_midnight_indexer /usr/local/bin/acropolis_process_midnight_indexer
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.mainnet.toml /app/processes/midnight_indexer/config.mainnet.toml
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.toml /app/processes/midnight_indexer/config.preview.toml
+COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
+COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.preview.csv /app/modules/accounts_state/test-data/pots.preview.csv
 
 RUN mkdir -p /app/modules/mithril_snapshot_fetcher/downloads \
     /app/modules/snapshot_bootstrapper/data \
