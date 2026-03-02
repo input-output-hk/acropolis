@@ -7,6 +7,7 @@ use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
 use pallas_traverse::{
     ComputeHash, Era as PallasEra, MultiEraInput, MultiEraMeta, MultiEraSigners, MultiEraTx,
+    OriginalHash,
 };
 
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
@@ -117,7 +118,10 @@ pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     let mut scripts_provided = Vec::new();
 
     for script in tx.native_scripts() {
-        scripts_provided.push((ScriptHash::from(*script.compute_hash()), ScriptLang::Native));
+        scripts_provided.push((
+            ScriptHash::from(*script.original_hash()),
+            ScriptLang::Native,
+        ));
     }
 
     for script in tx.plutus_v1_scripts() {
@@ -286,7 +290,7 @@ pub fn map_transaction(
     let plutus_data = tx
         .plutus_data()
         .iter()
-        .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
+        .map(|x| (DatumHash::from(*x.original_hash()), x.raw_cbor().to_vec()))
         .collect::<Vec<_>>();
 
     Transaction {
