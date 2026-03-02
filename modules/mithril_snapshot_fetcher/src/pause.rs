@@ -15,6 +15,14 @@ pub enum PauseType {
         number: u64,
         start_time: std::time::Instant,
     },
+    EveryNthEpoch {
+        number: u64,
+        start_time: std::time::Instant,
+    },
+    EveryNthBlock {
+        number: u64,
+        start_time: std::time::Instant,
+    },
 }
 
 impl PauseType {
@@ -52,6 +60,20 @@ impl PauseType {
                     start_time,
                 })
             }
+            "every-nth-epoch" => {
+                info!("Will {} at every {value}th epoch", default_pause.0);
+                Some(PauseType::EveryNthEpoch {
+                    number: value,
+                    start_time,
+                })
+            }
+            "every-nth-block" => {
+                info!("Will {} at every {value}th block", default_pause.0);
+                Some(PauseType::EveryNthBlock {
+                    number: value,
+                    start_time,
+                })
+            }
             _ => {
                 error!(
                     "Unknown {} type: {}. Supported types: epoch, block",
@@ -66,6 +88,12 @@ impl PauseType {
         match self {
             PauseType::Epoch { number, .. } => block_info.new_epoch && block_info.epoch == *number,
             PauseType::Block { number, .. } => block_info.number == *number,
+            PauseType::EveryNthEpoch { number, .. } => {
+                block_info.new_epoch && block_info.epoch.is_multiple_of(*number)
+            }
+            PauseType::EveryNthBlock { number, .. } => {
+                block_info.new_epoch && block_info.number.is_multiple_of(*number)
+            }
             PauseType::NoPause => false,
         }
     }
@@ -77,6 +105,14 @@ impl PauseType {
                 *start_time = Instant::now();
             }
             PauseType::Block { number, start_time } => {
+                *number += 1;
+                *start_time = Instant::now();
+            }
+            PauseType::EveryNthEpoch { number, start_time } => {
+                *number += 1;
+                *start_time = Instant::now();
+            }
+            PauseType::EveryNthBlock { number, start_time } => {
                 *number += 1;
                 *start_time = Instant::now();
             }
@@ -92,7 +128,31 @@ impl PauseType {
             PauseType::Block { number, start_time } => {
                 format!("Block {number} (started {:?} ago)", start_time.elapsed())
             }
+            PauseType::EveryNthEpoch { number, start_time } => {
+                format!(
+                    "Every {number}th epoch (started {:?} ago)",
+                    start_time.elapsed()
+                )
+            }
+            PauseType::EveryNthBlock { number, start_time } => {
+                format!(
+                    "Every {number}th block (started {:?} ago)",
+                    start_time.elapsed()
+                )
+            }
             PauseType::NoPause => "No pause".to_string(),
+        }
+    }
+
+    pub fn get_filename_part(&self, block_info: &BlockInfo) -> String {
+        match self {
+            PauseType::Epoch { .. } | PauseType::EveryNthEpoch { .. } => {
+                format!("epoch-{}", block_info.epoch)
+            }
+            PauseType::Block { .. } | PauseType::EveryNthBlock { .. } => {
+                format!("block-{}", block_info.number)
+            }
+            PauseType::NoPause => "unknown".to_string(),
         }
     }
 }
@@ -119,6 +179,34 @@ mod tests {
         match pause_type {
             Some(PauseType::Block { number, .. }) => assert_eq!(number, 100),
             _ => panic!("Expected Some(PauseType::Block {{ number: 100, .. }})"),
+        }
+    }
+
+    #[test]
+    fn test_pause_type_from_config_every_nth_epoch() {
+        let config = Config::builder()
+            .set_override("pause", "every-nth-epoch:100")
+            .unwrap()
+            .build()
+            .unwrap();
+        let pause_type = PauseType::from_config(&config, DEFAULT_PAUSE);
+        match pause_type {
+            Some(PauseType::EveryNthEpoch { number, .. }) => assert_eq!(number, 100),
+            _ => panic!("Expected Some(PauseType::EveryNthEpoch {{ number: 100, .. }})"),
+        }
+    }
+
+    #[test]
+    fn test_pause_type_from_config_every_nth_block() {
+        let config = Config::builder()
+            .set_override("pause", "every-nth-epoch:100")
+            .unwrap()
+            .build()
+            .unwrap();
+        let pause_type = PauseType::from_config(&config, DEFAULT_PAUSE);
+        match pause_type {
+            Some(PauseType::EveryNthEpoch { number, .. }) => assert_eq!(number, 100),
+            _ => panic!("Expected Some(PauseType::EveryNthEpoch {{ number: 100, .. }})"),
         }
     }
 

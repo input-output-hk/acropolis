@@ -14,7 +14,7 @@ use pallas::ledger::primitives::conway;
 pub fn validate(
     mtx: &conway::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &HashSet<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
 ) -> Result<(), Box<UTxOWValidationError>> {
     shelley_wrapper(mtx, tx_hash, vkey_witnesses, native_scripts)?;
@@ -29,7 +29,7 @@ pub fn validate(
 fn shelley_wrapper(
     mtx: &conway::MintedTx,
     tx_hash: TxHash,
-    vkey_witnesses: &HashSet<VKeyWitness>,
+    vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
 ) -> Result<(), Box<UTxOWValidationError>> {
     let transaction_body = &mtx.transaction_body;

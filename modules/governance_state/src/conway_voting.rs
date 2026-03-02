@@ -106,6 +106,9 @@ impl CastVotes {
 
     pub fn compare(&self, epoch: u64, action_id: &GovActionId, reference: &CastVotes) {
         let mut equal = true;
+        let mut equal_drep_count = 0;
+        let mut equal_pool_count = 0;
+        let mut equal_cons_count = 0;
 
         for (key, (v, s)) in self.votes.iter() {
             match reference.votes.get(key) {
@@ -113,7 +116,14 @@ impl CastVotes {
                     error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}: {s:<12} ---- reference (None)");
                     equal = false;
                 },
-                Some((rv, rs)) if rv == v && rs == s => (),
+                Some((rv, rs)) if rv == v && rs == s => {
+                    match key {
+                        Voter::DRepKey(_) | Voter::DRepScript(_) => equal_drep_count += 1,
+                        Voter::StakePoolKey(_) => equal_pool_count += 1,
+                        Voter::ConstitutionalCommitteeKey(_) |
+                        Voter::ConstitutionalCommitteeScript(_) => equal_cons_count += 1,
+                    }
+                },
                 Some((rv, rs)) => {
                     error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}:{s:<12} ---- reference {rv:<7?}:{rs:<12}");
                     equal = false;
@@ -129,7 +139,10 @@ impl CastVotes {
         }
 
         if !equal {
-            error!("Votes validation failed: epoch {epoch}, action_id {action_id}");
+            error!(
+                "Votes validation failed: epoch {epoch}, action_id {action_id}, \
+                equal votes p{equal_pool_count}:d{equal_drep_count}:c{equal_cons_count}"
+            );
         }
     }
 
@@ -140,8 +153,15 @@ impl CastVotes {
             pool: VoteCount::zero(),
         };
 
-        for (_drep, (vote, stake)) in self.votes.iter() {
-            votes.drep.register_vote(vote, *stake);
+        for (key, (vote, stake)) in self.votes.iter() {
+            match key {
+                Voter::ConstitutionalCommitteeKey(_) |
+                Voter::ConstitutionalCommitteeScript(_) =>
+                    votes.committee.register_vote(vote, 1),
+                Voter::DRepKey(_) |
+                Voter::DRepScript(_) => votes.drep.register_vote(vote, *stake),
+                Voter::StakePoolKey(_) => votes.pool.register_vote(vote, *stake),
+            }
         }
 
         votes
@@ -458,12 +478,14 @@ impl ConwayVoting {
 
     /// Replaces {action_id} with first 8 characters of transaction_id in hex and
     /// action_id.action_index, and {epoch} with epoch number.
-    fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
+    /// The `epoch_to_compare` is the current epoch from Haskell node *at the moment of votes
+    /// calculation*. So, votes, computed during E, are done for Mark of E-2/E-1 border.
+    fn apply_votes_pattern(&self, action_id: &GovActionId, epoch_to_compare: u64) -> Option<String> {
         let pattern = self.verify_votes_files.as_ref()?;
         let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
         let act_id = format!("{tx_hash}_{}", action_id.action_index);
         let applied = pattern.replace("{action_id}", &act_id)
-            .replace("{epoch}", &new_epoch.to_string());
+            .replace("{epoch}", &epoch_to_compare.to_string());
         Some(applied)
     }
 
@@ -479,7 +501,10 @@ impl ConwayVoting {
     ) -> Result<Option<VotingOutcome>> {
         let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
 
-        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch) {
+        // Checking ratification for new_epoch-1/new_epoch transition.
+        // This computation is done in Haskell node at new_epoch-1 epoch, and related to
+        // new_epoch-3/new_epoch-2 mark.
+        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch-1) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
                 info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");

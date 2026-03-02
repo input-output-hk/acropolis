@@ -321,17 +321,51 @@ pub enum TxCertificate {
 
 impl TxCertificate {
     /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/conway/impl/src/Cardano/Ledger/Conway/TxCert.hs#L742
     pub fn get_script_cert_author(&self) -> Option<ScriptHash> {
         match self {
             // Deregistration requires witness from stake credential
             Self::StakeDeregistration(addr) => addr.credential.get_script_hash(),
             // Delegation requires witness from delegator
             Self::StakeDelegation(deleg) => deleg.stake_address.credential.get_script_hash(),
+            // New registration cert (only when deposit is not 0)
+            Self::Registration(reg) => {
+                if reg.deposit > 0 {
+                    reg.stake_address.credential.get_script_hash()
+                } else {
+                    None
+                }
+            }
+            // New deregistration cert
+            Self::Deregistration(dereg) => dereg.stake_address.credential.get_script_hash(),
+            // New deleg certs
+            Self::VoteDelegation(vote_deleg) => {
+                vote_deleg.stake_address.credential.get_script_hash()
+            }
+            Self::StakeAndVoteDelegation(stake_vote_deleg) => {
+                stake_vote_deleg.stake_address.credential.get_script_hash()
+            }
+            Self::StakeRegistrationAndDelegation(stake_reg_deleg) => {
+                stake_reg_deleg.stake_address.credential.get_script_hash()
+            }
+            Self::StakeRegistrationAndVoteDelegation(stake_vote_reg_deleg) => {
+                stake_vote_reg_deleg.stake_address.credential.get_script_hash()
+            }
+            Self::StakeRegistrationAndStakeAndVoteDelegation(stake_vote_reg_deleg) => {
+                stake_vote_reg_deleg.stake_address.credential.get_script_hash()
+            }
+            // New DRep Certs
+            Self::AuthCommitteeHot(auth) => auth.cold_credential.get_script_hash(),
+            Self::ResignCommitteeCold(resign) => resign.cold_credential.get_script_hash(),
+            Self::DRepRegistration(drep_reg) => drep_reg.credential.get_script_hash(),
+            Self::DRepDeregistration(drep_dereg) => drep_dereg.credential.get_script_hash(),
+            Self::DRepUpdate(drep_update) => drep_update.credential.get_script_hash(),
             _ => None,
         }
     }
 
     /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/TxCert.hs#L583
+    /// https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/conway/impl/src/Cardano/Ledger/Conway/TxCert.hs#L765
     pub fn get_vkey_cert_authors(&self) -> HashSet<KeyHash> {
         let mut vkey_hashes = HashSet::new();
         match self {
@@ -361,6 +395,80 @@ impl TxCertificate {
             // Genesis delegation requires witness from genesis key
             Self::GenesisKeyDelegation(gen_deleg) => {
                 vkey_hashes.insert(gen_deleg.genesis_hash);
+            }
+            // New registration cert (only when deposit is not 0)
+            Self::Registration(reg) => {
+                if reg.deposit > 0 {
+                    if let Some(vkey_hash) = reg.stake_address.credential.get_addr_key_hash() {
+                        vkey_hashes.insert(vkey_hash);
+                    }
+                }
+            }
+            // New deregistration cert
+            Self::Deregistration(dereg) => {
+                if let Some(vkey_hash) = dereg.stake_address.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            // New deleg certs
+            Self::VoteDelegation(vote_deleg) => {
+                if let Some(vkey_hash) = vote_deleg.stake_address.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::StakeAndVoteDelegation(stake_vote_deleg) => {
+                if let Some(vkey_hash) =
+                    stake_vote_deleg.stake_address.credential.get_addr_key_hash()
+                {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::StakeRegistrationAndDelegation(stake_reg_deleg) => {
+                if let Some(vkey_hash) =
+                    stake_reg_deleg.stake_address.credential.get_addr_key_hash()
+                {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::StakeRegistrationAndVoteDelegation(stake_vote_reg_deleg) => {
+                if let Some(vkey_hash) =
+                    stake_vote_reg_deleg.stake_address.credential.get_addr_key_hash()
+                {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::StakeRegistrationAndStakeAndVoteDelegation(stake_vote_reg_deleg) => {
+                if let Some(vkey_hash) =
+                    stake_vote_reg_deleg.stake_address.credential.get_addr_key_hash()
+                {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            // New DRep Certs
+            Self::AuthCommitteeHot(auth) => {
+                if let Some(vkey_hash) = auth.cold_credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::ResignCommitteeCold(resign) => {
+                if let Some(vkey_hash) = resign.cold_credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::DRepRegistration(drep_reg) => {
+                if let Some(vkey_hash) = drep_reg.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::DRepDeregistration(drep_dereg) => {
+                if let Some(vkey_hash) = drep_dereg.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
+            }
+            Self::DRepUpdate(drep_update) => {
+                if let Some(vkey_hash) = drep_update.credential.get_addr_key_hash() {
+                    vkey_hashes.insert(vkey_hash);
+                }
             }
             _ => {}
         }

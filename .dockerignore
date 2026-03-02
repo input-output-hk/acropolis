@@ -1,0 +1,37 @@
+# Ignore everything by default, then allow only what the omnibus build needs.
+**
+
+# Workspace sources and manifests needed for cargo build
+!Cargo.toml
+!Cargo.lock
+!common/**
+!codec/**
+!cardano/**
+!modules/**
+!processes/**
+
+# Keep Docker files in context
+!Dockerfile
+!.dockerignore
+
+# Re-ignore local/runtime-heavy paths inside allowed trees
+modules/mithril_snapshot_fetcher/downloads/**
+processes/omnibus/downloads/**
+processes/omnibus/cache/**
+processes/omnibus/fjall-*/**
+processes/omnibus/fjall*/**
+modules/snapshot_bootstrapper/data/**
+modules/accounts_state/test-data/**
+!modules/accounts_state/test-data/pots.mainnet.csv
+**/target/**
+**/db/**
+**/*.db
+**/*.sqlite
+**/fjall-*/**
+**/fjall*/**
+
+# Local tooling/metadata
+.git/**
+.idea/**
+.claude/**
+.DS_Store

@@ -247,7 +247,7 @@ impl SnapshotUTXOValue {
                 address,
                 value,
                 datum,
-                reference_script_hash: reference_script.and_then(|s| s.compute_hash()),
+                reference_script_hash: reference_script.map(|s| s.compute_hash()),
             })),
             _ => Err(minicbor::decode::Error::message(
                 "map-based TxOut missing required fields",

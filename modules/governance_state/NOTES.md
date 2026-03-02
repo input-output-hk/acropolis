@@ -277,6 +277,86 @@ At epoch E/E+1 border we have actual SPO for epoch E and DReps for epoch E-1.
 We count votes, cast during epoch E.
 We have ratification at E/E+1 border and publish results immediately.
 
+### Sources (Haskell node comments):
+
+We start from E/E+1 border: Mark snapshot of E/E+1 transition (Hyp: actual result of E).
+Done all E+1.
+At E+1/E+2 we have drep info, good for votes counting purposes
+We count votes during E+2 -- using E/E+1 Mark data as stake value.
+At E+2/E+3 we have either ratification or expiration.
+
+====> Ratify state is generated from DRep pulsing state result at new Epoch transition.
+(E+1/E+2)
+
+.../Rules/Epoch.hs
+
+EpochTransition rule:
+    ratifyState@RatifyState {rsEnactState, rsEnacted, rsExpired} =
+      extractDRepPulsingState pulsingState
+
+.../Governance/Interhal.hs
+
+====> Hypothesis: Ratify uses result of drep pulsing state. 
+      (1) Drep pulsing state is for Mark at E/E+1 border, available at E+1/E+2 border.
+      (2) E+1 governance actions are analyzed
+      (3) E+1/E+2 ratification is expected
+
+-- | `RatifyState` stores information about what will happen to the active
+-- governance actions at the next epoch boundary.
+data RatifyState era = RatifyState
+  { rsEnactState :: !(EnactState era)
+  -- ^ This is the currently active `EnactState`. It contains all the changes
+  -- that were applied to it at the last epoch boundary by all the proposals
+  -- that were enacted.
+  , -- TODO: switch rsEnacted to StrictSeq for the sake of avoiding
+    -- space leaks during ledger state deserialization
+    rsEnacted :: !(Seq (GovActionState era))
+  -- ^ Governance actions that are going to be enacted at the next epoch
+  -- boundary.
+  , rsExpired :: !(Set GovActionId)
+  -- ^ Governance actions that are going to be removed at the next epoch
+  -- boundary, either due to expiring or because they would become invalid
+  -- after another governance action gets enacted or expired before it
+  , rsDelayed :: !Bool
+  -- ^ This flag is set to true if one of the proposals that was ratified at the
+  -- last epoch boundary was a delaying action. This means that no other
+  -- proposals will be ratified this epoch and each active proposal that has not
+  -- become invalid will have its expiry date extended by one epoch.
+  --
+  -- This flag is reset at each epoch boundary before the `RATIFY` rule gets
+  -- called, but it might immediately be set to `True` again after the `RATIFY`
+  -- rule has finished execution.
+  }
+  deriving (Generic)
+
+
+=====> UMap is given to drep_pulser at E/E+1 border, 
+it is taken from Mark snapshot. This pulser computes necessary 
+data throughout the whole epoch E+1.
+
+.../Conway/Rules/Epoch.hs
+epochTransition:
+  stakePoolDistr = ssStakeMarkPoolDistr snapshots1
+  liftSTS $ setFreshDRepPulsingState eNo stakePoolDistr epochState2
+
+../Governance/DRepPulser.hs
+
+-- | The type of a Pulser which uses 'computeDRepDistr' as its underlying
+-- function. Note that we use two type equality (~) constraints to fix both
+-- the monad 'm' and the 'ans' type, to the context where we will use the
+-- type as a Pulser. The type DRepPulser must have 'm' and 'ans' as its last
+-- two parameters so we can make a Pulsable instance. We will always use this
+-- instantiation (DRepPulser era Identity (RatifyState era))
+data DRepPulser era (m :: Type -> Type) ans where
+  DRepPulser ::
+    forall era ans m.
+    (ans ~ RatifyState era, m ~ Identity, RunConwayRatify era) =>
+    { dpPulseSize :: !Int
+    -- ^ How many elements of 'dpUMap' to consume each pulse.
+    , dpUMap :: !UMap
+    -- ^ Snapshot containing the mapping of stake credentials to DReps, Pools and Rewards.
+    , dpIndex :: !Int
+
 ### Testing
 
 https://cexplorer.io/params

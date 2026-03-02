@@ -332,8 +332,9 @@ pub fn process_message(
     mut tracker: Option<&mut Tracker>,
 ) -> StakeAddressDeltasMessage {
     let mut grouped: HashMap<StakeAddress, StakeEntry> = HashMap::new();
+    let deltas = delta.as_compact_or_convert();
 
-    for d in delta.deltas.iter() {
+    for d in deltas.iter() {
         // Variants to be processed:
         // 1. Shelley Address delegation is a stake
         // 2. Shelley Address delegation is a pointer + target address is a stake
@@ -571,24 +572,30 @@ mod test {
             2498243,
         );
 
-        let delta = AddressDeltasMessage {
-            deltas: vec![
-                parse_addr("addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x")?,
-                parse_addr("addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh")?,
-                parse_addr("addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve")?,
-                parse_addr("addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g")?,
-                // type 4
-                parse_addr("addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k")?,
-                // types 6 and 7, should be ignored as enterprise (no-stake) addresses;
-                // placed between pointers to delimit positions of the ignored deltas.
-                parse_addr("addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8")?,
-                parse_addr("addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx")?,
-                // type 5
-                parse_addr("addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu")?,
-                parse_addr(stake_addr)?,
-                parse_addr(script_addr)?,
-            ]
-        };
+        let delta = AddressDeltasMessage::Deltas(vec![
+            parse_addr(
+                "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x",
+            )?,
+            parse_addr(
+                "addr1z8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gten0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgs9yc0hh",
+            )?,
+            parse_addr(
+                "addr1yx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerkr0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shs2z78ve",
+            )?,
+            parse_addr(
+                "addr1x8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gt7r0vd4msrxnuwnccdxlhdjar77j6lg0wypcc9uar5d2shskhj42g",
+            )?,
+            // type 4
+            parse_addr("addr1gx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer5pnz75xxcrzqf96k")?,
+            // types 6 and 7, should be ignored as enterprise (no-stake) addresses;
+            // placed between pointers to delimit positions of the ignored deltas.
+            parse_addr("addr1vx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzers66hrl8")?,
+            parse_addr("addr1w8phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtcyjy7wx")?,
+            // type 5
+            parse_addr("addr128phkx6acpnf78fuvxn0mkew3l0fd058hzquvz7w36x4gtupnz75xxcrtw79hu")?,
+            parse_addr(stake_addr)?,
+            parse_addr(script_addr)?,
+        ]);
 
         let block = BlockInfo {
             status: BlockStatus::Immutable,

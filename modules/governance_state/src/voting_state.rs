@@ -260,6 +260,8 @@ impl VotingRegistrationState {
 
         let total_yes = votes.drep.yes + non_voted.yes;
         let total_no = votes.drep.no + non_voted.no;
+        tracing::info!("DRep votes: yes {}, no {}, y+n {}", total_yes, total_no, total_yes + total_no);
+        tracing::info!("SPO votes: yes {}, registered {}, abstain {}", votes.pool.yes, self.registered_spos, votes.pool.abstain);
         let drep_ratio = Self::safe_rational(total_yes, total_yes + total_no)?;
 
         // SPO vote thresholds
@@ -267,6 +269,7 @@ impl VotingRegistrationState {
         let spo_ratio =
             Self::safe_rational(votes.pool.yes, self.registered_spos - votes.pool.abstain)?;
 
+        tracing::info!("Computed");
         Ok(VoteResult::<RationalNumber>::new(
             committee_ratio,
             drep_ratio,
