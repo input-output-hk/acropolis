@@ -103,43 +103,35 @@ impl DRepState {
         let mut subscription = match snapshot_subscription {
             Some(sub) => sub,
             None => {
-                info!("No snapshot subscription, skipping bootstrap");
                 return Ok(());
             }
         };
 
-        info!("Waiting for snapshot bootstrap messages...");
         loop {
             let Ok((_, message)) = subscription.read().await else {
-                info!("Snapshot subscription closed without receiving bootstrap");
                 break;
             };
 
             match message.as_ref() {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received Startup signal, awaiting bootstrap data...");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::DRepState(
                     drep_msg,
                 ))) => {
-                    info!(
-                        "Received bootstrap message with {} DReps for epoch {}",
-                        drep_msg.dreps.len(),
-                        drep_msg.epoch
-                    );
                     let block_number = drep_msg.block_number;
+                    let epoch = drep_msg.epoch;
+                    let drep_count = drep_msg.dreps.len();
                     // Snapshot bootstrap: protocol parameters not known yet.
                     let mut state = State::new(storage_config);
                     state.bootstrap(drep_msg);
-                    let drep_count = state.dreps.len();
                     history.lock().await.bootstrap_init_with(state, block_number);
                     info!(
-                        "Bootstrap complete - {} DReps committed to state",
-                        drep_count
+                        epoch,
+                        block_number,
+                        dreps = drep_count,
+                        "snapshot bootstrap loaded"
                     );
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting DRep state bootstrap loop");
                     return Ok(());
                 }
                 _ => (),

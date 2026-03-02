@@ -209,9 +209,7 @@ impl ParametersState {
                     };
 
                     match message.as_ref() {
-                        Message::Snapshot(SnapshotMessage::Startup) => {
-                            info!("ParameterState: Snapshot Startup message received");
-                        }
+                        Message::Snapshot(SnapshotMessage::Startup) => {}
                         Message::Snapshot(SnapshotMessage::Bootstrap(
                             SnapshotStateMessage::ParametersState(msg),
                         )) => {
@@ -220,11 +218,11 @@ impl ParametersState {
                                 let mut h = history.lock().await;
                                 h.get_or_init_with(|| State::new(network_name.clone()))
                             };
-                            info!("ParameterState: Snapshot Bootstrap message received");
                             match state.bootstrap(msg) {
                                 Ok(epoch) => {
                                     let mut h = history.lock().await;
                                     h.commit(epoch, state);
+                                    info!(epoch, "snapshot bootstrap loaded");
                                 }
                                 Err(e) => {
                                     panic!("ParametersState bootstrap failed: {e}");
@@ -232,7 +230,6 @@ impl ParametersState {
                             };
                         }
                         Message::Snapshot(SnapshotMessage::Complete) => {
-                            info!("Snapshot complete, exiting Parameters state bootstrap loop");
                             break; // done processing snapshot messages
                         }
                         // There will be other snapshot messages that we're not interested in

@@ -250,20 +250,16 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for ProtocolParamUpdate {
         let min_pool_cost = d.u32()? as u64;
         let lovelace_per_utxo_byte = d.u16()? as u64;
         let cost_models = if let Some(len) = d.map()? {
-            tracing::info!("cost_models map length = {}", len);
-
             let mut cost_models = CostModels {
                 plutus_v1: None,
                 plutus_v2: None,
                 plutus_v3: None,
             };
 
-            for i in 0..len {
+            for _ in 0..len {
                 let lang_id: u8 = d.decode()?;
-                tracing::info!("cost_model[{}] lang_id = {}", i, lang_id);
 
                 let array_len = d.array()?;
-                tracing::info!("cost_model[{}] array_len = {:?}", i, array_len);
 
                 let mut costs = Vec::new();
                 if array_len.is_none() {
@@ -294,6 +290,14 @@ impl<'b, C> minicbor::decode::Decode<'b, C> for ProtocolParamUpdate {
                     _ => unreachable!("unexpected language version: {}", lang_id),
                 }
             }
+
+            tracing::debug!(
+                entries = len,
+                has_plutus_v1 = cost_models.plutus_v1.is_some(),
+                has_plutus_v2 = cost_models.plutus_v2.is_some(),
+                has_plutus_v3 = cost_models.plutus_v3.is_some(),
+                "Decoded protocol cost models"
+            );
 
             Some(cost_models)
         } else {

@@ -63,10 +63,7 @@ impl BlockVrfValidator {
         // Initialize VRF validator state from snapshot data
         state.bootstrap(vrf_data)?;
 
-        info!(
-            "VRF state bootstrapped successfully for epoch {} with {} pools",
-            epoch, pools_len
-        );
+        info!(epoch, pools = pools_len, "snapshot bootstrap loaded");
 
         Ok(())
     }
@@ -76,29 +73,22 @@ impl BlockVrfValidator {
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        info!("Waiting for snapshot bootstrap messages...");
         loop {
             let (_, message) = snapshot_subscription.read().await?;
             let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
 
             match message {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting bootstrap data...");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
-                    info!("Received AccountsState bootstrap message");
-
                     let block_number = accounts_data.block_number;
                     let mut state = State::default();
 
                     Self::handle_bootstrap(&mut state, accounts_data)?;
                     history.lock().await.bootstrap_init_with(state, block_number);
-                    info!("VRF validator bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting VRF validator bootstrap loop");
                     return Ok(());
                 }
                 _ => {

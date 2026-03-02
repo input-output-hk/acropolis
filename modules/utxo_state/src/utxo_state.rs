@@ -349,7 +349,6 @@ impl UTXOState {
 
                     match message.as_ref() {
                         Message::Snapshot(SnapshotMessage::Startup) => {
-                            info!("UTXO state received Snapshot Startup message");
                             match snapshot_state {
                                 SnapshotState::Preparing => snapshot_state = SnapshotState::Started,
                                 _ => error!("Snapshot Startup message received but we have already left preparing state"),
@@ -362,12 +361,6 @@ impl UTXOState {
                             batch_count += 1;
                             total_utxos_received += batch_size as u64;
 
-                            if batch_count == 1 {
-                                info!("UTXO state received first UTxO batch with {} UTxOs", batch_size);
-                            } else if batch_count.is_multiple_of(100) {
-                                info!("UTXO state received {} batches, {} total UTxOs so far", batch_count, total_utxos_received);
-                            }
-
                             for (key, value) in &utxo_state.utxos {
                                 if store.add_utxo(*key, value.clone()).await.is_err() {
                                     error!("Failed to add snapshot utxo to state store");
@@ -375,7 +368,11 @@ impl UTXOState {
                             }
                         }
                         Message::Snapshot(SnapshotMessage::Complete) => {
-                            info!("UTXO state snapshot complete: {} UTxOs in {} batches", total_utxos_received, batch_count);
+                            info!(
+                                utxos = total_utxos_received,
+                                batches = batch_count,
+                                "snapshot bootstrap loaded"
+                            );
                             return;
                         }
                         _ => {}

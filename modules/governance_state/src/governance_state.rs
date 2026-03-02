@@ -135,18 +135,13 @@ impl GovernanceState {
         state: Arc<Mutex<State>>,
         mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        info!("Waiting for governance state snapshot bootstrap messages...");
-
         loop {
             let Ok((_, message)) = snapshot_subscription.read().await else {
-                info!("Snapshot subscription closed");
                 return Ok(());
             };
 
             match message.as_ref() {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Snapshot Startup message received");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::GovernanceState(gov_msg),
                 )) => {
@@ -159,14 +154,17 @@ impl GovernanceState {
                         .map(|p| p.gov_action_lifetime as u64)
                         .unwrap_or(6); // Default to 6 epochs if not set
 
+                    let proposals = gov_msg.proposals.len();
+                    let votes = gov_msg.votes.len();
+                    let committee_members =
+                        gov_msg.committee.as_ref().map(|c| c.members.len()).unwrap_or(0);
                     locked.get_conway_voting_mut().bootstrap_from_snapshot(gov_msg, voting_length);
                     info!(
-                        "Snapshot Bootstrap message received, {} proposals loaded",
-                        gov_msg.proposals.len()
+                        proposals,
+                        votes, committee_members, "snapshot bootstrap loaded"
                     );
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting bootstrap loop");
                     return Ok(());
                 }
                 _ => {}

@@ -90,11 +90,6 @@ impl State {
     /// Bootstrap state from snapshot data
     /// This initializes the epoch state with block production data from a snapshot
     pub fn bootstrap(&mut self, epoch_data: &EpochBootstrapMessage) {
-        info!(
-            "Bootstrapping state from snapshot for epoch {}",
-            epoch_data.epoch
-        );
-
         self.epoch = epoch_data.epoch;
         self.epoch_start_time = epoch_data.epoch_start_time;
         self.first_block_time = epoch_data.first_block_time;
@@ -109,11 +104,6 @@ impl State {
 
         self.nonces = Some(epoch_data.nonces.clone());
         self.praos_params = epoch_data.praos_params.clone();
-
-        info!(
-            "Bootstrapped epoch state: epoch={}, blocks={}",
-            self.epoch, self.epoch_blocks,
-        );
     }
 
     /// Handle protocol parameters updates

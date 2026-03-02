@@ -366,58 +366,13 @@ impl<C> minicbor::Encode<C> for DRep {
 ///
 /// This is converted to AccountState for the external API.
 #[derive(Debug)]
-struct LegacyAccount {
-    pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
-    pub pool: StrictMaybe<PoolId>,
-    pub drep: StrictMaybe<DRep>,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for LegacyAccount {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let len = d.array()?;
-        let rewards_and_deposit = d.decode_with(ctx)?;
-        let _pointers: SnapshotSet<(u64, u64, u64)> = d.decode_with(ctx)?;
-        let pool = d.decode_with(ctx)?;
-        let drep = d.decode_with(ctx)?;
-        skip_remaining_array_items(d, len, 4)?;
-        Ok(LegacyAccount {
-            rewards_and_deposit,
-            pool,
-            drep,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct ShelleyAccountStateCompat {
-    pub balance: Lovelace,
-    pub pool: StrictMaybe<PoolId>,
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for ShelleyAccountStateCompat {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let len = d.array()?;
-
-        // Shelley account state: [ptr, balance, deposit, stake_pool_delegation]
-        d.skip()?; // ptr
-        let balance = d.decode_with(ctx)?;
-        d.skip()?; // deposit
-        let pool = d.decode_with(ctx)?;
-
-        skip_remaining_array_items(d, len, 4)?;
-
-        Ok(Self { balance, pool })
-    }
-}
-
-#[derive(Debug)]
-struct ConwayAccountStateCompat {
+struct SnapshotAccountValue {
     pub balance: Lovelace,
     pub pool: StrictMaybe<PoolId>,
     pub drep: StrictMaybe<DRep>,
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for ConwayAccountStateCompat {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let len = d.array()?;
 
@@ -437,67 +392,13 @@ impl<'b, C> minicbor::Decode<'b, C> for ConwayAccountStateCompat {
     }
 }
 
-#[derive(Debug)]
-enum SnapshotAccountValue {
-    Legacy(LegacyAccount),
-    Shelley(ShelleyAccountStateCompat),
-    Conway(ConwayAccountStateCompat),
-}
-
 impl SnapshotAccountValue {
     fn to_normalized(&self) -> NormalizedAccount {
-        match self {
-            SnapshotAccountValue::Legacy(account) => {
-                let rewards = match &account.rewards_and_deposit {
-                    StrictMaybe::Just((reward, _deposit)) => *reward,
-                    StrictMaybe::Nothing => 0,
-                };
-                let delegated_spo = strict_maybe_copy(&account.pool);
-                let delegated_drep = strict_maybe_cloned(&account.drep).map(drep_to_choice);
-
-                NormalizedAccount {
-                    rewards,
-                    delegated_spo,
-                    delegated_drep,
-                }
-            }
-            SnapshotAccountValue::Shelley(account) => NormalizedAccount {
-                rewards: account.balance,
-                delegated_spo: strict_maybe_copy(&account.pool),
-                delegated_drep: None,
-            },
-            SnapshotAccountValue::Conway(account) => NormalizedAccount {
-                rewards: account.balance,
-                delegated_spo: strict_maybe_copy(&account.pool),
-                delegated_drep: strict_maybe_cloned(&account.drep).map(drep_to_choice),
-            },
+        NormalizedAccount {
+            rewards: self.balance,
+            delegated_spo: strict_maybe_copy(&self.pool),
+            delegated_drep: strict_maybe_cloned(&self.drep).map(drep_to_choice),
         }
-    }
-}
-
-impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
-    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let mut conway_decoder = d.clone();
-        if let Ok(account) = ConwayAccountStateCompat::decode(&mut conway_decoder, ctx) {
-            d.set_position(conway_decoder.position());
-            return Ok(Self::Conway(account));
-        }
-
-        let mut shelley_decoder = d.clone();
-        if let Ok(account) = ShelleyAccountStateCompat::decode(&mut shelley_decoder, ctx) {
-            d.set_position(shelley_decoder.position());
-            return Ok(Self::Shelley(account));
-        }
-
-        let mut legacy_decoder = d.clone();
-        if let Ok(account) = LegacyAccount::decode(&mut legacy_decoder, ctx) {
-            d.set_position(legacy_decoder.position());
-            return Ok(Self::Legacy(account));
-        }
-
-        Err(minicbor::decode::Error::message(
-            "Failed to decode account value as Conway/Shelley/legacy account",
-        ))
     }
 }
 
@@ -1181,6 +1082,17 @@ impl StreamingSnapshotParser {
         }
     }
 
+    fn progress_bar(progress_pct: f64) -> String {
+        let width = 20usize;
+        let filled = ((progress_pct.clamp(0.0, 100.0) / 100.0) * width as f64).round() as usize;
+        let filled = filled.min(width);
+        format!("[{}{}]", "=".repeat(filled), " ".repeat(width - filled))
+    }
+
+    fn bytes_to_mb(bytes: u64) -> f64 {
+        bytes as f64 / 1024.0 / 1024.0
+    }
+
     /// Create a new streaming parser for the given snapshot file
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
@@ -1280,7 +1192,7 @@ impl StreamingSnapshotParser {
 
             // Extract epoch number [0]
             let epoch = decoder.u64().context("Failed to parse epoch number")?;
-            info!("Parsing snapshot for epoch {}", epoch);
+            info!(epoch, snapshot = %self.file_path);
 
             // Parse blocks_previous_epoch [1] and blocks_current_epoch [2]
             let blocks_previous_epoch =
@@ -1405,12 +1317,6 @@ impl StreamingSnapshotParser {
                 }
             }
 
-            // Log instant rewards deltas
-            info!(
-                "Instant rewards deltas: delta_treasury={}, delta_reserves={}",
-                instant_rewards_result.delta_treasury, instant_rewards_result.delta_reserves
-            );
-
             // Convert to AccountState for API, combining regular rewards with instant rewards
             let accounts: Vec<AccountState> = accounts_map
                 .into_iter()
@@ -1488,28 +1394,29 @@ impl StreamingSnapshotParser {
             utxo_file_path.display()
         ))?;
 
+        let position_after_utxos = utxo_file_position + utxo_placeholder_bytes;
+        let snapshot_file_size = snapshot_file.metadata()?.len();
+        let nes_remainder_bytes = snapshot_file_size.saturating_sub(position_after_utxos);
+        let utxo_sidecar_total_bytes = utxo_file.metadata()?.len();
+        let total_progress_bytes =
+            utxo_sidecar_total_bytes.saturating_add(nes_remainder_bytes).max(1);
+
+        info!(snapshot = %snapshot_path.display(), utxo_sidecar = %utxo_file_path.display());
         info!(
-            snapshot = %snapshot_path.display(),
-            utxo_sidecar = %utxo_file_path.display(),
-            utxo_placeholder_bytes,
-            "Using split snapshot sources"
+            phase = "start",
+            progress_pct = 0.0,
+            progress_bar = %Self::progress_bar(0.0),
+            loaded_mb = 0.0,
+            total_mb = Self::bytes_to_mb(total_progress_bytes)
         );
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(0))?;
         let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
-            Self::stream_utxos(&mut utxo_file, callbacks)
+            Self::stream_utxos(&mut utxo_file, callbacks, total_progress_bytes, 0)
                 .context("Failed to stream UTXOs with true streaming")?;
 
-        let position_after_utxos = utxo_file_position + utxo_placeholder_bytes;
         snapshot_file.seek(SeekFrom::Start(position_after_utxos))?;
-
-        info!(
-            utxos_streamed = utxo_count,
-            utxo_sidecar_bytes = bytes_consumed_from_file,
-            snapshot_resume_offset = position_after_utxos,
-            "UTxO streaming complete"
-        );
 
         // ========================================================================
         // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
@@ -1535,23 +1442,24 @@ impl StreamingSnapshotParser {
         // ========================================================================
 
         // Calculate remaining file size from current position
-        let current_file_size = snapshot_file.metadata()?.len();
-        let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
-
-        info!(
-            snapshot_resume_offset = position_after_utxos,
-            remainder_mb = remaining_bytes as f64 / 1024.0 / 1024.0,
-            "Loading NES remainder"
-        );
+        let remaining_bytes = nes_remainder_bytes;
 
         // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
         snapshot_file.read_to_end(&mut remainder_buffer)?;
-
+        let loaded_bytes = utxo_sidecar_total_bytes.saturating_add(remainder_buffer.len() as u64);
+        let progress_pct =
+            (loaded_bytes as f64 / total_progress_bytes as f64 * 100.0).clamp(0.0, 100.0);
+        let progress_pct = (progress_pct * 10.0).round() / 10.0;
         info!(
-            remainder_mb = remainder_buffer.len() as f64 / 1024.0 / 1024.0,
-            "Loaded NES remainder"
+            phase = "nes_remainder_loaded",
+            progress_pct,
+            progress_bar = %Self::progress_bar(progress_pct),
+            loaded_mb = Self::bytes_to_mb(loaded_bytes),
+            total_mb = Self::bytes_to_mb(total_progress_bytes)
         );
+
+        let remainder_mb = remainder_buffer.len() as f64 / 1024.0 / 1024.0;
 
         // Create decoder for the remainder buffer
         let mut remainder_decoder = Decoder::new(&remainder_buffer);
@@ -1572,11 +1480,8 @@ impl StreamingSnapshotParser {
         let governance_state = super::governance::parse_gov_state(&mut remainder_decoder, epoch)
             .context("Failed to parse governance state")?;
 
-        info!(
-            governance_proposals = governance_state.proposals.len(),
-            governance_votes = governance_state.votes.len(),
-            "Parsed governance state"
-        );
+        let governance_proposals_count = governance_state.proposals.len();
+        let governance_votes_count = governance_state.votes.len();
 
         // Emit governance protocol parameters callback
         callbacks.on_gs_protocol_parameters(
@@ -1593,8 +1498,6 @@ impl StreamingSnapshotParser {
             governance_state.proposals.iter().map(|p| p.proposal_procedure.deposit).sum();
         let enacted_proposal_deposits: u64 =
             governance_state.enacted_actions.iter().map(|p| p.proposal_procedure.deposit).sum();
-        let enacted_proposal_count = governance_state.enacted_actions.len();
-        let expired_proposal_count = governance_state.expired_action_ids.len();
 
         // Subtract pending and enacted governance proposal deposits from us_deposited
         // The snapshot's us_deposited includes these, but they shouldn't be in our deposits pot
@@ -1602,24 +1505,8 @@ impl StreamingSnapshotParser {
         let governance_deposits = pending_proposal_deposits + enacted_proposal_deposits;
         let deposits = deposits.saturating_sub(governance_deposits);
 
-        if governance_deposits > 0 {
-            info!(
-                "Governance proposal deposits: {} pending ({} ADA) + {} enacted ({} ADA) = {} ADA (subtracted from us_deposited)",
-                governance_state.proposals.len(),
-                pending_proposal_deposits / 1_000_000,
-                enacted_proposal_count,
-                enacted_proposal_deposits / 1_000_000,
-                governance_deposits / 1_000_000
-            );
-        }
-
-        info!(
-            "Governance state: enacted={}, expired={} proposals",
-            enacted_proposal_count, expired_proposal_count,
-        );
-
         // Extract pool deposit from protocol parameters before consuming governance_state
-        let stake_pool_deposit = match governance_state.protocol_params.pool_deposit {
+        let _stake_pool_deposit = match governance_state.protocol_params.pool_deposit {
             Some(deposit) => deposit,
             None => {
                 return Err(anyhow::anyhow!(
@@ -1637,9 +1524,6 @@ impl StreamingSnapshotParser {
         // Epoch State / Ledger State / UTxO State / utxosDonation
         // Treasury donations accumulate during epoch and are added to treasury at epoch boundary
         let donations: u64 = remainder_decoder.decode().unwrap_or(0);
-        if donations > 0 {
-            info!("Treasury donations: {} ADA", donations / 1_000_000);
-        }
 
         // Parse mark/set snapshots (EpochState[2])
         let snapshots_result =
@@ -1658,25 +1542,13 @@ impl StreamingSnapshotParser {
         let blocks_curr_map: std::collections::HashMap<PoolId, usize> =
             blocks_current_epoch.iter().map(|p| (p.pool_id, p.block_count as usize)).collect();
 
-        // Log the deltas from pulsing_rew_update (applied during bootstrap to adjust pots)
-        info!(
-            "Pulsing reward update deltas: delta_treasury={}, delta_reserves={}",
-            pulsing_result.delta_treasury, pulsing_result.delta_reserves
-        );
-
         let raw_snapshots = snapshots_result.context("Failed to parse mark/set snapshots")?;
-        info!("Successfully parsed mark/set snapshots!");
         let fees_prev_epoch = raw_snapshots.fees;
         let bootstrap_snapshots = raw_snapshots.into_snapshots_container(
             epoch,
             &blocks_prev_map,
             &blocks_curr_map,
             network.clone(),
-        );
-        info!(
-            "Parsed snapshots: Mark {} SPOs, Set {} SPOs",
-            bootstrap_snapshots.mark.spos.len(),
-            bootstrap_snapshots.set.spos.len(),
         );
         callbacks.on_snapshots(bootstrap_snapshots.clone())?;
 
@@ -1689,83 +1561,91 @@ impl StreamingSnapshotParser {
             .map(|(pool_id, _)| *pool_id)
             .collect();
 
-        info!(
-            "Pools: {} registered, {} retiring, {} DReps",
-            pool_registrations.len(),
-            retiring_pools.len(),
-            dreps.len()
-        );
-
         // Convert DRepInfo to (credential, deposit) tuples
         let drep_deposits: Vec<(DRepCredential, u64)> =
             dreps.iter().map(|(cred, record)| (cred.clone(), record.deposit)).collect();
 
         // Calculate total DRep deposits
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
-        let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
         // Subtract DRep deposits from us_deposited
         // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
         let deposits = deposits.saturating_sub(total_drep_deposits);
 
-        info!(
-            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
-            deposits / 1_000_000,
-            total_drep_deposits / 1_000_000,
-            total_pool_deposits / 1_000_000,
-            pool_registrations.len(),
-            drep_deposits.len()
-        );
-
-        // Merge UTXO values and pulsing reward update rewards into accounts
-        // The pulsing_rew_update contains rewards calculated during the current epoch that need to be
-        // added to DState rewards (accumulated rewards from previous epochs).
-        let mut pulsing_rewards_total: u64 = 0;
-
-        let mut accounts_with_utxo_values: Vec<AccountState> = accounts
-            .into_iter()
-            .map(|mut account| {
-                if let Some(&utxo_value) = stake_utxo_values.get(&account.stake_address.credential)
-                {
-                    account.address_state.utxo_value = utxo_value;
-                }
-                if let Some(&pulsing_reward) =
-                    pulsing_result.rewards.get(&account.stake_address.credential)
-                {
-                    account.address_state.rewards += pulsing_reward;
-                    pulsing_rewards_total += pulsing_reward;
-                }
-                account
-            })
-            .collect();
-
-        // Add accounts for stake addresses that have UTXOs but aren't registered in DState
-        // These are addresses that received funds but were never registered for staking
+        // Merge UTXO values and reward updates into accounts.
+        // Keep unregistered accounts if they carry UTxO or reward balances so
+        // withdrawals and stake deltas can resolve those credentials after bootstrap.
         let registered_credentials: std::collections::HashSet<_> =
-            accounts_with_utxo_values.iter().map(|a| a.stake_address.credential.clone()).collect();
+            accounts.iter().map(|a| a.stake_address.credential.clone()).collect();
 
-        let unregistered_accounts: Vec<_> = stake_utxo_values
-            .iter()
-            .filter(|(credential, _)| !registered_credentials.contains(credential))
-            .map(|(credential, &utxo_value)| AccountState {
-                stake_address: StakeAddress::new(credential.clone(), network.clone()),
-                address_state: StakeAddressState {
-                    registered: false,
-                    utxo_value,
-                    rewards: 0,
-                    delegated_spo: None,
-                    delegated_drep: None,
-                },
-            })
-            .collect();
+        let mut accounts_by_credential: std::collections::HashMap<StakeCredential, AccountState> =
+            accounts
+                .into_iter()
+                .map(|account| (account.stake_address.credential.clone(), account))
+                .collect();
 
-        if !unregistered_accounts.is_empty() {
-            info!(
-                "Added {} unregistered stake addresses with UTXOs to bootstrap",
-                unregistered_accounts.len()
-            );
+        for (credential, &utxo_value) in &stake_utxo_values {
+            let entry =
+                accounts_by_credential.entry(credential.clone()).or_insert_with(|| AccountState {
+                    stake_address: StakeAddress::new(credential.clone(), network.clone()),
+                    address_state: StakeAddressState {
+                        registered: false,
+                        utxo_value: 0,
+                        rewards: 0,
+                        delegated_spo: None,
+                        delegated_drep: None,
+                    },
+                });
+            entry.address_state.utxo_value = utxo_value;
         }
-        accounts_with_utxo_values.extend(unregistered_accounts);
+
+        for (credential, &pulsing_reward) in &pulsing_result.rewards {
+            let entry =
+                accounts_by_credential.entry(credential.clone()).or_insert_with(|| AccountState {
+                    stake_address: StakeAddress::new(credential.clone(), network.clone()),
+                    address_state: StakeAddressState {
+                        registered: false,
+                        utxo_value: 0,
+                        rewards: 0,
+                        delegated_spo: None,
+                        delegated_drep: None,
+                    },
+                });
+            entry.address_state.rewards =
+                entry.address_state.rewards.saturating_add(pulsing_reward);
+        }
+
+        // Registered DState accounts already include MIR rewards from instant_rewards_result.
+        // Only add MIR rewards here for credentials absent from DState.
+        for (credential, &mir_reward) in &instant_rewards_result.rewards {
+            if registered_credentials.contains(credential) {
+                continue;
+            }
+
+            let entry =
+                accounts_by_credential.entry(credential.clone()).or_insert_with(|| AccountState {
+                    stake_address: StakeAddress::new(credential.clone(), network.clone()),
+                    address_state: StakeAddressState {
+                        registered: false,
+                        utxo_value: 0,
+                        rewards: 0,
+                        delegated_spo: None,
+                        delegated_drep: None,
+                    },
+                });
+            entry.address_state.rewards = entry.address_state.rewards.saturating_add(mir_reward);
+        }
+
+        let pulsing_rewards_total: u64 = pulsing_result.rewards.values().sum();
+        let unregistered_accounts =
+            accounts_by_credential.values().filter(|a| !a.address_state.registered).count();
+        let reward_only_accounts = accounts_by_credential
+            .values()
+            .filter(|a| !a.address_state.registered && a.address_state.utxo_value == 0)
+            .count();
+
+        let accounts_with_utxo_values: Vec<AccountState> =
+            accounts_by_credential.into_values().collect();
 
         // Calculate summary statistics
         let total_utxo_value: u64 = stake_utxo_values.values().sum();
@@ -1776,52 +1656,6 @@ impl StreamingSnapshotParser {
             .filter(|a| a.address_state.delegated_spo.is_some())
             .count();
 
-        info!(
-            "Accounts: {} total, {} delegated, {} ADA in UTXOs, {} ADA rewards ({} ADA from pulsing update)",
-            accounts_with_utxo_values.len(),
-            delegated_count,
-            total_utxo_value / 1_000_000,
-            total_rewards / 1_000_000,
-            pulsing_rewards_total / 1_000_000
-        );
-
-        // Calculate deposit refunds for deregistered accounts with pending rewards
-        // When rewards are paid to a deregistered account:
-        // 1. The reward goes to treasury instead
-        // 2. Their stake key deposit is refunded (reducing total deposits)
-        let mut unclaimed_rewards: u64 = 0;
-        let mut deregistered_with_rewards: u64 = 0;
-
-        // Check pulsing rewards for deregistered accounts
-        for (credential, &reward) in &pulsing_result.rewards {
-            if !registered_credentials.contains(credential) {
-                unclaimed_rewards += reward;
-                deregistered_with_rewards += 1;
-            }
-        }
-
-        // Also check instant rewards (MIRs) for deregistered accounts
-        for (credential, &reward) in &instant_rewards_result.rewards {
-            if !registered_credentials.contains(credential) {
-                unclaimed_rewards += reward;
-                // Only count unique deregistered accounts (avoid double counting)
-                if !pulsing_result.rewards.contains_key(credential) {
-                    deregistered_with_rewards += 1;
-                }
-            }
-        }
-
-        // Note: Stake key deposit refunds happen immediately when the deregistration tx is processed,
-        // not at epoch boundary. The snapshot's us_deposited already reflects these refunds.
-        // We only track deregistered_with_rewards for the unclaimed rewards -> treasury calculation.
-        if deregistered_with_rewards > 0 {
-            info!(
-                "Deregistered accounts with rewards: {} accounts, {} ADA unclaimed rewards -> treasury",
-                deregistered_with_rewards,
-                unclaimed_rewards / 1_000_000
-            );
-        }
-
         // Calculate governance proposal deposit refunds for enacted proposals
         // We use enacted_proposal_deposits which was calculated earlier by summing each proposal's
         // actual deposit field. For expired proposals, we only have IDs (no deposit amounts),
@@ -1829,25 +1663,12 @@ impl StreamingSnapshotParser {
         // should be tracked when proposals are processed, not at epoch boundary.
         let gov_deposit_refunds = enacted_proposal_deposits;
 
-        if enacted_proposal_count > 0 || expired_proposal_count > 0 {
-            info!(
-                "Governance deposit refunds: {} enacted ({} ADA), {} expired (not included - IDs only)",
-                enacted_proposal_count,
-                gov_deposit_refunds / 1_000_000,
-                expired_proposal_count
-            );
-        }
-
         let total_deposit_refunds = gov_deposit_refunds;
 
-        // Combine pot deltas from pulsing_rew_update and instant_rewards
-        // Plus adjustments for deregistered accounts with pending rewards
-        // Plus governance proposal deposit refunds
-        // Plus treasury donations
+        // Combine pot deltas from pulsing_rew_update and instant_rewards,
+        // plus governance proposal deposit refunds and treasury donations.
         //
         // Use checked arithmetic to detect overflow
-        let unclaimed_rewards_i64 =
-            i64::try_from(unclaimed_rewards).expect("unclaimed_rewards exceeds i64::MAX");
         let donations_i64 = i64::try_from(donations).expect("donations exceeds i64::MAX");
         let total_deposit_refunds_i64 =
             i64::try_from(total_deposit_refunds).expect("total_deposit_refunds exceeds i64::MAX");
@@ -1855,7 +1676,6 @@ impl StreamingSnapshotParser {
         let delta_treasury = pulsing_result
             .delta_treasury
             .checked_add(instant_rewards_result.delta_treasury)
-            .and_then(|v| v.checked_add(unclaimed_rewards_i64))
             .and_then(|v| v.checked_add(donations_i64))
             .expect("overflow computing delta_treasury");
 
@@ -1872,16 +1692,28 @@ impl StreamingSnapshotParser {
             delta_deposits,
         };
 
+        // Build the accounts bootstrap data
+        let pools_total = pool_registrations.len();
+        let dreps_total = drep_deposits.len();
+        let accounts_total = accounts_with_utxo_values.len();
         info!(
-            "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (gov={})",
-            pot_deltas.delta_treasury,
-            donations,
-            pot_deltas.delta_reserves,
-            pot_deltas.delta_deposits,
-            gov_deposit_refunds
+            epoch,
+            utxos = utxo_count,
+            utxo_sidecar_bytes = bytes_consumed_from_file,
+            pools = pools_total,
+            dreps = dreps_total,
+            accounts = accounts_total,
+            delegated_accounts = delegated_count,
+            utxo_ada = total_utxo_value / 1_000_000,
+            rewards_ada = total_rewards / 1_000_000,
+            pulsing_rewards_ada = pulsing_rewards_total / 1_000_000,
+            governance_proposals = governance_proposals_count,
+            governance_votes = governance_votes_count,
+            remainder_mb = remainder_mb,
+            unregistered_accounts,
+            reward_only_accounts
         );
 
-        // Build the accounts bootstrap data
         let accounts_bootstrap_data = AccountsBootstrapData {
             epoch,
             accounts: accounts_with_utxo_values,
@@ -1927,10 +1759,20 @@ impl StreamingSnapshotParser {
         callbacks.on_metadata(snapshot_metadata)?;
 
         info!(
-            "Snapshot parsing complete: treasury {} ADA, reserves {} ADA, deposits {} ADA",
-            treasury / 1_000_000,
-            reserves / 1_000_000,
-            deposits / 1_000_000
+            epoch,
+            treasury_ada = treasury / 1_000_000,
+            reserves_ada = reserves / 1_000_000,
+            deposits_ada = deposits / 1_000_000,
+            pending_deposits_ada = pending_proposal_deposits / 1_000_000,
+            enacted_deposits_ada = enacted_proposal_deposits / 1_000_000,
+            donations_ada = donations / 1_000_000
+        );
+        info!(
+            phase = "complete",
+            progress_pct = 100.0,
+            progress_bar = %Self::progress_bar(100.0),
+            loaded_mb = Self::bytes_to_mb(total_progress_bytes),
+            total_mb = Self::bytes_to_mb(total_progress_bytes)
         );
 
         callbacks.on_complete()?;
@@ -1947,6 +1789,8 @@ impl StreamingSnapshotParser {
     fn stream_utxos<C: UtxoCallback>(
         file: &mut File,
         callbacks: &mut C,
+        total_progress_bytes: u64,
+        progress_offset_bytes: u64,
     ) -> Result<(u64, u64, HashMap<StakeCredential, u64>)> {
         // OPTIMIZED: Balance between memory usage and performance
         // Based on experiment: avg=194 bytes, max=22KB per entry
@@ -2035,11 +1879,19 @@ impl StreamingSnapshotParser {
 
                         // Progress reporting - less frequent for better performance
                         if utxo_count.is_multiple_of(1000000) {
+                            let global_bytes =
+                                progress_offset_bytes.saturating_add(total_bytes_read_from_file);
+                            let progress_pct = (global_bytes as f64 / total_progress_bytes as f64
+                                * 100.0)
+                                .clamp(0.0, 100.0);
+                            let progress_pct = (progress_pct * 10.0).round() / 10.0;
                             info!(
+                                phase = "utxo_stream",
                                 utxos_streamed = utxo_count,
-                                buffer_mb = buffer.len() / 1024 / 1024,
-                                max_entry_bytes = max_single_entry_size,
-                                "UTxO stream progress"
+                                progress_pct,
+                                progress_bar = %Self::progress_bar(progress_pct),
+                                loaded_mb = Self::bytes_to_mb(global_bytes),
+                                total_mb = Self::bytes_to_mb(total_progress_bytes)
                             );
                         }
 
@@ -2097,8 +1949,7 @@ impl StreamingSnapshotParser {
             utxos_processed = utxo_count,
             streamed_mb = total_bytes_processed as f64 / 1024.0 / 1024.0,
             peak_buffer_mb = PARSE_BUFFER_SIZE / 1024 / 1024,
-            largest_entry_bytes = max_single_entry_size,
-            "UTxO stream summary"
+            largest_entry_bytes = max_single_entry_size
         );
 
         // After successfully parsing all UTXOs, we need to consume the break token
@@ -2107,7 +1958,6 @@ impl StreamingSnapshotParser {
             let mut decoder = Decoder::new(&buffer);
             match decoder.datatype() {
                 Ok(Type::Break) => {
-                    info!("Consuming trailing UTxO map break token");
                     decoder.skip()?; // Consume the break that ends the UTXO map
 
                     // Update our tracking to account for the consumed break token
@@ -2116,10 +1966,9 @@ impl StreamingSnapshotParser {
                 }
                 Ok(_) => {
                     // No break token, this is a definite-length map - continue normal parsing
-                    info!("UTxO map has no trailing break token");
                 }
                 Err(e) => {
-                    info!(error = %e, "Unable to inspect trailing UTxO token");
+                    error!(error = %e, "Unable to inspect trailing UTxO token");
                 }
             }
         }
@@ -2175,19 +2024,14 @@ impl StreamingSnapshotParser {
                     }
                 } else {
                     // Indefinite-length array
-                    info!("Processing indefinite-length blocks array");
-                    let mut count = 0;
                     loop {
                         match decoder.datatype()? {
                             Type::Break => {
                                 decoder.skip()?;
-                                info!("Found array break after {} entries", count);
                                 break;
                             }
-                            entry_type => {
-                                info!("  Block #{}: {:?}", count + 1, entry_type);
+                            _ => {
                                 decoder.skip().context("Failed to skip block entry")?;
-                                count += 1;
                             }
                         }
                     }
@@ -2247,20 +2091,16 @@ impl StreamingSnapshotParser {
                 // Try to get more details about simple types
                 match simple_type {
                     Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
-                        let value = decoder.u64().context("Failed to read block integer value")?;
-                        info!("Block data is integer: {}", value);
+                        decoder.u64().context("Failed to read block integer value")?;
                     }
                     Type::Bytes => {
-                        let bytes = decoder.bytes().context("Failed to read block bytes")?;
-                        info!("Block data is {} bytes", bytes.len());
+                        decoder.bytes().context("Failed to read block bytes")?;
                     }
                     Type::String => {
-                        let text = decoder.str().context("Failed to read block text")?;
-                        info!("Block data is text: '{}'", text);
+                        decoder.str().context("Failed to read block text")?;
                     }
                     Type::Null => {
                         decoder.skip()?;
-                        info!("Block data is null");
                     }
                     _ => {
                         decoder.skip().context("Failed to skip blocks value")?;
@@ -2350,12 +2190,6 @@ impl StreamingSnapshotParser {
                     .iter()
                     .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
                     .collect();
-                // delta_r1 is the reserves decrease, delta_t1 is the treasury increase
-                // Both are positive values in RewardSnapshot
-                info!(
-                    "Pulsing reward snapshot: delta_r1={}, delta_t1={}, r={}",
-                    snapshot.delta_r1, snapshot.delta_t1, snapshot.r
-                );
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: snapshot.delta_t1 as i64,
@@ -2370,12 +2204,6 @@ impl StreamingSnapshotParser {
                     .iter()
                     .map(|(cred, rewards)| (cred.clone(), rewards.iter().map(|r| r.amount).sum()))
                     .collect();
-                // In RewardUpdate: invert_dr and invert_df are stored inverted
-                // We need to negate them to get actual deltas
-                info!(
-                    "Complete reward update: delta_treasury={}, delta_reserves(inverted)={}, delta_fees(inverted)={}",
-                    update.delta_treasury, update.delta_reserves, update.delta_fees
-                );
                 PulsingRewardResult {
                     rewards,
                     delta_treasury: update.delta_treasury,
@@ -2452,27 +2280,16 @@ impl StreamingSnapshotParser {
                 error!(
                     map = map_name,
                     byte_offset = decoder.position(),
-                    error = %err,
-                    "Failed to decode accounts map"
+                    error = %err
                 );
                 err
             })
             .context(format!("Failed to decode {map_name}"))?;
 
-        let entry_count = decoded.len();
-        let normalized = decoded
+        Ok(decoded
             .into_iter()
             .map(|(credential, value)| (credential, value.to_normalized()))
-            .collect();
-
-        info!(
-            map = map_name,
-            entries = entry_count,
-            byte_offset = decoder.position(),
-            "Decoded accounts map"
-        );
-
-        Ok(normalized)
+            .collect())
     }
 
     fn parse_dstate_accounts_map(
@@ -2484,94 +2301,14 @@ impl StreamingSnapshotParser {
             .datatype()
             .with_context(|| format!("Failed to inspect datatype for {map_name}"))?
         {
-            Type::Map | Type::MapIndef => {
-                info!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    "Detected direct accounts map in DState"
-                );
-                Self::decode_account_state_map(decoder, ctx, map_name)
-            }
-            Type::Array | Type::ArrayIndef => {
-                info!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    "Detected array container for DState accounts"
-                );
-
-                let container_len = decoder
-                    .array()
-                    .with_context(|| format!("Failed to parse array container for {map_name}"))?;
-
-                let nested_map_name = format!("{map_name}[0]");
-                let accounts_map =
-                    Self::decode_account_state_map(decoder, ctx, nested_map_name.as_str())?;
-
-                match container_len {
-                    Some(len) => {
-                        for i in 1..len {
-                            decoder.skip().with_context(|| {
-                                format!("Failed to skip {map_name}[{i}] in array container")
-                            })?;
-                        }
-                    }
-                    None => loop {
-                        match decoder.datatype()? {
-                            Type::Break => {
-                                decoder.skip()?;
-                                break;
-                            }
-                            _ => {
-                                decoder.skip().with_context(|| {
-                                    format!("Failed to skip additional element in {map_name}")
-                                })?;
-                            }
-                        }
-                    },
-                }
-
-                Ok(accounts_map)
-            }
+            Type::Map | Type::MapIndef => Self::decode_account_state_map(decoder, ctx, map_name),
             other => Err(anyhow!(
-                "Unexpected {map_name} datatype: expected map/array, got {other:?}"
+                "Unexpected {map_name} datatype: expected map, got {other:?}"
             )),
         }
     }
 
-    fn parse_pool_params_map_with_operator(
-        decoder: &mut Decoder,
-        ctx: &mut SnapshotContext,
-        map_name: &str,
-    ) -> Result<BTreeMap<PoolId, PoolRegistration>> {
-        if matches!(decoder.datatype()?, Type::Tag) {
-            decoder.tag()?;
-        }
-
-        let map: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder
-            .decode_with(ctx)
-            .map_err(|err| {
-                error!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    error = %err,
-                    "Failed to decode pool params map"
-                );
-                err
-            })
-            .context(format!("Failed to decode {map_name}"))?;
-
-        let entry_count = map.len();
-        info!(
-            map = map_name,
-            entries = entry_count,
-            byte_offset = decoder.position(),
-            "Decoded pool params map with operator"
-        );
-
-        Ok(map.into_iter().map(|(pool_id, pool)| (pool_id, pool.0)).collect())
-    }
-
-    fn parse_pool_params_map_without_operator(
+    fn parse_pool_params_map(
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
         map_name: &str,
@@ -2586,20 +2323,11 @@ impl StreamingSnapshotParser {
                 error!(
                     map = map_name,
                     byte_offset = decoder.position(),
-                    error = %err,
-                    "Failed to decode pool params map without operator"
+                    error = %err
                 );
                 err
             })
             .context(format!("Failed to decode {map_name}"))?;
-
-        let entry_count = map.len();
-        info!(
-            map = map_name,
-            entries = entry_count,
-            byte_offset = decoder.position(),
-            "Decoded pool params map without operator"
-        );
 
         Ok(map
             .into_iter()
@@ -2609,115 +2337,6 @@ impl StreamingSnapshotParser {
                 (pool_id, pool_registration)
             })
             .collect())
-    }
-
-    fn parse_pool_params_map_with_optional_operator(
-        decoder: &mut Decoder,
-        ctx: &mut SnapshotContext,
-        map_name: &str,
-    ) -> Result<BTreeMap<PoolId, PoolRegistration>> {
-        match Self::inspect_pool_params_operator_layout(decoder, map_name)? {
-            Some(true) => {
-                info!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    "Detected operator-in-value pool params map layout"
-                );
-                Self::parse_pool_params_map_with_operator(decoder, ctx, map_name)
-            }
-            Some(false) => {
-                info!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    "Detected operator-in-key pool params map layout"
-                );
-                Self::parse_pool_params_map_without_operator(decoder, ctx, map_name)
-            }
-            None => {
-                let mut with_operator_decoder = decoder.clone();
-                match Self::parse_pool_params_map_with_operator(
-                    &mut with_operator_decoder,
-                    ctx,
-                    map_name,
-                ) {
-                    Ok(map) => {
-                        decoder.set_position(with_operator_decoder.position());
-                        Ok(map)
-                    }
-                    Err(with_operator_error) => {
-                        info!(
-                            map = map_name,
-                            byte_offset = decoder.position(),
-                            error = %with_operator_error,
-                            "Pool params map layout probe was inconclusive; trying without operator"
-                        );
-
-                        let mut without_operator_decoder = decoder.clone();
-                        match Self::parse_pool_params_map_without_operator(
-                            &mut without_operator_decoder,
-                            ctx,
-                            map_name,
-                        ) {
-                            Ok(map) => {
-                                decoder.set_position(without_operator_decoder.position());
-                                Ok(map)
-                            }
-                            Err(without_operator_error) => Err(anyhow!(
-                                "Failed to decode {map_name} with both operator layouts: \
-with-operator error: {}; without-operator error: {}",
-                                with_operator_error,
-                                without_operator_error
-                            )),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn inspect_pool_params_operator_layout(
-        decoder: &mut Decoder,
-        map_name: &str,
-    ) -> Result<Option<bool>> {
-        let mut probe = decoder.clone();
-
-        if matches!(probe.datatype()?, Type::Tag) {
-            probe.tag()?;
-        }
-
-        let map_len =
-            probe.map().with_context(|| format!("Failed to inspect {map_name} map header"))?;
-
-        let has_entry = match map_len {
-            Some(len) => len > 0,
-            None => !matches!(probe.datatype()?, Type::Break),
-        };
-
-        if !has_entry {
-            return Ok(None);
-        }
-
-        // Skip key for first map entry.
-        probe.skip()?;
-
-        // Value should be array-encoded pool params/state.
-        if !matches!(probe.datatype()?, Type::Array | Type::ArrayIndef) {
-            return Ok(None);
-        }
-        probe.array()?;
-
-        if !matches!(probe.datatype()?, Type::Bytes) {
-            return Ok(None);
-        }
-
-        let first_field = probe.bytes()?;
-        match first_field.len() {
-            // first field is pool operator hash
-            28 => Ok(Some(true)),
-            // first field is VRF hash, meaning operator is map key
-            32 => Ok(Some(false)),
-            _ => Ok(None),
-        }
     }
 
     fn parse_retiring_map(
@@ -2734,48 +2353,13 @@ with-operator error: {}; without-operator error: {}",
                 error!(
                     map = map_name,
                     byte_offset = decoder.position(),
-                    error = %err,
-                    "Failed to decode retiring map"
+                    error = %err
                 );
                 err
             })
             .context(format!("Failed to decode {map_name}"))?;
 
-        info!(
-            map = map_name,
-            entries = map.len(),
-            byte_offset = decoder.position(),
-            "Decoded retiring map"
-        );
-
         Ok(map)
-    }
-
-    fn parse_pstate_legacy_layout(
-        decoder: &mut Decoder,
-        ctx: &mut SnapshotContext,
-        pstate_len: u64,
-    ) -> Result<SPOState> {
-        if pstate_len < 3 {
-            return Err(anyhow!(
-                "Legacy PState array too short: expected at least 3 elements, got {pstate_len}"
-            ));
-        }
-
-        let pools = Self::parse_pool_params_map_with_operator(decoder, ctx, "PState[0] pools")?;
-        let updates =
-            Self::parse_pool_params_map_with_operator(decoder, ctx, "PState[1] future_pools")?;
-        let retiring = Self::parse_retiring_map(decoder, "PState[2] retiring")?;
-
-        for i in 3..pstate_len {
-            decoder.skip().context(format!("Failed to skip PState[{i}]"))?;
-        }
-
-        Ok(SPOState {
-            pools,
-            updates,
-            retiring,
-        })
     }
 
     fn parse_pstate_new_layout(
@@ -2796,15 +2380,11 @@ with-operator error: {}; without-operator error: {}",
         decoder.skip().context("Failed to skip PState[0] VRF key hash map (new-era layout)")?;
 
         // [1] psStakePools
-        let pools =
-            Self::parse_pool_params_map_without_operator(decoder, ctx, "PState[1] stake_pools")?;
+        let pools = Self::parse_pool_params_map(decoder, ctx, "PState[1] stake_pools")?;
 
         // [2] psFutureStakePoolParams
-        let updates = Self::parse_pool_params_map_with_optional_operator(
-            decoder,
-            ctx,
-            "PState[2] future_stake_pool_params",
-        )?;
+        let updates =
+            Self::parse_pool_params_map(decoder, ctx, "PState[2] future_stake_pool_params")?;
 
         // [3] psRetiring
         let retiring = Self::parse_retiring_map(decoder, "PState[3] retiring")?;
@@ -2822,9 +2402,6 @@ with-operator error: {}; without-operator error: {}",
 
     /// Parse PState to extract stake pools.
     ///
-    /// Legacy shape:
-    ///   [pools_map, future_pools_map, retiring_map, ...]
-    ///
     /// New-era shape:
     ///   [vrf_key_hashes_map, stake_pools_map, future_stake_pool_params_map, retiring_map]
     pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
@@ -2833,41 +2410,13 @@ with-operator error: {}; without-operator error: {}",
             .context("Failed to parse PState array")?
             .ok_or_else(|| anyhow!("PState must be a definite-length array"))?;
 
-        if pstate_len < 3 {
+        if pstate_len < 4 {
             return Err(anyhow!(
-                "PState array too short: expected at least 3 elements, got {pstate_len}"
+                "PState array too short: expected at least 4 elements, got {pstate_len}"
             ));
         }
 
-        let mut new_layout_decoder = decoder.clone();
-        match Self::parse_pstate_new_layout(&mut new_layout_decoder, ctx, pstate_len) {
-            Ok(state) => {
-                decoder.set_position(new_layout_decoder.position());
-                Ok(state)
-            }
-            Err(new_layout_error) => {
-                info!(
-                    byte_offset = decoder.position(),
-                    error = %new_layout_error,
-                    "PState did not match new-era layout; trying legacy layout"
-                );
-
-                let mut legacy_layout_decoder = decoder.clone();
-                match Self::parse_pstate_legacy_layout(&mut legacy_layout_decoder, ctx, pstate_len)
-                {
-                    Ok(state) => {
-                        decoder.set_position(legacy_layout_decoder.position());
-                        Ok(state)
-                    }
-                    Err(legacy_layout_error) => Err(anyhow!(
-                        "Failed to parse PState using both known layouts: \
-new-era layout error: {}; legacy layout error: {}",
-                        new_layout_error,
-                        legacy_layout_error
-                    )),
-                }
-            }
-        }
+        Self::parse_pstate_new_layout(decoder, ctx, pstate_len)
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
@@ -2990,10 +2539,6 @@ impl GovernanceProtocolParametersCallback for CollectingCallbacks {
 
 impl GovernanceStateCallback for CollectingCallbacks {
     fn on_governance_state(&mut self, state: super::governance::GovernanceState) -> Result<()> {
-        info!(
-            "CollectingCallbacks: Received governance state with {} proposals",
-            state.proposals.len()
-        );
         self.governance_state = Some(state);
         Ok(())
     }
@@ -3011,13 +2556,7 @@ impl SnapshotCallbacks for CollectingCallbacks {
 }
 
 impl SnapshotsCallback for CollectingCallbacks {
-    fn on_snapshots(&mut self, snapshots: SnapshotsContainer) -> Result<()> {
-        // For testing, we could store snapshots here if needed
-        info!(
-            "CollectingCallbacks: Received snapshots with {} mark SPOs, {} set SPOs",
-            snapshots.mark.spos.len(),
-            snapshots.set.spos.len(),
-        );
+    fn on_snapshots(&mut self, _snapshots: SnapshotsContainer) -> Result<()> {
         Ok(())
     }
 }
@@ -3129,45 +2668,11 @@ mod tests {
     }
 
     #[test]
-    fn test_account_decode_legacy_shelley_conway_shapes() {
+    fn test_account_decode_conway_shape() {
         fn decode_account(bytes: &[u8]) -> SnapshotAccountValue {
             let mut dec = Decoder::new(bytes);
             dec.decode().unwrap()
         }
-
-        // Legacy: [StrictMaybe (reward,deposit), pointers, pool, drep]
-        let mut legacy_buf = Vec::new();
-        let mut legacy_enc = Encoder::new(&mut legacy_buf);
-        legacy_enc.array(4).unwrap();
-        legacy_enc.array(1).unwrap();
-        legacy_enc.array(2).unwrap();
-        legacy_enc.u64(100).unwrap();
-        legacy_enc.u64(50).unwrap();
-        legacy_enc.array(0).unwrap();
-        legacy_enc.null().unwrap();
-        legacy_enc.null().unwrap();
-
-        let legacy = decode_account(&legacy_buf).to_normalized();
-        assert_eq!(legacy.rewards, 100);
-        assert!(legacy.delegated_spo.is_none());
-        assert!(legacy.delegated_drep.is_none());
-
-        // Shelley: [ptr, balance, deposit, pool]
-        let mut shelley_buf = Vec::new();
-        let mut shelley_enc = Encoder::new(&mut shelley_buf);
-        shelley_enc.array(4).unwrap();
-        shelley_enc.array(3).unwrap();
-        shelley_enc.u64(1).unwrap();
-        shelley_enc.u64(2).unwrap();
-        shelley_enc.u64(3).unwrap();
-        shelley_enc.u64(200).unwrap();
-        shelley_enc.u64(25).unwrap();
-        shelley_enc.null().unwrap();
-
-        let shelley = decode_account(&shelley_buf).to_normalized();
-        assert_eq!(shelley.rewards, 200);
-        assert!(shelley.delegated_spo.is_none());
-        assert!(shelley.delegated_drep.is_none());
 
         // Conway: [balance, deposit, pool, drep]
         let mut conway_buf = Vec::new();
@@ -3183,6 +2688,25 @@ mod tests {
         assert_eq!(conway.rewards, 300);
         assert!(conway.delegated_spo.is_some());
         assert!(matches!(conway.delegated_drep, Some(DRepChoice::Abstain)));
+    }
+
+    #[test]
+    fn test_account_decode_legacy_shape_rejected() {
+        // Legacy: [StrictMaybe (reward,deposit), pointers, pool, drep]
+        let mut legacy_buf = Vec::new();
+        let mut legacy_enc = Encoder::new(&mut legacy_buf);
+        legacy_enc.array(4).unwrap();
+        legacy_enc.array(1).unwrap();
+        legacy_enc.array(2).unwrap();
+        legacy_enc.u64(100).unwrap();
+        legacy_enc.u64(50).unwrap();
+        legacy_enc.array(0).unwrap();
+        legacy_enc.null().unwrap();
+        legacy_enc.null().unwrap();
+
+        let mut dec = Decoder::new(&legacy_buf);
+        let decoded: Result<SnapshotAccountValue, _> = dec.decode();
+        assert!(decoded.is_err());
     }
 
     fn encode_margin(enc: &mut Encoder<&mut Vec<u8>>) {
@@ -3210,25 +2734,6 @@ mod tests {
         enc.null().unwrap(); // metadata
     }
 
-    fn encode_pool_params_with_operator(enc: &mut Encoder<&mut Vec<u8>>, key_seed: u8, seed: u8) {
-        enc.array(9).unwrap();
-        enc.bytes(&[key_seed; 28]).unwrap(); // operator
-        enc.bytes(&[seed.wrapping_add(2); 32]).unwrap(); // vrf
-        enc.u64(2_000).unwrap(); // pledge
-        enc.u64(500).unwrap(); // cost
-        encode_margin(enc);
-        let reward_address = StakeAddress::new(
-            StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
-            NetworkId::Testnet,
-        )
-        .to_binary();
-        enc.bytes(&reward_address).unwrap(); // reward account
-        enc.array(1).unwrap(); // owners
-        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
-        enc.array(0).unwrap(); // relays
-        enc.null().unwrap(); // metadata
-    }
-
     fn encode_new_layout_pstate(future_mode: &str) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
@@ -3247,11 +2752,6 @@ mod tests {
         match future_mode {
             "empty" => {
                 enc.map(0).unwrap();
-            }
-            "with_operator" => {
-                enc.map(1).unwrap();
-                enc.bytes(&[0x22; 28]).unwrap();
-                encode_pool_params_with_operator(&mut enc, 0x22, 0x31);
             }
             "without_operator" => {
                 enc.map(1).unwrap();
@@ -3278,20 +2778,6 @@ mod tests {
         let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
         assert_eq!(parsed.pools.len(), 1);
         assert_eq!(parsed.updates.len(), 0);
-        assert_eq!(parsed.retiring.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_pstate_new_layout_with_operator_future_map() {
-        let bytes = encode_new_layout_pstate("with_operator");
-        let mut decoder = Decoder::new(&bytes);
-        let mut ctx = SnapshotContext {
-            network: NetworkId::Testnet,
-        };
-
-        let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
-        assert_eq!(parsed.pools.len(), 1);
-        assert_eq!(parsed.updates.len(), 1);
         assert_eq!(parsed.retiring.len(), 0);
     }
 

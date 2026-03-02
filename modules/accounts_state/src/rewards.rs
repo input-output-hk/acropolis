@@ -183,10 +183,10 @@ pub fn calculate_rewards(
                             > 0
                         {
                             pay_to_pool_reward_account = false;
-                            warn!("Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
-                                  operator_id,
-                                  other_id,
-                                  staking_spo.reward_account);
+                            warn!(
+                                "Shelley shared reward account bug: Dropping reward to {} in favour of {} on shared account {}",
+                                operator_id, other_id, staking_spo.reward_account
+                            );
                             break;
                         }
                     }
@@ -391,8 +391,10 @@ fn calculate_spo_rewards(
                     continue;
                 }
 
-                debug!("Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
-                       delegator_stake_address);
+                debug!(
+                    "Reward stake {stake} -> proportion {proportion} of SPO rewards {to_delegators} -> {to_pay} to hash {}",
+                    delegator_stake_address
+                );
 
                 let is_pool_owner = spo.pool_owners.contains(delegator_stake_address);
                 let is_reward_account = &spo.reward_account == delegator_stake_address;

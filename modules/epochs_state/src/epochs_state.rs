@@ -89,8 +89,13 @@ impl EpochsState {
         state.bootstrap(epoch_data);
 
         info!(
-            "Epoch state bootstrapped successfully for epoch {}",
-            epoch_data.epoch
+            epoch = epoch_data.epoch,
+            block_number = epoch_data.last_block_height,
+            blocks = epoch_data.total_blocks,
+            txs = epoch_data.total_txs,
+            outputs = epoch_data.total_outputs,
+            fees = epoch_data.total_fees,
+            "snapshot bootstrap loaded"
         );
     }
 
@@ -109,15 +114,11 @@ impl EpochsState {
             }
         };
 
-        info!("Waiting for snapshot bootstrap messages...");
-
         loop {
             let (_, message) = snapshot_subscription.read().await?;
 
             match message.as_ref() {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting bootstrap data...");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::EpochState(epoch_data),
                 )) => {
@@ -125,10 +126,8 @@ impl EpochsState {
                     let mut state = history.lock().await.get_or_init_with(|| State::new(genesis));
                     Self::handle_bootstrap(&mut state, epoch_data);
                     history.lock().await.bootstrap_init_with(state, block_number);
-                    info!("Epoch state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting bootstrap loop");
                     return Ok(());
                 }
                 _ => {}

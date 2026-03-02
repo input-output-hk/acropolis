@@ -59,8 +59,9 @@ impl BlockKesValidator {
         state.bootstrap(kes_data.ocert_counters);
 
         info!(
-            "KES state bootstrapped successfully for epoch {} with {} opcert counters",
-            epoch, counters_len
+            epoch,
+            opcert_counters = counters_len,
+            "snapshot bootstrap loaded"
         );
     }
 
@@ -69,29 +70,22 @@ impl BlockKesValidator {
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        info!("Waiting for KES validator snapshot bootstrap messages...");
         loop {
             let (_, message) = snapshot_subscription.read().await?;
             let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
 
             match message {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting KES bootstrap data...");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::BlockKesValidatorState(kes_data),
                 )) => {
-                    info!("Received BlockKesValidatorState bootstrap message");
-
                     let block_number = kes_data.block_number;
                     let mut state = State::new();
 
                     Self::handle_bootstrap(&mut state, kes_data);
                     history.lock().await.bootstrap_init_with(state, block_number);
-                    info!("KES validator bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting KES validator bootstrap loop");
                     return Ok(());
                 }
                 _ => {}

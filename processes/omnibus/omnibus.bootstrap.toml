@@ -27,3 +27,14 @@ download-max-age = "never"
 pause = "none"
 # Stop constraint likewise
 stop = "none"
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0    # every 5 seconds
+
+[module.peer-network-interface]
+sync-point = "dynamic"
+node-addresses = [
+    "preview-node.play.dev.cardano.org:3001",
+]
+magic-number = 2

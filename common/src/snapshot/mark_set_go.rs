@@ -3,7 +3,7 @@
 // ================================================================================================
 
 use anyhow::{Context, Error, Result};
-use log::info;
+use log::debug;
 
 use minicbor::Decoder;
 use serde::{Deserialize, Serialize};
@@ -75,7 +75,7 @@ impl RawSnapshot {
         ctx: &mut SnapshotContext,
         snapshot_name: &str,
     ) -> Result<RawSnapshot> {
-        info!("Parsing snapshot {snapshot_name}");
+        debug!(target: "acropolis_common::snapshot::mark_set_go", "Parsing snapshot {snapshot_name}");
         match decoder.datatype().context("Failed to read snapshot datatype")? {
             minicbor::data::Type::Array => {
                 decoder.array().context("Failed to parse snapshot array")?;

@@ -16,7 +16,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Range;
 use std::path::Path;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionStatus {
@@ -105,7 +105,7 @@ impl ConwayVoting {
             }
         }
 
-        tracing::info!(
+        tracing::debug!(
             "ConwayVoting bootstrapped: {} proposals, {} actions with votes",
             self.proposals.len(),
             self.votes.len()
@@ -240,7 +240,7 @@ impl ConwayVoting {
             None => true,
         };
         let accepted = previous_ok && voted;
-        info!(
+        debug!(
             "Proposal {action_id}: new epoch {new_epoch}, votes {votes}, thresholds {threshold}, prevous_ok {previous_ok}, \
              voted {voted}, result {accepted}"
         );
@@ -341,7 +341,7 @@ impl ConwayVoting {
 
     /// Checks whether action is expired at the beginning of new_epoch
     pub fn is_expired(&self, new_epoch: u64, action_id: &GovActionId) -> Result<bool> {
-        info!(
+        debug!(
             "Checking whether {} is expired at new epoch {}",
             action_id, new_epoch
         );
@@ -397,7 +397,7 @@ impl ConwayVoting {
         let expired = self.is_expired(new_epoch, action_id)?;
         if outcome.accepted || expired {
             self.end_voting(action_id);
-            info!(
+            debug!(
                 "New epoch {new_epoch}: voting for {action_id} outcome: {}, expired: {expired}",
                 outcome.accepted
             );
@@ -501,7 +501,7 @@ impl ConwayVoting {
         let actions = self.proposals.keys().cloned().collect::<Vec<_>>();
 
         for action_id in actions.iter() {
-            info!(
+            debug!(
                 "Epoch {} started: processing action {}",
                 new_block.epoch, action_id
             );
@@ -551,12 +551,12 @@ impl ConwayVoting {
                     format!(" {p:?} ")
                 }
             };
-            info!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
+            debug!("Epoch start {new_epoch}, {action_id}: {proposal} => {voting_procedure:?}",)
         }
 
         if !proposal_procedures.is_empty() {
             let pp = proposal_procedures.into_iter().map(|x| format!("{x},")).collect::<String>();
-            info!(
+            debug!(
                 "Proposal procedures at {new_epoch} without 'votes' records: [{}]",
                 pp
             );

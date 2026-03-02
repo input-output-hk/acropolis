@@ -119,10 +119,7 @@ impl SnapshotBootstrapper {
 
         publisher.publish_start().await?;
 
-        info!(
-            "Parsing snapshot: {}",
-            bootstrap_ctx.snapshot_path().display()
-        );
+        info!(snapshot = %bootstrap_ctx.snapshot_path().display(), "snapshot parse start");
         let start = Instant::now();
         let parser = StreamingSnapshotParser::new(
             bootstrap_ctx.snapshot_path().to_string_lossy().into_owned(),
@@ -130,7 +127,7 @@ impl SnapshotBootstrapper {
         parser
             .parse(&mut publisher, cfg.startup.network_name.into())
             .map_err(|e| BootstrapError::Parse(format!("{e:#}")))?;
-        info!("Parsed snapshot in {:.2?}", start.elapsed());
+        let parse_ms = start.elapsed().as_millis() as u64;
 
         publisher
             .publish_kes_validator_bootstrap(
@@ -141,7 +138,13 @@ impl SnapshotBootstrapper {
         publisher.publish_snapshot_complete().await?;
         publisher.start_chain_sync(bootstrap_ctx.block_info.to_point()).await?;
 
-        info!("Snapshot bootstrap completed");
+        info!(
+            epoch = bootstrap_ctx.block_info.epoch,
+            slot = bootstrap_ctx.block_info.slot,
+            block = bootstrap_ctx.block_info.number,
+            parse_ms,
+            "snapshot bootstrap complete"
+        );
         Ok(())
     }
 

@@ -131,8 +131,6 @@ pub struct GovRelation {
 /// ]
 /// ```
 pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceState> {
-    info!("    Parsing governance state for epoch {epoch}...");
-
     let gov_state_len = decoder
         .array()
         .context("Failed to parse gov_state array")?
@@ -147,17 +145,12 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
     // Parse proposals [0]
     let (proposals, proposal_roots) =
         parse_proposals(decoder).context("Failed to parse proposals")?;
-    info!("      Parsed {} proposals", proposals.len());
 
     // Parse committee [1] - strict_maybe<committee>
     let committee = parse_strict_maybe_committee(decoder).context("Failed to parse committee")?;
-    if committee.is_some() {
-        info!("      Parsed committee with members");
-    }
 
     // Parse constitution [2]
     let constitution = parse_constitution(decoder).context("Failed to parse constitution")?;
-    info!("      Parsed constitution: {}", constitution.anchor.url);
 
     // Parse current_pparams [3], previous_pparams [4], future_pparams [5]
     let current_pparams: ProtocolParamUpdate =
@@ -179,10 +172,13 @@ pub fn parse_gov_state(decoder: &mut Decoder, epoch: u64) -> Result<GovernanceSt
     let (votes, enacted_actions, expired_action_ids) =
         parse_drep_pulsing_state(decoder).context("Failed to parse drep_pulsing_state")?;
     info!(
-        "      Parsed {} voting records, {} enacted, {} expired",
-        votes.len(),
-        enacted_actions.len(),
-        expired_action_ids.len()
+        epoch,
+        proposals = proposals.len(),
+        committee_members = committee.as_ref().map(|c| c.members.len()).unwrap_or(0),
+        constitution_url = %constitution.anchor.url,
+        votes = votes.len(),
+        enacted = enacted_actions.len(),
+        expired = expired_action_ids.len()
     );
 
     Ok(GovernanceState {

@@ -71,10 +71,13 @@ pub enum NetworkId {
 
 impl From<String> for NetworkId {
     fn from(s: String) -> Self {
-        match s.as_str() {
-            "testnet" => NetworkId::Testnet,
+        let network = s.to_ascii_lowercase();
+        match network.as_str() {
             "mainnet" => NetworkId::Mainnet,
-            _ => NetworkId::Mainnet,
+            // Cardano public test networks all use network id 0 in addresses.
+            "testnet" | "preview" | "preprod" | "sanchonet" | "sancho" => NetworkId::Testnet,
+            // IMO we should be conservative: unknown non-mainnet names should not be coerced to mainnet.
+            _ => NetworkId::Testnet,
         }
     }
 }
@@ -2384,6 +2387,20 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn network_id_from_string_maps_preview_like_networks_to_testnet() {
+        assert_eq!(NetworkId::from("mainnet".to_string()), NetworkId::Mainnet);
+        assert_eq!(NetworkId::from("testnet".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("preview".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("preprod".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("sanchonet".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("sancho".to_string()), NetworkId::Testnet);
+        assert_eq!(
+            NetworkId::from("unknown-network".to_string()),
+            NetworkId::Testnet
+        );
     }
 
     fn make_committee_credential(addr_key_hash: bool, val: u8) -> CommitteeCredential {
