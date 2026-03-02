@@ -4,10 +4,10 @@
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateTransitionMessage},
     validation::ValidationStatus,
-    BlockIntent,
+    BlockInfo, BlockIntent,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use futures::future::try_join_all;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -53,6 +53,9 @@ impl Consensus {
         );
         info!("Validation timeout {validation_timeout:?}");
 
+        let force_validation = config.get_bool("force-validation").unwrap_or(true);
+        info!("Force validation: {force_validation}");
+
         // Subscribe for incoming blocks
         let mut subscription = context.subscribe(&subscribe_blocks_topic).await?;
 
@@ -71,7 +74,7 @@ impl Consensus {
                 };
                 match message.as_ref() {
                     Message::Cardano((raw_blk_info, ba @ CardanoMessage::BlockAvailable(_))) => {
-                        let block_info = if do_validation {
+                        let block_info = if force_validation && do_validation {
                             raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
                         } else {
                             raw_blk_info.clone()
@@ -91,76 +94,14 @@ impl Consensus {
                                 .await
                                 .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-                            let completed_tasks = Arc::new(Mutex::new(HashMap::<
-                                String,
-                                Option<Arc<Message>>,
-                            >::from_iter(
-                                validator_topics.iter().map(|s| (s.clone(), None)),
-                            )));
-
-                            // Read validation responses from all validators in parallel
-                            // and check they are all positive, with a safety timeout
-                            let all_say_go = match timeout(
-                                validation_timeout,
-                                try_join_all(validator_subscriptions.iter_mut().map(|s| async {
-                                    let (topic, res) = s.read().await?;
-                                    completed_tasks
-                                        .lock()
-                                        .await
-                                        .insert(topic.clone(), Some(res.clone()));
-                                    Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
-                                })),
-                            )
-                            .await
-                            {
-                                Ok(Ok(results)) => {
-                                    results.iter().fold(true, |all_ok, (topic, msg)| {
-                                        match msg.as_ref() {
-                                            Message::Cardano((
-                                                block_info,
-                                                CardanoMessage::BlockValidation(status),
-                                            )) => match status {
-                                                ValidationStatus::Go => all_ok,
-                                                ValidationStatus::NoGo(err) => {
-                                                    error!(
-                                                    block = block_info.number,
-                                                    ?err,
-                                                    "Validation failure: {topic}, result {msg:?}"
-                                                );
-                                                    false
-                                                }
-                                            },
-
-                                            _ => {
-                                                error!(
-                                                    "Unexpected validation message type: {msg:?}"
-                                                );
-                                                false
-                                            }
-                                        }
-                                    })
-                                }
-                                Ok(Err(e)) => {
-                                    error!("Failed to read validations: {e}");
-                                    false
-                                }
-                                Err(_) => {
-                                    error!("Timeout waiting for validation responses");
-                                    false
-                                }
-                            };
-
-                            if !all_say_go {
-                                error!(
-                                    block = block_info.number,
-                                    "Validation rejected block, results available:"
-                                );
-                                let completed_tasks = completed_tasks.lock().await;
-                                for (topic, msg) in completed_tasks.iter() {
-                                    error!("Topic {topic}, result {msg:?}");
-                                }
-
-                                // TODO Consequences:  rollback, blacklist source
+                            if block_info.intent.do_validation() {
+                                Self::wait_for_validation(
+                                    &validator_topics,
+                                    validation_timeout,
+                                    &mut validator_subscriptions,
+                                    block_info,
+                                )
+                                .await;
                             }
                         }
                         .instrument(span)
@@ -185,5 +126,75 @@ impl Consensus {
         });
 
         Ok(())
+    }
+
+    async fn wait_for_validation(
+        validator_topics: &[String],
+        validation_timeout: Duration,
+        validator_subscriptions: &mut Vec<Box<dyn Subscription<Message>>>,
+        block_info: BlockInfo,
+    ) {
+        let completed_tasks = Arc::new(Mutex::new(
+            HashMap::<String, Option<Arc<Message>>>::from_iter(
+                validator_topics.iter().map(|s| (s.clone(), None)),
+            ),
+        ));
+
+        // Read validation responses from all validators in parallel
+        // and check they are all positive, with a safety timeout
+        let all_say_go = match timeout(
+            validation_timeout,
+            try_join_all(validator_subscriptions.iter_mut().map(|s| async {
+                let (topic, res) = s.read().await?;
+                completed_tasks.lock().await.insert(topic.clone(), Some(res.clone()));
+                Ok::<(String, Arc<Message>), anyhow::Error>((topic, res))
+            })),
+        )
+        .await
+        {
+            Ok(Ok(results)) => {
+                results.iter().fold(true, |all_ok, (topic, msg)| match msg.as_ref() {
+                    Message::Cardano((block_info, CardanoMessage::BlockValidation(status))) => {
+                        match status {
+                            ValidationStatus::Go => all_ok,
+                            ValidationStatus::NoGo(err) => {
+                                error!(
+                                    block = block_info.number,
+                                    ?err,
+                                    "Validation failure: {topic}, result {msg:?}"
+                                );
+                                false
+                            }
+                        }
+                    }
+
+                    _ => {
+                        error!("Unexpected validation message type: {msg:?}");
+                        false
+                    }
+                })
+            }
+            Ok(Err(e)) => {
+                error!("Failed to read validations: {e}");
+                false
+            }
+            Err(_) => {
+                error!("Timeout waiting for validation responses");
+                false
+            }
+        };
+
+        if !all_say_go {
+            error!(
+                block = block_info.number,
+                "Validation rejected block, results available:"
+            );
+            let completed_tasks = completed_tasks.lock().await;
+            for (topic, msg) in completed_tasks.iter() {
+                error!("Topic {topic}, result {msg:?}");
+            }
+
+            // TODO Consequences:  rollback, blacklist source
+        }
     }
 }
