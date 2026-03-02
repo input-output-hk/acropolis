@@ -26,10 +26,10 @@ use tokio::{sync::Mutex, time::timeout};
 use tracing::{debug, error, info, info_span, warn, Instrument};
 use tree_observer::ConsensusTreeObserver;
 
-const DEFAULT_SUBSCRIBE_BLOCKS_TOPIC: &str = "cardano.block.available";
-const DEFAULT_PUBLISH_BLOCKS_TOPIC: &str = "cardano.block.proposed";
-const DEFAULT_CONSENSUS_TOPIC: &str = "cardano.consensus";
-const DEFAULT_PUBLISH_CONSENSUS_TOPIC: &str = "cardano.consensus";
+const DEFAULT_BLOCKS_AVAILABLE_TOPIC: &str = "cardano.block.available";
+const DEFAULT_BLOCKS_PROPOSED_TOPIC: &str = "cardano.block.proposed";
+const DEFAULT_CONSENSUS_OFFERS_TOPIC: &str = "cardano.consensus.offers";
+const DEFAULT_CONSENSUS_WANTS_TOPIC: &str = "cardano.consensus.wants";
 const DEFAULT_VALIDATION_TIMEOUT: i64 = 60; // seconds
 const DEFAULT_SECURITY_PARAMETER: u64 = 2160; // k
 
@@ -95,8 +95,8 @@ impl ConsensusTreeObserver for QueuingConsensusTreeObserver {
 /// Bundled runtime state for the consensus loop.
 struct ConsensusRuntime {
     context: Arc<Context<Message>>,
-    publish_blocks_topic: String,
-    publish_consensus_topic: String,
+    blocks_proposed_topic: String,
+    consensus_wants_topic: String,
     event_queue: EventQueue,
     tree: ConsensusTree,
     /// Cache of full block payloads for re-publication.
@@ -155,23 +155,23 @@ impl Consensus {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_blocks_topic = config
-            .get_string("subscribe-blocks-topic")
-            .unwrap_or(DEFAULT_SUBSCRIBE_BLOCKS_TOPIC.to_string());
-        info!("Creating blocks subscriber on '{subscribe_blocks_topic}'");
+        let blocks_available_topic = config
+            .get_string("blocks-available-topic")
+            .unwrap_or(DEFAULT_BLOCKS_AVAILABLE_TOPIC.to_string());
+        info!("Subscribing to blocks on '{blocks_available_topic}'");
 
-        let publish_blocks_topic = config
-            .get_string("publish-blocks-topic")
-            .unwrap_or(DEFAULT_PUBLISH_BLOCKS_TOPIC.to_string());
-        info!("Publishing blocks on '{publish_blocks_topic}'");
+        let blocks_proposed_topic = config
+            .get_string("blocks-proposed-topic")
+            .unwrap_or(DEFAULT_BLOCKS_PROPOSED_TOPIC.to_string());
+        info!("Publishing proposed blocks on '{blocks_proposed_topic}'");
 
-        let consensus_topic =
-            config.get_string("consensus-topic").unwrap_or(DEFAULT_CONSENSUS_TOPIC.to_string());
-        info!("Subscribing to consensus messages on '{consensus_topic}'");
+        let consensus_offers_topic =
+            config.get_string("consensus-offers-topic").unwrap_or(DEFAULT_CONSENSUS_OFFERS_TOPIC.to_string());
+        info!("Subscribing to consensus offers on '{consensus_offers_topic}'");
 
-        let publish_consensus_topic = config
-            .get_string("publish-consensus-topic")
-            .unwrap_or(DEFAULT_PUBLISH_CONSENSUS_TOPIC.to_string());
+        let consensus_wants_topic = config
+            .get_string("consensus-wants-topic")
+            .unwrap_or(DEFAULT_CONSENSUS_WANTS_TOPIC.to_string());
 
         let validator_topics: Vec<String> =
             config.get::<Vec<String>>("validators").unwrap_or_default();
@@ -190,7 +190,7 @@ impl Consensus {
         info!("Security parameter k={security_parameter}");
 
         // Subscribe for incoming blocks (BlockAvailable)
-        let block_subscription = context.subscribe(&subscribe_blocks_topic).await?;
+        let block_subscription = context.subscribe(&blocks_available_topic).await?;
 
         let flow_mode = ConsensusFlowMode::from_config(&config);
         info!("Consensus flow mode: {flow_mode}");
@@ -198,7 +198,7 @@ impl Consensus {
         // Subscribe for consensus messages (BlockOffered, BlockRescinded)
         // TODO: Temporary until consensus flow fully works.
         let consensus_subscription = if flow_mode == ConsensusFlowMode::Consensus {
-            Some(context.subscribe(&consensus_topic).await?)
+            Some(context.subscribe(&consensus_offers_topic).await?)
         } else {
             None
         };
@@ -218,8 +218,8 @@ impl Consensus {
 
         let mut runtime = ConsensusRuntime {
             context: context.clone(),
-            publish_blocks_topic,
-            publish_consensus_topic,
+            blocks_proposed_topic,
+            consensus_wants_topic,
             event_queue,
             tree,
             block_data: HashMap::new(),
@@ -692,7 +692,7 @@ impl ConsensusRuntime {
                             info.clone(),
                             CardanoMessage::BlockAvailable(raw.clone()),
                         )));
-                        messages.push((self.publish_blocks_topic.to_string(), msg));
+                        messages.push((self.blocks_proposed_topic.to_string(), msg));
                     } else {
                         warn!("No block data found for proposed block {hash}");
                     }
@@ -704,7 +704,7 @@ impl ConsensusRuntime {
                         block_info,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
                     )));
-                    messages.push((self.publish_blocks_topic.to_string(), msg));
+                    messages.push((self.blocks_proposed_topic.to_string(), msg));
                     info!("Rollback to block number {to_block_number}");
                 }
                 ObserverEvent::BlockRejected { hash } => {
@@ -717,7 +717,7 @@ impl ConsensusRuntime {
                     let msg = Arc::new(Message::Consensus(ConsensusMessage::BlockRejected(
                         BlockRejectedMessage { hash, slot },
                     )));
-                    messages.push((self.publish_consensus_topic.to_string(), msg));
+                    messages.push((self.consensus_wants_topic.to_string(), msg));
                 }
             }
         }
@@ -874,7 +874,7 @@ impl ConsensusRuntime {
                     // Pass rollback to all validators and state modules.
                     self.context
                         .message_bus
-                        .publish(&self.publish_blocks_topic, message.clone())
+                        .publish(&self.blocks_proposed_topic, message.clone())
                         .await
                         .unwrap_or_else(|e| error!("Failed to publish: {e}"));
                 }
@@ -899,7 +899,7 @@ impl ConsensusRuntime {
 
         self.context
             .message_bus
-            .publish(&self.publish_blocks_topic, block)
+            .publish(&self.blocks_proposed_topic, block)
             .await
             .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 

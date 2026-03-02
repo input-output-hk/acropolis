@@ -14,8 +14,8 @@ be configured - if empty, no validation is performed
 [module.consensus]
 
 # Message topics
-subscribe-blocks-topic = "cardano.block.available"
-publish-blocks-topic = "cardano.block.proposed"
+blocks-available-topic = "cardano.block.available"
+blocks-proposed-topic = "cardano.block.proposed"
 
 # Block flow mode: "direct" (pass-through) or "consensus" (offers/wants + chain selection)
 consensus-flow-mode = "consensus"
