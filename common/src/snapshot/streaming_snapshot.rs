@@ -1105,13 +1105,6 @@ struct ChunkedCborReader {
     file_size: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EmbeddedUtxoProbe {
-    Missing,
-    EmptyMap { bytes_consumed: u64 },
-    NonEmptyMap,
-}
-
 impl ChunkedCborReader {
     fn new(mut file: File, _chunk_size: usize) -> Result<Self> {
         let file_size = file.seek(SeekFrom::End(0))?;
@@ -1145,41 +1138,46 @@ impl StreamingSnapshotParser {
         }
     }
 
-    fn probe_embedded_utxos_at(file: &mut File, offset: u64) -> Result<EmbeddedUtxoProbe> {
-        const PROBE_SIZE: usize = 8 * 1024 * 1024;
+    fn parse_empty_utxo_placeholder_bytes(file: &mut File, offset: u64) -> Result<u64> {
+        // Empty map placeholder requires only a tiny probe:
+        // header + optional break token for indefinite maps.
+        const PROBE_SIZE: usize = 64;
 
         file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = vec![0u8; PROBE_SIZE];
+        let mut buffer = [0u8; PROBE_SIZE];
         let bytes_read = file.read(&mut buffer)?;
         if bytes_read == 0 {
-            return Ok(EmbeddedUtxoProbe::Missing);
+            return Err(anyhow!(
+                "Expected empty UTxO placeholder map at offset {offset}, but reached EOF"
+            ));
         }
-        buffer.truncate(bytes_read);
 
-        let mut decoder = Decoder::new(&buffer);
+        let mut decoder = Decoder::new(&buffer[..bytes_read]);
         match decoder.datatype()? {
             Type::Map | Type::MapIndef => {}
-            _ => return Ok(EmbeddedUtxoProbe::Missing),
+            other => {
+                return Err(anyhow!(
+                    "Expected UTxO placeholder map at offset {offset}, got {other:?}"
+                ));
+            }
         }
 
         let map_len = decoder.map()?;
-        if matches!(map_len, Some(0)) {
-            return Ok(EmbeddedUtxoProbe::EmptyMap {
-                bytes_consumed: decoder.position() as u64,
-            });
-        }
-
-        if map_len.is_none() && matches!(decoder.datatype(), Ok(Type::Break)) {
-            decoder.skip()?;
-            return Ok(EmbeddedUtxoProbe::EmptyMap {
-                bytes_consumed: decoder.position() as u64,
-            });
-        }
-
-        if Self::parse_single_utxo(&mut decoder).is_ok() {
-            Ok(EmbeddedUtxoProbe::NonEmptyMap)
-        } else {
-            Ok(EmbeddedUtxoProbe::Missing)
+        match map_len {
+            Some(0) => Ok(decoder.position() as u64),
+            Some(len) => Err(anyhow!(
+                "Expected empty UTxO placeholder map at offset {offset}, found {len} embedded entries (embedded UTxOs are no longer supported)"
+            )),
+            None => {
+                if matches!(decoder.datatype(), Ok(Type::Break)) {
+                    decoder.skip()?;
+                    Ok(decoder.position() as u64)
+                } else {
+                    Err(anyhow!(
+                        "Expected empty indefinite UTxO placeholder map at offset {offset}, found embedded entries (embedded UTxOs are no longer supported)"
+                    ))
+                }
+            }
         }
     }
 
@@ -1469,70 +1467,48 @@ impl StreamingSnapshotParser {
         }; // decoder goes out of scope here
 
         let snapshot_path = Path::new(&self.file_path);
-        let utxo_sidecar_path = self.find_utxo_sidecar_path();
+        let utxo_file_path = self.find_utxo_sidecar_path().ok_or_else(|| {
+            anyhow!(
+                "Expected split snapshot sidecar UTxO file for snapshot {}",
+                snapshot_path.display()
+            )
+        })?;
 
         // Continue remainder parsing from the snapshot file.
-        // Split-file snapshots have deposits at utxo_file_position (no embedded UTxO map),
-        // while monolithic snapshots require skipping the embedded UTxO map first.
+        // New snapshot format expects an empty UTxO placeholder map in NES.
         let mut snapshot_file = File::open(&self.file_path).context(format!(
             "Failed to open snapshot file for remainder parsing: {}",
             self.file_path
         ))?;
-        let embedded_utxo_probe =
-            Self::probe_embedded_utxos_at(&mut snapshot_file, utxo_file_position)?;
-        let snapshot_has_embedded_utxos =
-            matches!(embedded_utxo_probe, EmbeddedUtxoProbe::NonEmptyMap);
-
-        let use_external_utxo_file = !snapshot_has_embedded_utxos && utxo_sidecar_path.is_some();
-        let utxo_file_path = if let Some(path) = utxo_sidecar_path {
-            if use_external_utxo_file {
-                info!("Using external UTXO file: {}", path.display());
-                path
-            } else {
-                if path != snapshot_path {
-                    info!("Using embedded UTXOs from snapshot file (sidecar ignored)");
-                } else {
-                    info!("Using embedded UTXOs from snapshot file");
-                }
-                snapshot_path.to_path_buf()
-            }
-        } else {
-            if !snapshot_has_embedded_utxos {
-                if matches!(embedded_utxo_probe, EmbeddedUtxoProbe::EmptyMap { .. }) {
-                    info!("Snapshot contains an empty embedded UTXO map");
-                } else {
-                    return Err(anyhow!(
-                        "Snapshot does not contain embedded UTXOs and no sidecar UTXO file was found"
-                    ));
-                }
-            }
-            info!("Using embedded UTXOs from snapshot file");
-            snapshot_path.to_path_buf()
-        };
+        let utxo_placeholder_bytes =
+            Self::parse_empty_utxo_placeholder_bytes(&mut snapshot_file, utxo_file_position)?;
 
         let mut utxo_file = File::open(&utxo_file_path).context(format!(
             "Failed to open UTXO source file: {}",
             utxo_file_path.display()
         ))?;
 
+        info!(
+            snapshot = %snapshot_path.display(),
+            utxo_sidecar = %utxo_file_path.display(),
+            utxo_placeholder_bytes,
+            "Using split snapshot sources"
+        );
+
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
-        if !use_external_utxo_file {
-            utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
-        }
+        utxo_file.seek(SeekFrom::Start(0))?;
         let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
             Self::stream_utxos(&mut utxo_file, callbacks)
                 .context("Failed to stream UTXOs with true streaming")?;
 
-        let position_after_utxos = match embedded_utxo_probe {
-            EmbeddedUtxoProbe::NonEmptyMap => utxo_file_position + bytes_consumed_from_file,
-            EmbeddedUtxoProbe::EmptyMap { bytes_consumed } => utxo_file_position + bytes_consumed,
-            EmbeddedUtxoProbe::Missing => utxo_file_position,
-        };
+        let position_after_utxos = utxo_file_position + utxo_placeholder_bytes;
         snapshot_file.seek(SeekFrom::Start(position_after_utxos))?;
 
         info!(
-            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
-            position_after_utxos
+            utxos_streamed = utxo_count,
+            utxo_sidecar_bytes = bytes_consumed_from_file,
+            snapshot_resume_offset = position_after_utxos,
+            "UTxO streaming complete"
         );
 
         // ========================================================================
@@ -1563,9 +1539,9 @@ impl StreamingSnapshotParser {
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
         info!(
-            "    Reading remainder of file into memory: {:.1} MB from position {}",
-            remaining_bytes as f64 / 1024.0 / 1024.0,
-            position_after_utxos
+            snapshot_resume_offset = position_after_utxos,
+            remainder_mb = remaining_bytes as f64 / 1024.0 / 1024.0,
+            "Loading NES remainder"
         );
 
         // Read the entire remainder of the file into memory
@@ -1573,8 +1549,8 @@ impl StreamingSnapshotParser {
         snapshot_file.read_to_end(&mut remainder_buffer)?;
 
         info!(
-            "    Successfully loaded {:.1} MB remainder buffer for parsing",
-            remainder_buffer.len() as f64 / 1024.0 / 1024.0
+            remainder_mb = remainder_buffer.len() as f64 / 1024.0 / 1024.0,
+            "Loaded NES remainder"
         );
 
         // Create decoder for the remainder buffer
@@ -1597,9 +1573,9 @@ impl StreamingSnapshotParser {
             .context("Failed to parse governance state")?;
 
         info!(
-            "    Successfully parsed governance state: {} proposals, {} votes",
-            governance_state.proposals.len(),
-            governance_state.votes.len()
+            governance_proposals = governance_state.proposals.len(),
+            governance_votes = governance_state.votes.len(),
+            "Parsed governance state"
         );
 
         // Emit governance protocol parameters callback
@@ -2059,12 +2035,11 @@ impl StreamingSnapshotParser {
 
                         // Progress reporting - less frequent for better performance
                         if utxo_count.is_multiple_of(1000000) {
-                            let buffer_usage = buffer.len();
                             info!(
-                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
-                                utxo_count,
-                                buffer_usage / 1024 / 1024,
-                                max_single_entry_size
+                                utxos_streamed = utxo_count,
+                                buffer_mb = buffer.len() / 1024 / 1024,
+                                max_entry_bytes = max_single_entry_size,
+                                "UTxO stream progress"
                             );
                         }
 
@@ -2118,17 +2093,13 @@ impl StreamingSnapshotParser {
             }
         }
 
-        info!("Streaming results:");
-        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "  Total data streamed: {:.2} MB",
-            total_bytes_processed as f64 / 1024.0 / 1024.0
+            utxos_processed = utxo_count,
+            streamed_mb = total_bytes_processed as f64 / 1024.0 / 1024.0,
+            peak_buffer_mb = PARSE_BUFFER_SIZE / 1024 / 1024,
+            largest_entry_bytes = max_single_entry_size,
+            "UTxO stream summary"
         );
-        info!(
-            "  Peak buffer usage: {} MB",
-            PARSE_BUFFER_SIZE / 1024 / 1024
-        );
-        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
         // After successfully parsing all UTXOs, we need to consume the break token
         // that ends the indefinite-length UTXO map if present
@@ -2136,9 +2107,7 @@ impl StreamingSnapshotParser {
             let mut decoder = Decoder::new(&buffer);
             match decoder.datatype() {
                 Ok(Type::Break) => {
-                    info!(
-                        "    Found break token after UTXOs, consuming it (end of indefinite UTXO map)"
-                    );
+                    info!("Consuming trailing UTxO map break token");
                     decoder.skip()?; // Consume the break that ends the UTXO map
 
                     // Update our tracking to account for the consumed break token
@@ -2147,10 +2116,10 @@ impl StreamingSnapshotParser {
                 }
                 Ok(_) => {
                     // No break token, this is a definite-length map - continue normal parsing
-                    info!("    No break token found, assuming definite-length UTXO map");
+                    info!("UTxO map has no trailing break token");
                 }
                 Err(e) => {
-                    info!("    After UTXO parsing, datatype() check failed: {}", e);
+                    info!(error = %e, "Unable to inspect trailing UTxO token");
                 }
             }
         }
