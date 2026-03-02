@@ -529,19 +529,10 @@ impl ConsensusRuntime {
         }
 
         if self.tree.get_block(&parent_hash).is_none() {
-            // Keep the same parent-number convention while re-rooting, including
-            // block 0 -> u64::MAX for genesis alignment.
-            let parent_number = number.wrapping_sub(1);
-
-            warn!(
-                "Parent {parent_hash} not in tree for offered block {hash} — re-rooting tree at block {parent_number}"
+            debug!(
+                "Parent {parent_hash} not in tree for offered block {hash} (block {number}) — ignoring"
             );
-            self.tree = ConsensusTree::new(self.tree.k(), self.tree.take_observer());
-            self.block_data.clear();
-            if let Err(e) = self.tree.set_root(parent_hash, parent_number, 0) {
-                error!("Failed to re-root tree: {e}");
-                return;
-            }
+            return;
         }
 
         let wanted = match self.tree.check_block_wanted(hash, parent_hash, number, slot) {
