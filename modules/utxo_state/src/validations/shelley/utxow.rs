@@ -118,6 +118,13 @@ mod tests {
         "conway - valid transaction 1 - with CCMember Certificate"
     )]
     #[test_case(validation_fixture!(
+        "conway",
+        "dddcbbead098914e61907b832c3c95ac985c032f02960d5dc569fd4176447064"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 2 - failed transaction"
+    )]
+    #[test_case(validation_fixture!(
         "shelley",
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b",
         "missing_vkey_witnesses_utxow"
