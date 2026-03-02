@@ -8,8 +8,8 @@ use acropolis_common::queries::errors::QueryError;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     messages::{
-        CardanoMessage, Message, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
-        StateQuery, StateQueryResponse,
+        CardanoMessage, Message, PoolRegistrationUpdatesMessage, SPOStateMessage, SnapshotMessage,
+        SnapshotStateMessage, StateQuery, StateQueryResponse,
     },
     queries::pools::{
         PoolActiveStakeInfo, PoolDelegators, PoolsListWithInfo, PoolsStateQuery,
@@ -167,35 +167,29 @@ impl SPOState {
         history: Arc<Mutex<StateHistory<State>>>,
         mut snapshot_subscription: Box<dyn Subscription<Message>>,
     ) -> Result<()> {
-        info!("Waiting for SPO state snapshot bootstrap messages...");
-
         loop {
             let Ok((_, message)) = snapshot_subscription.read().await else {
-                info!("Snapshot subscription closed");
                 return Ok(());
             };
 
             match message.as_ref() {
-                Message::Snapshot(SnapshotMessage::Startup) => {
-                    info!("Received snapshot startup signal, awaiting SPO bootstrap data...");
-                }
+                Message::Snapshot(SnapshotMessage::Startup) => {}
                 Message::Snapshot(SnapshotMessage::Bootstrap(SnapshotStateMessage::SPOState(
                     spo_bootstrap,
                 ))) => {
-                    info!(
-                        "Bootstrapping SPO state: {} pools, {} pending updates, {} retiring",
-                        spo_bootstrap.spo_state.pools.len(),
-                        spo_bootstrap.spo_state.updates.len(),
-                        spo_bootstrap.spo_state.retiring.len()
-                    );
                     let block_number = spo_bootstrap.block_number;
+                    let pools = spo_bootstrap.spo_state.pools.len();
+                    let pending_updates = spo_bootstrap.spo_state.updates.len();
+                    let retiring = spo_bootstrap.spo_state.retiring.len();
                     let mut guard = history.lock().await;
                     guard.clear();
                     guard.bootstrap_init_with(spo_bootstrap.spo_state.clone().into(), block_number);
-                    info!("SPO state bootstrap complete");
+                    info!(
+                        block_number,
+                        pools, pending_updates, retiring, "snapshot bootstrap loaded"
+                    );
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
-                    info!("Snapshot complete, exiting SPO state bootstrap loop");
                     return Ok(());
                 }
                 _ => {}
@@ -326,41 +320,52 @@ impl SPOState {
                     let span = info_span!("spo_state.handle_certs", block = block_info.number);
                     async {
                         ctx.check_sync(block_info);
-                        let result = state
+                        let (maybe_message, pool_registration_updates_message) = state
                             .handle_tx_certs(block_info, tx_certs_msg, &mut ctx.validation)
-                            .inspect_err(|e| ctx.handling_error("TxCerts", e))
-                            .ok();
+                            .unwrap_or_else(|e| {
+                                ctx.handling_error("TxCerts", &e);
+                                // Keep per-block synchronization intact for downstream consumers.
+                                error!(
+                                    block = block_info.number,
+                                    error = %e,
+                                    "TxCertificates handling failed; publishing empty pool registration updates"
+                                );
+                                (
+                                    None,
+                                    Arc::new(Message::Cardano((
+                                        block_info.clone(),
+                                        CardanoMessage::PoolRegistrationUpdates(
+                                            PoolRegistrationUpdatesMessage { updates: vec![] },
+                                        ),
+                                    ))),
+                                )
+                            });
 
-                        if let Some((maybe_message, pool_registration_updates_message)) = result {
-                            if let Some(message) = maybe_message {
-                                if let Message::Cardano((
-                                    _,
-                                    CardanoMessage::SPOState(SPOStateMessage {
-                                        retired_spos, ..
-                                    }),
-                                )) = message.as_ref()
-                                {
-                                    let pool_ids: Vec<PoolId> =
-                                        retired_spos.iter().map(|(spo, _sa)| *spo).collect();
-                                    retired_pools_history
-                                        .handle_deregistrations(block_info, &pool_ids);
-                                }
-
-                                // publish spo message
-                                if let Err(e) = spo_state_publisher.publish(message).await {
-                                    ctx.validation
-                                        .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
-                                }
-                            }
-
-                            if let Err(e) = pool_registration_updates_publisher
-                                .publish(pool_registration_updates_message)
-                                .await
+                        if let Some(message) = maybe_message {
+                            if let Message::Cardano((
+                                _,
+                                CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
+                            )) = message.as_ref()
                             {
-                                ctx.validation.push_anyhow(anyhow!(
-                                    "Error publishing Pool Registration Updates: {e:#}"
-                                ))
+                                let pool_ids: Vec<PoolId> =
+                                    retired_spos.iter().map(|(spo, _sa)| *spo).collect();
+                                retired_pools_history.handle_deregistrations(block_info, &pool_ids);
                             }
+
+                            // publish spo message
+                            if let Err(e) = spo_state_publisher.publish(message).await {
+                                ctx.validation
+                                    .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
+                            }
+                        }
+
+                        if let Err(e) = pool_registration_updates_publisher
+                            .publish(pool_registration_updates_message)
+                            .await
+                        {
+                            ctx.validation.push_anyhow(anyhow!(
+                                "Error publishing Pool Registration Updates: {e:#}"
+                            ))
                         }
                     }
                     .instrument(span)
@@ -672,7 +677,9 @@ impl SPOState {
         let pool_registration_updates_publish_topic = config
             .get_string(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.0)
             .unwrap_or(DEFAULT_POOL_REGISTRATION_UPDATES_PUBLISH_TOPIC.1.to_string());
-        info!("Creating pool registration updates publisher on '{pool_registration_updates_publish_topic}'");
+        info!(
+            "Creating pool registration updates publisher on '{pool_registration_updates_publish_topic}'"
+        );
 
         let validation_publish_topic = config
             .get_string(DEFAULT_VALIDATION_PUBLISH_TOPIC.0)
