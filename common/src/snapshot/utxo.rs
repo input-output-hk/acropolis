@@ -26,7 +26,7 @@
 //! ```
 
 use minicbor::data::Type;
-use minicbor::Decoder;
+use minicbor::{Decode, Decoder};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -199,7 +199,7 @@ impl SnapshotUTXOValue {
             address: address.0,
             value: value.0,
             datum,
-            reference_script_hash: None,
+            script_ref: None,
         }))
     }
 
@@ -247,7 +247,7 @@ impl SnapshotUTXOValue {
                 address,
                 value,
                 datum,
-                reference_script_hash: reference_script.map(|s| s.compute_hash()),
+                script_ref: reference_script.map(|s| s.get_script_ref()),
             })),
             _ => Err(minicbor::decode::Error::message(
                 "map-based TxOut missing required fields",
@@ -335,19 +335,31 @@ fn decode_script_ref(d: &mut Decoder) -> Result<Option<ReferenceScript>, minicbo
 
     let script_type = match script_decoder.u8() {
         Ok(t) => t,
-        Err(_) => return Ok(None),
+        Err(_) => {
+            return Ok(None);
+        }
     };
 
-    let script_bytes = match script_decoder.bytes() {
-        Ok(b) => b.to_vec(),
-        Err(_) => return Ok(None),
-    };
-
-    let reference_script = match script_type {
-        0 => ReferenceScript::Native(minicbor::decode::<NativeScript>(&script_bytes)?),
-        1 => ReferenceScript::PlutusV1(script_bytes),
-        2 => ReferenceScript::PlutusV2(script_bytes),
-        3 => ReferenceScript::PlutusV3(script_bytes),
+    let reference_script = match script_decoder.datatype() {
+        Ok(Type::Bytes) => {
+            let script_bytes = script_decoder.bytes()?.to_vec();
+            match script_type {
+                0 => ReferenceScript::Native(minicbor::decode::<NativeScript>(&script_bytes)?),
+                1 => ReferenceScript::PlutusV1(script_bytes),
+                2 => ReferenceScript::PlutusV2(script_bytes),
+                3 => ReferenceScript::PlutusV3(script_bytes),
+                _ => return Ok(None),
+            }
+        }
+        Ok(Type::Array) => {
+            // if it is not bytes, then check if it is a native script
+            match NativeScript::decode(&mut script_decoder, &mut ()) {
+                Ok(native_script) => ReferenceScript::Native(native_script),
+                Err(_) => {
+                    return Ok(None);
+                }
+            }
+        }
         _ => return Ok(None),
     };
 
@@ -582,7 +594,7 @@ mod tests {
                 assets: NativeAssets::default(),
             },
             datum: None,
-            reference_script_hash: None,
+            script_ref: None,
         }
     }
 
@@ -692,7 +704,7 @@ mod tests {
         let utxo_value = result.unwrap().0;
         assert_eq!(utxo_value.value.lovelace, 2_000_000);
         assert!(utxo_value.datum.is_none());
-        assert!(utxo_value.reference_script_hash.is_none());
+        assert!(utxo_value.script_ref.is_none());
     }
 
     #[test]

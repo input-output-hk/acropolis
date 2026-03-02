@@ -65,6 +65,7 @@ pub fn validate_tx(
             plutus_data,
             redeemers,
             utxos,
+            tx_deltas.is_valid,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }

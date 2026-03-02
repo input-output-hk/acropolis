@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ScriptHash, ScriptLang, StakeRegistrationUpdate, TxCertificate, TxCertificateWithPos,
-    TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap, VotingProcedures,
-    Withdrawal,
+    Redeemer, ReferenceScript, ScriptHash, ScriptLang, ScriptRef, StakeRegistrationUpdate,
+    TxCertificate, TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness,
+    Value, ValueMap, VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -23,8 +23,8 @@ pub struct TxOutput {
     /// Datum (Inline or Hash)
     pub datum: Option<Datum>,
 
-    /// Reference script hash
-    pub reference_script_hash: Option<ScriptHash>,
+    /// Reference Script hash and type
+    pub script_ref: Option<ScriptRef>,
 }
 
 impl TxOutput {
@@ -33,7 +33,7 @@ impl TxOutput {
             address: self.address.clone(),
             value: self.value.clone(),
             datum: self.datum.clone(),
-            reference_script_hash: self.reference_script_hash,
+            script_ref: self.script_ref.clone(),
         }
     }
 }
@@ -45,6 +45,7 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
+    pub reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
     pub stated_total_collateral: Option<u64>,
@@ -79,6 +80,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            reference_scripts,
             stated_total_collateral,
             is_valid,
             certs,
@@ -100,6 +102,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            reference_scripts: None,
             stated_total_collateral,
             is_valid,
             withdrawals: None,
@@ -116,6 +119,7 @@ impl Transaction {
         };
 
         if do_validation {
+            utxo_deltas.reference_scripts = Some(reference_scripts);
             utxo_deltas.certs = Some(certs);
             utxo_deltas.withdrawals = Some(withdrawals);
             utxo_deltas.mint_burn_deltas = Some(mint_burn_deltas);
@@ -158,6 +162,9 @@ pub struct TxUTxODeltas {
     pub is_valid: bool,
 
     // State needed for validation
+
+    // Reference scripts (needed for phase 2 validation)
+    pub reference_scripts: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Certificates
     // NOTE:
