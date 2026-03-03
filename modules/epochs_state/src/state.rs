@@ -133,13 +133,9 @@ impl State {
         let new_epoch = block_info.new_epoch;
 
         // Skip blocks that don't participate in nonce evolution:
-        // - Genesis block (number 0): no parent hash or VRF output to evolve from
         // - Pre-Shelley epochs: nonce evolution starts at shelley_epoch
         // - Byron-era blocks: no VRF nonces (relevant on preview where shelley_epoch=0)
-        if block_info.number > 0
-            && block_info.epoch >= genesis.shelley_epoch
-            && block_info.era != Era::Byron
-        {
+        if block_info.epoch >= genesis.shelley_epoch && block_info.era != Era::Byron {
             let Some(praos_params) = self.praos_params.as_ref() else {
                 bail!("Praos Param is not set");
             };
@@ -174,9 +170,13 @@ impl State {
             // output.
             let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
 
-            // there must be parent hash
-            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::from(*h)) else {
-                bail!("Header Parent hash error");
+            // LAB nonce from the header's previous hash.
+            // GenesisHash (None) maps to NeutralNonce, matching the Haskell node's
+            // prevHashToNonce(GenesisHash) = NeutralNonce. This matters on networks
+            // like preview where the first Shelley block has no predecessor.
+            let lab_nonce: Nonce = match header.previous_hash() {
+                Some(h) => BlockHash::from(*h).into(),
+                None => Nonce::default(),
             };
 
             let new_nonces = Nonces {
@@ -210,8 +210,8 @@ impl State {
                 } else {
                     current_nonces.candidate.clone()
                 },
-                // Last Applied Block is the Header's Prev hash.
-                lab: parent_hash.into(),
+                // Last Applied Block is the Header's Previous Hash.
+                lab: lab_nonce,
                 // Previous LAB stay same during epoch
                 // only Epoch's Boundary, will be last block's Previous Epoch's LAB
                 prev_lab: if new_epoch {

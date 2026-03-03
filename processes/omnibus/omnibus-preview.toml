@@ -124,6 +124,7 @@ stake-spo-distribution-topic = "cardano.spo.distribution"
 [module.parameters-state]
 # Listen for governance actions
 enact-state-topic = "cardano.enact.state"
+# Enables /epochs/{number}/parameters
 store-history = false
 
 [module.stake-delta-filter]
@@ -131,6 +132,8 @@ cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
+
+#[module.historical-epochs-state]
 
 [module.accounts-state]
 # Optional subscription for when governance is active
@@ -172,9 +175,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-#[module.block-vrf-validator]
+[module.block-vrf-validator]
 
-#[module.block-kes-validator]
+[module.block-kes-validator]
 
 [module.clock]
 

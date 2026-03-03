@@ -154,6 +154,7 @@ verification-output-file = "../../modules/governance_state/data/verification.csv
 [module.parameters-state]
 # Listen for governance actions
 enact-state-topic = "cardano.enact.state"
+# Enables /epochs/{number}/parameters
 store-history = false
 
 [module.stake-delta-filter]
