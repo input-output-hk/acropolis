@@ -12,7 +12,22 @@ printf -v now "%(%s)T"
 current_epoch=$(( $(( now - genesis )) / epoch_slots ))
 previous_epoch=$(( current_epoch - 1 ))
 
-target_epoch=${TARGET_EPOCH:-$previous_epoch}
+target_epoch="${TARGET_EPOCH:-${previous_epoch}}"
+
+# sanitise the input and make sure that we have a valid target epoch
+#
+# strip out any non-digits
+sanitised_target_epoch="${target_epoch//[![:digit:]]}"
+
+# fall back to using previous epoch if input was bad or beyond current epoch
+if [ "${target_epoch}" != "${sanitised_target_epoch}" ]; then
+  target_epoch=${previous_epoch}
+else
+  if [ "${target_epoch}" -gt "${previous_epoch}" ]; then
+    target_epoch=${previous_epoch}
+  fi
+fi
+
 echo "Target epoch: $target_epoch"
 
 logfile=omnibus.txt
