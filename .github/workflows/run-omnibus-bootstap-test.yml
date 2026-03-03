@@ -41,6 +41,8 @@ jobs:
 
       - name: Bootstrap omnibus and wait for target epoch
         run: ./scripts/run-omnibus-wait-for-epoch.sh
+        env:
+          TARGET_EPOCH: ${{ inputs.target_epoch }}
 
       - name: Run spdd tests
         run: |
