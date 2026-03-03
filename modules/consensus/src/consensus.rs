@@ -163,6 +163,9 @@ impl Consensus {
         );
         info!("Validation timeout {validation_timeout:?}");
 
+        let force_validation = config.get_bool("force-validation").unwrap_or(true);
+        info!("Force validation and chain selection: {force_validation}");
+
         let security_parameter = config
             .get_int("security-parameter")
             .unwrap_or(DEFAULT_SECURITY_PARAMETER as i64) as u64;
@@ -210,12 +213,14 @@ impl Consensus {
             // TODO: Temporary until consensus flow fully works.
             match flow_mode {
                 BlockFlowMode::Direct => {
-                    runtime.run_direct(block_subscription).await;
+                    runtime.run_direct(block_subscription, force_validation).await;
                 }
                 BlockFlowMode::Consensus => {
                     let consensus_subscription = consensus_subscription
                         .expect("consensus subscription missing for consensus flow mode");
-                    runtime.run_consensus(block_subscription, consensus_subscription).await;
+                    runtime
+                        .run_consensus(block_subscription, consensus_subscription, force_validation)
+                        .await;
                 }
             }
         });
@@ -230,7 +235,11 @@ impl ConsensusRuntime {
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
         mut consensus_subscription: Box<dyn Subscription<Message>>,
+        force_validation: bool,
     ) {
+        // If force_validation is disabled, treat immutable Mithril replay blocks
+        // as pass-through. Once volatile blocks begin, resume normal consensus flow.
+        let mut mithril_passthrough_active = !force_validation;
         loop {
             tokio::select! {
                 result = block_subscription.read() => {
@@ -241,16 +250,32 @@ impl ConsensusRuntime {
 
                     match message.as_ref() {
                         Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                            let block_info = if self.do_validation {
+                            let block_info = if force_validation && self.do_validation {
                                 raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
                             } else {
                                 raw_blk_info.clone()
                             };
 
-                            let span = info_span!("consensus", block = block_info.number);
-                            self.handle_block_available_consensus(block_info, raw_block.clone())
-                                .instrument(span)
-                                .await;
+                            if mithril_passthrough_active && block_info.status == BlockStatus::Immutable {
+                                let span = info_span!("consensus", block = block_info.number);
+                                self.handle_block_available_direct(block_info, raw_block.clone())
+                                    .instrument(span)
+                                    .await;
+                            } else {
+                                if mithril_passthrough_active {
+                                    info!(
+                                        block = block_info.number,
+                                        slot = block_info.slot,
+                                        "Mithril pass-through complete; switching to consensus flow"
+                                    );
+                                    mithril_passthrough_active = false;
+                                }
+                                let span = info_span!("consensus", block = block_info.number);
+                                self.handle_block_available_consensus(block_info, raw_block.clone())
+                                    .instrument(span)
+                                    .await;
+                            }
+
                             self.stats.maybe_log();
                         }
 
@@ -589,6 +614,7 @@ impl ConsensusRuntime {
     /// Run validation if enabled and the block is on the favoured chain.
     async fn maybe_validate_if_on_favoured_chain(&mut self, block_info: &BlockInfo) {
         if self.do_validation
+            && block_info.intent.do_validation()
             && self
                 .tree
                 .favoured_tip()
@@ -825,7 +851,11 @@ impl ConsensusRuntime {
 
     /// Direct flow: pass-through BlockAvailable and Rollback (main-branch behavior).
     /// TODO: Temporary until consensus flow fully works
-    async fn run_direct(&mut self, mut block_subscription: Box<dyn Subscription<Message>>) {
+    async fn run_direct(
+        &mut self,
+        mut block_subscription: Box<dyn Subscription<Message>>,
+        _force_validation: bool,
+    ) {
         loop {
             let Ok((_, message)) = block_subscription.read().await else {
                 error!("Block message read failed");
@@ -834,12 +864,8 @@ impl ConsensusRuntime {
 
             match message.as_ref() {
                 Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                    let block_info = if self.do_validation {
-                        raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
-                    } else {
-                        raw_blk_info.clone()
-                    };
-
+                    // Direct mode is pass-through only: do not request validation.
+                    let block_info = raw_blk_info.with_intent(BlockIntent::Apply);
                     let span = info_span!("consensus", block = block_info.number);
                     self.handle_block_available_direct(block_info, raw_block.clone())
                         .instrument(span)
@@ -882,7 +908,7 @@ impl ConsensusRuntime {
             .await
             .unwrap_or_else(|e| error!("Failed to publish: {e}"));
 
-        if !self.do_validation {
+        if !self.do_validation || !block_info.intent.do_validation() {
             return;
         }
 

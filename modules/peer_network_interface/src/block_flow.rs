@@ -317,7 +317,7 @@ impl BlockTracker {
     /// that block after rollback, so we remove it from:
     /// - all blocks above `slot`
     /// - sibling hashes at the same `slot`
-    /// and keep it only on `(slot, hash)`.
+    /// - and keep it only on `(slot, hash)`.
     fn handle_rollback(&mut self, peer: PeerId, point: &Point) {
         match point {
             Point::Origin => {
