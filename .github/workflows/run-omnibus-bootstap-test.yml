@@ -48,14 +48,14 @@ jobs:
           npm install
           npm run test:spdd
         env:
-          MAINNET_DB_SYNC_URL: ${{ secrets.MAINNET_DB_SYNC_URL }}
+          MAINNET_DBSYNC_URL: ${{ secrets.MAINNET_DBSYNC_URL }}
 
       - name: Run drdd tests
         run: |
           cd tests/integration
           npm run test:spdd
         env:
-          MAINNET_DB_SYNC_URL: ${{ secrets.MAINNET_DB_SYNC_URL }}
+          MAINNET_DBSYNC_URL: ${{ secrets.MAINNET_DBSYNC_URL }}
 
       - name: Run k6 tests
         run: |
