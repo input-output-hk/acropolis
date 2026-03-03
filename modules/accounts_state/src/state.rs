@@ -92,7 +92,7 @@ pub struct State {
     protocol_parameters: Option<ProtocolParams>,
 
     /// Protocol parameters that applied in the previous epoch
-    previous_protocol_parameters: Option<ProtocolParams>,
+    //previous_protocol_parameters: Option<ProtocolParams>,
 
     /// Pool refunds to apply next epoch (list of reward accounts to refund to)
     pool_refunds: Vec<(PoolId, StakeAddress)>,
@@ -536,7 +536,7 @@ impl State {
         // rewards to calculate
         // In the first epoch of Shelley, there are no previous_protocol_parameters, so we
         // have to use the genesis parameters we just received
-        let shelley_params = match &self.previous_protocol_parameters {
+        let shelley_params = match &self.protocol_parameters {
             Some(ProtocolParams {
                 shelley: Some(sp), ..
             }) => sp,
@@ -1107,7 +1107,7 @@ impl State {
         if different {
             info!("New parameter set: {:?}", params_msg.params);
         }
-        self.previous_protocol_parameters = self.protocol_parameters.clone();
+        //self.previous_protocol_parameters = self.protocol_parameters.clone();
         self.protocol_parameters = Some(params_msg.params.clone());
 
         Ok(())
@@ -1800,7 +1800,7 @@ impl State {
     // Retrieve the major protocol version from the previous protocol parameters
     // During bootstrap we use the current protocol parameters for the first epoch
     fn is_chang(&self) -> bool {
-        self.previous_protocol_parameters
+        self.protocol_parameters
             .as_ref()
             .or(self.protocol_parameters.as_ref())
             .is_some_and(|p| p.major_protocol_version() == Some(9))

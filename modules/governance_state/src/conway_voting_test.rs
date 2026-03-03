@@ -20,7 +20,6 @@ mod tests {
 
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{filter, fmt, EnvFilter, Registry};
-    use acropolis_common::validation::ValidationOutcomes;
 
     struct ConwayVotingTestRecord {
         action_id: GovActionId,
@@ -304,6 +303,7 @@ mod tests {
                             .as_result()?
                     }
                 }
+                conway_voting.include_pending_votes()?;
 
                 let current_drep = dreps.get(&epoch).unwrap();
                 let current_pool = pools.get(&epoch).unwrap();

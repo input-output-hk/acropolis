@@ -1,21 +1,21 @@
 use crate::voting_state::VotingRegistrationState;
-use acropolis_common::messages::GovernanceBootstrapMessage;
-use acropolis_common::protocol_params::ConwayParams;
-use acropolis_common::validation::ValidationOutcomes;
-use acropolis_common::validation::{GovernanceValidationError, ValidationError};
 use acropolis_common::{
-    AddrKeyhash, BlockInfo, Committee, CommitteeCredential, ConstitutionalCommitteeKeyHash, DRepScriptHash,
-    ConstitutionalCommitteeScriptHash, DRepCredential, DRepKeyHash, DelegatedStake, EnactStateElem, GovActionId, GovernanceAction, GovernanceOutcome, GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure, ScriptHash, SingleVoterVotes, TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter, VotingOutcome, VotingProcedure};
+    messages::GovernanceBootstrapMessage,
+    protocol_params::ConwayParams,
+    validation::{ValidationOutcomes, GovernanceValidationError, ValidationError},
+    AddrKeyhash, BlockInfo, ConstitutionalCommitteeKeyHash, 
+    DRepScriptHash, ConstitutionalCommitteeScriptHash, DRepCredential, DRepKeyHash, 
+    DelegatedStake, EnactStateElem, GovActionId, GovernanceAction, GovernanceOutcome, 
+    GovernanceOutcomeVariant, Lovelace, PoolId, ProposalProcedure, ScriptHash, SingleVoterVotes, 
+    TreasuryWithdrawalsAction, TxHash, Vote, VoteCount, VoteResult, Voter, VotingOutcome, 
+    VotingProcedure
+};
 use anyhow::{anyhow, bail, Result};
 use hex::ToHex;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
-use std::fs::{File, OpenOptions};
-use std::hash::Hash;
-use std::io::Write;
-use std::ops::Range;
-use std::path::Path;
-use std::str::FromStr;
+use std::{
+    collections::{HashMap, HashSet}, fmt::Debug, fs::{File, OpenOptions},
+    io::Write, ops::Range, path::Path, str::FromStr
+};
 use tracing::{debug, error, info};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +51,7 @@ pub struct CastVotes {
 }
 
 impl CastVotes {
+    #[cfg(test)]
     fn get(&self, voter: &Voter) -> Option<&(Vote, Lovelace)> {
         self.votes.get(voter)
     }
@@ -109,11 +110,15 @@ impl CastVotes {
         let mut equal_drep_count = 0;
         let mut equal_pool_count = 0;
         let mut equal_cons_count = 0;
+        let mut diff_cnt = 0;
+        let mut comp_cnt = 0;
+        let mut ref_cnt = 0;
 
         for (key, (v, s)) in self.votes.iter() {
             match reference.votes.get(key) {
                 None => {
                     error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}: {s:<12} ---- reference (None)");
+                    comp_cnt += 1;
                     equal = false;
                 },
                 Some((rv, rs)) if rv == v && rs == s => {
@@ -126,6 +131,7 @@ impl CastVotes {
                 },
                 Some((rv, rs)) => {
                     error!("{epoch}, {action_id}, {key:?}: computed {v:<7?}:{s:<12} ---- reference {rv:<7?}:{rs:<12}");
+                    diff_cnt += 1;
                     equal = false;
                 }
             }
@@ -134,6 +140,7 @@ impl CastVotes {
         for (key, (rv, rs)) in reference.votes.iter() {
             if !self.votes.contains_key(key) {
                 error!("{epoch}, {action_id}, {key:?}: computed (None) ---- reference {rv:<7?}:{rs:<12}");
+                ref_cnt += 1;
                 equal = false;
             }
         }
@@ -141,7 +148,8 @@ impl CastVotes {
         if !equal {
             error!(
                 "Votes validation failed: epoch {epoch}, action_id {action_id}, \
-                equal votes p{equal_pool_count}:d{equal_drep_count}:c{equal_cons_count}"
+                equal votes p{equal_pool_count}:d{equal_drep_count}:c{equal_cons_count}, \
+                different votes {diff_cnt}, computed alone {comp_cnt}, reference alone {ref_cnt}",
             );
         }
     }
@@ -173,6 +181,7 @@ pub struct ConwayVoting {
     bootstrap: Option<bool>,
 
     pub proposals: HashMap<GovActionId, (u64, ProposalProcedure)>,
+    pub pending_votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     pub votes: HashMap<GovActionId, HashMap<Voter, (TxHash, VotingProcedure)>>,
     action_status: HashMap<GovActionId, ActionStatus>,
 
@@ -191,6 +200,7 @@ impl ConwayVoting {
             conway: None,
             bootstrap: None,
             proposals: Default::default(),
+            pending_votes: Default::default(),
             votes: Default::default(),
             action_status: Default::default(),
             action_proposal_count: 0,
@@ -300,7 +310,7 @@ impl ConwayVoting {
         self.votes_count += voter_votes.voting_procedures.len();
         let mut outcomes = ValidationOutcomes::new();
         for (action_id, procedure) in voter_votes.voting_procedures.iter() {
-            let votes = self.votes.entry(action_id.clone()).or_default();
+            let votes = self.pending_votes.entry(action_id.clone()).or_default();
 
             match self.action_status.get(action_id) {
                 None => {
@@ -383,6 +393,7 @@ impl ConwayVoting {
 
     /// Should be called when voting is over
     fn end_voting(&mut self, action_id: &GovActionId) {
+        self.pending_votes.remove(action_id);
         self.votes.remove(action_id);
         self.proposals.remove(action_id);
     }
@@ -718,6 +729,17 @@ impl ConwayVoting {
         Ok(())
     }
 
+    pub fn include_pending_votes(&mut self) -> Result<()>{
+        for (action_id, pending) in self.pending_votes.drain() {
+            let votes = self.votes.entry(action_id).or_default();
+            for (voter, (tx_hash, voting_proc)) in pending.into_iter() {
+                votes.insert(voter, (tx_hash, voting_proc));
+            }
+        }
+        anyhow::ensure!(self.pending_votes.is_empty());
+        Ok(())
+    }
+
     pub fn get_stats(&self) -> String {
         format!(
             "conway proposals: {}, conway votes: {}",
@@ -851,7 +873,7 @@ mod tests {
         assert_eq!(vstake, "\"1000\"");
 
         let split = vec!["a", "b", "c", "d", "e"];
-        let [vtype, vhash, vote, vstake] = &split[..] else {
+        let [_vtype, _vhash, _vote, _vstake] = &split[..] else {
             return Ok(())
         };
         bail!("Should not be able to decompose {split:?} into 4 elements");

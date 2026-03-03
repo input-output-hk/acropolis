@@ -211,6 +211,7 @@ impl State {
                 &self.spo_stake,
             )?;
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
+            self.conway_voting.include_pending_votes()?;
             let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();
 
             info!(

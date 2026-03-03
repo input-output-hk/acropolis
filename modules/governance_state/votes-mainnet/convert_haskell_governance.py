@@ -184,6 +184,38 @@ def apply_pattern(hash: str, idx: int, new_epoch: int, pattern: str) -> str:
     applied = pattern.replace("{action_id}", act_id).replace("{epoch}", str(new_epoch))
     return applied
 
+def epoch_change(output_pattern, records):
+    grouped = aggregate_records(records)
+    joined = {}
+    for (type,epoch,hash,idx), recs in grouped.items():
+        key = (epoch,hash,idx)
+        if key not in joined:
+            joined[key] = {}
+
+        for (voter,vote) in recs['keyhashes'].items():
+            if voter in joined[key]:
+                print(f"Error: common voter for different types: {key}, pool {pool}")
+            joined[key][voter] = vote
+
+        # Sanity check:
+        total_yes = 0
+        for (voter,(vote,stake)) in recs['keyhashes'].items():
+            if vote == "Yes":
+                total_yes += stake
+        if recs['yes_stake'] != total_yes:
+            print(f"Sanity check fail for {type},{key}: {total_yes} not sums to yes stake from Haskell: {recs['yes_stake']}")
+
+    for (epoch,hash,idx), recs in joined.items():
+        filename = apply_pattern(hash, idx, epoch, output_pattern)
+
+        f = open(filename, "w")
+        f.write('"type","voter-hash","vote","voting-stake"\n')
+        for (pool_type,pool_id), (vote, stake) in recs.items():
+            if vote=='Default' or vote=='NoVote':
+                continue
+
+            f.write(f'"{pool_type}","{pool_id}","{vote}",{stake}\n')
+
 def main():
     import sys
 
@@ -211,52 +243,35 @@ def main():
 
         parsed = parse_line("SPO", line)
         if parsed:
-            if parsed['epoch'] > 520: 
-                print("Parsed all epochs")
-                break
+            #if parsed['epoch'] > 520: 
+            #    print("Parsed all epochs")
+            #    break
             if epoch < parsed['epoch']:
+                epoch_change(output_pattern, records)
                 print(f"New epoch {parsed['epoch']}")
+                records = []
                 epoch = parsed['epoch']
+            elif epoch > parsed['epoch']:
+                print(f"WARN: Old epoch {parsed['epoch']} met")
             records.append(parsed)
             continue
 
         parsed = parse_line("DRep", line)
         if parsed:
+            if epoch < parsed['epoch']:
+                epoch_change(output_pattern, records)
+                print(f"New epoch {parsed['epoch']}")
+                records = []
+                epoch = parsed['epoch']
+            elif epoch > parsed['epoch']:
+                print(f"WARN: Old epoch {parsed['epoch']} met")
             records.append(parsed)
             continue
 
+        if line.startswith("*** Voting committee"):
+            continue
+
         print(f"Failed to parse line {lineno}, {line}")
-
-    grouped = aggregate_records(records)
-    joined = {}
-    for (type,epoch,hash,idx), recs in grouped.items():
-        key = (epoch,hash,idx)
-        if key not in joined:
-            joined[key] = {}
-
-        for (voter,vote) in recs['keyhashes'].items():
-            if voter in joined[key]:
-                print(f"Error: common voter for different types: {key}, pool {pool}")
-            joined[key][voter] = vote
-
-        # Sanity check:
-        total_yes = 0
-        for (voter,(vote,stake)) in recs['keyhashes'].items():
-            if vote == "Yes":
-                total_yes += stake
-        if recs['yes_stake'] != total_yes:
-            print(f"Sanity check fail for {type},{key}: {total_yes} not sums to yes stake from Haskell: {recs['yes_stake']}")
-
-    for (epoch,hash,idx), recs in joined.items():
-        filename = apply_pattern(hash, idx, epoch, output_pattern)
-
-        f = open(filename, "w")
-        f.write('"type","voter-hash","vote","voting-stake"')
-        for (pool_type,pool_id), (vote, stake) in recs.items():
-            if vote=='Default' or vote=='NoVote':
-                continue
-
-            f.write(f'"{pool_type}","{pool_id}","{vote}",{stake}\n')
 
 if __name__ == "__main__":
     main()
