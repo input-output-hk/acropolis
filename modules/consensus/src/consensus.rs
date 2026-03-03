@@ -17,7 +17,7 @@ use acropolis_common::{
     BlockHash, BlockIntent, BlockStatus, Era,
 };
 use anyhow::Result;
-use caryatid_sdk::{module, Context, Subscription};
+use caryatid_sdk::{module, Context};
 use config::Config;
 use consensus_tree::ConsensusTree;
 use futures::future::try_join_all;

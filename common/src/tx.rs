@@ -45,6 +45,7 @@ pub struct Transaction {
     pub produces: Vec<TxOutput>,
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
+    pub donation: Option<u64>,
     pub reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
@@ -80,6 +81,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            donation,
             reference_scripts,
             stated_total_collateral,
             is_valid,
@@ -102,6 +104,7 @@ impl Transaction {
             produces,
             reference_inputs,
             fee,
+            donation,
             reference_scripts: None,
             stated_total_collateral,
             is_valid,
@@ -154,6 +157,9 @@ pub struct TxUTxODeltas {
 
     // Transaction fee
     pub fee: u64,
+
+    // Transaction donation (added from Conway era)
+    pub donation: Option<u64>,
 
     // Transaction total collateral
     pub stated_total_collateral: Option<u64>,
@@ -261,7 +267,7 @@ impl TxUTxODeltas {
     }
 
     /// This functions returns the total produced value of the transaction
-    /// Produced = Outputs + Fee + Deposits + Value Burnt
+    /// Produced = Outputs + Fee + Deposits + Value Burnt + Donation (added from Conway era)
     /// When transaction is failed
     /// Produced =
     /// - Before Babbage: Collater Inputs (this is just moved to fee pot)
@@ -307,6 +313,11 @@ impl TxUTxODeltas {
 
         // Add Value Burnt
         total_produced.add_value(&self.get_burnt_value());
+
+        // Add Donation
+        if let Some(donation) = self.donation {
+            total_produced.add_value(&Value::new(donation, vec![]));
+        }
 
         total_produced.remove_zero_amounts();
 
