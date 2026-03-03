@@ -6,7 +6,8 @@
 [global.startup]
 network-name = "preview"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
-sync-mode = "upstream"      # Options: "mithril" | "upstream"
+sync-mode = "mithril"      # Options: "mithril" | "upstream"
+block-flow-mode = "direct" # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -34,15 +35,13 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 [module.peer-network-interface]
 # Use "origin" for genesis+upstream: no bootstrap module sends the sync command.
 # Use "dynamic" for snapshot+upstream or genesis+mithril (bootstrapper/MSF sends it).
-sync-point = "origin"
-block-flow-mode = "consensus"
+sync-point = "dynamic"
 node-addresses = [
     "preview-node.play.dev.cardano.org:3001",
 ]
 magic-number = 2
 
 [module.consensus]
-consensus-flow-mode = "direct"   # or "consensus"
 validation-timeout = 60  # seconds (default 60)
 # Security parameter k — maximum fork depth (Praos Common Prefix parameter)
 security-parameter = 2160
@@ -52,8 +51,8 @@ consensus-wants-topic = "cardano.consensus.wants"
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
-           "cardano.validation.vrf",
-           "cardano.validation.kes",
+#           "cardano.validation.vrf",
+#           "cardano.validation.kes",
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
@@ -182,9 +181,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-[module.block-vrf-validator]
+#[module.block-vrf-validator]
 
-[module.block-kes-validator]
+#[module.block-kes-validator]
 
 [module.clock]
 

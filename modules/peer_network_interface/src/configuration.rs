@@ -13,18 +13,6 @@ pub enum SyncPoint {
     Dynamic,
 }
 
-/// Block flow mode determines how the peer-network-interface handles block synchronization.
-///
-/// - Direct: blocks are automatically fetched and published as they come in from peers.
-/// - Consensus: block headers are first offered to a consensus module which decides which to fetch.
-#[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub enum BlockFlowMode {
-    #[default]
-    Direct,
-    Consensus,
-}
-
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct InterfaceConfig {
@@ -36,8 +24,6 @@ pub struct InterfaceConfig {
     pub cache_dir: PathBuf,
     #[serde(flatten)]
     pub genesis_values: Option<GenesisValues>,
-    #[serde(default)]
-    pub block_flow_mode: BlockFlowMode,
     #[serde(default = "default_consensus_topic")]
     pub consensus_topic: String,
     #[serde(default = "default_block_wanted_topic")]

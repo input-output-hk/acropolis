@@ -5,8 +5,9 @@
 # ============================================================================
 [global.startup]
 network-name = "mainnet"
-startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
-sync-mode = "upstream"      # Options: "mithril" | "upstream"
+startup-mode = "genesis"   # Options: "genesis" | "snapshot"
+sync-mode = "mithril"      # Options: "mithril" | "upstream"
+block-flow-mode = "direct" # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -33,7 +34,6 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 # ============================================================================
 [module.peer-network-interface]
 sync-point = "dynamic"
-block-flow-mode = "consensus"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",
@@ -50,8 +50,8 @@ consensus-wants-topic = "cardano.consensus.wants"
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
-           "cardano.validation.vrf",
-           "cardano.validation.kes",
+#           "cardano.validation.vrf",
+#           "cardano.validation.kes",
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]

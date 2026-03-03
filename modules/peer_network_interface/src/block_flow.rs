@@ -13,9 +13,10 @@ use tracing::{error, info, warn};
 
 use crate::BlockSink;
 use crate::chain_state::{ChainEvent, ChainState};
-use crate::configuration::{BlockFlowMode, InterfaceConfig};
+use crate::configuration::InterfaceConfig;
 use crate::connection::Header;
 use crate::network::{NetworkEvent, PeerId};
+use acropolis_common::configuration::BlockFlowMode;
 
 /// Block flow handling strategies.
 pub enum BlockFlowHandler {
@@ -31,10 +32,11 @@ pub enum BlockFlowHandler {
 impl BlockFlowHandler {
     pub async fn new(
         config: &InterfaceConfig,
+        block_flow_mode: BlockFlowMode,
         context: Arc<Context<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
     ) -> Result<Self> {
-        match config.block_flow_mode {
+        match block_flow_mode {
             BlockFlowMode::Direct => {
                 info!("Block flow mode: Direct (auto-fetch)");
                 Ok(BlockFlowHandler::Direct {

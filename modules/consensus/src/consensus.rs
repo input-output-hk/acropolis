@@ -7,6 +7,7 @@ pub mod tree_error;
 pub mod tree_observer;
 
 use acropolis_common::{
+    configuration::BlockFlowMode,
     messages::{
         BlockRejectedMessage, BlockWantedMessage, CardanoMessage, ConsensusMessage, Message,
         RawBlockMessage, StateTransitionMessage,
@@ -31,33 +32,7 @@ const DEFAULT_BLOCKS_PROPOSED_TOPIC: &str = "cardano.block.proposed";
 const DEFAULT_CONSENSUS_OFFERS_TOPIC: &str = "cardano.consensus.offers";
 const DEFAULT_CONSENSUS_WANTS_TOPIC: &str = "cardano.consensus.wants";
 const DEFAULT_VALIDATION_TIMEOUT: i64 = 60; // seconds
-const DEFAULT_SECURITY_PARAMETER: u64 = 2160; // k
-
-/// Consensus flow handling strategies.
-#[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum ConsensusFlowMode {
-    /// Direct flow (pass-through, no chain selection).
-    #[default]
-    Direct,
-    /// Consensus flow: use offers/wants with chain selection.
-    Consensus,
-}
-
-impl ConsensusFlowMode {
-    fn from_config(config: &Config) -> Self {
-        config.get::<ConsensusFlowMode>("consensus-flow-mode").unwrap_or_default()
-    }
-}
-
-impl std::fmt::Display for ConsensusFlowMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConsensusFlowMode::Direct => write!(f, "direct"),
-            ConsensusFlowMode::Consensus => write!(f, "consensus"),
-        }
-    }
-}
+const DEFAULT_SECURITY_PARAMETER: u64 = 2160; // TODO: This should come from the protocol params message security_param
 
 /// Events emitted by the consensus tree observer, queued for async publishing.
 enum ObserverEvent {
@@ -180,7 +155,7 @@ impl Consensus {
             info!("Validator: {topic}");
         }
 
-        let flow_mode = ConsensusFlowMode::from_config(&config);
+        let flow_mode = BlockFlowMode::from_config(&config);
         info!("Consensus flow mode: {flow_mode}");
 
         let validation_timeout = Duration::from_secs(
@@ -198,7 +173,7 @@ impl Consensus {
 
         // Subscribe for consensus messages (BlockOffered, BlockRescinded)
         // TODO: Temporary until consensus flow fully works.
-        let consensus_subscription = if flow_mode == ConsensusFlowMode::Consensus {
+        let consensus_subscription = if flow_mode == BlockFlowMode::Consensus {
             Some(context.subscribe(&consensus_offers_topic).await?)
         } else {
             None
@@ -234,10 +209,10 @@ impl Consensus {
         context.run(async move {
             // TODO: Temporary until consensus flow fully works.
             match flow_mode {
-                ConsensusFlowMode::Direct => {
+                BlockFlowMode::Direct => {
                     runtime.run_direct(block_subscription).await;
                 }
-                ConsensusFlowMode::Consensus => {
+                BlockFlowMode::Consensus => {
                     let consensus_subscription = consensus_subscription
                         .expect("consensus subscription missing for consensus flow mode");
                     runtime.run_consensus(block_subscription, consensus_subscription).await;
@@ -647,6 +622,9 @@ impl ConsensusRuntime {
 
         if all_say_go {
             self.stats.validated += 1;
+
+            // TODO: Actually send message with validated block
+
             if let Err(e) = self.tree.mark_validated(block_info.hash) {
                 error!("Failed to mark block validated: {e}");
             }

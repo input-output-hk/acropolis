@@ -4,6 +4,7 @@
 network-name = "mainnet"
 startup-mode = "snapshot"
 sync-mode = "upstream"      # Options: "mithril" | "upstream"
+block-flow-mode = "direct"  # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
 
 [module.genesis-bootstrapper]
@@ -17,7 +18,6 @@ block-publish-topic = "cardano.block.proposed"
 
 [module.peer-network-interface]
 sync-point = "dynamic"
-block-flow-mode = "consensus"
 node-addresses = [
     "backbone.cardano.iog.io:3001",
     "backbone.mainnet.cardanofoundation.org:3001",

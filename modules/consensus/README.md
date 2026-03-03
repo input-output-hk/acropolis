@@ -17,8 +17,8 @@ be configured - if empty, no validation is performed
 blocks-available-topic = "cardano.block.available"
 blocks-proposed-topic = "cardano.block.proposed"
 
-# Block flow mode: "direct" (pass-through) or "consensus" (offers/wants + chain selection)
-consensus-flow-mode = "consensus"
+# Block flow mode is set globally in [global.startup]:
+# block-flow-mode = "consensus"  # Options: "direct" | "consensus"
 
 # Validation result topics
 validators = [
