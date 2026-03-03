@@ -311,14 +311,30 @@ impl BlockTracker {
         self.tips.insert(peer, tip);
     }
 
-    /// Handle a peer rolling back — remove it from blocks beyond the rollback point.
+    /// Handle a peer rollback.
+    ///
+    /// For `Point::Specific(slot, hash)`, the peer is considered to be on exactly
+    /// that block after rollback, so we remove it from:
+    /// - all blocks above `slot`
+    /// - sibling hashes at the same `slot`
+    /// and keep it only on `(slot, hash)`.
     fn handle_rollback(&mut self, peer: PeerId, point: &Point) {
-        let rollback_to_slot = match point {
-            Point::Origin => 0,
-            Point::Specific(slot, _) => *slot,
-        };
-        for announcers in self.blocks.range_mut((rollback_to_slot + 1, BlockHash::default())..) {
-            announcers.1.retain(|p| *p != peer);
+        match point {
+            Point::Origin => {
+                for announcers in self.blocks.values_mut() {
+                    announcers.retain(|p| *p != peer);
+                }
+            }
+            Point::Specific(rollback_to_slot, rollback_to_hash) => {
+                let rollback_keep = BlockHash::try_from(rollback_to_hash.as_slice())
+                    .ok()
+                    .map(|h| (*rollback_to_slot, h));
+                for ((slot, hash), announcers) in &mut self.blocks {
+                    if *slot >= *rollback_to_slot && rollback_keep != Some((*slot, *hash)) {
+                        announcers.retain(|p| *p != peer);
+                    }
+                }
+            }
         }
         self.blocks.retain(|_, announcers| !announcers.is_empty());
     }
@@ -553,6 +569,23 @@ mod tests {
 
         assert_eq!(tracker.announcers(100, BLOCK_HASH_A), vec![PEER_1]);
         assert_eq!(tracker.announcers(200, BLOCK_HASH_B), vec![PEER_2]);
+    }
+
+    #[test]
+    fn rollback_removes_peer_from_same_slot_sibling_hashes() {
+        let mut tracker = BlockTracker::new();
+
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_B));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_B, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_B, GENESIS_HASH);
+        let _ = tracker.take_events();
+
+        tracker.handle_rollback(PEER_1, &point(100, BLOCK_HASH_A));
+
+        assert_eq!(tracker.announcers(100, BLOCK_HASH_A), vec![PEER_1]);
+        assert_eq!(tracker.announcers(100, BLOCK_HASH_B), vec![PEER_2]);
     }
 
     #[test]
