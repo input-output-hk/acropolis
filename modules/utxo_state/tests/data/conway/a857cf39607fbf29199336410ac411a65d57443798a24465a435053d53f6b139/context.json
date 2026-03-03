@@ -9,7 +9,7 @@
     "protocolParams": {
       "protocolVersion": {
         "minor": 0,
-        "major": 9
+        "major": 10
       },
       "maxTxSize": 16384,
       "maxBlockBodySize": 65536,
@@ -67,10 +67,37 @@
     }
   },
   "utxos": {
-    "b28fbe11a2456876572202b1b9b47576150cbffd2bb2d3997e7418edbb4c8acf#0": {
-      "address": "addr1q9ue0fgdvfmmpgxhtqfhjlx3vq394k030prksncsrl7wcjm6p9p4ggul6hnmy3n9zk8l0m32lhatej28hgakgap0lfyqpzr44p",
+    "09d1d4b6a55f1272043cbd15f3883e8a4b5b4e634264f931b81847b7fee8e285#0": {
+      "address": "addr1qxdzj659w8zew3vm2nwu29tx3skdx4a7cv5ygyl5mykx0lwukcl75cytk4hqrfxvw0cj2x7eukmjfjstwud9atc0vzhqhx0ug3",
       "value": {
-        "lovelace": 101000000000,
+        "lovelace": 10876906758,
+        "assets": []
+      },
+      "datum": null,
+      "script_ref": null
+    },
+    "552644d8aca843a1b4b942c231c80e52575758a8f030e49ddeb4e11799f012cd#0": {
+      "address": "addr1qxdzj659w8zew3vm2nwu29tx3skdx4a7cv5ygyl5mykx0lwukcl75cytk4hqrfxvw0cj2x7eukmjfjstwud9atc0vzhqhx0ug3",
+      "value": {
+        "lovelace": 601009754144,
+        "assets": []
+      },
+      "datum": null,
+      "script_ref": null
+    },
+    "7e344ddb897dfe1b26f788cfd15e039f7f08aac006f944159dafb1701a9097eb#0": {
+      "address": "addr1qxdzj659w8zew3vm2nwu29tx3skdx4a7cv5ygyl5mykx0lwukcl75cytk4hqrfxvw0cj2x7eukmjfjstwud9atc0vzhqhx0ug3",
+      "value": {
+        "lovelace": 73279163976,
+        "assets": []
+      },
+      "datum": null,
+      "script_ref": null
+    },
+    "bbad89586ddc99dd05871eef5cc2a777908d13be4118805a89653ce381aca665#4": {
+      "address": "addr1qxdzj659w8zew3vm2nwu29tx3skdx4a7cv5ygyl5mykx0lwukcl75cytk4hqrfxvw0cj2x7eukmjfjstwud9atc0vzhqhx0ug3",
+      "value": {
+        "lovelace": 5000000,
         "assets": []
       },
       "datum": null,
