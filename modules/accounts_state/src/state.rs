@@ -1,6 +1,6 @@
 //! Acropolis AccountsState: State storage
 use crate::monetary::calculate_monetary_change;
-use crate::rewards::{RewardsResult, calculate_rewards};
+use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::messages::{
@@ -9,10 +9,6 @@ use acropolis_common::messages::{
 use acropolis_common::queries::accounts::OptimalPoolSizing;
 use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
-    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
-    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
-    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
-    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRewardDelta, TxCertificate,
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
     messages::{
@@ -24,22 +20,26 @@ use acropolis_common::{
     queries::{
         get_query_topic,
         stake_deltas::{
-            DEFAULT_STAKE_DELTAS_QUERY_TOPIC, StakeDeltaQuery, StakeDeltaQueryResponse,
+            StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
         },
-        utxos::{DEFAULT_UTXOS_QUERY_TOPIC, UTxOStateQuery, UTxOStateQueryResponse},
+        utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
     },
     stake_addresses::{StakeAddressMap, StakeAddressState},
+    BlockInfo, DRepChoice, DRepCredential, DelegatedStake, Era, GovernanceOutcomeVariant,
+    InstantaneousRewardSource, InstantaneousRewardTarget, Lovelace, MoveInstantaneousReward,
+    PoolId, PoolLiveStakeInfo, PoolRegistration, RegistrationChange, RegistrationChangeKind,
+    SPORewards, ShelleyAddressPointer, StakeAddress, StakeRewardDelta, TxCertificate,
 };
 pub(crate) use acropolis_common::{Pots, RewardType};
 use acropolis_common::{StakeRegistrationOutcome, StakeRegistrationUpdate};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use caryatid_sdk::Context;
 use imbl::{HashMap as ImHashMap, OrdMap, OrdSet};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::take;
-use std::sync::{Arc, Mutex, mpsc};
-use tokio::task::{JoinHandle, spawn_blocking};
-use tracing::{Level, debug, error, info, warn};
+use std::sync::{mpsc, Arc, Mutex};
+use tokio::task::{spawn_blocking, JoinHandle};
+use tracing::{debug, error, info, warn, Level};
 
 const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
@@ -1796,10 +1796,10 @@ mod tests {
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::messages::BootstrapPotDeltas;
     use acropolis_common::{
-        Anchor, Committee, Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId,
-        PoolVotingThresholds, Ratio, StakeAddress, StakeAddressDelta, StakeCredential,
-        TxIdentifier, VrfKeyHash, Withdrawal, protocol_params::ConwayParams,
-        rational_number::RationalNumber,
+        protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
+        Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
+        Ratio, StakeAddress, StakeAddressDelta, StakeCredential, TxIdentifier, VrfKeyHash,
+        Withdrawal,
     };
     use acropolis_common::{
         Registration, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
