@@ -250,7 +250,7 @@ impl ConsensusRuntime {
 
                     match message.as_ref() {
                         Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
-                            let block_info = if force_validation && self.do_validation {
+                            let block_info = if !mithril_passthrough_active && self.do_validation {
                                 raw_blk_info.with_intent(BlockIntent::ValidateAndApply)
                             } else {
                                 raw_blk_info.clone()
