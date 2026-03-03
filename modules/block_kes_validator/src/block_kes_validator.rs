@@ -171,38 +171,43 @@ impl BlockKesValidator {
                         });
                     }
 
-                    let span =
-                        info_span!("block_kes_validator.validate", block = block_info.number);
-                    async {
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        let result =
-                            state.validate(block_info, &block_msg.header, &genesis).map_err(|e| *e);
-                        match result {
-                            Ok(Some((pool_id, updated_sequence_number))) => {
-                                // Update the operational certificate counter
-                                // When block is validated successfully
-                                // Reference
-                                // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
-                                state.update_ocert_counter(pool_id, updated_sequence_number);
+                    if block_info.intent.do_validation() {
+                        let span =
+                            info_span!("block_kes_validator.validate", block = block_info.number);
+                        async {
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            let result = state
+                                .validate(block_info, &block_msg.header, &genesis)
+                                .map_err(|e| *e);
+                            match result {
+                                Ok(Some((pool_id, updated_sequence_number))) => {
+                                    // Update the operational certificate counter
+                                    // When block is validated successfully
+                                    // Reference
+                                    // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
+                                    state.update_ocert_counter(pool_id, updated_sequence_number);
+                                }
+                                Err(e) => {
+                                    validation_outcomes.push(e);
+                                }
+                                _ => {}
                             }
-                            Err(e) => {
-                                validation_outcomes.push(e);
-                            }
-                            _ => {}
-                        }
 
-                        validation_outcomes
-                            .publish(
-                                &context,
-                                "block_kes_validator",
-                                &kes_validation_publisher_topic,
-                                block_info,
-                            )
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish KES validation: {e}"));
+                            validation_outcomes
+                                .publish(
+                                    &context,
+                                    "block_kes_validator",
+                                    &kes_validation_publisher_topic,
+                                    block_info,
+                                )
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to publish KES validation: {e}")
+                                });
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
                 }
                 _ => error!("Unexpected message type: {message:?}"),
             }
