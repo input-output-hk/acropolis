@@ -8,9 +8,8 @@ use crate::{
         slot_to_timestamp_with_params,
     },
     hash::Hash,
-    protocol_params::{Nonce, PraosParams},
-    rational_number::RationalNumber,
-    GenesisDelegates, MagicNumber, NetworkId,
+    protocol_params::PraosParams,
+    GenesisDelegates, MagicNumber,
 };
 
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
@@ -202,8 +201,8 @@ impl GenesisValues {
     pub fn praos_params_for_network(network_name: &str) -> Result<PraosParams> {
         match network_name {
             "mainnet" => Ok(PraosParams::mainnet()),
-            "preview" => Ok(testnet_praos_params()),
-            "sanchonet" | "sancho" => Ok(testnet_praos_params()),
+            "preview" => Ok(PraosParams::testnet()),
+            "sanchonet" | "sancho" => Ok(PraosParams::testnet()),
             unsupported => bail!("Unsupported network for praos params: {unsupported}"),
         }
     }
@@ -217,21 +216,5 @@ impl GenesisValues {
 
     pub fn epoch_to_first_slot(&self, epoch: u64) -> u64 {
         epoch_to_first_slot_with_shelley_params(epoch, self.shelley_epoch, self.shelley_epoch_len)
-    }
-}
-
-fn testnet_praos_params() -> PraosParams {
-    PraosParams {
-        security_param: 432,
-        active_slots_coeff: RationalNumber::new(1, 20),
-        epoch_length: 86400,
-        max_kes_evolutions: 62,
-        max_lovelace_supply: 45_000_000_000_000_000,
-        network_id: NetworkId::Testnet,
-        slot_length: 1,
-        slots_per_kes_period: 129600,
-        extra_entropy: Nonce::default(),
-        stability_window: 25920,
-        randomness_stabilization_window: 34560,
     }
 }
