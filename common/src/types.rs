@@ -71,8 +71,8 @@ pub enum NetworkId {
 
 impl From<String> for NetworkId {
     fn from(s: String) -> Self {
-        match s.as_str() {
-            "testnet" => NetworkId::Testnet,
+        match s.to_ascii_lowercase().as_str() {
+            "testnet" | "preview" | "preprod" | "sanchonet" | "sancho" => NetworkId::Testnet,
             "mainnet" => NetworkId::Mainnet,
             _ => NetworkId::Mainnet,
         }
@@ -2514,6 +2514,18 @@ mod tests {
         assert_eq!(serialized_back, serialized);
 
         Ok(())
+    }
+
+    #[test]
+    fn network_id_from_preview_is_testnet() {
+        assert_eq!(NetworkId::from("preview".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("preprod".to_string()), NetworkId::Testnet);
+        assert_eq!(NetworkId::from("sanchonet".to_string()), NetworkId::Testnet);
+    }
+
+    #[test]
+    fn network_id_from_mainnet_is_mainnet() {
+        assert_eq!(NetworkId::from("mainnet".to_string()), NetworkId::Mainnet);
     }
 
     #[test_case("origin")]

@@ -376,13 +376,31 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let len = d.array()?;
 
-        // Conway account state: [balance, deposit, stake_pool_delegation, drep_delegation]
-        let balance = d.decode_with(ctx)?;
-        d.skip()?; // deposit
-        let pool = d.decode_with(ctx)?;
-        let drep = d.decode_with(ctx)?;
+        // New snapshots can encode account values in either:
+        //   [balance, deposit, stake_pool_delegation, drep_delegation]
+        // or (schema-aligned, with optional pointer first):
+        //   [ptr, balance, deposit, stake_pool_delegation, drep_delegation, ...]
+        //
+        // We currently don't materialize ptr in AccountState, but we must consume it when present.
+        let mut consumed_fields = 0u64;
+        if matches!(
+            d.datatype()?,
+            Type::Null | Type::Undefined | Type::Array | Type::ArrayIndef
+        ) {
+            d.skip()?; // ptr
+            consumed_fields += 1;
+        }
 
-        skip_remaining_array_items(d, len, 4)?;
+        let balance = d.decode_with(ctx)?;
+        consumed_fields += 1;
+        d.skip()?; // deposit
+        consumed_fields += 1;
+        let pool = d.decode_with(ctx)?;
+        consumed_fields += 1;
+        let drep = d.decode_with(ctx)?;
+        consumed_fields += 1;
+
+        skip_remaining_array_items(d, len, consumed_fields)?;
 
         Ok(Self {
             balance,
@@ -1603,12 +1621,11 @@ impl StreamingSnapshotParser {
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
         let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
-        // Subtract DRep deposits from us_deposited
-        // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
-        let deposits = deposits.saturating_sub(total_drep_deposits);
+        // Keep DRep deposits in us_deposited. The verifier expects deposits pot to include
+        // all active deposits (stake keys, pools, and DReps).
 
         info!(
-            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
+            "Deposit breakdown: total_deposits={} ADA (includes {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
             deposits / 1_000_000,
             total_drep_deposits / 1_000_000,
             total_pool_deposits / 1_000_000,
@@ -2797,6 +2814,30 @@ mod tests {
         assert_eq!(conway.rewards, 300);
         assert!(conway.delegated_spo.is_some());
         assert!(matches!(conway.delegated_drep, Some(DRepChoice::Abstain)));
+    }
+
+    #[test]
+    fn test_account_decode_conway_shape_with_ptr() {
+        fn decode_account(bytes: &[u8]) -> SnapshotAccountValue {
+            let mut dec = Decoder::new(bytes);
+            dec.decode().unwrap()
+        }
+
+        // Schema-aligned form: [ptr, balance, deposit, pool, drep]
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(5).unwrap();
+        enc.null().unwrap(); // ptr
+        enc.u64(300).unwrap();
+        enc.u64(40).unwrap();
+        enc.bytes(&[0x33; 28]).unwrap();
+        enc.array(1).unwrap();
+        enc.u16(2).unwrap(); // DRep::Abstain
+
+        let parsed = decode_account(&buf).to_normalized();
+        assert_eq!(parsed.rewards, 300);
+        assert!(parsed.delegated_spo.is_some());
+        assert!(matches!(parsed.delegated_drep, Some(DRepChoice::Abstain)));
     }
 
     #[test]
