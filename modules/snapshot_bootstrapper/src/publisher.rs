@@ -15,7 +15,6 @@ use acropolis_common::{
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
-    params::EPOCH_LENGTH,
     protocol_params::{Nonces, PraosParams},
     snapshot::{
         streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
@@ -56,6 +55,8 @@ pub struct EpochContext {
     pub era: Era,
     /// Magic number from genesis params
     pub magic_number: MagicNumber,
+    /// Praos params from shelley genesis
+    pub praos_params: PraosParams,
     /// DRep Delegations needed to reproduce PV9 deregistration bug
     pub drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
 }
@@ -76,11 +77,12 @@ impl EpochContext {
         epoch: u64,
         era: Era,
         genesis: &GenesisValues,
+        praos_params: PraosParams,
         drep_delegations: Vec<(DRepCredential, Vec<StakeAddress>)>,
     ) -> Self {
         let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
         let epoch_start_time = genesis.slot_to_timestamp(epoch_start_slot);
-        let epoch_end_time = epoch_start_time + EPOCH_LENGTH;
+        let epoch_end_time = epoch_start_time + genesis.shelley_epoch_len;
         let last_block_time = genesis.slot_to_timestamp(header_slot);
 
         Self {
@@ -91,6 +93,7 @@ impl EpochContext {
             last_block_height: header_block_height,
             era,
             magic_number: genesis.magic_number.clone(),
+            praos_params,
             drep_delegations,
         }
     }
@@ -221,7 +224,7 @@ impl SnapshotPublisher {
             total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
-            praos_params: Some(PraosParams::mainnet()),
+            praos_params: Some(ctx.praos_params.clone()),
         }
     }
 
@@ -460,7 +463,12 @@ fn publish_gov_state(
     magic_number: MagicNumber,
     params: ProtocolParamUpdate,
 ) {
-    info!("Received governance protocol parameters for epoch {epoch}",);
+    info!(
+        epoch,
+        era = %era,
+        network_name = %magic_number.to_network_name(),
+        "Received governance protocol parameters"
+    );
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
@@ -487,9 +495,7 @@ impl EpochCallback for SnapshotPublisher {
     fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
         info!(
             "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
-            data.epoch,
-            data.total_blocks_current,
-            data.total_blocks_previous
+            data.epoch, data.total_blocks_current, data.total_blocks_previous
         );
 
         let epoch_bootstrap_data = self.build_epoch_bootstrap_message(&data);
@@ -679,6 +685,7 @@ mod tests {
     fn test_bootstrap_context_new() {
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
+        let praos_params = PraosParams::mainnet();
 
         let ctx = EpochContext::new(
             nonces.clone(),
@@ -687,6 +694,7 @@ mod tests {
             509,       // epoch
             Era::Conway,
             &genesis,
+            praos_params,
             Vec::new(),
         );
 
@@ -701,6 +709,7 @@ mod tests {
         // This would require mocking Context, so just test the data flow concept
         let nonces = make_test_nonces();
         let genesis = GenesisValues::mainnet();
+        let praos_params = PraosParams::mainnet();
 
         let ctx = EpochContext::new(
             nonces.clone(),
@@ -709,6 +718,7 @@ mod tests {
             509,
             Era::Conway,
             &genesis,
+            praos_params,
             Vec::new(),
         );
 

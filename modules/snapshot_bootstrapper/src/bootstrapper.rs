@@ -129,7 +129,7 @@ impl SnapshotBootstrapper {
         );
         parser
             .parse(&mut publisher, cfg.startup.network_name.into())
-            .map_err(|e| BootstrapError::Parse(e.to_string()))?;
+            .map_err(|e| BootstrapError::Parse(format!("{e:#}")))?;
         info!("Parsed snapshot in {:.2?}", start.elapsed());
 
         publisher
