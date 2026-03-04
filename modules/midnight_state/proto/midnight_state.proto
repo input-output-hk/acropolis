@@ -14,6 +14,7 @@ service MidnightState {
   rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
   rpc GetCouncilDatum (CouncilDatumRequest) returns (CouncilDatumResponse);
   rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
+  rpc GetBlockByHash (BlockByHashRequest) returns (BlockByHashResponse);
 }
 
 message AssetCreatesRequest {
@@ -123,4 +124,12 @@ message AriadneParametersRequest {
 message AriadneParametersResponse {
   uint64 source_epoch = 1;
   bytes datum = 2;
+}
+
+message BlockByHashRequest {
+  bytes block_hash = 1;
+}
+message BlockByHashResponse {
+  uint64 block_number = 1;
+  int64 block_timestamp_unix = 3;
 }
