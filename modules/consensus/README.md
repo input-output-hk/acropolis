@@ -14,8 +14,11 @@ be configured - if empty, no validation is performed
 [module.consensus]
 
 # Message topics
-subscribe-blocks-topic = "cardano.block.available"
-publish-blocks-topic = "cardano.block.proposed"
+blocks-available-topic = "cardano.block.available"
+blocks-proposed-topic = "cardano.block.proposed"
+
+# Block flow mode is set globally in [global.startup]:
+# block-flow-mode = "consensus"  # Options: "direct" | "consensus"
 
 # Validation result topics
 validators = [
@@ -57,4 +60,3 @@ pub struct RawBlockMessage {
     pub body: Vec<u8>,
 }
 ```
-

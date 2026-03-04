@@ -47,6 +47,7 @@ pub fn validate_tx(
             &vkey_witness_hashes,
             &script_witness_hashes,
             &script_hashes_provided,
+            tx_deltas.is_valid,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
