@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter, Result};
 
 pub const CONFIG_KEY_STARTUP_MODE: &str = "startup.startup-mode";
 pub const CONFIG_KEY_SYNC_MODE: &str = "startup.sync-mode";
+pub const CONFIG_KEY_BLOCK_FLOW_MODE: &str = "startup.block-flow-mode";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -61,6 +62,34 @@ impl Display for StartupMode {
         match self {
             StartupMode::Genesis => write!(f, "genesis"),
             StartupMode::Snapshot => write!(f, "snapshot"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlockFlowMode {
+    /// Direct: PNI auto-fetches blocks, consensus is pass-through.
+    Direct,
+    /// Consensus: PNI publishes offers, consensus drives fetching via wants.
+    Consensus,
+}
+
+impl BlockFlowMode {
+    pub fn from_config(config: &Config) -> Self {
+        config.get::<BlockFlowMode>(CONFIG_KEY_BLOCK_FLOW_MODE).unwrap_or(BlockFlowMode::Direct)
+    }
+
+    pub fn is_consensus(&self) -> bool {
+        matches!(self, BlockFlowMode::Consensus)
+    }
+}
+
+impl Display for BlockFlowMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            BlockFlowMode::Direct => write!(f, "direct"),
+            BlockFlowMode::Consensus => write!(f, "consensus"),
         }
     }
 }
