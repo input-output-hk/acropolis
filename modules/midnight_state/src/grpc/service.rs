@@ -4,23 +4,35 @@ use crate::{
     grpc::midnight_state_proto::{
         self, midnight_state_server::MidnightState, AriadneParametersRequest,
         AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse, AssetSpendsRequest,
-        AssetSpendsResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-        DeregistrationsResponse, RegistrationsRequest, RegistrationsResponse,
-        TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+        AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse, CouncilDatumRequest,
+        CouncilDatumResponse, DeregistrationsRequest, DeregistrationsResponse,
+        RegistrationsRequest, RegistrationsResponse, TechnicalCommitteeDatumRequest,
+        TechnicalCommitteeDatumResponse,
     },
     state::State,
 };
-use acropolis_common::state_history::StateHistory;
+use acropolis_common::{
+    messages::{Message, StateQuery, StateQueryResponse},
+    queries::{
+        blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+        errors::QueryError,
+        utils::query_state,
+    },
+    state_history::StateHistory,
+    BlockHash,
+};
+use caryatid_sdk::Context;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
+    context: Arc<Context<Message>>,
 }
 
 impl MidnightStateService {
-    pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
-        Self { history }
+    pub fn new(history: Arc<Mutex<StateHistory<State>>>, context: Arc<Context<Message>>) -> Self {
+        Self { history, context }
     }
 }
 
@@ -304,11 +316,50 @@ impl MidnightState for MidnightStateService {
             datum,
         }))
     }
+
+    async fn get_block_by_hash(
+        &self,
+        request: Request<BlockByHashRequest>,
+    ) -> Result<Response<BlockByHashResponse>, Status> {
+        let req = request.into_inner();
+        let block_hash = BlockHash::try_from(req.block_hash)
+            .map_err(|_| Status::invalid_argument("invalid block hash"))?;
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+            BlocksStateQuery::GetBlockByHash { block_hash },
+        )));
+
+        let block_info =
+            query_state(
+                &self.context,
+                "cardano.query.blocks",
+                msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::BlockByHash(block_info),
+                    )) => Ok(block_info),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving block info",
+                    )),
+                },
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(BlockByHashResponse {
+            block_number: block_info.number,
+            block_timestamp_unix: i64::try_from(block_info.timestamp)
+                .map_err(|_| Status::internal("timestamp overflow"))?,
+        }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use acropolis_common::{
         messages::AddressDeltasMessage,
@@ -317,6 +368,8 @@ mod tests {
         Datum, DatumHash, Era, ExtendedAddressDelta, PolicyId, TxHash, TxIdentifier,
         UTxOIdentifier, ValueMap,
     };
+    use caryatid_sdk::{async_trait, Context, MessageBounds, MessageBus, Subscription};
+    use config::Config;
     use tokio::sync::Mutex;
     use tonic::{Code, Request};
 
@@ -327,6 +380,26 @@ mod tests {
 
     use super::{MidnightState, MidnightStateService};
 
+    pub struct DummyBus;
+
+    #[async_trait]
+    impl<M: MessageBounds> MessageBus<M> for DummyBus {
+        async fn publish(&self, _topic: &str, _message: Arc<M>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn request_timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<M>>> {
+            Err(anyhow::anyhow!("subscriptions not supported in tests"))
+        }
+
+        async fn shutdown(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
     fn test_block_info(number: u64, epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Volatile,
@@ -381,7 +454,16 @@ mod tests {
     fn service_with_committed_state(state: State, block_number: u64) -> MidnightStateService {
         let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
         history.commit(block_number, state);
-        MidnightStateService::new(Arc::new(Mutex::new(history)))
+
+        let (_, startup_watch) = tokio::sync::watch::channel(true);
+        MidnightStateService::new(
+            Arc::new(Mutex::new(history)),
+            Arc::new(Context::new(
+                Arc::new(Config::default()),
+                Arc::new(DummyBus),
+                startup_watch,
+            )),
+        )
     }
 
     #[tokio::test]
