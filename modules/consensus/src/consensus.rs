@@ -370,11 +370,8 @@ impl ConsensusRuntime {
                     error!("Failed to add genesis block body: {e}");
                 }
                 self.stats.available += 1;
-                self.drain_and_publish_events().await;
-
-                // Must consume validation results for any block we proposed, otherwise
-                // the validator subscriptions drift out of sync (off-by-one).
-                self.maybe_validate_if_on_favoured_chain(&block_info).await;
+                let proposed = self.drain_and_publish_events().await;
+                self.validate_proposed_blocks(&proposed).await;
 
                 return;
             }
@@ -433,13 +430,14 @@ impl ConsensusRuntime {
         }
 
         // Collect and publish observer events
-        self.drain_and_publish_events().await;
+        let proposed = self.drain_and_publish_events().await;
 
         self.stats.available += 1;
 
-        // Validate only when this call newly supplied body for a favoured block.
+        // Validate all blocks that were newly proposed by this add; contiguous
+        // proposals can include more than just `block_info.hash`.
         if !had_body {
-            self.maybe_validate_if_on_favoured_chain(&block_info).await;
+            self.validate_proposed_blocks(&proposed).await;
         }
 
         self.prune_block_data();
@@ -496,10 +494,10 @@ impl ConsensusRuntime {
             error!("Failed to add Immutable block body: {e}");
         }
 
-        self.drain_and_publish_events().await;
+        let proposed = self.drain_and_publish_events().await;
         self.stats.available += 1;
 
-        self.maybe_validate_if_on_favoured_chain(&block_info).await;
+        self.validate_proposed_blocks(&proposed).await;
 
         self.prune_block_data();
         if let Err(e) = self.tree.prune() {
@@ -548,7 +546,7 @@ impl ConsensusRuntime {
         self.stats.wanted += wanted.len() as u64;
 
         // Collect and publish observer events
-        self.drain_and_publish_events().await;
+        let _ = self.drain_and_publish_events().await;
 
         let wanted_msgs = self.build_block_wanted_messages(&wanted);
         self.publish_block_wanted_messages(&wanted_msgs).await;
@@ -558,7 +556,7 @@ impl ConsensusRuntime {
     async fn handle_block_rescinded(&mut self, hash: BlockHash) {
         match self.tree.remove_block(hash) {
             Ok(newly_wanted) => {
-                self.drain_and_publish_events().await;
+                let _ = self.drain_and_publish_events().await;
 
                 let wanted_msgs = self.build_block_wanted_messages(&newly_wanted);
                 self.publish_block_wanted_messages(&wanted_msgs).await;
@@ -571,11 +569,17 @@ impl ConsensusRuntime {
     }
 
     /// Collect observer events, resolve to messages, and publish.
-    async fn drain_and_publish_events(&mut self) {
+    ///
+    /// Returns hashes for blocks that were proposed in this batch.
+    async fn drain_and_publish_events(&mut self) -> Vec<BlockHash> {
         let raw_events: Vec<ObserverEvent> = self.event_queue.lock().unwrap().drain(..).collect();
+        let mut proposed = Vec::new();
         for event in &raw_events {
             match event {
-                ObserverEvent::BlockProposed { .. } => self.stats.proposed += 1,
+                ObserverEvent::BlockProposed { hash } => {
+                    self.stats.proposed += 1;
+                    proposed.push(*hash);
+                }
                 ObserverEvent::Rollback { .. } => self.stats.rollbacks += 1,
                 ObserverEvent::BlockRejected { .. } => self.stats.rejected += 1,
             }
@@ -590,6 +594,7 @@ impl ConsensusRuntime {
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish to {topic}: {e}"));
         }
+        proposed
     }
 
     /// Publish `BlockWanted` messages for each hash.
@@ -611,16 +616,28 @@ impl ConsensusRuntime {
         self.block_data.retain(|hash, _| self.tree.get_block(hash).is_some());
     }
 
-    /// Run validation if enabled and the block is on the favoured chain.
-    async fn maybe_validate_if_on_favoured_chain(&mut self, block_info: &BlockInfo) {
-        if self.do_validation
-            && block_info.intent.do_validation()
-            && self
-                .tree
-                .favoured_tip()
-                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
-        {
-            self.handle_validation(block_info).await;
+    /// Consume validation responses for each block proposed in this batch.
+    ///
+    /// A single tree update can propose multiple contiguous blocks. We must
+    /// consume one validator response set per proposed block to keep
+    /// subscriptions aligned.
+    async fn validate_proposed_blocks(&mut self, proposed: &[BlockHash]) {
+        if !self.do_validation || proposed.is_empty() {
+            return;
+        }
+
+        for &hash in proposed {
+            let Some((block_info, _)) = self.block_data.get(&hash) else {
+                warn!("No block data for proposed block {hash}, skipping validation");
+                continue;
+            };
+            let block_info = block_info.clone();
+
+            if !block_info.intent.do_validation() {
+                continue;
+            }
+
+            self.handle_validation(&block_info).await;
         }
     }
 
@@ -671,7 +688,7 @@ impl ConsensusRuntime {
             }
 
             // Collect and publish events from mark_rejected
-            self.drain_and_publish_events().await;
+            let _ = self.drain_and_publish_events().await;
             self.prune_block_data();
         }
     }
