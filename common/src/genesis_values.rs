@@ -1,7 +1,5 @@
 use std::str::FromStr;
 
-use anyhow::{bail, Result};
-
 use crate::{
     calculations::{
         epoch_to_first_slot_with_shelley_params, slot_to_epoch_with_shelley_params,
@@ -10,13 +8,8 @@ use crate::{
     hash::Hash,
     GenesisDelegates, MagicNumber,
 };
-
 const MAINNET_SHELLEY_GENESIS_HASH: &str =
     "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81";
-const PREVIEW_SHELLEY_GENESIS_HASH: &str =
-    "bf772f645f1ef1701cb75eb1eb277fc63db0a130335187cea6b8a8148b3a0aaf";
-const SANCHONET_SHELLEY_GENESIS_HASH: &str =
-    "5023cadbedb36234bbc38cf03d0136aae092d9bada473c233419d45a0a6ed3b1";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -89,111 +82,6 @@ impl GenesisValues {
             ])
             .unwrap(),
             magic_number: MagicNumber::new(764824073),
-        }
-    }
-
-    pub fn preview() -> Self {
-        Self {
-            byron_timestamp: 1666656000,
-            shelley_epoch: 0,
-            shelley_epoch_len: 86400,
-            shelley_genesis_hash: Hash::<32>::from_str(PREVIEW_SHELLEY_GENESIS_HASH).unwrap(),
-            genesis_delegs: GenesisDelegates::try_from(vec![
-                (
-                    "12b0f443d02861948a0fce9541916b014e8402984c7b83ad70a834ce",
-                    (
-                        "7c54a168c731f2f44ced620f3cca7c2bd90731cab223d5167aa994e6",
-                        "62d546a35e1be66a2b06e29558ef33f4222f1c466adbb59b52d800964d4e60ec",
-                    ),
-                ),
-                (
-                    "3df542796a64e399b60c74acfbdb5afa1e114532fa36b46d6368ef3a",
-                    (
-                        "c44bc2f3cc7e98c0f227aa399e4035c33c0d775a0985875fff488e20",
-                        "4f9d334decadff6eba258b2df8ae1f02580a2628bce47ae7d957e1acd3f42a3c",
-                    ),
-                ),
-                (
-                    "93fd5083ff20e7ab5570948831730073143bea5a5d5539852ed45889",
-                    (
-                        "82a02922f10105566b70366b07c758c8134fa91b3d8ae697dfa5e8e0",
-                        "8a57e94a9b4c65ec575f35d41edb1df399fa30fdf10775389f5d1ef670ca3f9f",
-                    ),
-                ),
-                (
-                    "a86cab3ea72eabb2e8aafbbf4abbd2ba5bdfd04eea26a39b126a78e4",
-                    (
-                        "10257f6d3bae913514bdc96c9170b3166bf6838cca95736b0e418426",
-                        "1b54aad6b013145a0fc74bb5c2aa368ebaf3999e88637d78e09706d0cc29874a",
-                    ),
-                ),
-                (
-                    "b799804a28885bd49c0e1b99d8b3b26de0fac17a5cf651ecf0c872f0",
-                    (
-                        "ebe606e22d932d51be2c1ce87e7d7e4c9a7d1f7df4a5535c29e23d22",
-                        "b3fc06a1f8ee69ff23185d9af453503be8b15b2652e1f9fb7c3ded6797a2d6f9",
-                    ),
-                ),
-                (
-                    "d125812d6ab973a2c152a0525b7fd32d36ff13555a427966a9cac9b1",
-                    (
-                        "e302198135fb5b00bfe0b9b5623426f7cf03179ab7ba75f945d5b79b",
-                        "b45ca2ed95f92248fa0322ce1fc9f815a5a5aa2f21f1adc2c42c4dccfc7ba631",
-                    ),
-                ),
-                (
-                    "ef27651990a26449a40767d5e06cdef1670a3f3ff4b951d385b51787",
-                    (
-                        "0e0b11e80d958732e587585d30978d683a061831d1b753878f549d05",
-                        "b860ec844f6cd476c4fabb4aa1ca72d5c74d82f3835aed3c9515a35b6e048719",
-                    ),
-                ),
-            ])
-            .unwrap(),
-            magic_number: MagicNumber::new(2),
-        }
-    }
-
-    pub fn sanchonet() -> Self {
-        Self {
-            byron_timestamp: 1686789000,
-            shelley_epoch: 0,
-            shelley_epoch_len: 86400,
-            shelley_genesis_hash: Hash::<32>::from_str(SANCHONET_SHELLEY_GENESIS_HASH).unwrap(),
-            genesis_delegs: GenesisDelegates::try_from(vec![
-                (
-                    "c1ad22cabb342cbb83ce3859708232f4945ccb669e9b5f932cffc0ed",
-                    (
-                        "405357b552c397e81f73dcb5a0da0828fe29610bd25197d86130df34",
-                        "458215df6c07abc66e80082caa7a189dc2f4995ad4b4b5f09481a55d8d0692d2",
-                    ),
-                ),
-                (
-                    "c264bca994a3a5deee5a1d9b92a3d7e9d6cbdb81f2f6989bb7f7b437",
-                    (
-                        "d9d9d0f0e1f25c4af4d80cb2d62878b611d8b3a8e1ef548d01f246d7",
-                        "624f1bf3b2f978e0c95644f26228b307d7acca7fc7eb3d88fb6f107e0aa1198c",
-                    ),
-                ),
-                (
-                    "d4bf7eb45b72dffa5ac33d5c902fe409e4e611f2e9a52fb0d09784c3",
-                    (
-                        "806eb0c17d9b0fe6d99acbabe7be76ef72bf9de96c5b58435e50837f",
-                        "57e52289207a7128c29e0b7e96a02c731a961a5944329b363bed751ad8f377ee",
-                    ),
-                ),
-            ])
-            .unwrap(),
-            magic_number: MagicNumber::new(4),
-        }
-    }
-
-    pub fn for_network(network_name: &str) -> Result<Self> {
-        match network_name {
-            "mainnet" => Ok(Self::mainnet()),
-            "preview" => Ok(Self::preview()),
-            "sanchonet" | "sancho" => Ok(Self::sanchonet()),
-            unsupported => bail!("Unsupported network for genesis values: {unsupported}"),
         }
     }
 
