@@ -8,7 +8,6 @@ use crate::{
         slot_to_timestamp_with_params,
     },
     hash::Hash,
-    protocol_params::PraosParams,
     GenesisDelegates, MagicNumber,
 };
 
@@ -195,15 +194,6 @@ impl GenesisValues {
             "preview" => Ok(Self::preview()),
             "sanchonet" | "sancho" => Ok(Self::sanchonet()),
             unsupported => bail!("Unsupported network for genesis values: {unsupported}"),
-        }
-    }
-
-    pub fn praos_params_for_network(network_name: &str) -> Result<PraosParams> {
-        match network_name {
-            "mainnet" => Ok(PraosParams::mainnet()),
-            "preview" => Ok(PraosParams::testnet()),
-            "sanchonet" | "sancho" => Ok(PraosParams::testnet()),
-            unsupported => bail!("Unsupported network for praos params: {unsupported}"),
         }
     }
 

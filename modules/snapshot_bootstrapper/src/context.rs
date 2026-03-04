@@ -14,7 +14,6 @@ use acropolis_common::{DRepCredential, PoolId, StakeAddress};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum BootstrapContextError {
@@ -66,18 +65,7 @@ impl BootstrapContext {
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
         let genesis = GenesisValues::for_network(&cfg.startup.network_name)?;
-        let praos_params = GenesisValues::praos_params_for_network(&cfg.startup.network_name)?;
-        info!(
-            network = %cfg.startup.network_name,
-            byron_timestamp = genesis.byron_timestamp,
-            shelley_epoch = genesis.shelley_epoch,
-            shelley_epoch_len = genesis.shelley_epoch_len,
-            magic_number = u32::from(genesis.magic_number.clone()),
-            praos_security_param = praos_params.security_param,
-            praos_active_slots_coeff_num = praos_params.active_slots_coeff.numer(),
-            praos_active_slots_coeff_den = praos_params.active_slots_coeff.denom(),
-            "Loaded snapshot bootstrap genesis values"
-        );
+        let praos_params = PraosParams::from_network(&cfg.startup.network_name)?;
 
         let nonces_file = NonceContext::load(&network_dir)?;
         let drep_delegators_file = DRepDelegationContext::load(&network_dir)?;

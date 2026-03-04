@@ -213,6 +213,15 @@ impl PraosParams {
             randomness_stabilization_window: 34560,
         }
     }
+
+    pub fn from_network(network_name: &str) -> Result<Self> {
+        match network_name {
+            "mainnet" => Ok(Self::mainnet()),
+            "preview" => Ok(Self::testnet()),
+            "sanchonet" | "sancho" => Ok(Self::testnet()),
+            unsupported => bail!("Unsupported network for praos params: {unsupported}"),
+        }
+    }
 }
 
 impl From<&ShelleyParams> for PraosParams {
