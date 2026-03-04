@@ -70,6 +70,7 @@ impl EpochContext {
     /// * `epoch` - Target epoch number
     /// * `era` - Era of the target block
     /// * `genesis` - Genesis values for timestamp calculations
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         nonces: Nonces,
         header_slot: u64,
@@ -463,12 +464,7 @@ fn publish_gov_state(
     magic_number: MagicNumber,
     params: ProtocolParamUpdate,
 ) {
-    info!(
-        epoch,
-        era = %era,
-        network_name = %magic_number.to_network_name(),
-        "Received governance protocol parameters"
-    );
+    info!("Received governance protocol parameters for epoch {epoch}",);
     // Send a message to the protocol parameters state, one per slice
     let message = Arc::new(Message::Snapshot(SnapshotMessage::Bootstrap(
         SnapshotStateMessage::ParametersState(ProtocolParametersBootstrapMessage {
@@ -495,7 +491,9 @@ impl EpochCallback for SnapshotPublisher {
     fn on_epoch(&mut self, data: EpochBootstrapData) -> Result<()> {
         info!(
             "Received epoch bootstrap data for epoch {}: {} current epoch blocks, {} previous epoch blocks",
-            data.epoch, data.total_blocks_current, data.total_blocks_previous
+            data.epoch,
+            data.total_blocks_current,
+            data.total_blocks_previous
         );
 
         let epoch_bootstrap_data = self.build_epoch_bootstrap_message(&data);
