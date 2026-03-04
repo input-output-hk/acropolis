@@ -60,11 +60,13 @@ pub struct BootstrapContext {
 
 impl BootstrapContext {
     /// Load all bootstrap data from the network directory.
-    pub fn load(cfg: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
+    pub fn load(
+        cfg: &BootstrapConfig,
+        genesis: GenesisValues,
+    ) -> Result<Self, BootstrapContextError> {
         let target_epoch = cfg.epoch;
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
-        let genesis = GenesisValues::for_network(&cfg.startup.network_name)?;
         let praos_params = PraosParams::from_network(&cfg.startup.network_name)?;
 
         let nonces_file = NonceContext::load(&network_dir)?;
