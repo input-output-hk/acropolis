@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
-    BlockOfferedMessage, BlockWantedMessage, ConsensusMessage, Message,
+    BlockOfferedMessage, BlockRejectedMessage, BlockWantedMessage, ConsensusMessage, Message,
 };
 use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
@@ -66,17 +66,25 @@ impl BlockFlowHandler {
         events_sender: mpsc::Sender<NetworkEvent>,
     ) {
         while let Ok((_, msg)) = subscription.read().await {
-            if let Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
-                hash,
-                slot,
-            })) = msg.as_ref()
-                && events_sender
-                    .send(NetworkEvent::BlockWanted {
-                        hash: *hash,
-                        slot: *slot,
-                    })
-                    .await
-                    .is_err()
+            let event = match msg.as_ref() {
+                Message::Consensus(ConsensusMessage::BlockWanted(BlockWantedMessage {
+                    hash,
+                    slot,
+                })) => Some(NetworkEvent::BlockWanted {
+                    hash: *hash,
+                    slot: *slot,
+                }),
+                Message::Consensus(ConsensusMessage::BlockRejected(BlockRejectedMessage {
+                    hash,
+                    slot,
+                })) => Some(NetworkEvent::BlockRejected {
+                    hash: *hash,
+                    slot: *slot,
+                }),
+                _ => None,
+            };
+            if let Some(event) = event
+                && events_sender.send(event).await.is_err()
             {
                 error!("event channel closed");
                 return;
@@ -209,10 +217,18 @@ impl BlockFlowHandler {
         }
     }
 
+    /// Return the peers that announced a rejected block, consuming the entry.
+    pub fn block_rejected_announcers(&mut self, hash: BlockHash) -> Vec<PeerId> {
+        match self {
+            BlockFlowHandler::Direct { .. } => Vec::new(),
+            BlockFlowHandler::Consensus(state) => state.block_rejected_announcers(hash),
+        }
+    }
+
     /// Publish events appropriate for the current flow mode.
     ///
     /// - Direct mode: publishes RollForward/RollBackward from chain state
-    /// - Consensus mode: publishes BlockOffered/BlockRescinded to consensus
+    /// - Consensus mode: publishes Offered/Rescinded to consensus
     pub async fn publish(
         &mut self,
         block_sink: &mut BlockSink,
@@ -246,19 +262,21 @@ impl BlockFlowHandler {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum ConsensusEvent {
-    BlockOffered {
+enum ConsensusBlockEvent {
+    Offered {
         hash: BlockHash,
         slot: u64,
         number: u64,
         parent_hash: BlockHash,
     },
-    BlockFetched {
+    Fetched {
         header: Header,
         body: Vec<u8>,
     },
-    // TODO: BlockRescinded would be sent when NO peers have a block anymore.
-    // TODO: This requires tracking when all announcers disconnect/rollback - not implemented yet.
+    Rescinded {
+        hash: BlockHash,
+        slot: u64,
+    },
 }
 
 /// Tracks block announcements from peers and generates consensus events.
@@ -273,7 +291,10 @@ struct BlockTracker {
     /// Each peer's last reported chain tip.
     tips: HashMap<PeerId, Point>,
     /// Pending consensus events to publish.
-    pending_events: Vec<ConsensusEvent>,
+    pending_events: Vec<ConsensusBlockEvent>,
+    /// Peers retained after a block is fetched, until consensus sends
+    /// `BlockRejected`.
+    fetched: HashMap<BlockHash, Vec<PeerId>>,
 }
 
 impl BlockTracker {
@@ -282,7 +303,7 @@ impl BlockTracker {
     }
 
     /// Record a block announcement from a peer.
-    /// Generates a BlockOffered event if this is the first announcement for this block.
+    /// Generates a ConsensusBlockEvent::Offered event if this is the first announcement for this block.
     fn track_announcement(
         &mut self,
         peer: PeerId,
@@ -297,7 +318,7 @@ impl BlockTracker {
             announcers.push(peer);
         }
         if is_new {
-            self.pending_events.push(ConsensusEvent::BlockOffered {
+            self.pending_events.push(ConsensusBlockEvent::Offered {
                 hash,
                 slot,
                 number,
@@ -336,16 +357,34 @@ impl BlockTracker {
                 }
             }
         }
-        self.blocks.retain(|_, announcers| !announcers.is_empty());
+        self.rescind_orphaned_blocks();
     }
 
     /// Handle a peer disconnecting — remove it from all blocks and tips.
+    /// Blocks whose announcer list drops to zero are rescinded: a
+    /// `Rescinded` event is pushed to `pending_events` for each.
     fn handle_disconnect(&mut self, peer: PeerId) {
         self.tips.remove(&peer);
         for announcers in self.blocks.values_mut() {
             announcers.retain(|p| *p != peer);
         }
-        self.blocks.retain(|_, announcers| !announcers.is_empty());
+        self.rescind_orphaned_blocks();
+    }
+
+    /// Remove blocks with no remaining announcers and emit Rescinded events.
+    fn rescind_orphaned_blocks(&mut self) {
+        let mut rescinded = Vec::new();
+        self.blocks.retain(|key, announcers| {
+            if announcers.is_empty() {
+                rescinded.push(*key);
+                false
+            } else {
+                true
+            }
+        });
+        for (slot, hash) in rescinded {
+            self.pending_events.push(ConsensusBlockEvent::Rescinded { hash, slot });
+        }
     }
 
     /// Checks if a peer's tip is at or beyond the given slot.
@@ -367,13 +406,24 @@ impl BlockTracker {
             .collect()
     }
 
-    /// A block was successfully fetched — remove it from tracking.
+    /// A block was successfully fetched — move its announcing peers from
+    /// `blocks` to `fetched` so they can be sanctioned if consensus later
+    /// rejects the block.
     fn block_fetched(&mut self, slot: u64, hash: BlockHash) {
-        self.blocks.remove(&(slot, hash));
+        let peers = self.blocks.remove(&(slot, hash)).unwrap_or_default();
+        if !peers.is_empty() {
+            self.fetched.insert(hash, peers);
+        }
+    }
+
+    /// Consume and return the peers that announced a fetched block, to be
+    /// sanctioned after a `BlockRejected` from consensus.
+    fn take_rejected_announcers(&mut self, hash: BlockHash) -> Vec<PeerId> {
+        self.fetched.remove(&hash).unwrap_or_default()
     }
 
     /// Take all pending events for publishing.
-    fn take_events(&mut self) -> Vec<ConsensusEvent> {
+    fn take_events(&mut self) -> Vec<ConsensusBlockEvent> {
         std::mem::take(&mut self.pending_events)
     }
 
@@ -382,6 +432,7 @@ impl BlockTracker {
         self.blocks.clear();
         self.tips.clear();
         self.pending_events.clear();
+        self.fetched.clear();
     }
 }
 
@@ -428,6 +479,14 @@ impl ConsensusFlowState {
         self.tracker.announcers(slot, hash)
     }
 
+    /// Return the peers that announced a rejected block and clear the entry.
+    ///
+    /// Callers should disconnect each returned peer to sanction them for
+    /// providing an invalid block.
+    fn block_rejected_announcers(&mut self, hash: BlockHash) -> Vec<PeerId> {
+        self.tracker.take_rejected_announcers(hash)
+    }
+
     async fn publish_pending(
         &mut self,
         block_sink: &mut BlockSink,
@@ -435,7 +494,7 @@ impl ConsensusFlowState {
     ) -> Result<()> {
         for event in self.tracker.take_events() {
             match event {
-                ConsensusEvent::BlockOffered {
+                ConsensusBlockEvent::Offered {
                     hash,
                     slot,
                     number,
@@ -458,12 +517,20 @@ impl ConsensusFlowState {
                         error!("Failed to publish consensus event: {e}");
                     }
                 }
-                ConsensusEvent::BlockFetched { header, body } => {
+                ConsensusBlockEvent::Fetched { header, body } => {
                     block_sink.announce_roll_forward(&header, &body, None).await?;
                     *published_blocks += 1;
                     self.blocks_published_count += 1;
                     if self.blocks_published_count.is_multiple_of(100) {
                         info!("Published block {} (consensus)", header.number);
+                    }
+                }
+                ConsensusBlockEvent::Rescinded { hash, slot } => {
+                    let message = Arc::new(Message::Consensus(ConsensusMessage::BlockRescinded(
+                        acropolis_common::messages::BlockRescindedMessage { hash, slot },
+                    )));
+                    if let Err(e) = self.context.publish(&self.topic, message).await {
+                        error!("Failed to publish Rescinded for {hash}: {e}");
                     }
                 }
             }
@@ -474,7 +541,7 @@ impl ConsensusFlowState {
     fn handle_block_fetched(&mut self, slot: u64, hash: BlockHash, body: Vec<u8>) {
         self.tracker.block_fetched(slot, hash);
         if let Some(header) = self.headers.remove(&(slot, hash)) {
-            self.tracker.pending_events.push(ConsensusEvent::BlockFetched { header, body });
+            self.tracker.pending_events.push(ConsensusBlockEvent::Fetched { header, body });
         } else {
             warn!("No stored header for fetched block {hash} at slot {slot}");
         }
@@ -513,7 +580,7 @@ mod tests {
         let events = tracker.take_events();
         assert!(matches!(
             &events[..],
-            [ConsensusEvent::BlockOffered { slot: 100, number: 1, hash, parent_hash }]
+            [ConsensusBlockEvent::Offered { slot: 100, number: 1, hash, parent_hash }]
                 if *hash == BLOCK_HASH_A && *parent_hash == GENESIS_HASH
         ));
     }
@@ -631,10 +698,12 @@ mod tests {
 
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
         tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.block_fetched(100, BLOCK_HASH_A);
         tracker.reset();
 
         assert!(tracker.blocks.is_empty());
         assert!(tracker.tips.is_empty());
+        assert!(tracker.fetched.is_empty());
         assert!(tracker.take_events().is_empty());
     }
 
@@ -682,5 +751,157 @@ mod tests {
         if let Some(announcers) = handler.block_announcers(100, BLOCK_HASH_A) {
             assert_eq!(announcers, vec![PEER_1, PEER_2]);
         }
+    }
+
+    #[test]
+    fn block_fetched_moves_peers_to_fetched() {
+        let mut tracker = BlockTracker::new();
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+
+        tracker.block_fetched(100, BLOCK_HASH_A);
+
+        assert!(
+            !tracker.blocks.contains_key(&(100, BLOCK_HASH_A)),
+            "block removed from tracker"
+        );
+        let peers = tracker.take_rejected_announcers(BLOCK_HASH_A);
+        assert_eq!(peers.len(), 2);
+        assert!(peers.contains(&PEER_1));
+        assert!(peers.contains(&PEER_2));
+    }
+
+    #[test]
+    fn block_fetched_on_removed_block_yields_no_announcers() {
+        let mut tracker = BlockTracker::new();
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.handle_rollback(PEER_1, &point(50, GENESIS_HASH));
+        let _ = tracker.take_events(); // consume Rescinded
+
+        tracker.block_fetched(100, BLOCK_HASH_A);
+
+        let peers = tracker.take_rejected_announcers(BLOCK_HASH_A);
+        assert!(peers.is_empty(), "expected empty for already-removed block");
+    }
+
+    #[test]
+    fn rollback_last_announcer_emits_block_rescinded() {
+        let mut tracker = BlockTracker::new();
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        let _ = tracker.take_events(); // consume Offered
+
+        tracker.handle_rollback(PEER_1, &point(50, GENESIS_HASH));
+
+        let events = tracker.take_events();
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], ConsensusBlockEvent::Rescinded { hash, slot }
+                if *hash == BLOCK_HASH_A && *slot == 100),
+            "expected Rescinded for BLOCK_HASH_A at slot 100, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn rollback_non_last_announcer_emits_no_block_rescinded() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
+        tracker.handle_tip(PEER_2, point(200, BLOCK_HASH_B));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        let _ = tracker.take_events();
+
+        tracker.handle_rollback(PEER_1, &point(50, GENESIS_HASH));
+
+        let events = tracker.take_events();
+        assert!(
+            events.is_empty(),
+            "expected no events when peer 2 still announces the block, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn disconnect_last_announcer_emits_block_rescinded() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        let _ = tracker.take_events();
+
+        tracker.handle_disconnect(PEER_1);
+
+        let events = tracker.take_events();
+        assert_eq!(events.len(), 1);
+        assert!(
+            matches!(&events[0], ConsensusBlockEvent::Rescinded { hash, slot }
+                if *hash == BLOCK_HASH_A && *slot == 100),
+            "expected Rescinded for BLOCK_HASH_A at slot 100, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn two_peer_rollback_second_emits_block_rescinded() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        let _ = tracker.take_events();
+
+        tracker.handle_rollback(PEER_1, &point(50, GENESIS_HASH));
+        let events_after_first = tracker.take_events();
+        assert!(
+            events_after_first.is_empty(),
+            "first rollback should not rescind (peer 2 still has it), got {:?}",
+            events_after_first
+        );
+
+        tracker.handle_rollback(PEER_2, &point(50, GENESIS_HASH));
+        let events_after_second = tracker.take_events();
+        assert_eq!(events_after_second.len(), 1);
+        assert!(
+            matches!(&events_after_second[0], ConsensusBlockEvent::Rescinded { hash, .. }
+                if *hash == BLOCK_HASH_A),
+            "second rollback should rescind, got {:?}",
+            events_after_second
+        );
+    }
+
+    #[test]
+    fn rollback_can_rescind_multiple_blocks() {
+        let mut tracker = BlockTracker::new();
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 101, 2, BLOCK_HASH_B, BLOCK_HASH_A);
+        let _ = tracker.take_events();
+
+        // Roll back to before both blocks
+        tracker.handle_rollback(PEER_1, &point(50, GENESIS_HASH));
+
+        let events = tracker.take_events();
+        assert_eq!(
+            events.len(),
+            2,
+            "both blocks should be rescinded, got {:?}",
+            events
+        );
+        assert!(events.iter().any(
+            |e| matches!(e, ConsensusBlockEvent::Rescinded { hash, .. } if *hash == BLOCK_HASH_A)
+        ));
+        assert!(events.iter().any(
+            |e| matches!(e, ConsensusBlockEvent::Rescinded { hash, .. } if *hash == BLOCK_HASH_B)
+        ));
+    }
+
+    #[test]
+    fn direct_mode_block_rejected_announcers_is_empty() {
+        let mut handler = BlockFlowHandler::Direct {
+            chain: ChainState::new(),
+        };
+        let announcers = handler.block_rejected_announcers(BLOCK_HASH_A);
+        assert!(
+            announcers.is_empty(),
+            "Direct mode should return empty for block_rejected_announcers"
+        );
     }
 }

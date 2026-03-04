@@ -129,6 +129,15 @@ impl NetworkManager {
                     warn!("BlockWanted for unknown block {hash} at slot {slot}");
                 }
             }
+            NetworkEvent::BlockRejected { hash, slot } => {
+                let peers = self.flow_handler.block_rejected_announcers(hash);
+                if peers.is_empty() {
+                    warn!("BlockRejected for unknown block {hash} at slot {slot}");
+                }
+                for peer in peers {
+                    self.handle_disconnect(peer);
+                }
+            }
         }
 
         Ok(())
@@ -258,6 +267,7 @@ pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
     SyncPointUpdate { point: Point },
     BlockWanted { hash: BlockHash, slot: u64 },
+    BlockRejected { hash: BlockHash, slot: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
