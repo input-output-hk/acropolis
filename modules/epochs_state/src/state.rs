@@ -108,7 +108,6 @@ impl State {
         self.blocks_minted = epoch_data.spo_blocks.iter().map(|(k, v)| (*k, *v as usize)).collect();
 
         self.nonces = Some(epoch_data.nonces.clone());
-        self.praos_params = epoch_data.praos_params.clone();
 
         info!(
             "Bootstrapped epoch state: epoch={}, blocks={}",

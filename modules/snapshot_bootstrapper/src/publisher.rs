@@ -221,7 +221,6 @@ impl SnapshotPublisher {
             total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
-            praos_params: None,
         }
     }
 
