@@ -6,9 +6,7 @@ use crate::opcerts::{OpCertsContext, OpCertsError};
 use crate::publisher::EpochContext;
 use acropolis_common::Slot;
 use acropolis_common::{
-    genesis_values::GenesisValues,
-    protocol_params::{Nonces, PraosParams},
-    BlockInfo, BlockIntent, BlockStatus,
+    genesis_values::GenesisValues, protocol_params::Nonces, BlockInfo, BlockIntent, BlockStatus,
 };
 use acropolis_common::{DRepCredential, PoolId, StakeAddress};
 use std::collections::HashMap;
@@ -40,16 +38,12 @@ pub enum BootstrapContextError {
 
     #[error(transparent)]
     Config(#[from] ConfigError),
-
-    #[error(transparent)]
-    Genesis(#[from] anyhow::Error),
 }
 
 /// Everything needed to bootstrap from a snapshot.
 #[derive(Debug)]
 pub struct BootstrapContext {
     pub genesis: GenesisValues,
-    pub praos_params: PraosParams,
     pub snapshot: Snapshot,
     pub nonces: Nonces,
     pub block_info: BlockInfo,
@@ -67,7 +61,6 @@ impl BootstrapContext {
         let target_epoch = cfg.epoch;
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
-        let praos_params = PraosParams::from_network(&cfg.startup.network_name)?;
 
         let nonces_file = NonceContext::load(&network_dir)?;
         let drep_delegators_file = DRepDelegationContext::load(&network_dir)?;
@@ -113,7 +106,6 @@ impl BootstrapContext {
 
         Ok(Self {
             genesis,
-            praos_params,
             snapshot,
             nonces,
             block_info,
@@ -142,7 +134,6 @@ impl BootstrapContext {
             self.block_info.epoch,
             self.block_info.era,
             &self.genesis,
-            self.praos_params.clone(),
             self.drep_delegations.clone(),
         )
     }

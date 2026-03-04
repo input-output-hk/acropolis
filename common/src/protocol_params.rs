@@ -197,31 +197,6 @@ impl PraosParams {
             randomness_stabilization_window: 172800,
         }
     }
-
-    pub fn testnet() -> Self {
-        PraosParams {
-            security_param: 432,
-            active_slots_coeff: RationalNumber::new(1, 20),
-            epoch_length: 86400,
-            max_kes_evolutions: 62,
-            max_lovelace_supply: 45_000_000_000_000_000,
-            network_id: NetworkId::Testnet,
-            slot_length: 1,
-            slots_per_kes_period: 129600,
-            extra_entropy: Nonce::default(),
-            stability_window: 25920,
-            randomness_stabilization_window: 34560,
-        }
-    }
-
-    pub fn from_network(network_name: &str) -> Result<Self> {
-        match network_name {
-            "mainnet" => Ok(Self::mainnet()),
-            "preview" => Ok(Self::testnet()),
-            "sanchonet" | "sancho" => Ok(Self::testnet()),
-            unsupported => bail!("Unsupported network for praos params: {unsupported}"),
-        }
-    }
 }
 
 impl From<&ShelleyParams> for PraosParams {
