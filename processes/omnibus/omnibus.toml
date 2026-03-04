@@ -172,9 +172,9 @@ spdd-retention-epochs = 0
 spdd-db-path = "./fjall-spdd"
 spdd-clear-on-start = true
 # Verify against captured CSV
-verify-pots-file = "../../modules/accounts_state/test-data/pots.mainnet.csv"
-verify-rewards-files = "../../modules/accounts_state/test-data/rewards.mainnet.{}.csv"
-verify-spdd-files = "../../modules/accounts_state/test-data/spdd.mainnet.{}.csv"
+verify-pots-file = "../../modules/accounts_state/test-data/pots.preview.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.preview.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.preview.{}.csv"
 
 [module.assets-state]
 # Enables /assets endpoint
@@ -226,6 +226,10 @@ port = 4341
 # Enable for message spying
 #[module.spy]
 #topic = "cardano.#"
+
+[monitor]
+output = "monitor.json" # Write to a file named monitor.json
+frequency_secs = 5.0    # every 5 seconds
 
 # ============================================================================
 # Message Bus Configuration

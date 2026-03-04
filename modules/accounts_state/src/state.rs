@@ -143,8 +143,15 @@ pub struct State {
 impl State {
     /// Bootstrap state from snapshot data (consumes the message to avoid cloning)
     pub fn bootstrap(&mut self, bootstrap_msg: AccountsBootstrapMessage) -> Result<()> {
-        let epoch = bootstrap_msg.epoch;
         let num_accounts = bootstrap_msg.accounts.len();
+        let num_pools = bootstrap_msg.pools.len();
+        let num_retiring = bootstrap_msg.retiring_pools.len();
+        let num_dreps = bootstrap_msg.dreps.len();
+
+        info!(
+            "Bootstrapping accounts state for epoch {} with {} accounts, {} pools ({} retiring), {} dreps",
+            bootstrap_msg.epoch, num_accounts, num_pools, num_retiring, num_dreps
+        );
 
         // Load stake addresses
         {
@@ -153,21 +160,29 @@ impl State {
                 stake_addresses.insert(account.stake_address, account.address_state);
             }
         }
+        info!("Loaded {} stake addresses", num_accounts);
 
         // Load pools
         for pool_reg in bootstrap_msg.pools {
             let operator = pool_reg.operator;
             self.spos.insert(operator, pool_reg);
         }
+        info!("Loaded {} pools", self.spos.len());
 
         // Load retiring pools
         self.retiring_spos = bootstrap_msg.retiring_pools;
+        info!("Loaded {} retiring pools", self.retiring_spos.len());
 
         // Load DReps
         self.dreps = bootstrap_msg.dreps.into();
+        info!("Loaded {} DReps", self.dreps.len());
 
         // Load pots
         self.pots = bootstrap_msg.pots;
+        info!(
+            "Loaded pots: reserves={}, treasury={}, deposits={}",
+            self.pots.reserves, self.pots.treasury, self.pots.deposits
+        );
 
         // Load mark/set/go snapshots
         let snapshots = bootstrap_msg.bootstrap_snapshots;
@@ -177,9 +192,28 @@ impl State {
             go: Arc::new(EpochSnapshot::default()),
         };
 
+        if !self.epoch_snapshots.mark.spos.is_empty() {
+            info!(
+                "Loaded epoch snapshots: mark(epoch {}, {} SPOs), set(epoch {}, {} SPOs), go(epoch {}, {} SPOs)",
+                self.epoch_snapshots.mark.epoch,
+                self.epoch_snapshots.mark.spos.len(),
+                self.epoch_snapshots.set.epoch,
+                self.epoch_snapshots.set.spos.len(),
+                self.epoch_snapshots.go.epoch,
+                self.epoch_snapshots.go.spos.len(),
+            );
+        } else {
+            info!("Loaded empty epoch snapshots (pre-Shelley or parse error)");
+        }
+
         // Apply pot deltas immediately to adjust from epoch N (snapshot) to epoch N+1 values
         // These come from pulsing_rew_update and instantaneous_rewards in the snapshot
         let deltas = bootstrap_msg.pot_deltas;
+        info!(
+            "Applying pot deltas: treasury={}, reserves={}, deposits={}",
+            deltas.delta_treasury, deltas.delta_reserves, deltas.delta_deposits,
+        );
+
         // Apply deltas with overflow checks
         update_value_with_delta(&mut self.pots.treasury, deltas.delta_treasury)?;
         update_value_with_delta(&mut self.pots.reserves, deltas.delta_reserves)?;
@@ -189,21 +223,15 @@ impl State {
         self.drep_delegators = bootstrap_msg.drep_delegations.into();
 
         info!(
-            epoch,
-            accounts = num_accounts,
-            pools = self.spos.len(),
-            retiring_pools = self.retiring_spos.len(),
-            dreps = self.dreps.len(),
-            pots_reserves = self.pots.reserves,
-            pots_treasury = self.pots.treasury,
-            pots_deposits = self.pots.deposits,
-            mark_epoch = self.epoch_snapshots.mark.epoch,
-            mark_spos = self.epoch_snapshots.mark.spos.len(),
-            set_epoch = self.epoch_snapshots.set.epoch,
-            set_spos = self.epoch_snapshots.set.spos.len(),
-            delta_treasury = deltas.delta_treasury,
-            delta_reserves = deltas.delta_reserves,
-            delta_deposits = deltas.delta_deposits
+            "Accounts state bootstrap complete for epoch {}: {} accounts, {} pools, {} DReps, \
+             pots(reserves={}, treasury={}, deposits={})",
+            bootstrap_msg.epoch,
+            num_accounts,
+            self.spos.len(),
+            self.dreps.len(),
+            self.pots.reserves,
+            self.pots.treasury,
+            self.pots.deposits,
         );
 
         Ok(())
@@ -1077,7 +1105,7 @@ impl State {
         };
 
         if different {
-            debug!("New parameter set: {:?}", params_msg.params);
+            info!("New parameter set: {:?}", params_msg.params);
         }
         self.previous_protocol_parameters = self.protocol_parameters.clone();
         self.protocol_parameters = Some(params_msg.params.clone());
@@ -1104,16 +1132,6 @@ impl State {
         if skip_rewards {
             info!("Skipping rewards calculation on first epoch after bootstrap");
             return Ok((spo_rewards, reward_deltas));
-        }
-
-        // If the stability-window trigger never fired before epoch boundary,
-        // start the rewards worker now so we don't block forever waiting on it.
-        if let Some(tx) = self.start_rewards_tx.take() {
-            warn!(
-                stability_window_slot = self.stability_window_slot,
-                "Rewards calculation trigger was not reached before epoch boundary; starting now"
-            );
-            let _ = tx.send(());
         }
 
         // Check previous epoch rewards calculation is done

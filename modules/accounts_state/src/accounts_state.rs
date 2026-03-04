@@ -91,7 +91,10 @@ impl AccountsState {
         // Initialize accounts state from snapshot data
         state.bootstrap(accounts_data)?;
 
-        info!(epoch, accounts = accounts_len);
+        info!(
+            "Accounts state bootstrapped successfully for epoch {} with {} accounts",
+            epoch, accounts_len
+        );
 
         Ok(())
     }
@@ -103,26 +106,35 @@ impl AccountsState {
     ) -> Result<()> {
         let snapshot_subscription = match snapshot_subscription.as_mut() {
             Some(sub) => sub,
-            None => return Ok(()),
+            None => {
+                info!("No snapshot subscription available, using default state");
+                return Ok(());
+            }
         };
 
+        info!("Waiting for snapshot bootstrap messages...");
         loop {
             let (_, message) = snapshot_subscription.read().await?;
             let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
 
             match message {
-                Message::Snapshot(SnapshotMessage::Startup) => {}
+                Message::Snapshot(SnapshotMessage::Startup) => {
+                    info!("Received snapshot startup signal, awaiting bootstrap data...");
+                }
                 Message::Snapshot(SnapshotMessage::Bootstrap(
                     SnapshotStateMessage::AccountsState(accounts_data),
                 )) => {
+                    info!("Received AccountsState bootstrap message");
+
                     let block_number = accounts_data.block_number;
                     let mut state = State::default();
 
                     Self::handle_bootstrap(&mut state, accounts_data)?;
                     history.lock().await.bootstrap_init_with(state, block_number);
-                    info!(block_number);
+                    info!("Accounts state bootstrap complete");
                 }
                 Message::Snapshot(SnapshotMessage::Complete) => {
+                    info!("Snapshot complete, exiting accounts state bootstrap loop");
                     return Ok(());
                 }
                 _ => {
@@ -461,24 +473,21 @@ impl AccountsState {
                                 block_info.era,
                                 &mut vld,
                             )
-                            .unwrap_or_else(|e| {
-                                vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"));
-                                // Keep per-block synchronization intact for downstream consumers.
-                                error!(
-                                    block = block_info.number,
-                                    error = %e,
-                                    "TxCertificates handling failed; publishing empty stake registration updates"
-                                );
-                                Vec::new()
-                            });
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!("TxCertificates handling error: {e:#}"))
+                            })
+                            .ok();
 
-                        if let Err(e) = stake_registration_updates_publisher
-                            .publish(block_info, stake_registration_updates)
-                            .await
-                        {
-                            vld.push_anyhow(anyhow!(
-                                "Error publishing stake registration updates: {e:#}"
-                            ));
+                        // Publish stake registration updates
+                        if let Some(updates) = stake_registration_updates {
+                            if let Err(e) = stake_registration_updates_publisher
+                                .publish(block_info, updates)
+                                .await
+                            {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing stake registration updates: {e:#}"
+                                ));
+                            }
                         }
                     }
                     .instrument(span)

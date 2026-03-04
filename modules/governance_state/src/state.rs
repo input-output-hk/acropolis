@@ -20,7 +20,7 @@ use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::Context;
 use hex::ToHex;
 use std::{collections::HashMap, sync::Arc};
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct State {
     publisher: RollbackAwarePublisher<Message>,
@@ -212,14 +212,14 @@ impl State {
             self.conway_voting.update_action_status_with_outcomes(new_block.epoch, &ratified)?;
             let acc = ratified.iter().filter(|oc| oc.voting.accepted).count();
 
-            info!(
+            debug!(
                 "Conway voting, epoch {} ({}): {voting_state}, total {} actions, {acc} accepted",
                 new_block.epoch,
                 new_block.era,
                 ratified.len()
             );
 
-            info!(
+            debug!(
                 "Conway voting: new epoch {}, outcomes: {ratified:?}",
                 new_block.epoch
             );
