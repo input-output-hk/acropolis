@@ -231,6 +231,13 @@ mod tests {
         "conway - valid transaction 1 - with withdraw 0 and smart contracts and reference inputs"
     )]
     #[test_case(validation_fixture!(
+        "conway",
+        "e609e5c6b885c0790d0dd8267e5e434ccfb92036ea869a9c2ddcabbe4c0811f1"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 2"
+    )]
+    #[test_case(validation_fixture!(
         "alonzo",
         "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590",
         "missing_redeemers"
