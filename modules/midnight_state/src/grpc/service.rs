@@ -57,7 +57,7 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .get_asset_creates(req.start_block, req.start_tx_index, utxo_capacity)
+                .get_asset_creates(req.start_block.into(), req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -104,7 +104,7 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .get_asset_spends(req.start_block, req.start_tx_index, utxo_capacity)
+                .get_asset_spends(req.start_block.into(), req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -151,7 +151,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.get_registrations(req.start_block, req.start_tx_index, utxo_capacity)
+            state.get_registrations(req.start_block.into(), req.start_tx_index, utxo_capacity)
         };
 
         let proto_registrations = registrations
@@ -197,7 +197,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.get_deregistrations(req.start_block, req.start_tx_index, utxo_capacity)
+            state.get_deregistrations(req.start_block.into(), req.start_tx_index, utxo_capacity)
         };
 
         let proto_deregistrations = deregistrations
@@ -348,9 +348,12 @@ impl MidnightState for MidnightStateService {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(BlockByHashResponse {
-            block_number: block_info.number,
+            block_number: u32::try_from(block_info.number)
+                .map_err(|_| Status::internal("block number overflow"))?,
             block_timestamp_unix: i64::try_from(block_info.timestamp)
                 .map_err(|_| Status::internal("timestamp overflow"))?,
+            tx_count: u32::try_from(block_info.tx_count)
+                .map_err(|_| Status::internal("tx count overflow"))?,
         }))
     }
 }

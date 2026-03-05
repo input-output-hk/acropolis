@@ -18,7 +18,7 @@ service MidnightState {
 }
 
 message AssetCreatesRequest {
-  uint64 start_block = 1;
+  uint32 start_block = 1;
   uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
@@ -40,7 +40,7 @@ message AssetCreatesResponse {
 }
 
 message AssetSpendsRequest {
-  uint64 start_block = 1;
+  uint32 start_block = 1;
   uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
@@ -63,7 +63,7 @@ message AssetSpendsResponse {
 }
 
 message RegistrationsRequest {
-  uint64 start_block = 1;
+  uint32 start_block = 1;
   uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
@@ -84,7 +84,7 @@ message RegistrationsResponse {
 }
 
 message DeregistrationsRequest {
-  uint64 start_block = 1;
+  uint32 start_block = 1;
   uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
@@ -134,6 +134,7 @@ message BlockByHashRequest {
   bytes block_hash = 1;
 }
 message BlockByHashResponse {
-  uint64 block_number = 1;
+  uint32 block_number = 1;
+  uint32 tx_count = 2;
   int64 block_timestamp_unix = 3;
 }
