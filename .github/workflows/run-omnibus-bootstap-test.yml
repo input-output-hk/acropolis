@@ -62,6 +62,7 @@ jobs:
       - name: Run k6 tests
         run: |
           cd tests/k6
+          npm install
           make test-all
         continue-on-error: true  # threshold tests currently failing
         env:
