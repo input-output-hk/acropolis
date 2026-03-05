@@ -43,7 +43,12 @@ impl CandidateState {
     }
 
     /// Get the candidate registrations within a specified block range
-    pub fn get_registrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Registration> {
+    pub fn get_registrations(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Vec<Registration> {
         self.registrations
             .range(start..=end)
             .flat_map(|(block_number, identifiers)| {
@@ -53,11 +58,17 @@ impl CandidateState {
                         .map(|event| Registration::from((*block_number, event)))
                 })
             })
+            .take(utxo_capacity)
             .collect()
     }
 
     /// Get the candidate deregistrations within a specified block range
-    pub fn get_deregistrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Deregistration> {
+    pub fn get_deregistrations(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Vec<Deregistration> {
         self.deregistrations
             .range(start..=end)
             .flat_map(|(block_number, events)| {
@@ -67,6 +78,7 @@ impl CandidateState {
                     })
                 })
             })
+            .take(utxo_capacity)
             .collect()
     }
 }

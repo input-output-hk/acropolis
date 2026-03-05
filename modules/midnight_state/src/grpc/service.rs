@@ -51,14 +51,16 @@ impl MidnightState for MidnightStateService {
         // 1. end_block <= tip
         // 2. (end_block - start_block) < some_max_blocks
 
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
+
         let creates = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
-                .get_asset_creates(req.start_block, req.end_block)
+                .get_asset_creates(req.start_block, req.end_block, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -99,14 +101,16 @@ impl MidnightState for MidnightStateService {
         // 1. end_block <= tip
         // 2. (end_block - start_block) < some_max_blocks
 
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
+
         let spends = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .utxos
-                .get_asset_spends(req.start_block, req.end_block)
+                .get_asset_spends(req.start_block, req.end_block, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -148,12 +152,15 @@ impl MidnightState for MidnightStateService {
         // 1. end_block <= tip
         // 2. (end_block - start_block) < some_max_blocks
 
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
+
         let registrations = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_registrations(req.start_block, req.end_block)
+            state.get_registrations(req.start_block, req.end_block, utxo_capacity)
         };
 
         let proto_registrations = registrations
@@ -194,12 +201,15 @@ impl MidnightState for MidnightStateService {
         // 1. end_block <= tip
         // 2. (end_block - start_block) < some_max_blocks
 
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
+
         let deregistrations = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_deregistrations(req.start_block, req.end_block)
+            state.get_deregistrations(req.start_block, req.end_block, utxo_capacity)
         };
 
         let proto_deregistrations = deregistrations

@@ -64,10 +64,12 @@ impl CNightUTxOState {
         &self,
         start: BlockNumber,
         end: BlockNumber,
+        utxo_capacity: usize,
     ) -> Result<Vec<AssetCreate>> {
         self.created_utxos
             .range(start..=end)
             .flat_map(|(_, utxos)| utxos.iter())
+            .take(utxo_capacity)
             .map(|utxo_id| AssetCreate::try_from(self.utxo_index.get(utxo_id)))
             .collect()
     }
@@ -77,10 +79,12 @@ impl CNightUTxOState {
         &self,
         start: BlockNumber,
         end: BlockNumber,
+        utxo_capacity: usize,
     ) -> Result<Vec<AssetSpend>> {
         self.spent_utxos
             .range(start..=end)
             .flat_map(|(_, utxos)| utxos.iter())
+            .take(utxo_capacity)
             .map(|utxo_id| AssetSpend::try_from(self.utxo_index.get(utxo_id)))
             .collect()
     }
@@ -135,7 +139,7 @@ mod tests {
         );
         state.spent_utxos.insert(1, vec![utxo]);
 
-        match state.get_asset_spends(1, 1) {
+        match state.get_asset_spends(1, 1, 50) {
             Ok(_) => panic!("expected missing spend to error"),
             Err(err) => assert!(err.to_string().contains("UTxO has no spend record")),
         }
@@ -148,7 +152,7 @@ mod tests {
 
         state.created_utxos.insert(1, vec![utxo]);
 
-        match state.get_asset_creates(1, 1) {
+        match state.get_asset_creates(1, 1, 50) {
             Ok(_) => panic!("expected missing creation to error"),
             Err(err) => assert!(err.to_string().contains("UTxO creation without existing record")),
         }

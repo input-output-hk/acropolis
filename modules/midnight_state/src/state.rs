@@ -14,7 +14,10 @@ use crate::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
     },
-    types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
+    types::{
+        AssetCreate, AssetSpend, CNightCreation, CNightSpend, Deregistration, DeregistrationEvent,
+        Registration, RegistrationEvent,
+    },
 };
 
 #[derive(Clone, Default)]
@@ -23,9 +26,9 @@ pub struct State {
     epoch_totals: EpochTotals,
 
     // CNight UTxO spends and creations indexed by block
-    pub utxos: CNightUTxOState,
+    utxos: CNightUTxOState,
     // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    pub candidates: CandidateState,
+    candidates: CandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
@@ -48,6 +51,42 @@ impl State {
 
     pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
         self.parameters.get_ariadne_parameters_with_epoch(epoch)
+    }
+
+    pub fn get_asset_creates(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Result<Vec<AssetCreate>> {
+        self.utxos.get_asset_creates(start, end, utxo_capacity)
+    }
+
+    pub fn get_asset_spends(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Result<Vec<AssetSpend>> {
+        self.utxos.get_asset_spends(start, end, utxo_capacity)
+    }
+
+    pub fn get_registrations(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Vec<Registration> {
+        self.candidates.get_registrations(start, end, utxo_capacity)
+    }
+
+    pub fn get_deregistrations(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        utxo_capacity: usize,
+    ) -> Vec<Deregistration> {
+        self.candidates.get_deregistrations(start, end, utxo_capacity)
     }
 
     pub fn handle_address_deltas(
@@ -613,7 +652,8 @@ mod tests {
         state.utxos.add_created_utxos(block_info.number, creations);
 
         // Retrieve the UTxO from state using the getter
-        let utxos = state.utxos.get_asset_creates(block_info.number, block_info.number).unwrap();
+        let utxos =
+            state.utxos.get_asset_creates(block_info.number, block_info.number, 50).unwrap();
         assert_eq!(utxos.len(), 2);
         assert_eq!(utxos[0].quantity, 5);
         assert_eq!(utxos[1].quantity, 10);
@@ -650,7 +690,7 @@ mod tests {
         state.utxos.add_spent_utxos(block_info.number, spends).unwrap();
 
         // Retrieve the UTxO from state using the getter
-        let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number).unwrap();
+        let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number, 50).unwrap();
         assert_eq!(utxos.len(), 1);
         assert_eq!(utxos[0].quantity, 10);
     }
@@ -708,7 +748,7 @@ mod tests {
 
         state.candidates.register_candidates(block_info.number, registrations);
 
-        let indexed = state.candidates.get_registrations(block_info.number, block_info.number);
+        let indexed = state.candidates.get_registrations(block_info.number, block_info.number, 50);
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
@@ -744,7 +784,8 @@ mod tests {
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
 
-        let indexed = state.candidates.get_deregistrations(block_info.number, block_info.number);
+        let indexed =
+            state.candidates.get_deregistrations(block_info.number, block_info.number, 50);
 
         // Only 1 deregistration indexed
         assert_eq!(indexed.len(), 1);
