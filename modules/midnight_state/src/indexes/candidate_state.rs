@@ -43,30 +43,174 @@ impl CandidateState {
     }
 
     /// Get the candidate registrations within a specified block range
-    pub fn get_registrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Registration> {
+    pub fn get_registrations(
+        &self,
+        start: BlockNumber,
+        start_tx_index: u32,
+        utxo_capacity: usize,
+    ) -> Vec<Registration> {
         self.registrations
-            .range(start..=end)
+            .range(start..)
             .flat_map(|(block_number, identifiers)| {
-                identifiers.iter().filter_map(|identifier| {
-                    self.registration_index
-                        .get(identifier)
-                        .map(|event| Registration::from((*block_number, event)))
+                identifiers.iter().filter_map(move |identifier| {
+                    let event = self.registration_index.get(identifier)?;
+
+                    if *block_number == start && event.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(Registration::from((*block_number, event)))
                 })
             })
+            .take(utxo_capacity)
             .collect()
     }
 
     /// Get the candidate deregistrations within a specified block range
-    pub fn get_deregistrations(&self, start: BlockNumber, end: BlockNumber) -> Vec<Deregistration> {
+    pub fn get_deregistrations(
+        &self,
+        start: BlockNumber,
+        start_tx_index: u32,
+        utxo_capacity: usize,
+    ) -> Vec<Deregistration> {
         self.deregistrations
-            .range(start..=end)
+            .range(start..)
             .flat_map(|(block_number, events)| {
-                events.iter().filter_map(|event| {
-                    self.registration_index.get(&event.registration_utxo).map(|registration| {
-                        Deregistration::from((*block_number, registration, event))
-                    })
+                events.iter().filter_map(move |event| {
+                    if *block_number == start && event.spent_tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    let registration = self.registration_index.get(&event.registration_utxo)?;
+
+                    Some(Deregistration::from((*block_number, registration, event)))
                 })
             })
+            .take(utxo_capacity)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use acropolis_common::{BlockHash, Datum, TxHash};
+
+    use super::*;
+
+    fn id(i: u8) -> UTxOIdentifier {
+        UTxOIdentifier::new(TxHash::from([i; 32]), 0)
+    }
+
+    fn registration_event(tx_index: u32) -> RegistrationEvent {
+        RegistrationEvent {
+            tx_index,
+            block_hash: BlockHash::default(),
+            block_timestamp: 0,
+            tx_hash: TxHash::default(),
+            utxo_index: 0,
+            datum: Datum::Inline(vec![1u8; 32]),
+        }
+    }
+
+    fn dereg_event(tx_index: u32, reg: UTxOIdentifier) -> DeregistrationEvent {
+        DeregistrationEvent {
+            spent_tx_index: tx_index,
+            registration_utxo: reg,
+            spent_block_hash: BlockHash::default(),
+            spent_block_timestamp: 1,
+            spent_tx_hash: TxHash::default(),
+        }
+    }
+
+    #[test]
+    fn registrations_respect_start_tx_index() {
+        let mut state = CandidateState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.registrations.insert(10, vec![id0, id1, id2]);
+
+        state.registration_index.insert(id0, registration_event(0));
+        state.registration_index.insert(id1, registration_event(1));
+        state.registration_index.insert(id2, registration_event(2));
+
+        let result = state.get_registrations(10, 1, 10);
+
+        let txs: Vec<u32> = result.iter().map(|r| r.tx_index_in_block).collect();
+
+        assert_eq!(txs, vec![1, 2]);
+    }
+
+    #[test]
+    fn registrations_respect_capacity() {
+        let mut state = CandidateState::default();
+
+        let ids = [id(1), id(2), id(3), id(4)];
+
+        state.registrations.insert(10, ids.to_vec());
+
+        for (i, identifier) in ids.iter().enumerate() {
+            state.registration_index.insert(*identifier, registration_event(i as u32));
+        }
+
+        let result = state.get_registrations(10, 0, 2);
+
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn deregistrations_respect_start_tx_index() {
+        let mut state = CandidateState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.deregistrations.insert(
+            10,
+            vec![
+                dereg_event(0, id0),
+                dereg_event(1, id1),
+                dereg_event(2, id2),
+            ],
+        );
+
+        state.registration_index.insert(id0, registration_event(0));
+        state.registration_index.insert(id1, registration_event(1));
+        state.registration_index.insert(id2, registration_event(2));
+
+        let result = state.get_deregistrations(10, 1, 10);
+
+        let txs: Vec<u32> = result.iter().map(|r| r.tx_index_in_block).collect();
+
+        assert_eq!(txs, vec![1, 2]);
+    }
+
+    #[test]
+    fn deregistrations_respect_capacity() {
+        let mut state = CandidateState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.deregistrations.insert(
+            10,
+            vec![
+                dereg_event(0, id0),
+                dereg_event(1, id1),
+                dereg_event(2, id2),
+            ],
+        );
+
+        state.registration_index.insert(id0, registration_event(0));
+        state.registration_index.insert(id1, registration_event(1));
+        state.registration_index.insert(id2, registration_event(2));
+
+        let result = state.get_deregistrations(10, 0, 2);
+
+        assert_eq!(result.len(), 2);
     }
 }

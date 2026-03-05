@@ -63,12 +63,24 @@ impl CNightUTxOState {
     pub fn get_asset_creates(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
+        utxo_capacity: usize,
     ) -> Result<Vec<AssetCreate>> {
         self.created_utxos
-            .range(start..=end)
-            .flat_map(|(_, utxos)| utxos.iter())
-            .map(|utxo_id| AssetCreate::try_from(self.utxo_index.get(utxo_id)))
+            .range(start..)
+            .flat_map(|(block_number, utxos)| {
+                utxos.iter().filter_map(move |utxo_id| {
+                    let utxo = self.utxo_index.get(utxo_id)?;
+
+                    if *block_number == start && utxo.creation.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(utxo)
+                })
+            })
+            .take(utxo_capacity)
+            .map(AssetCreate::try_from)
             .collect()
     }
 
@@ -76,12 +88,25 @@ impl CNightUTxOState {
     pub fn get_asset_spends(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
+        utxo_capacity: usize,
     ) -> Result<Vec<AssetSpend>> {
         self.spent_utxos
-            .range(start..=end)
-            .flat_map(|(_, utxos)| utxos.iter())
-            .map(|utxo_id| AssetSpend::try_from(self.utxo_index.get(utxo_id)))
+            .range(start..)
+            .flat_map(|(block_number, utxos)| {
+                utxos.iter().filter_map(move |utxo_id| {
+                    let utxo = self.utxo_index.get(utxo_id)?;
+                    let spend = utxo.spend.as_ref()?;
+
+                    if *block_number == start && spend.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(utxo)
+                })
+            })
+            .take(utxo_capacity)
+            .map(AssetSpend::try_from)
             .collect()
     }
 }
@@ -91,14 +116,28 @@ mod tests {
     use super::*;
     use acropolis_common::{Address, BlockHash, TxHash};
 
-    fn test_creation(utxo: UTxOIdentifier) -> CNightCreation {
+    fn id(i: u8) -> UTxOIdentifier {
+        UTxOIdentifier::new(TxHash::from([i; 32]), 0)
+    }
+
+    fn creation(utxo: UTxOIdentifier, tx_index: u32) -> CNightCreation {
         CNightCreation {
             address: Address::default(),
             quantity: 42,
             utxo,
-            block_number: 1,
+            block_number: 10,
             block_hash: BlockHash::default(),
-            tx_index: 7,
+            tx_index,
+            block_timestamp: 0,
+        }
+    }
+
+    fn spend(tx_index: u32) -> CNightSpend {
+        CNightSpend {
+            block_number: 10,
+            block_hash: BlockHash::default(),
+            tx_hash: TxHash::default(),
+            tx_index,
             block_timestamp: 0,
         }
     }
@@ -122,35 +161,180 @@ mod tests {
     }
 
     #[test]
-    fn get_asset_spends_errors_when_spend_missing() {
+    fn get_asset_spends_ignores_missing_spend() {
         let mut state = CNightUTxOState::default();
-        let utxo = UTxOIdentifier::new(TxHash::default(), 1);
+
+        let utxo = id(1);
 
         state.utxo_index.insert(
             utxo,
             UTxOMeta {
-                creation: test_creation(utxo),
+                creation: creation(utxo, 0),
                 spend: None,
             },
         );
+
         state.spent_utxos.insert(1, vec![utxo]);
 
-        match state.get_asset_spends(1, 1) {
-            Ok(_) => panic!("expected missing spend to error"),
-            Err(err) => assert!(err.to_string().contains("UTxO has no spend record")),
-        }
+        let result = state.get_asset_spends(1, 0, 10).unwrap();
+
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn get_asset_creates_errors_when_creation_missing() {
+    fn get_asset_creates_ignores_missing_creation() {
         let mut state = CNightUTxOState::default();
-        let utxo = UTxOIdentifier::new(TxHash::default(), 2);
+
+        let utxo = id(2);
 
         state.created_utxos.insert(1, vec![utxo]);
 
-        match state.get_asset_creates(1, 1) {
-            Ok(_) => panic!("expected missing creation to error"),
-            Err(err) => assert!(err.to_string().contains("UTxO creation without existing record")),
+        let result = state.get_asset_creates(1, 0, 10).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn asset_creates_respect_start_tx_index() {
+        let mut state = CNightUTxOState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.utxo_index.insert(
+            id0,
+            UTxOMeta {
+                creation: creation(id0, 0),
+                spend: None,
+            },
+        );
+
+        state.utxo_index.insert(
+            id1,
+            UTxOMeta {
+                creation: creation(id1, 1),
+                spend: None,
+            },
+        );
+
+        state.utxo_index.insert(
+            id2,
+            UTxOMeta {
+                creation: creation(id2, 2),
+                spend: None,
+            },
+        );
+
+        state.created_utxos.insert(10, vec![id0, id1, id2]);
+
+        let result = state.get_asset_creates(10, 1, 10).unwrap();
+
+        let txs: Vec<u32> = result.iter().map(|r| r.tx_index_in_block).collect();
+
+        assert_eq!(txs, vec![1, 2]);
+    }
+
+    #[test]
+    fn asset_creates_respect_capacity() {
+        let mut state = CNightUTxOState::default();
+
+        let ids = [id(1), id(2), id(3), id(4)];
+
+        for (i, identifier) in ids.iter().enumerate() {
+            state.utxo_index.insert(
+                *identifier,
+                UTxOMeta {
+                    creation: creation(*identifier, i as u32),
+                    spend: None,
+                },
+            );
         }
+
+        state.created_utxos.insert(10, ids.to_vec());
+
+        let result = state.get_asset_creates(10, 0, 2).unwrap();
+
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn asset_spends_respect_start_tx_index() {
+        let mut state = CNightUTxOState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.utxo_index.insert(
+            id0,
+            UTxOMeta {
+                creation: creation(id0, 0),
+                spend: Some(spend(0)),
+            },
+        );
+
+        state.utxo_index.insert(
+            id1,
+            UTxOMeta {
+                creation: creation(id1, 0),
+                spend: Some(spend(1)),
+            },
+        );
+
+        state.utxo_index.insert(
+            id2,
+            UTxOMeta {
+                creation: creation(id2, 0),
+                spend: Some(spend(2)),
+            },
+        );
+
+        state.spent_utxos.insert(10, vec![id0, id1, id2]);
+
+        let result = state.get_asset_spends(10, 1, 10).unwrap();
+
+        let txs: Vec<u32> = result.iter().map(|r| r.tx_index_in_block).collect();
+
+        assert_eq!(txs, vec![1, 2]);
+    }
+
+    #[test]
+    fn asset_spends_respect_capacity() {
+        let mut state = CNightUTxOState::default();
+
+        let id0 = id(0);
+        let id1 = id(1);
+        let id2 = id(2);
+
+        state.utxo_index.insert(
+            id0,
+            UTxOMeta {
+                creation: creation(id0, 0),
+                spend: Some(spend(0)),
+            },
+        );
+
+        state.utxo_index.insert(
+            id1,
+            UTxOMeta {
+                creation: creation(id1, 0),
+                spend: Some(spend(1)),
+            },
+        );
+
+        state.utxo_index.insert(
+            id2,
+            UTxOMeta {
+                creation: creation(id2, 0),
+                spend: Some(spend(2)),
+            },
+        );
+
+        state.spent_utxos.insert(10, vec![id0, id1, id2]);
+
+        let result = state.get_asset_spends(10, 0, 2).unwrap();
+
+        assert_eq!(result.len(), 2);
     }
 }
