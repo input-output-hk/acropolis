@@ -56,37 +56,37 @@ impl State {
     pub fn get_asset_creates(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Result<Vec<AssetCreate>> {
-        self.utxos.get_asset_creates(start, end, utxo_capacity)
+        self.utxos.get_asset_creates(start, start_tx_index, utxo_capacity)
     }
 
     pub fn get_asset_spends(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Result<Vec<AssetSpend>> {
-        self.utxos.get_asset_spends(start, end, utxo_capacity)
+        self.utxos.get_asset_spends(start, start_tx_index, utxo_capacity)
     }
 
     pub fn get_registrations(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Vec<Registration> {
-        self.candidates.get_registrations(start, end, utxo_capacity)
+        self.candidates.get_registrations(start, start_tx_index, utxo_capacity)
     }
 
     pub fn get_deregistrations(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Vec<Deregistration> {
-        self.candidates.get_deregistrations(start, end, utxo_capacity)
+        self.candidates.get_deregistrations(start, start_tx_index, utxo_capacity)
     }
 
     pub fn handle_address_deltas(
@@ -652,8 +652,7 @@ mod tests {
         state.utxos.add_created_utxos(block_info.number, creations);
 
         // Retrieve the UTxO from state using the getter
-        let utxos =
-            state.utxos.get_asset_creates(block_info.number, block_info.number, 50).unwrap();
+        let utxos = state.utxos.get_asset_creates(block_info.number, 0, 50).unwrap();
         assert_eq!(utxos.len(), 2);
         assert_eq!(utxos[0].quantity, 5);
         assert_eq!(utxos[1].quantity, 10);
@@ -690,7 +689,7 @@ mod tests {
         state.utxos.add_spent_utxos(block_info.number, spends).unwrap();
 
         // Retrieve the UTxO from state using the getter
-        let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number, 50).unwrap();
+        let utxos = state.utxos.get_asset_spends(block_info.number, 0, 50).unwrap();
         assert_eq!(utxos.len(), 1);
         assert_eq!(utxos[0].quantity, 10);
     }
@@ -748,7 +747,7 @@ mod tests {
 
         state.candidates.register_candidates(block_info.number, registrations);
 
-        let indexed = state.candidates.get_registrations(block_info.number, block_info.number, 50);
+        let indexed = state.candidates.get_registrations(block_info.number, 0, 50);
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
@@ -784,8 +783,7 @@ mod tests {
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
 
-        let indexed =
-            state.candidates.get_deregistrations(block_info.number, block_info.number, 50);
+        let indexed = state.candidates.get_deregistrations(block_info.number, 0, 50);
 
         // Only 1 deregistration indexed
         assert_eq!(indexed.len(), 1);

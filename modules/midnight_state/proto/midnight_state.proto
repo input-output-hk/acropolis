@@ -19,7 +19,7 @@ service MidnightState {
 
 message AssetCreatesRequest {
   uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
 message AssetCreate {
@@ -41,7 +41,7 @@ message AssetCreatesResponse {
 
 message AssetSpendsRequest {
   uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
 message AssetSpend {
@@ -64,7 +64,7 @@ message AssetSpendsResponse {
 
 message RegistrationsRequest {
   uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
 message Registration {
@@ -85,7 +85,7 @@ message RegistrationsResponse {
 
 message DeregistrationsRequest {
   uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_tx_index = 2;
   uint32 utxo_capacity = 3;
 }
 message Deregistration {

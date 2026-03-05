@@ -46,16 +46,20 @@ impl CandidateState {
     pub fn get_registrations(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Vec<Registration> {
         self.registrations
-            .range(start..=end)
+            .range(start..)
             .flat_map(|(block_number, identifiers)| {
-                identifiers.iter().filter_map(|identifier| {
-                    self.registration_index
-                        .get(identifier)
-                        .map(|event| Registration::from((*block_number, event)))
+                identifiers.iter().filter_map(move |identifier| {
+                    let event = self.registration_index.get(identifier)?;
+
+                    if *block_number == start && event.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(Registration::from((*block_number, event)))
                 })
             })
             .take(utxo_capacity)
@@ -66,16 +70,20 @@ impl CandidateState {
     pub fn get_deregistrations(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Vec<Deregistration> {
         self.deregistrations
-            .range(start..=end)
+            .range(start..)
             .flat_map(|(block_number, events)| {
-                events.iter().filter_map(|event| {
-                    self.registration_index.get(&event.registration_utxo).map(|registration| {
-                        Deregistration::from((*block_number, registration, event))
-                    })
+                events.iter().filter_map(move |event| {
+                    if *block_number == start && event.spent_tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    let registration = self.registration_index.get(&event.registration_utxo)?;
+
+                    Some(Deregistration::from((*block_number, registration, event)))
                 })
             })
             .take(utxo_capacity)

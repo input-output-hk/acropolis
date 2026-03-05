@@ -43,13 +43,10 @@ impl MidnightState for MidnightStateService {
         request: Request<AssetCreatesRequest>,
     ) -> Result<Response<AssetCreatesResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let utxo_capacity = usize::try_from(req.utxo_capacity)
             .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
@@ -60,7 +57,7 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .get_asset_creates(req.start_block, req.end_block, utxo_capacity)
+                .get_asset_creates(req.start_block, req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -93,13 +90,10 @@ impl MidnightState for MidnightStateService {
         request: Request<AssetSpendsRequest>,
     ) -> Result<Response<AssetSpendsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let utxo_capacity = usize::try_from(req.utxo_capacity)
             .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
@@ -110,7 +104,7 @@ impl MidnightState for MidnightStateService {
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
-                .get_asset_spends(req.start_block, req.end_block, utxo_capacity)
+                .get_asset_spends(req.start_block, req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
@@ -144,13 +138,10 @@ impl MidnightState for MidnightStateService {
         request: Request<RegistrationsRequest>,
     ) -> Result<Response<RegistrationsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let utxo_capacity = usize::try_from(req.utxo_capacity)
             .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
@@ -160,7 +151,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.get_registrations(req.start_block, req.end_block, utxo_capacity)
+            state.get_registrations(req.start_block, req.start_tx_index, utxo_capacity)
         };
 
         let proto_registrations = registrations
@@ -193,13 +184,10 @@ impl MidnightState for MidnightStateService {
         request: Request<DeregistrationsRequest>,
     ) -> Result<Response<DeregistrationsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let utxo_capacity = usize::try_from(req.utxo_capacity)
             .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
@@ -209,7 +197,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.get_deregistrations(req.start_block, req.end_block, utxo_capacity)
+            state.get_deregistrations(req.start_block, req.start_tx_index, utxo_capacity)
         };
 
         let proto_deregistrations = deregistrations

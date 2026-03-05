@@ -63,14 +63,24 @@ impl CNightUTxOState {
     pub fn get_asset_creates(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Result<Vec<AssetCreate>> {
         self.created_utxos
-            .range(start..=end)
-            .flat_map(|(_, utxos)| utxos.iter())
+            .range(start..)
+            .flat_map(|(block_number, utxos)| {
+                utxos.iter().filter_map(move |utxo_id| {
+                    let utxo = self.utxo_index.get(utxo_id)?;
+
+                    if *block_number == start && utxo.creation.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(utxo)
+                })
+            })
             .take(utxo_capacity)
-            .map(|utxo_id| AssetCreate::try_from(self.utxo_index.get(utxo_id)))
+            .map(AssetCreate::try_from)
             .collect()
     }
 
@@ -78,14 +88,25 @@ impl CNightUTxOState {
     pub fn get_asset_spends(
         &self,
         start: BlockNumber,
-        end: BlockNumber,
+        start_tx_index: u32,
         utxo_capacity: usize,
     ) -> Result<Vec<AssetSpend>> {
         self.spent_utxos
-            .range(start..=end)
-            .flat_map(|(_, utxos)| utxos.iter())
+            .range(start..)
+            .flat_map(|(block_number, utxos)| {
+                utxos.iter().filter_map(move |utxo_id| {
+                    let utxo = self.utxo_index.get(utxo_id)?;
+                    let spend = utxo.spend.as_ref()?;
+
+                    if *block_number == start && spend.tx_index < start_tx_index {
+                        return None;
+                    }
+
+                    Some(utxo)
+                })
+            })
             .take(utxo_capacity)
-            .map(|utxo_id| AssetSpend::try_from(self.utxo_index.get(utxo_id)))
+            .map(AssetSpend::try_from)
             .collect()
     }
 }
