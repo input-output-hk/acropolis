@@ -76,7 +76,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "392768bba2df5cd1e092859060e456091f88e3b9abad81d59562c2ee0c0323de#0": {
       "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
@@ -87,7 +87,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "69c9d2a8cad8b5e30c3114028b863cd6f6c371231e30ff323f7bd4dbbfbecb27#0": {
       "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
@@ -98,7 +98,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "9e978adf290e28938588dd04fd69d423eff29b24a4919e3f430fa372540c4b87#0": {
       "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
@@ -109,7 +109,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#2": {
       "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
@@ -120,7 +120,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#3": {
       "address": "addr1wxhc9s9uufjkgn4z5teqclywxqzjkhjstrjvhw8zjuykptqmsuqu2",
@@ -135,7 +135,7 @@
           101, 146
         ]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "ba51b6a82c39f46a69ee805ae7e1888d3ca6c89349282598378712251d8da75a#4": {
       "address": "addr1vyz5deam6gy5tujg8y3vushnn3wqsc6eumacflxyhh8jggq73ky74",
@@ -144,7 +144,7 @@
         "assets": []
       },
       "datum": null,
-      "reference_script_hash": null
+      "script_ref": null
     },
     "dc5e545b16de18a8d97a0d3c019e6b843df8360a4976f81069bd982c33a546af#0": {
       "address": "addr1x9pfn68c5e7ag56l9ywkgrvatetg39y89kevmjwp9qr5x2tlwwec08ynzrr6qt6p69ng7aa6k93kgzqnls3cjjd2lyhsufwv7k",
@@ -155,7 +155,7 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": null
+      "script_ref": null
     },
     "2e4508680eebf4357c40e16a09b0aa428bb9f95d63847b9395c3203220e9181d#1": {
       "address": "addr1w9n8n39lghsvdha5yvuhmxkv25620e9kgdgzhalmap753pq5czu4h",
@@ -166,7 +166,10 @@
       "datum": {
         "Inline": [216, 121, 128]
       },
-      "reference_script_hash": "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2"
+      "script_ref": {
+        "script_hash": "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2",
+        "script_lang": "Native"
+      }
     },
     "cf9b3804fb048391cd98016024b9f4d86a4cddbdc493a324729765dec6063533#0": {
       "address": "addr1w8ypa9x3ffz6p4gmwux36agrtcvqen9wplzqqrath87vjjcwjxvp9",
@@ -210,7 +213,7 @@
           40, 178, 255, 255, 255, 255
         ]
       },
-      "reference_script_hash": "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2"
+      "script_ref": null
     }
   }
 }

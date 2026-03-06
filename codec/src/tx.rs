@@ -7,6 +7,7 @@ use acropolis_common::{validation::Phase1ValidationError, *};
 use pallas_primitives::Metadatum as PallasMetadatum;
 use pallas_traverse::{
     ComputeHash, Era as PallasEra, MultiEraInput, MultiEraMeta, MultiEraSigners, MultiEraTx,
+    OriginalHash,
 };
 
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
@@ -88,6 +89,13 @@ pub fn map_transaction_consumes_produces(
     (parsed_consumes, parsed_produces, reference_scripts, errors)
 }
 
+pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
+    match tx {
+        MultiEraTx::Conway(conway) => conway.transaction_body.donation.map(u64::from),
+        _ => None,
+    }
+}
+
 pub fn map_metadatum(metadatum: &PallasMetadatum) -> Metadatum {
     match metadatum {
         PallasMetadatum::Int(pallas_primitives::Int(i)) => Metadatum::Int(i128::from(*i)),
@@ -117,7 +125,10 @@ pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     let mut scripts_provided = Vec::new();
 
     for script in tx.native_scripts() {
-        scripts_provided.push((ScriptHash::from(*script.compute_hash()), ScriptLang::Native));
+        scripts_provided.push((
+            ScriptHash::from(*script.original_hash()),
+            ScriptLang::Native,
+        ));
     }
 
     for script in tx.plutus_v1_scripts() {
@@ -166,6 +177,8 @@ pub fn map_transaction(
     let fee = tx.fee().unwrap_or(0);
     let stated_total_collateral = tx.total_collateral();
     let is_valid = tx.is_valid();
+
+    let donation = map_transaction_donation(tx);
 
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
@@ -286,7 +299,7 @@ pub fn map_transaction(
     let plutus_data = tx
         .plutus_data()
         .iter()
-        .map(|x| (DatumHash::from(*x.compute_hash()), x.raw_cbor().to_vec()))
+        .map(|x| (DatumHash::from(*x.original_hash()), x.raw_cbor().to_vec()))
         .collect::<Vec<_>>();
 
     Transaction {
@@ -295,6 +308,7 @@ pub fn map_transaction(
         produces,
         reference_inputs,
         fee,
+        donation,
         reference_scripts,
         stated_total_collateral,
         is_valid,
