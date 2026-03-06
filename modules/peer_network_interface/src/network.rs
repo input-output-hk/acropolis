@@ -276,6 +276,11 @@ impl NetworkManager {
 
         let pending: Vec<(u64, BlockHash)> = self.pending_wanted.keys().copied().collect();
         for (slot, hash) in pending {
+            if !self.flow_handler.knows_block(slot, hash) {
+                self.pending_wanted.remove(&(slot, hash));
+                continue;
+            }
+
             if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
                 self.request_block(slot, hash, announcers);
                 self.pending_wanted.remove(&(slot, hash));
@@ -334,24 +339,15 @@ mod tests {
     use acropolis_common::genesis_values::GenesisValues;
     use acropolis_common::messages::Message;
     use acropolis_common::{BlockHash, Era};
-    use acropolis_module_consensus::Consensus;
     use caryatid_sdk::Context;
     use caryatid_sdk::mock_bus::MockBus;
-    use config::{Config, FileFormat};
+    use config::Config;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tokio::sync::watch;
-    use tokio::time::{Duration as TokioDuration, timeout};
 
     fn test_context() -> Arc<Context<Message>> {
         let config = Arc::new(Config::builder().build().unwrap());
-        let bus = Arc::new(MockBus::<Message>::new(&config));
-        let (_tx, rx) = watch::channel(true);
-        Arc::new(Context::new(config, bus, rx))
-    }
-
-    fn test_context_with_config(config: Config) -> Arc<Context<Message>> {
-        let config = Arc::new(config);
         let bus = Arc::new(MockBus::<Message>::new(&config));
         let (_tx, rx) = watch::channel(true);
         Arc::new(Context::new(config, bus, rx))
@@ -489,6 +485,26 @@ mod tests {
         assert!(
             reqs.contains(&(hash, slot)),
             "late announcement should trigger block fetch retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_pending_wanted_evicts_unknown_blocks() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(3);
+        add_test_peer(&mut manager, peer);
+
+        let slot = 300;
+        let hash = BlockHash::new([5; 32]);
+
+        manager.pending_wanted.insert((slot, hash), ());
+        assert!(manager.pending_wanted.contains_key(&(slot, hash)));
+
+        manager.retry_pending_wanted();
+
+        assert!(
+            !manager.pending_wanted.contains_key(&(slot, hash)),
+            "stale entry for unknown block should be evicted"
         );
     }
 }

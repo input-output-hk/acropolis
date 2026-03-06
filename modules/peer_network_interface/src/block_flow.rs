@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use acropolis_common::BlockHash;
 use acropolis_common::messages::{
-    BlockOfferedMessage, BlockRejectedMessage, BlockWantedMessage, ConsensusMessage, Message,
+    BlockOfferedMessage, BlockRejectedMessage, BlockRescindedMessage, BlockWantedMessage,
+    ConsensusMessage, Message,
 };
 use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
@@ -229,7 +230,7 @@ impl BlockFlowHandler {
     /// Publish events appropriate for the current flow mode.
     ///
     /// - Direct mode: publishes RollForward/RollBackward from chain state
-    /// - Consensus mode: publishes Offered/Rescinded to consensus
+    /// - Consensus mode: publishes BlockOffered/BlockRescinded/BlockAvailable to consensus
     pub async fn publish(
         &mut self,
         block_sink: &mut BlockSink,
@@ -589,7 +590,7 @@ impl ConsensusFlowState {
                 }
                 ConsensusBlockEvent::Rescinded { hash, slot } => {
                     let message = Arc::new(Message::Consensus(ConsensusMessage::BlockRescinded(
-                        acropolis_common::messages::BlockRescindedMessage { hash, slot },
+                        BlockRescindedMessage { hash, slot },
                     )));
                     if let Err(e) = self.context.publish(&self.topic, message).await {
                         error!("Failed to publish Rescinded for {hash}: {e}");
