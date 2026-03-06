@@ -41,6 +41,9 @@ pub enum BlocksStateQuery {
     GetBlockBySlot {
         slot: u64,
     },
+    GetBlockByHash {
+        block_hash: BlockHash,
+    },
     GetBlockByEpochSlot {
         epoch: u64,
         slot: u64,
@@ -95,6 +98,7 @@ pub enum BlocksStateQueryResponse {
     NextBlocks(NextBlocks),
     PreviousBlocks(PreviousBlocks),
     BlockBySlot(BlockInfo),
+    BlockByHash(BlockInfo),
     BlockByEpochSlot(BlockInfo),
     BlockTransactions(BlockTransactions),
     BlockTransactionsCBOR(BlockTransactionsCBOR),

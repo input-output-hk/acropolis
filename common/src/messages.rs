@@ -5,7 +5,7 @@ use crate::commands::chain_sync::ChainSyncCommand;
 use crate::commands::transactions::{TransactionsCommand, TransactionsCommandResponse};
 use crate::genesis_values::GenesisValues;
 use crate::ledger_state::SPOState;
-use crate::protocol_params::{Nonce, Nonces, PraosParams, ProtocolParams};
+use crate::protocol_params::{Nonce, Nonces, ProtocolParams};
 use crate::queries::parameters::{ParametersStateQuery, ParametersStateQueryResponse};
 use crate::queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse};
 use crate::queries::stake_deltas::{StakeDeltaQuery, StakeDeltaQueryResponse};
@@ -403,6 +403,7 @@ pub enum CardanoMessage {
 pub struct BlockOfferedMessage {
     pub hash: BlockHash,
     pub slot: u64,
+    pub number: u64,
     pub parent_hash: BlockHash,
 }
 
@@ -515,9 +516,6 @@ pub struct EpochBootstrapMessage {
 
     /// Nonces
     pub nonces: Nonces,
-
-    /// Praos Params
-    pub praos_params: Option<PraosParams>,
 }
 
 /// Accounts bootstrap message containing all data needed to bootstrap accounts state

@@ -261,6 +261,16 @@ impl ChainStore {
                 let info = Self::to_block_info(block, store, state, false)?;
                 Ok(BlocksStateQueryResponse::BlockBySlot(info))
             }
+            BlocksStateQuery::GetBlockByHash { block_hash } => {
+                let Some(block) = store.get_block_by_hash(block_hash.as_ref())? else {
+                    return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(
+                        format!("{} not found", block_hash),
+                    )));
+                };
+
+                let info = Self::to_block_info(block, store, state, false)?;
+                Ok(BlocksStateQueryResponse::BlockByHash(info))
+            }
             BlocksStateQuery::GetBlockByEpochSlot { epoch, slot } => {
                 let Some(block) = store.get_block_by_epoch_slot(*epoch, *slot)? else {
                     return Ok(BlocksStateQueryResponse::Error(QueryError::not_found(

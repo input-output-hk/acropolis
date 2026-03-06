@@ -96,7 +96,7 @@ impl MidnightState {
             StateHistoryStore::Unbounded,
         )));
         let grpc_history = history.clone();
-
+        let grpc_context = context.clone();
         // Start the main run loop
         context.run(async move {
             Self::run(history, cfg, address_deltas_reader)
@@ -106,7 +106,7 @@ impl MidnightState {
 
         // Start the gRPC server
         context.run(async move {
-            crate::grpc::server::run(grpc_history, addr)
+            crate::grpc::server::run(grpc_history, grpc_context, addr)
                 .await
                 .unwrap_or_else(|e| error!("gRPC server failed: {e}"));
         });

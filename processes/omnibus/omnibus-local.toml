@@ -58,6 +58,7 @@ store-stake-addresses = false
 [module.governance-state]
 
 [module.parameters-state]
+# Enables /epochs/{number}/parameters
 store-history = false
 
 [module.stake-delta-filter]

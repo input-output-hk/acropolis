@@ -54,11 +54,13 @@ pub struct BootstrapContext {
 
 impl BootstrapContext {
     /// Load all bootstrap data from the network directory.
-    pub fn load(cfg: &BootstrapConfig) -> Result<Self, BootstrapContextError> {
+    pub fn load(
+        cfg: &BootstrapConfig,
+        genesis: GenesisValues,
+    ) -> Result<Self, BootstrapContextError> {
         let target_epoch = cfg.epoch;
         let snapshot = cfg.snapshot()?;
         let network_dir = cfg.network_dir();
-        let genesis = genesis_for_network(&cfg.startup.network_name);
 
         let nonces_file = NonceContext::load(&network_dir)?;
         let drep_delegators_file = DRepDelegationContext::load(&network_dir)?;
@@ -135,9 +137,4 @@ impl BootstrapContext {
             self.drep_delegations.clone(),
         )
     }
-}
-
-fn genesis_for_network(_network: &str) -> GenesisValues {
-    // TODO: Add preprod/preview support
-    GenesisValues::mainnet()
 }
