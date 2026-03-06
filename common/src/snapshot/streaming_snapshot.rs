@@ -163,63 +163,36 @@ where
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         match d.datatype()? {
-            Type::Null | Type::Undefined => {
-                d.skip()?;
-                Ok(StrictMaybe::Nothing)
-            }
-            Type::Array | Type::ArrayIndef => {
-                // Try the array-wrapper shape first:
-                //   []      -> Nothing
-                //   [value] -> Just value
-                //
-                // If probing fails, fall back to decoding a direct T (which itself might be an
-                // array, such as DRep).
-                let mut probe = d.clone();
-                match probe.array()? {
-                    Some(0) => {
-                        d.array()?;
-                        Ok(StrictMaybe::Nothing)
+            Type::Array | Type::ArrayIndef => match d.array()? {
+                Some(0) => Ok(StrictMaybe::Nothing),
+                Some(1) => {
+                    let value = T::decode(d, ctx)?;
+                    Ok(StrictMaybe::Just(value))
+                }
+                Some(len) => Err(minicbor::decode::Error::message(format!(
+                    "Expected StrictMaybe array length 0 or 1, got {len}"
+                ))),
+                None => {
+                    if matches!(d.datatype()?, Type::Break) {
+                        d.skip()?;
+                        return Ok(StrictMaybe::Nothing);
                     }
-                    Some(1) => {
-                        if T::decode(&mut probe, ctx).is_ok() {
-                            d.array()?;
-                            let value = T::decode(d, ctx)?;
-                            Ok(StrictMaybe::Just(value))
-                        } else {
-                            let value = T::decode(d, ctx)?;
-                            Ok(StrictMaybe::Just(value))
-                        }
-                    }
-                    None => match probe.datatype()? {
+
+                    let value = T::decode(d, ctx)?;
+                    match d.datatype()? {
                         Type::Break => {
-                            d.array()?;
                             d.skip()?;
-                            Ok(StrictMaybe::Nothing)
+                            Ok(StrictMaybe::Just(value))
                         }
-                        _ => {
-                            if T::decode(&mut probe, ctx).is_ok()
-                                && matches!(probe.datatype()?, Type::Break)
-                            {
-                                d.array()?;
-                                let value = T::decode(d, ctx)?;
-                                d.skip()?;
-                                Ok(StrictMaybe::Just(value))
-                            } else {
-                                let value = T::decode(d, ctx)?;
-                                Ok(StrictMaybe::Just(value))
-                            }
-                        }
-                    },
-                    Some(_) => {
-                        let value = T::decode(d, ctx)?;
-                        Ok(StrictMaybe::Just(value))
+                        other => Err(minicbor::decode::Error::message(format!(
+                            "Expected break token after indefinite StrictMaybe value, got {other:?}"
+                        ))),
                     }
                 }
-            }
-            _ => {
-                let value = T::decode(d, ctx)?;
-                Ok(StrictMaybe::Just(value))
-            }
+            },
+            _ => Err(minicbor::decode::Error::message(
+                "Expected array for StrictMaybe",
+            )),
         }
     }
 }
@@ -376,31 +349,23 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let len = d.array()?;
 
-        // New snapshots can encode account values in either:
-        //   [balance, deposit, stake_pool_delegation, drep_delegation]
-        // or (schema-aligned, with optional pointer first):
-        //   [ptr, balance, deposit, stake_pool_delegation, drep_delegation, ...]
-        //
-        // We currently don't materialize ptr in AccountState, but we must consume it when present.
-        let mut consumed_fields = 0u64;
-        if matches!(
-            d.datatype()?,
-            Type::Null | Type::Undefined | Type::Array | Type::ArrayIndef
-        ) {
-            d.skip()?; // ptr
-            consumed_fields += 1;
+        if let Some(array_len) = len {
+            if array_len < 5 {
+                return Err(minicbor::decode::Error::message(format!(
+                    "Expected account array with at least 5 fields, got {array_len}"
+                )));
+            }
         }
 
+        // Conway account state: [ptr, balance, deposit, stake_pool_delegation, drep_delegation, ...]
+        // ptr is currently not materialized in AccountState, but must be consumed.
+        d.skip()?; // ptr
         let balance = d.decode_with(ctx)?;
-        consumed_fields += 1;
         d.skip()?; // deposit
-        consumed_fields += 1;
         let pool = d.decode_with(ctx)?;
-        consumed_fields += 1;
         let drep = d.decode_with(ctx)?;
-        consumed_fields += 1;
 
-        skip_remaining_array_items(d, len, consumed_fields)?;
+        skip_remaining_array_items(d, len, 5)?;
 
         Ok(Self {
             balance,
@@ -414,8 +379,14 @@ impl SnapshotAccountValue {
     fn to_normalized(&self) -> NormalizedAccount {
         NormalizedAccount {
             rewards: self.balance,
-            delegated_spo: strict_maybe_copy(&self.pool),
-            delegated_drep: strict_maybe_cloned(&self.drep).map(drep_to_choice),
+            delegated_spo: match &self.pool {
+                StrictMaybe::Nothing => None,
+                StrictMaybe::Just(pool) => Some(pool.clone()),
+            },
+            delegated_drep: match &self.drep {
+                StrictMaybe::Nothing => None,
+                StrictMaybe::Just(drep) => Some(drep_to_choice(drep.clone())),
+            },
         }
     }
 }
@@ -428,7 +399,7 @@ struct NormalizedAccount {
 }
 
 // -----------------------------------------------------------------------------
-// Type decoders for snapshot compatibility
+// Snapshot decode context and helpers
 // -----------------------------------------------------------------------------
 
 pub use crate::types::AddrKeyhash;
@@ -469,65 +440,12 @@ fn skip_remaining_array_items(
     Ok(())
 }
 
-fn strict_maybe_copy<T: Copy>(value: &StrictMaybe<T>) -> Option<T> {
-    match value {
-        StrictMaybe::Nothing => None,
-        StrictMaybe::Just(inner) => Some(*inner),
-    }
-}
-
-fn strict_maybe_cloned<T: Clone>(value: &StrictMaybe<T>) -> Option<T> {
-    match value {
-        StrictMaybe::Nothing => None,
-        StrictMaybe::Just(inner) => Some(inner.clone()),
-    }
-}
-
 fn drep_to_choice(drep: DRep) -> DRepChoice {
     match drep {
         DRep::Key(hash) => DRepChoice::Key(hash),
         DRep::Script(hash) => DRepChoice::Script(hash),
         DRep::Abstain => DRepChoice::Abstain,
         DRep::NoConfidence => DRepChoice::NoConfidence,
-    }
-}
-
-fn decode_stake_address_compat<'b, C>(
-    d: &mut Decoder<'b>,
-    ctx: &mut C,
-) -> Result<StakeAddress, minicbor::decode::Error>
-where
-    C: AsRef<SnapshotContext>,
-{
-    match d.datatype()? {
-        Type::Bytes => {
-            let bytes = d.bytes()?;
-
-            match bytes.len() {
-                // RewardAccount encoding (bytes)
-                29 => StakeAddress::from_binary(bytes)
-                    .map_err(|e| minicbor::decode::Error::message(e.to_string())),
-                // Key hash encoding (raw bytes)
-                28 => {
-                    let hash = Hash::<28>::try_from(bytes)
-                        .map_err(|e| minicbor::decode::Error::message(e.to_string()))?;
-                    Ok(StakeAddress::new(
-                        StakeCredential::AddrKeyHash(hash),
-                        ctx.as_ref().network.clone(),
-                    ))
-                }
-                len => Err(minicbor::decode::Error::message(format!(
-                    "Unexpected stake credential/address byte length: {len}"
-                ))),
-            }
-        }
-        Type::Array | Type::ArrayIndef => {
-            let credential = d.decode_with(ctx)?;
-            Ok(StakeAddress::new(credential, ctx.as_ref().network.clone()))
-        }
-        other => Err(minicbor::decode::Error::message(format!(
-            "Expected stake credential/address bytes or array, got {other:?}"
-        ))),
     }
 }
 
@@ -542,39 +460,6 @@ where
             Type::Null | Type::Undefined => {
                 d.skip()?;
                 Ok(SnapshotOption(None))
-            }
-            // Some ledger versions encode `StrictMaybe a` as:
-            //   []      -> Nothing
-            //   [a]     -> Just a
-            // We support that shape here in addition to plain `a` / null.
-            Type::Array | Type::ArrayIndef => {
-                let mut probe = d.clone();
-                match probe.array()? {
-                    Some(0) => {
-                        d.array()?;
-                        Ok(SnapshotOption(None))
-                    }
-                    Some(1) => {
-                        d.array()?;
-                        let t = T::decode(d, ctx)?;
-                        Ok(SnapshotOption(Some(t)))
-                    }
-                    None => match probe.datatype()? {
-                        Type::Break => {
-                            d.array()?;
-                            d.skip()?;
-                            Ok(SnapshotOption(None))
-                        }
-                        _ => {
-                            let t = T::decode(d, ctx)?;
-                            Ok(SnapshotOption(Some(t)))
-                        }
-                    },
-                    _ => {
-                        let t = T::decode(d, ctx)?;
-                        Ok(SnapshotOption(Some(t)))
-                    }
-                }
             }
             _ => {
                 let t = T::decode(d, ctx)?;
@@ -592,43 +477,20 @@ where
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let len = d.array()?;
-        let operator = d.decode_with(ctx).map_err(|e| {
-            minicbor::decode::Error::message(format!("failed to decode operator PoolId: {e}"))
-        })?;
-        let vrf_key_hash = d.decode_with(ctx).map_err(|e| {
-            minicbor::decode::Error::message(format!("failed to decode vrf key hash: {e}"))
-        })?;
-        let pledge = d.decode_with(ctx).map_err(|e| {
-            minicbor::decode::Error::message(format!("failed to decode pledge: {e}"))
-        })?;
-        let cost = d
-            .decode_with(ctx)
-            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode cost: {e}")))?;
-        let margin = SnapshotRatio::decode(d, ctx)
-            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode margin: {e}")))?
-            .0;
-        let reward_account = decode_stake_address_compat(d, ctx).map_err(|e| {
-            minicbor::decode::Error::message(format!("failed to decode reward account: {e}"))
-        })?;
-        let pool_owners = SnapshotSet::<SnapshotStakeAddress>::decode(d, ctx)
-            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode owners: {e}")))?
+        let operator = d.decode_with(ctx)?;
+        let vrf_key_hash = d.decode_with(ctx)?;
+        let pledge = d.decode_with(ctx)?;
+        let cost = d.decode_with(ctx)?;
+        let margin = SnapshotRatio::decode(d, ctx)?.0;
+        let reward_account = SnapshotStakeAddress::decode(d, ctx)?.0;
+        let pool_owners = SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
             .0
             .into_iter()
             .map(|a| a.0)
             .collect();
-        let relays = Vec::<SnapshotRelay>::decode(d, ctx)
-            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode relays: {e}")))?
-            .into_iter()
-            .map(|r| r.0)
-            .collect();
-        let pool_metadata = SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)
-            .map_err(|e| {
-                minicbor::decode::Error::message(format!("failed to decode pool metadata: {e}"))
-            })?
-            .0
-            .map(|m| m.0);
+        let relays = Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect();
+        let pool_metadata = SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0);
 
-        // Newer stake pool state variants may append extra fields after PoolRegistration.
         skip_remaining_array_items(d, len, 9)?;
 
         Ok(Self(PoolRegistration {
@@ -666,10 +528,12 @@ where
         let margin = SnapshotRatio::decode(d, ctx)
             .map_err(|e| minicbor::decode::Error::message(format!("failed to decode margin: {e}")))?
             .0;
-        let reward_account = decode_stake_address_compat(d, ctx).map_err(|e| {
-            minicbor::decode::Error::message(format!("failed to decode reward account: {e}"))
-        })?;
-        let pool_owners = SnapshotSet::<SnapshotStakeAddress>::decode(d, ctx)
+        let reward_account = SnapshotStakeAddress::decode(d, ctx)
+            .map_err(|e| {
+                minicbor::decode::Error::message(format!("failed to decode reward account: {e}"))
+            })?
+            .0;
+        let pool_owners = SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)
             .map_err(|e| minicbor::decode::Error::message(format!("failed to decode owners: {e}")))?
             .0
             .into_iter()
@@ -730,8 +594,28 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress
 where
     C: AsRef<SnapshotContext>,
 {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        Ok(Self(StakeAddress::from_binary(bytes).map_err(|e| {
+            minicbor::decode::Error::message(e.to_string())
+        })?))
+    }
+}
+
+struct SnapshotStakeAddressFromCred(pub StakeAddress);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddressFromCred
+where
+    C: AsRef<SnapshotContext>,
+{
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        Ok(Self(decode_stake_address_compat(d, ctx)?))
+        let bytes = d.bytes()?;
+        let bytes = Hash::<28>::try_from(bytes)
+            .map_err(|e| minicbor::decode::Error::message(e.to_string()))?;
+        Ok(Self(StakeAddress::new(
+            StakeCredential::AddrKeyHash(bytes),
+            ctx.as_ref().network.clone(),
+        )))
     }
 }
 
@@ -1302,7 +1186,7 @@ impl StreamingSnapshotParser {
             }
 
             let accounts_map =
-                Self::parse_dstate_accounts_map(&mut decoder, &mut ctx, "DState[0] accounts")?;
+                Self::decode_account_state_map(&mut decoder, &mut ctx, "DState[0] accounts")?;
 
             // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
             decoder.skip().context("Failed to skip DState[1] future genesis delegations")?;
@@ -2391,22 +2275,6 @@ impl StreamingSnapshotParser {
         Ok(normalized)
     }
 
-    fn parse_dstate_accounts_map(
-        decoder: &mut Decoder,
-        ctx: &mut SnapshotContext,
-        map_name: &str,
-    ) -> Result<BTreeMap<StakeCredential, NormalizedAccount>> {
-        match decoder
-            .datatype()
-            .with_context(|| format!("Failed to inspect datatype for {map_name}"))?
-        {
-            Type::Map | Type::MapIndef => Self::decode_account_state_map(decoder, ctx, map_name),
-            other => Err(anyhow!(
-                "Unexpected {map_name} datatype: expected map, got {other:?}"
-            )),
-        }
-    }
-
     fn parse_pool_params_map(
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
@@ -2769,51 +2637,22 @@ mod tests {
     }
 
     #[test]
-    fn test_strict_maybe_decode_compatibility() {
+    fn test_strict_maybe_decode_new_layout() {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
-        enc.array(4).unwrap();
-        enc.null().unwrap();
+        enc.array(2).unwrap();
         enc.array(0).unwrap();
         enc.array(1).unwrap();
         enc.u64(42).unwrap();
-        enc.u64(99).unwrap();
 
         let mut dec = Decoder::new(&buf);
         dec.array().unwrap();
 
-        let null_case: StrictMaybe<u64> = dec.decode().unwrap();
         let empty_wrapper_case: StrictMaybe<u64> = dec.decode().unwrap();
         let single_wrapper_case: StrictMaybe<u64> = dec.decode().unwrap();
-        let direct_case: StrictMaybe<u64> = dec.decode().unwrap();
 
-        assert!(matches!(null_case, StrictMaybe::Nothing));
         assert!(matches!(empty_wrapper_case, StrictMaybe::Nothing));
         assert!(matches!(single_wrapper_case, StrictMaybe::Just(42)));
-        assert!(matches!(direct_case, StrictMaybe::Just(99)));
-    }
-
-    #[test]
-    fn test_account_decode_conway_shape() {
-        fn decode_account(bytes: &[u8]) -> SnapshotAccountValue {
-            let mut dec = Decoder::new(bytes);
-            dec.decode().unwrap()
-        }
-
-        // Conway: [balance, deposit, pool, drep]
-        let mut conway_buf = Vec::new();
-        let mut conway_enc = Encoder::new(&mut conway_buf);
-        conway_enc.array(4).unwrap();
-        conway_enc.u64(300).unwrap();
-        conway_enc.u64(40).unwrap();
-        conway_enc.bytes(&[0x33; 28]).unwrap();
-        conway_enc.array(1).unwrap();
-        conway_enc.u16(2).unwrap(); // DRep::Abstain
-
-        let conway = decode_account(&conway_buf).to_normalized();
-        assert_eq!(conway.rewards, 300);
-        assert!(conway.delegated_spo.is_some());
-        assert!(matches!(conway.delegated_drep, Some(DRepChoice::Abstain)));
     }
 
     #[test]
@@ -2830,7 +2669,9 @@ mod tests {
         enc.null().unwrap(); // ptr
         enc.u64(300).unwrap();
         enc.u64(40).unwrap();
+        enc.array(1).unwrap();
         enc.bytes(&[0x33; 28]).unwrap();
+        enc.array(1).unwrap();
         enc.array(1).unwrap();
         enc.u16(2).unwrap(); // DRep::Abstain
 
@@ -2841,20 +2682,20 @@ mod tests {
     }
 
     #[test]
-    fn test_account_decode_legacy_shape_rejected() {
-        // Legacy: [StrictMaybe (reward,deposit), pointers, pool, drep]
-        let mut legacy_buf = Vec::new();
-        let mut legacy_enc = Encoder::new(&mut legacy_buf);
-        legacy_enc.array(4).unwrap();
-        legacy_enc.array(1).unwrap();
-        legacy_enc.array(2).unwrap();
-        legacy_enc.u64(100).unwrap();
-        legacy_enc.u64(50).unwrap();
-        legacy_enc.array(0).unwrap();
-        legacy_enc.null().unwrap();
-        legacy_enc.null().unwrap();
+    fn test_account_decode_without_ptr_rejected() {
+        // Missing ptr field: [balance, deposit, pool, drep]
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(4).unwrap();
+        enc.u64(300).unwrap();
+        enc.u64(40).unwrap();
+        enc.array(1).unwrap();
+        enc.bytes(&[0x33; 28]).unwrap();
+        enc.array(1).unwrap();
+        enc.array(1).unwrap();
+        enc.u16(2).unwrap(); // DRep::Abstain
 
-        let mut dec = Decoder::new(&legacy_buf);
+        let mut dec = Decoder::new(&buf);
         let decoded: Result<SnapshotAccountValue, _> = dec.decode();
         assert!(decoded.is_err());
     }
