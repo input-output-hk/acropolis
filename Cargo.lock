@@ -590,6 +590,7 @@ dependencies = [
  "dashmap",
  "fjall",
  "hex",
+ "imbl",
  "pallas",
  "serde",
  "serde_cbor",
