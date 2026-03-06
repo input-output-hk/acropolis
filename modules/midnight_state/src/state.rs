@@ -613,7 +613,7 @@ mod tests {
         state.utxos.add_created_utxos(block_info.number, creations);
 
         // Retrieve the UTxO from state using the getter
-        let utxos = state.utxos.get_asset_creates(block_info.number, block_info.number).unwrap();
+        let utxos = state.utxos.get_asset_creates(block_info.number, 0, 50).unwrap();
         assert_eq!(utxos.len(), 2);
         assert_eq!(utxos[0].quantity, 5);
         assert_eq!(utxos[1].quantity, 10);
@@ -650,7 +650,7 @@ mod tests {
         state.utxos.add_spent_utxos(block_info.number, spends).unwrap();
 
         // Retrieve the UTxO from state using the getter
-        let utxos = state.utxos.get_asset_spends(block_info.number, block_info.number).unwrap();
+        let utxos = state.utxos.get_asset_spends(block_info.number, 0, 50).unwrap();
         assert_eq!(utxos.len(), 1);
         assert_eq!(utxos[0].quantity, 10);
     }
@@ -708,7 +708,7 @@ mod tests {
 
         state.candidates.register_candidates(block_info.number, registrations);
 
-        let indexed = state.candidates.get_registrations(block_info.number, block_info.number);
+        let indexed = state.candidates.get_registrations(block_info.number, 0, 50);
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
@@ -744,7 +744,7 @@ mod tests {
 
         state.candidates.deregister_candidates(block_info.number, deregistrations);
 
-        let indexed = state.candidates.get_deregistrations(block_info.number, block_info.number);
+        let indexed = state.candidates.get_deregistrations(block_info.number, 0, 50);
 
         // Only 1 deregistration indexed
         assert_eq!(indexed.len(), 1);
