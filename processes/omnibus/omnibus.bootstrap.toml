@@ -6,7 +6,7 @@
 # Startup Configuration
 # ============================================================================
 [global.startup]
-network-name = "mainnet"
+network-name = "preview"
 startup-mode = "snapshot"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril" # Options: "mithril" | "upstream"
 
@@ -14,5 +14,5 @@ sync-mode = "mithril" # Options: "mithril" | "upstream"
 # Bootstrap Module Configurations
 # ============================================================================
 [module.snapshot-bootstrapper]
-epoch = 507
+epoch = 999
 data-dir = "../../modules/snapshot_bootstrapper/data"

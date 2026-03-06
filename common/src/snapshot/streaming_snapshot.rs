@@ -28,7 +28,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{Ipv4Addr, Ipv6Addr};
-use tracing::info;
+use std::path::{Path, PathBuf};
+use tracing::{error, info};
 
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
@@ -162,16 +163,36 @@ where
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         match d.datatype()? {
-            Type::Array | Type::ArrayIndef => {
-                let len = d.array()?;
-                if len == Some(0) {
-                    Ok(StrictMaybe::Nothing)
-                } else {
+            Type::Array | Type::ArrayIndef => match d.array()? {
+                Some(0) => Ok(StrictMaybe::Nothing),
+                Some(1) => {
                     let value = T::decode(d, ctx)?;
                     Ok(StrictMaybe::Just(value))
                 }
-            }
-            _ => Err(minicbor::decode::Error::message("Expected array for Maybe")),
+                Some(len) => Err(minicbor::decode::Error::message(format!(
+                    "Expected StrictMaybe array length 0 or 1, got {len}"
+                ))),
+                None => {
+                    if matches!(d.datatype()?, Type::Break) {
+                        d.skip()?;
+                        return Ok(StrictMaybe::Nothing);
+                    }
+
+                    let value = T::decode(d, ctx)?;
+                    match d.datatype()? {
+                        Type::Break => {
+                            d.skip()?;
+                            Ok(StrictMaybe::Just(value))
+                        }
+                        other => Err(minicbor::decode::Error::message(format!(
+                            "Expected break token after indefinite StrictMaybe value, got {other:?}"
+                        ))),
+                    }
+                }
+            },
+            _ => Err(minicbor::decode::Error::message(
+                "Expected array for StrictMaybe",
+            )),
         }
     }
 }
@@ -196,7 +217,7 @@ impl<'b, C> minicbor::Decode<'b, C> for Anchor {
             _ => {
                 return Err(minicbor::decode::Error::message(
                     "Expected bytes or string for URL",
-                ))
+                ));
             }
         };
         let content_hash = Hash::<32>::decode(d, ctx)?;
@@ -318,27 +339,67 @@ impl<C> minicbor::Encode<C> for DRep {
 ///
 /// This is converted to AccountState for the external API.
 #[derive(Debug)]
-pub struct Account {
-    pub rewards_and_deposit: StrictMaybe<(Lovelace, Lovelace)>,
-    pub pointers: SnapshotSet<(u64, u64, u64)>,
+struct SnapshotAccountValue {
+    pub balance: Lovelace,
     pub pool: StrictMaybe<PoolId>,
     pub drep: StrictMaybe<DRep>,
 }
 
-impl<'b, C> minicbor::Decode<'b, C> for Account {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        d.array()?;
-        Ok(Account {
-            rewards_and_deposit: d.decode_with(ctx)?,
-            pointers: d.decode_with(ctx)?,
-            pool: d.decode_with(ctx)?,
-            drep: d.decode_with(ctx)?,
+        let len = d.array()?;
+
+        if let Some(array_len) = len {
+            if array_len < 5 {
+                return Err(minicbor::decode::Error::message(format!(
+                    "Expected account array with at least 5 fields, got {array_len}"
+                )));
+            }
+        }
+
+        // Conway account state: [ptr, balance, deposit, stake_pool_delegation, drep_delegation, ...]
+        // ptr is currently not materialized in AccountState, but must be consumed.
+        d.skip()?; // ptr
+        let balance = d.decode_with(ctx)?;
+        d.skip()?; // deposit
+        let pool = d.decode_with(ctx)?;
+        let drep = d.decode_with(ctx)?;
+
+        skip_remaining_array_items(d, len, 5)?;
+
+        Ok(Self {
+            balance,
+            pool,
+            drep,
         })
     }
 }
 
+impl SnapshotAccountValue {
+    fn to_normalized(&self) -> NormalizedAccount {
+        NormalizedAccount {
+            rewards: self.balance,
+            delegated_spo: match &self.pool {
+                StrictMaybe::Nothing => None,
+                StrictMaybe::Just(pool) => Some(*pool),
+            },
+            delegated_drep: match &self.drep {
+                StrictMaybe::Nothing => None,
+                StrictMaybe::Just(drep) => Some(drep_to_choice(drep.clone())),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedAccount {
+    rewards: Lovelace,
+    delegated_spo: Option<PoolId>,
+    delegated_drep: Option<DRepChoice>,
+}
+
 // -----------------------------------------------------------------------------
-// Type decoders for snapshot compatibility
+// Snapshot decode context and helpers
 // -----------------------------------------------------------------------------
 
 pub use crate::types::AddrKeyhash;
@@ -351,6 +412,40 @@ pub struct SnapshotContext {
 impl AsRef<SnapshotContext> for SnapshotContext {
     fn as_ref(&self) -> &Self {
         self
+    }
+}
+
+fn skip_remaining_array_items(
+    d: &mut Decoder<'_>,
+    len: Option<u64>,
+    already_read: u64,
+) -> Result<(), minicbor::decode::Error> {
+    match len {
+        Some(array_len) => {
+            for _ in already_read..array_len {
+                d.skip()?;
+            }
+        }
+        None => loop {
+            match d.datatype()? {
+                Type::Break => {
+                    d.skip()?;
+                    break;
+                }
+                _ => d.skip()?,
+            }
+        },
+    }
+
+    Ok(())
+}
+
+fn drep_to_choice(drep: DRep) -> DRepChoice {
+    match drep {
+        DRep::Key(hash) => DRepChoice::Key(hash),
+        DRep::Script(hash) => DRepChoice::Script(hash),
+        DRep::Abstain => DRepChoice::Abstain,
+        DRep::NoConfidence => DRepChoice::NoConfidence,
     }
 }
 
@@ -381,21 +476,93 @@ where
     C: AsRef<SnapshotContext>,
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let _len = d.array()?;
+        let len = d.array()?;
+        let operator = d.decode_with(ctx)?;
+        let vrf_key_hash = d.decode_with(ctx)?;
+        let pledge = d.decode_with(ctx)?;
+        let cost = d.decode_with(ctx)?;
+        let margin = SnapshotRatio::decode(d, ctx)?.0;
+        let reward_account = SnapshotStakeAddress::decode(d, ctx)?.0;
+        let pool_owners = SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
+            .0
+            .into_iter()
+            .map(|a| a.0)
+            .collect();
+        let relays = Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect();
+        let pool_metadata = SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0);
+
+        skip_remaining_array_items(d, len, 9)?;
+
         Ok(Self(PoolRegistration {
-            operator: d.decode_with(ctx)?,
-            vrf_key_hash: d.decode_with(ctx)?,
-            pledge: d.decode_with(ctx)?,
-            cost: d.decode_with(ctx)?,
-            margin: SnapshotRatio::decode(d, ctx)?.0,
-            reward_account: SnapshotStakeAddress::decode(d, ctx)?.0,
-            pool_owners: SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)?
-                .0
-                .into_iter()
-                .map(|a| a.0)
-                .collect(),
-            relays: Vec::<SnapshotRelay>::decode(d, ctx)?.into_iter().map(|r| r.0).collect(),
-            pool_metadata: SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)?.0.map(|m| m.0),
+            operator,
+            vrf_key_hash,
+            pledge,
+            cost,
+            margin,
+            reward_account,
+            pool_owners,
+            relays,
+            pool_metadata,
+        }))
+    }
+}
+
+/// Stake pool params in PState are encoded without operator because map key is pool id.
+struct SnapshotPoolRegistrationWithoutOperator(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistrationWithoutOperator
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        let vrf_key_hash = d.decode_with(ctx).map_err(|e| {
+            minicbor::decode::Error::message(format!("failed to decode vrf key hash: {e}"))
+        })?;
+        let pledge = d.decode_with(ctx).map_err(|e| {
+            minicbor::decode::Error::message(format!("failed to decode pledge: {e}"))
+        })?;
+        let cost = d
+            .decode_with(ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode cost: {e}")))?;
+        let margin = SnapshotRatio::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode margin: {e}")))?
+            .0;
+        let reward_account = SnapshotStakeAddress::decode(d, ctx)
+            .map_err(|e| {
+                minicbor::decode::Error::message(format!("failed to decode reward account: {e}"))
+            })?
+            .0;
+        let pool_owners = SnapshotSet::<SnapshotStakeAddressFromCred>::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode owners: {e}")))?
+            .0
+            .into_iter()
+            .map(|a| a.0)
+            .collect();
+        let relays = Vec::<SnapshotRelay>::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode relays: {e}")))?
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
+        let pool_metadata = SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)
+            .map_err(|e| {
+                minicbor::decode::Error::message(format!("failed to decode pool metadata: {e}"))
+            })?
+            .0
+            .map(|m| m.0);
+
+        skip_remaining_array_items(d, len, 8)?;
+
+        Ok(Self(PoolRegistration {
+            operator: PoolId::default(),
+            vrf_key_hash,
+            pledge,
+            cost,
+            margin,
+            reward_account,
+            pool_owners,
+            relays,
+            pool_metadata,
         }))
     }
 }
@@ -423,11 +590,13 @@ pub type SnapshotPort = u32;
 
 struct SnapshotStakeAddress(pub StakeAddress);
 
-impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress {
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeAddress
+where
+    C: AsRef<SnapshotContext>,
+{
     fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         let bytes = d.bytes()?;
-        let bytes = bytes.to_vec();
-        Ok(Self(StakeAddress::from_binary(&bytes).map_err(|e| {
+        Ok(Self(StakeAddress::from_binary(bytes).map_err(|e| {
             minicbor::decode::Error::message(e.to_string())
         })?))
     }
@@ -747,6 +916,72 @@ impl ChunkedCborReader {
 }
 
 impl StreamingSnapshotParser {
+    fn utxo_sidecar_path(snapshot_path: &Path) -> Option<PathBuf> {
+        let file_name = snapshot_path.file_name()?.to_str()?;
+
+        // If parser is already pointed at a UTxO file, keep it as-is.
+        if file_name.starts_with("utxos.") {
+            return Some(snapshot_path.to_path_buf());
+        }
+
+        let suffix = file_name.strip_prefix("nes.").unwrap_or(file_name);
+        let parent = snapshot_path.parent().unwrap_or_else(|| Path::new(""));
+        Some(parent.join(format!("utxos.{suffix}")))
+    }
+
+    fn find_utxo_sidecar_path(&self) -> Option<PathBuf> {
+        let snapshot_path = Path::new(&self.file_path);
+        let candidate = Self::utxo_sidecar_path(snapshot_path);
+
+        match candidate {
+            Some(path) if path.exists() => Some(path),
+            _ => None,
+        }
+    }
+
+    fn parse_empty_utxo_placeholder_bytes(file: &mut File, offset: u64) -> Result<u64> {
+        // Empty map placeholder requires only a tiny probe:
+        // header + optional break token for indefinite maps.
+        const PROBE_SIZE: usize = 64;
+
+        file.seek(SeekFrom::Start(offset))?;
+        let mut buffer = [0u8; PROBE_SIZE];
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            return Err(anyhow!(
+                "Expected empty UTxO placeholder map at offset {offset}, but reached EOF"
+            ));
+        }
+
+        let mut decoder = Decoder::new(&buffer[..bytes_read]);
+        match decoder.datatype()? {
+            Type::Map | Type::MapIndef => {}
+            other => {
+                return Err(anyhow!(
+                    "Expected UTxO placeholder map at offset {offset}, got {other:?}"
+                ));
+            }
+        }
+
+        let map_len = decoder.map()?;
+        match map_len {
+            Some(0) => Ok(decoder.position() as u64),
+            Some(len) => Err(anyhow!(
+                "Expected empty UTxO placeholder map at offset {offset}, found {len} embedded entries (embedded UTxOs are no longer supported)"
+            )),
+            None => {
+                if matches!(decoder.datatype(), Ok(Type::Break)) {
+                    decoder.skip()?;
+                    Ok(decoder.position() as u64)
+                } else {
+                    Err(anyhow!(
+                        "Expected empty indefinite UTxO placeholder map at offset {offset}, found embedded entries (embedded UTxOs are no longer supported)"
+                    ))
+                }
+            }
+        }
+    }
+
     /// Create a new streaming parser for the given snapshot file
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
@@ -840,8 +1075,8 @@ impl StreamingSnapshotParser {
 
             if new_epoch_state_len < 4 {
                 return Err(anyhow!(
-                "NewEpochState array too short: expected at least 4 elements, got {new_epoch_state_len}"
-            ));
+                    "NewEpochState array too short: expected at least 4 elements, got {new_epoch_state_len}"
+                ));
             }
 
             // Extract epoch number [0]
@@ -863,8 +1098,8 @@ impl StreamingSnapshotParser {
 
             if epoch_state_len < 3 {
                 return Err(anyhow!(
-                "EpochState array too short: expected at least 3 elements, got {epoch_state_len}"
-            ));
+                    "EpochState array too short: expected at least 3 elements, got {epoch_state_len}"
+                ));
             }
 
             // Extract AccountState [3][0]: [treasury, reserves]
@@ -876,8 +1111,8 @@ impl StreamingSnapshotParser {
 
             if account_state_len < 2 {
                 return Err(anyhow!(
-                "AccountState array too short: expected at least 2 elements, got {account_state_len}"
-            ));
+                    "AccountState array too short: expected at least 2 elements, got {account_state_len}"
+                ));
             }
 
             // Parse treasury and reserves (can be negative in CBOR, so decode as i64 first)
@@ -903,8 +1138,8 @@ impl StreamingSnapshotParser {
 
             if ledger_state_len < 2 {
                 return Err(anyhow!(
-                "LedgerState array too short: expected at least 2 elements, got {ledger_state_len}"
-            ));
+                    "LedgerState array too short: expected at least 2 elements, got {ledger_state_len}"
+                ));
             }
 
             // Parse CertState [3][1][0] to extract DReps and pools
@@ -929,39 +1164,47 @@ impl StreamingSnapshotParser {
             let dreps =
                 Self::parse_vstate(&mut decoder).context("Failed to parse VState for DReps")?;
 
-            // Parse PState [3][1][0][1] for pools
-            let pools = Self::parse_pstate(&mut decoder, &mut ctx)
-                .context("Failed to parse PState for pools")?;
+            // Parse PState [3][1][0][1] for pools. Include full error chain here because some
+            // callers stringify the error, which otherwise only keeps the top-level context.
+            let pools = Self::parse_pstate(&mut decoder, &mut ctx).map_err(|error| {
+                anyhow!(
+                    "Failed to parse PState for pools at byte {}: {error:#}",
+                    decoder.position()
+                )
+            })?;
 
             // Parse DState [3][1][0][2] for accounts/delegations
             // DState is an array: [unified_rewards, fut_gen_deleg, gen_deleg, instant_rewards]
-            decoder.array().context("Failed to parse DState array")?;
+            let dstate_len = decoder.array().context("Failed to parse DState array")?;
 
-            // Parse unified rewards - it's actually an array containing the map
-            // UMap structure: [rewards_map, ...]
-            let umap_len = decoder.array().context("Failed to parse UMap array")?;
-
-            // Parse the rewards map [0]: StakeCredential -> Account
-            let accounts_map: BTreeMap<StakeCredential, Account> = decoder.decode()?;
-
-            // Skip remaining UMap elements if any
-            if let Some(len) = umap_len {
-                for _ in 1..len {
-                    decoder.skip()?;
+            if let Some(len) = dstate_len {
+                if len < 4 {
+                    return Err(anyhow!(
+                        "DState array too short: expected at least 4 elements, got {len}"
+                    ));
                 }
             }
 
+            let accounts_map =
+                Self::decode_account_state_map(&mut decoder, &mut ctx, "DState[0] accounts")?;
+
             // Epoch State / Ledger State / Cert State / Delegation state / dsFutureGenDelegs
-            decoder.skip()?;
+            decoder.skip().context("Failed to skip DState[1] future genesis delegations")?;
 
             // Epoch State / Ledger State / Cert State / Delegation state / dsGenDelegs
-            decoder.skip()?;
+            decoder.skip().context("Failed to skip DState[2] genesis delegations")?;
 
             // Epoch State / Ledger State / Cert State / Delegation state / dsIRewards
             // Parse instant rewards (MIRs) and combine with regular rewards
             // Structure: [ir_reserves, ir_treasury, ir_delta_reserves, ir_delta_treasury]
             let instant_rewards_result = Self::parse_instant_rewards(&mut decoder)
                 .context("Failed to parse instant rewards")?;
+
+            if let Some(len) = dstate_len {
+                for i in 4..len {
+                    decoder.skip().context(format!("Failed to skip DState[{i}]"))?;
+                }
+            }
 
             // Log instant rewards deltas
             info!(
@@ -976,34 +1219,10 @@ impl StreamingSnapshotParser {
                     // Convert StakeCredential to stake address representation
                     let stake_address = StakeAddress::new(credential.clone(), network.clone());
 
-                    // Extract rewards from rewards_and_deposit (first element of tuple)
-                    let regular_rewards = match &account.rewards_and_deposit {
-                        StrictMaybe::Just((reward, _deposit)) => *reward,
-                        StrictMaybe::Nothing => 0,
-                    };
-
                     // Add instant rewards (MIRs) if any
                     let mir_rewards =
                         instant_rewards_result.rewards.get(&credential).copied().unwrap_or(0);
-                    let rewards = regular_rewards + mir_rewards;
-
-                    // Convert SPO delegation from StrictMaybe<PoolId> to Option<KeyHash>
-                    // PoolId is Hash<28>, we need to convert to Vec<u8>
-                    let delegated_spo = match &account.pool {
-                        StrictMaybe::Just(pool_id) => Some(*pool_id),
-                        StrictMaybe::Nothing => None,
-                    };
-
-                    // Convert DRep delegation from StrictMaybe<DRep> to Option<DRepChoice>
-                    let delegated_drep = match &account.drep {
-                        StrictMaybe::Just(drep) => Some(match drep {
-                            DRep::Key(hash) => DRepChoice::Key(*hash),
-                            DRep::Script(hash) => DRepChoice::Script(*hash),
-                            DRep::Abstain => DRepChoice::Abstain,
-                            DRep::NoConfidence => DRepChoice::NoConfidence,
-                        }),
-                        StrictMaybe::Nothing => None,
-                    };
+                    let rewards = account.rewards + mir_rewards;
 
                     AccountState {
                         stake_address,
@@ -1011,8 +1230,8 @@ impl StreamingSnapshotParser {
                             registered: true, // Accounts in DState are registered by definition
                             utxo_value: 0,    // Will be populated from UTXO parsing
                             rewards,
-                            delegated_spo,
-                            delegated_drep,
+                            delegated_spo: account.delegated_spo,
+                            delegated_drep: account.delegated_drep,
                         },
                     }
                 })
@@ -1048,26 +1267,49 @@ impl StreamingSnapshotParser {
             )
         }; // decoder goes out of scope here
 
-        // Read only the UTXO section from the file (not the entire file!)
-        let mut utxo_file = File::open(&self.file_path).context(format!(
-            "Failed to open snapshot file for UTXO reading: {}",
+        let snapshot_path = Path::new(&self.file_path);
+        let utxo_file_path = self.find_utxo_sidecar_path().ok_or_else(|| {
+            anyhow!(
+                "Expected split snapshot sidecar UTxO file for snapshot {}",
+                snapshot_path.display()
+            )
+        })?;
+
+        // Continue remainder parsing from the snapshot file.
+        // New snapshot format expects an empty UTxO placeholder map in NES.
+        let mut snapshot_file = File::open(&self.file_path).context(format!(
+            "Failed to open snapshot file for remainder parsing: {}",
             self.file_path
         ))?;
+        let utxo_placeholder_bytes =
+            Self::parse_empty_utxo_placeholder_bytes(&mut snapshot_file, utxo_file_position)?;
+
+        let mut utxo_file = File::open(&utxo_file_path).context(format!(
+            "Failed to open UTXO source file: {}",
+            utxo_file_path.display()
+        ))?;
+
+        info!(
+            snapshot = %snapshot_path.display(),
+            utxo_sidecar = %utxo_file_path.display(),
+            utxo_placeholder_bytes,
+            "Using split snapshot sources"
+        );
 
         // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
-        utxo_file.seek(SeekFrom::Start(utxo_file_position))?;
+        utxo_file.seek(SeekFrom::Start(0))?;
         let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
             Self::stream_utxos(&mut utxo_file, callbacks)
                 .context("Failed to stream UTXOs with true streaming")?;
 
-        // After UTXOs, parse deposits from UTxOState[1]
-        // Reset our file pointer to a position after UTXOs
-        let position_after_utxos = utxo_file_position + bytes_consumed_from_file;
-        utxo_file.seek(SeekFrom::Start(position_after_utxos))?;
+        let position_after_utxos = utxo_file_position + utxo_placeholder_bytes;
+        snapshot_file.seek(SeekFrom::Start(position_after_utxos))?;
 
         info!(
-            "    UTXO parsing complete. File positioned at byte {} for remainder parsing",
-            position_after_utxos
+            utxos_streamed = utxo_count,
+            utxo_sidecar_bytes = bytes_consumed_from_file,
+            snapshot_resume_offset = position_after_utxos,
+            "UTxO streaming complete"
         );
 
         // ========================================================================
@@ -1094,22 +1336,22 @@ impl StreamingSnapshotParser {
         // ========================================================================
 
         // Calculate remaining file size from current position
-        let current_file_size = utxo_file.metadata()?.len();
+        let current_file_size = snapshot_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
         info!(
-            "    Reading remainder of file into memory: {:.1} MB from position {}",
-            remaining_bytes as f64 / 1024.0 / 1024.0,
-            position_after_utxos
+            snapshot_resume_offset = position_after_utxos,
+            remainder_mb = remaining_bytes as f64 / 1024.0 / 1024.0,
+            "Loading NES remainder"
         );
 
         // Read the entire remainder of the file into memory
         let mut remainder_buffer = Vec::with_capacity(remaining_bytes as usize);
-        utxo_file.read_to_end(&mut remainder_buffer)?;
+        snapshot_file.read_to_end(&mut remainder_buffer)?;
 
         info!(
-            "    Successfully loaded {:.1} MB remainder buffer for parsing",
-            remainder_buffer.len() as f64 / 1024.0 / 1024.0
+            remainder_mb = remainder_buffer.len() as f64 / 1024.0 / 1024.0,
+            "Loaded NES remainder"
         );
 
         // Create decoder for the remainder buffer
@@ -1132,9 +1374,9 @@ impl StreamingSnapshotParser {
             .context("Failed to parse governance state")?;
 
         info!(
-            "    Successfully parsed governance state: {} proposals, {} votes",
-            governance_state.proposals.len(),
-            governance_state.votes.len()
+            governance_proposals = governance_state.proposals.len(),
+            governance_votes = governance_state.votes.len(),
+            "Parsed governance state"
         );
 
         // Emit governance protocol parameters callback
@@ -1183,7 +1425,7 @@ impl StreamingSnapshotParser {
             None => {
                 return Err(anyhow::anyhow!(
                     "Stake pool deposit must exist in protocol params"
-                ))
+                ));
             }
         };
 
@@ -1263,12 +1505,11 @@ impl StreamingSnapshotParser {
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
         let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
-        // Subtract DRep deposits from us_deposited
-        // The snapshot's us_deposited includes DRep deposits, but they shouldn't be in our deposits pot
-        let deposits = deposits.saturating_sub(total_drep_deposits);
+        // Keep DRep deposits in us_deposited. The verifier expects deposits pot to include
+        // all active deposits (stake keys, pools, and DReps).
 
         info!(
-            "Deposit breakdown: total_deposits={} ADA (after subtracting {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
+            "Deposit breakdown: total_deposits={} ADA (includes {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
             deposits / 1_000_000,
             total_drep_deposits / 1_000_000,
             total_pool_deposits / 1_000_000,
@@ -1433,8 +1674,10 @@ impl StreamingSnapshotParser {
 
         info!(
             "Combined pot deltas: delta_treasury={} (donations={}), delta_reserves={}, delta_deposits={} (gov={})",
-            pot_deltas.delta_treasury, donations,
-            pot_deltas.delta_reserves, pot_deltas.delta_deposits,
+            pot_deltas.delta_treasury,
+            donations,
+            pot_deltas.delta_reserves,
+            pot_deltas.delta_deposits,
             gov_deposit_refunds
         );
 
@@ -1592,12 +1835,11 @@ impl StreamingSnapshotParser {
 
                         // Progress reporting - less frequent for better performance
                         if utxo_count.is_multiple_of(1000000) {
-                            let buffer_usage = buffer.len();
                             info!(
-                                "Streamed {} UTXOs, buffer: {} MB, max entry: {} bytes",
-                                utxo_count,
-                                buffer_usage / 1024 / 1024,
-                                max_single_entry_size
+                                utxos_streamed = utxo_count,
+                                buffer_mb = buffer.len() / 1024 / 1024,
+                                max_entry_bytes = max_single_entry_size,
+                                "UTxO stream progress"
                             );
                         }
 
@@ -1651,17 +1893,13 @@ impl StreamingSnapshotParser {
             }
         }
 
-        info!("Streaming results:");
-        info!("  UTXOs processed: {}", utxo_count);
         info!(
-            "  Total data streamed: {:.2} MB",
-            total_bytes_processed as f64 / 1024.0 / 1024.0
+            utxos_processed = utxo_count,
+            streamed_mb = total_bytes_processed as f64 / 1024.0 / 1024.0,
+            peak_buffer_mb = PARSE_BUFFER_SIZE / 1024 / 1024,
+            largest_entry_bytes = max_single_entry_size,
+            "UTxO stream summary"
         );
-        info!(
-            "  Peak buffer usage: {} MB",
-            PARSE_BUFFER_SIZE / 1024 / 1024
-        );
-        info!("  Largest single entry: {} bytes", max_single_entry_size);
 
         // After successfully parsing all UTXOs, we need to consume the break token
         // that ends the indefinite-length UTXO map if present
@@ -1669,7 +1907,7 @@ impl StreamingSnapshotParser {
             let mut decoder = Decoder::new(&buffer);
             match decoder.datatype() {
                 Ok(Type::Break) => {
-                    info!("    Found break token after UTXOs, consuming it (end of indefinite UTXO map)");
+                    info!("Consuming trailing UTxO map break token");
                     decoder.skip()?; // Consume the break that ends the UTXO map
 
                     // Update our tracking to account for the consumed break token
@@ -1678,10 +1916,10 @@ impl StreamingSnapshotParser {
                 }
                 Ok(_) => {
                     // No break token, this is a definite-length map - continue normal parsing
-                    info!("    No break token found, assuming definite-length UTXO map");
+                    info!("UTxO map has no trailing break token");
                 }
                 Err(e) => {
-                    info!("    After UTXO parsing, datatype() check failed: {}", e);
+                    info!(error = %e, "Unable to inspect trailing UTxO token");
                 }
             }
         }
@@ -2003,79 +2241,139 @@ impl StreamingSnapshotParser {
         Ok(dreps)
     }
 
-    /// Parse PState to extract stake pools
-    /// PState = [pools_map, future_pools_map, retiring_map, deposits_map]
-    pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
-        // Parse PState array
-        let pstate_len = decoder
-            .array()
-            .context("Failed to parse PState array")?
-            .ok_or_else(|| anyhow!("PState must be a definite-length array"))?;
+    fn decode_account_state_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        map_name: &str,
+    ) -> Result<BTreeMap<StakeCredential, NormalizedAccount>> {
+        let decoded: BTreeMap<StakeCredential, SnapshotAccountValue> = decoder
+            .decode_with(ctx)
+            .map_err(|err| {
+                error!(
+                    map = map_name,
+                    byte_offset = decoder.position(),
+                    error = %err,
+                    "Failed to decode accounts map"
+                );
+                err
+            })
+            .context(format!("Failed to decode {map_name}"))?;
 
-        if pstate_len < 1 {
+        let entry_count = decoded.len();
+        let normalized = decoded
+            .into_iter()
+            .map(|(credential, value)| (credential, value.to_normalized()))
+            .collect();
+
+        info!(
+            map = map_name,
+            entries = entry_count,
+            byte_offset = decoder.position(),
+            "Decoded accounts map"
+        );
+
+        Ok(normalized)
+    }
+
+    fn parse_pool_params_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        map_name: &str,
+    ) -> Result<BTreeMap<PoolId, PoolRegistration>> {
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?;
+        }
+
+        let map: BTreeMap<PoolId, SnapshotPoolRegistrationWithoutOperator> = decoder
+            .decode_with(ctx)
+            .map_err(|err| {
+                error!(
+                    map = map_name,
+                    byte_offset = decoder.position(),
+                    error = %err,
+                    "Failed to decode pool params map"
+                );
+                err
+            })
+            .context(format!("Failed to decode {map_name}"))?;
+
+        let entry_count = map.len();
+        info!(
+            map = map_name,
+            entries = entry_count,
+            byte_offset = decoder.position(),
+            "Decoded pool params map without operator"
+        );
+
+        Ok(map
+            .into_iter()
+            .map(|(pool_id, pool)| {
+                let mut pool_registration = pool.0;
+                pool_registration.operator = pool_id;
+                (pool_id, pool_registration)
+            })
+            .collect())
+    }
+
+    fn parse_retiring_map(
+        decoder: &mut Decoder,
+        map_name: &str,
+    ) -> Result<BTreeMap<PoolId, Epoch>> {
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?;
+        }
+
+        let map: BTreeMap<PoolId, Epoch> = decoder
+            .decode()
+            .map_err(|err| {
+                error!(
+                    map = map_name,
+                    byte_offset = decoder.position(),
+                    error = %err,
+                    "Failed to decode retiring map"
+                );
+                err
+            })
+            .context(format!("Failed to decode {map_name}"))?;
+
+        info!(
+            map = map_name,
+            entries = map.len(),
+            byte_offset = decoder.position(),
+            "Decoded retiring map"
+        );
+
+        Ok(map)
+    }
+
+    fn parse_pstate_new_layout(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        pstate_len: u64,
+    ) -> Result<SPOState> {
+        if pstate_len < 4 {
             return Err(anyhow!(
-                "PState array too short: expected at least 1 element, got {pstate_len}"
+                "New-era PState array too short: expected at least 4 elements, got {pstate_len}"
             ));
         }
 
-        // Parse pools map [0]: PoolId (Hash<28>) -> PoolParams
-        // Note: Maps might be tagged with CBOR tag 258 (set)
-        if matches!(decoder.datatype()?, Type::Tag) {
-            decoder.tag()?; // skip tag if present
-        }
-
-        let mut pools = BTreeMap::new();
-        match decoder.map()? {
-            Some(pool_count) => {
-                // Definite-length map
-                for i in 0..pool_count {
-                    let pool_id: PoolId =
-                        decoder.decode().context(format!("Failed to decode pool id #{i}"))?;
-                    let pool: SnapshotPoolRegistration = decoder
-                        .decode_with(ctx)
-                        .context(format!("Failed to decode pool for pool #{i}"))?;
-                    pools.insert(pool_id, pool.0);
-                }
-            }
-            None => {
-                // Indefinite-length map
-                let mut count = 0;
-                loop {
-                    match decoder.datatype()? {
-                        Type::Break => {
-                            decoder.skip()?;
-                            break;
-                        }
-                        _ => {
-                            let pool_id: PoolId = decoder
-                                .decode()
-                                .context(format!("Failed to decode pool id #{count}"))?;
-                            let pool: SnapshotPoolRegistration = decoder
-                                .decode_with(ctx)
-                                .context(format!("Failed to decode pool for pool #{count}"))?;
-                            pools.insert(pool_id, pool.0);
-                            count += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Parse future pools map [1]: PoolId -> PoolParams
+        // [0] psVRFKeyHashes
         if matches!(decoder.datatype()?, Type::Tag) {
             decoder.tag()?;
         }
-        let updates: BTreeMap<PoolId, SnapshotPoolRegistration> = decoder.decode_with(ctx)?;
-        let updates = updates.into_iter().map(|(id, pool)| (id, pool.0)).collect();
+        decoder.skip().context("Failed to skip PState[0] VRF key hash map (new-era layout)")?;
 
-        // Parse retiring map [2]: PoolId -> Epoch
-        if matches!(decoder.datatype()?, Type::Tag) {
-            decoder.tag()?;
-        }
-        let retiring: BTreeMap<PoolId, Epoch> = decoder.decode()?;
+        // [1] psStakePools
+        let pools = Self::parse_pool_params_map(decoder, ctx, "PState[1] stake_pools")?;
 
-        // Skip any remaining PState elements (like deposits)
-        for i in 3..pstate_len {
+        // [2] psFutureStakePoolParams
+        let updates =
+            Self::parse_pool_params_map(decoder, ctx, "PState[2] future_stake_pool_params")?;
+
+        // [3] psRetiring
+        let retiring = Self::parse_retiring_map(decoder, "PState[3] retiring")?;
+
+        for i in 4..pstate_len {
             decoder.skip().context(format!("Failed to skip PState[{i}]"))?;
         }
 
@@ -2084,6 +2382,25 @@ impl StreamingSnapshotParser {
             updates,
             retiring,
         })
+    }
+
+    /// Parse PState to extract stake pools.
+    ///
+    /// New-era shape:
+    ///   [vrf_key_hashes_map, stake_pools_map, future_stake_pool_params_map, retiring_map]
+    pub fn parse_pstate(decoder: &mut Decoder, ctx: &mut SnapshotContext) -> Result<SPOState> {
+        let pstate_len = decoder
+            .array()
+            .context("Failed to parse PState array")?
+            .ok_or_else(|| anyhow!("PState must be a definite-length array"))?;
+
+        if pstate_len < 4 {
+            return Err(anyhow!(
+                "PState array too short: expected at least 4 elements, got {pstate_len}"
+            ));
+        }
+
+        Self::parse_pstate_new_layout(decoder, ctx, pstate_len)
     }
 
     /// Parse snapshots using hybrid approach with memory-based parsing
@@ -2240,7 +2557,10 @@ impl SnapshotsCallback for CollectingCallbacks {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use crate::{Address, NativeAssets, TxHash, UTXOValue, UTxOIdentifier, Value};
+    use minicbor::Encoder;
 
     use super::*;
 
@@ -2287,5 +2607,182 @@ mod tests {
 
         assert_eq!(callbacks.utxos.len(), 1);
         assert_eq!(callbacks.utxos[0].value.value.lovelace, 5000000);
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_from_nes_filename() {
+        let path = Path::new("preview/nes.1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(
+            sidecar,
+            Path::new("preview/utxos.1234.abcdef.cbor").to_path_buf()
+        );
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_from_legacy_snapshot_filename() {
+        let path = Path::new("preview/1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(
+            sidecar,
+            Path::new("preview/utxos.1234.abcdef.cbor").to_path_buf()
+        );
+    }
+
+    #[test]
+    fn test_utxo_sidecar_path_keeps_utxo_filename() {
+        let path = Path::new("preview/utxos.1234.abcdef.cbor");
+        let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
+        assert_eq!(sidecar, path.to_path_buf());
+    }
+
+    #[test]
+    fn test_strict_maybe_decode_new_layout() {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(2).unwrap();
+        enc.array(0).unwrap();
+        enc.array(1).unwrap();
+        enc.u64(42).unwrap();
+
+        let mut dec = Decoder::new(&buf);
+        dec.array().unwrap();
+
+        let empty_wrapper_case: StrictMaybe<u64> = dec.decode().unwrap();
+        let single_wrapper_case: StrictMaybe<u64> = dec.decode().unwrap();
+
+        assert!(matches!(empty_wrapper_case, StrictMaybe::Nothing));
+        assert!(matches!(single_wrapper_case, StrictMaybe::Just(42)));
+    }
+
+    #[test]
+    fn test_account_decode_conway_shape_with_ptr() {
+        fn decode_account(bytes: &[u8]) -> SnapshotAccountValue {
+            let mut dec = Decoder::new(bytes);
+            dec.decode().unwrap()
+        }
+
+        // Schema-aligned form: [ptr, balance, deposit, pool, drep]
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(5).unwrap();
+        enc.null().unwrap(); // ptr
+        enc.u64(300).unwrap();
+        enc.u64(40).unwrap();
+        enc.array(1).unwrap();
+        enc.bytes(&[0x33; 28]).unwrap();
+        enc.array(1).unwrap();
+        enc.array(1).unwrap();
+        enc.u16(2).unwrap(); // DRep::Abstain
+
+        let parsed = decode_account(&buf).to_normalized();
+        assert_eq!(parsed.rewards, 300);
+        assert!(parsed.delegated_spo.is_some());
+        assert!(matches!(parsed.delegated_drep, Some(DRepChoice::Abstain)));
+    }
+
+    #[test]
+    fn test_account_decode_without_ptr_rejected() {
+        // Missing ptr field: [balance, deposit, pool, drep]
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(4).unwrap();
+        enc.u64(300).unwrap();
+        enc.u64(40).unwrap();
+        enc.array(1).unwrap();
+        enc.bytes(&[0x33; 28]).unwrap();
+        enc.array(1).unwrap();
+        enc.array(1).unwrap();
+        enc.u16(2).unwrap(); // DRep::Abstain
+
+        let mut dec = Decoder::new(&buf);
+        let decoded: Result<SnapshotAccountValue, _> = dec.decode();
+        assert!(decoded.is_err());
+    }
+
+    fn encode_margin(enc: &mut Encoder<&mut Vec<u8>>) {
+        enc.array(2).unwrap();
+        enc.u64(1).unwrap();
+        enc.u64(2).unwrap();
+    }
+
+    fn encode_pool_params_without_operator(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
+        let reward_address = StakeAddress::new(
+            StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
+            NetworkId::Testnet,
+        )
+        .to_binary();
+
+        enc.array(8).unwrap();
+        enc.bytes(&[seed.wrapping_add(2); 32]).unwrap(); // vrf
+        enc.u64(1_000).unwrap(); // pledge
+        enc.u64(340).unwrap(); // cost
+        encode_margin(enc);
+        enc.bytes(&reward_address).unwrap(); // reward account
+        enc.array(1).unwrap(); // owners
+        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
+        enc.array(0).unwrap(); // relays
+        enc.null().unwrap(); // metadata
+    }
+
+    fn encode_new_layout_pstate(future_mode: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+
+        enc.array(4).unwrap();
+
+        // PState[0] psVRFKeyHashes
+        enc.map(0).unwrap();
+
+        // PState[1] psStakePools (no operator in value)
+        enc.map(1).unwrap();
+        enc.bytes(&[0x11; 28]).unwrap();
+        encode_pool_params_without_operator(&mut enc, 0x21);
+
+        // PState[2] psFutureStakePoolParams
+        match future_mode {
+            "empty" => {
+                enc.map(0).unwrap();
+            }
+            "without_operator" => {
+                enc.map(1).unwrap();
+                enc.bytes(&[0x23; 28]).unwrap();
+                encode_pool_params_without_operator(&mut enc, 0x32);
+            }
+            other => panic!("unsupported future mode {other}"),
+        }
+
+        // PState[3] psRetiring
+        enc.map(0).unwrap();
+
+        buf
+    }
+
+    #[test]
+    fn test_parse_pstate_new_layout_with_empty_future_map() {
+        let bytes = encode_new_layout_pstate("empty");
+        let mut decoder = Decoder::new(&bytes);
+        let mut ctx = SnapshotContext {
+            network: NetworkId::Testnet,
+        };
+
+        let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
+        assert_eq!(parsed.pools.len(), 1);
+        assert_eq!(parsed.updates.len(), 0);
+        assert_eq!(parsed.retiring.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_pstate_new_layout_without_operator_future_map() {
+        let bytes = encode_new_layout_pstate("without_operator");
+        let mut decoder = Decoder::new(&bytes);
+        let mut ctx = SnapshotContext {
+            network: NetworkId::Testnet,
+        };
+
+        let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
+        assert_eq!(parsed.pools.len(), 1);
+        assert_eq!(parsed.updates.len(), 1);
+        assert_eq!(parsed.retiring.len(), 0);
     }
 }
