@@ -70,7 +70,7 @@ run-bootstrap:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
 
 run-bootstrap-preview:
-	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml --config omnibus.bootstrap.toml
 
 run-midnight-mainnet:
 	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.mainnet.toml
