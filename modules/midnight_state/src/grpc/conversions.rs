@@ -11,11 +11,8 @@ use crate::{
 
 impl From<AssetCreateInternal> for AssetCreateProto {
     fn from(c: AssetCreateInternal) -> Self {
-        let address =
-            c.holder_address.to_bytes_key().expect("holder address should always serialize");
-
         AssetCreateProto {
-            address,
+            address: c.holder_address.to_bytes_key(),
             quantity: c.quantity,
             tx_hash: c.tx_hash.to_vec(),
             output_index: c.utxo_index.into(),
@@ -29,11 +26,8 @@ impl From<AssetCreateInternal> for AssetCreateProto {
 
 impl From<AssetSpendInternal> for AssetSpendProto {
     fn from(c: AssetSpendInternal) -> Self {
-        let address =
-            c.holder_address.to_bytes_key().expect("holder address should always serialize");
-
         AssetSpendProto {
-            address,
+            address: c.holder_address.to_bytes_key(),
             quantity: c.quantity,
             spending_tx_hash: c.spending_tx_hash.to_vec(),
             block_number: c.block_number,
