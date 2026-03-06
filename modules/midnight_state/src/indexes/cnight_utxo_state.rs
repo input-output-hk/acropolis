@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_creates_respect_start_tx_index() {
+    fn asset_creates_returns_entries_at_or_after_start_tx_index() {
         let mut state = CNightUTxOState::default();
 
         let id0 = id(0);
@@ -236,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_creates_respect_capacity() {
+    fn asset_creates_limits_to_capacity() {
         let mut state = CNightUTxOState::default();
 
         let ids = [id(1), id(2), id(3), id(4)];
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_spends_respect_start_tx_index() {
+    fn asset_spends_returns_entries_at_or_after_start_tx_index() {
         let mut state = CNightUTxOState::default();
 
         let id0 = id(0);
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn asset_spends_respect_capacity() {
+    fn asset_spends_limits_to_capacity() {
         let mut state = CNightUTxOState::default();
 
         let id0 = id(0);

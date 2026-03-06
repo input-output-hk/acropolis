@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn registrations_respect_start_tx_index() {
+    fn registrations_returns_entries_at_or_after_start_tx_index() {
         let mut state = CandidateState::default();
 
         let id0 = id(0);
@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn registrations_respect_capacity() {
+    fn registrations_limits_to_capacity() {
         let mut state = CandidateState::default();
 
         let ids = [id(1), id(2), id(3), id(4)];
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn deregistrations_respect_start_tx_index() {
+    fn deregistrations_returns_entries_at_or_after_start_tx_index() {
         let mut state = CandidateState::default();
 
         let id0 = id(0);
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn deregistrations_respect_capacity() {
+    fn deregistrations_limits_to_capacity() {
         let mut state = CandidateState::default();
 
         let id0 = id(0);
