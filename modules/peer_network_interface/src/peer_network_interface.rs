@@ -1,4 +1,6 @@
 mod block_flow;
+#[cfg(test)]
+mod block_flow_consensus_scenarios_tests;
 mod chain_state;
 mod configuration;
 mod connection;

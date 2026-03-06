@@ -95,7 +95,6 @@ struct ConsensusRuntime {
 }
 
 /// Periodic logging counters.
-#[derive(Default)]
 struct ConsensusStats {
     offered: u64,
     wanted: u64,
@@ -104,16 +103,34 @@ struct ConsensusStats {
     proposed: u64,
     rollbacks: u64,
     rejected: u64,
+    parent_missing: u64,
+    last_logged_at: std::time::Instant,
+}
+
+impl Default for ConsensusStats {
+    fn default() -> Self {
+        Self {
+            offered: 0,
+            wanted: 0,
+            available: 0,
+            validated: 0,
+            proposed: 0,
+            rollbacks: 0,
+            rejected: 0,
+            parent_missing: 0,
+            last_logged_at: std::time::Instant::now(),
+        }
+    }
 }
 
 impl ConsensusStats {
-    fn maybe_log(&self) {
-        const STATS_LOG_INTERVAL: u64 = 100;
-        if self.available > 0 && self.available.is_multiple_of(STATS_LOG_INTERVAL) {
+    fn maybe_log(&mut self) {
+        if self.last_logged_at.elapsed() >= Duration::from_secs(60) {
             info!(
-                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
-                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
+                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}, parent_missing={}",
+                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected, self.parent_missing
             );
+            self.last_logged_at = std::time::Instant::now();
         }
     }
 }
@@ -307,6 +324,8 @@ impl ConsensusRuntime {
 
                         _ => debug!("Ignoring unknown consensus message"),
                     }
+
+                    self.stats.maybe_log();
                 }
             }
         }
@@ -500,8 +519,12 @@ impl ConsensusRuntime {
         }
 
         if self.tree.get_block(&parent_hash).is_none() {
-            debug!(
-                "Parent {parent_hash} not in tree for offered block {hash} (block {number}) — ignoring"
+            self.stats.parent_missing += 1;
+            info!(
+                block = number,
+                %hash,
+                %parent_hash,
+                "Parent not in tree for offered block — ignoring"
             );
             return;
         }
@@ -509,7 +532,7 @@ impl ConsensusRuntime {
         let wanted = match self.tree.check_block_wanted(hash, parent_hash, number, slot) {
             Ok(w) => w,
             Err(e) => {
-                warn!("Offered block {hash} rejected: {e}");
+                warn!(block = number, %hash, "Offered block rejected: {e}");
                 return;
             }
         };
@@ -603,6 +626,11 @@ impl ConsensusRuntime {
             return;
         }
 
+        debug!(
+            count = proposed.len(),
+            "Validating batch of proposed blocks"
+        );
+
         for &hash in proposed {
             let Some((block_info, _)) = self.block_data.get(&hash) else {
                 warn!("No block data for proposed block {hash}, skipping validation");
@@ -611,6 +639,7 @@ impl ConsensusRuntime {
             let block_info = block_info.clone();
 
             if !block_info.intent.do_validation() {
+                debug!(block = block_info.number, "Skipping validation (intent)");
                 continue;
             }
 

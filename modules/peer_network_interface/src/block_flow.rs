@@ -140,13 +140,6 @@ impl BlockFlowHandler {
         }
     }
 
-    /// Whether PNI should autonomously re-request blocks when a peer disconnects.
-    /// In Direct mode, PNI manages chain selection and should retry from other peers.
-    /// In Consensus mode, block fetching is driven by the consensus module via BlockWanted.
-    pub fn should_rerequest_on_disconnect(&self) -> bool {
-        matches!(self, BlockFlowHandler::Direct { .. })
-    }
-
     /// Handle a peer disconnecting.
     pub fn handle_disconnect(&mut self, peer: PeerId, next_peer: Option<PeerId>) {
         match self {
@@ -207,6 +200,14 @@ impl BlockFlowHandler {
         };
 
         (!announcers.is_empty()).then_some(announcers)
+    }
+
+    /// Whether the flow has ever seen this exact block identity (slot+hash).
+    pub fn knows_block(&self, slot: u64, hash: BlockHash) -> bool {
+        match self {
+            BlockFlowHandler::Direct { chain } => !chain.block_announcers(slot, hash).is_empty(),
+            BlockFlowHandler::Consensus(state) => state.knows_block(slot, hash),
+        }
     }
 
     /// Reset state for a new sync point.
@@ -294,7 +295,15 @@ struct BlockTracker {
     pending_events: Vec<ConsensusBlockEvent>,
     /// Peers retained after a block is fetched, until consensus sends
     /// `BlockRejected`.
-    fetched: HashMap<BlockHash, Vec<PeerId>>,
+    /// Also used as a fallback source for `BlockWanted` re-requests:
+    /// a block can become wanted again after it has already been fetched.
+    fetched: HashMap<BlockHash, FetchedAnnouncers>,
+}
+
+#[derive(Debug, Clone)]
+struct FetchedAnnouncers {
+    slot: u64,
+    peers: Vec<PeerId>,
 }
 
 impl BlockTracker {
@@ -312,6 +321,14 @@ impl BlockTracker {
         hash: BlockHash,
         parent_hash: BlockHash,
     ) {
+        // Already fetched — just record the peer for sanctioning, no re-offer.
+        if let Some(entry) = self.fetched.get_mut(&hash) {
+            if !entry.peers.contains(&peer) {
+                entry.peers.push(peer);
+            }
+            return;
+        }
+
         let is_new = !self.blocks.contains_key(&(slot, hash));
         let announcers = self.blocks.entry((slot, hash)).or_default();
         if !announcers.contains(&peer) {
@@ -345,6 +362,9 @@ impl BlockTracker {
                 for announcers in self.blocks.values_mut() {
                     announcers.retain(|p| *p != peer);
                 }
+                for fetched in self.fetched.values_mut() {
+                    fetched.peers.retain(|p| *p != peer);
+                }
             }
             Point::Specific(rollback_to_slot, rollback_to_hash) => {
                 let rollback_keep = BlockHash::try_from(rollback_to_hash.as_slice())
@@ -355,9 +375,17 @@ impl BlockTracker {
                         announcers.retain(|p| *p != peer);
                     }
                 }
+                for (hash, fetched) in &mut self.fetched {
+                    if fetched.slot >= *rollback_to_slot
+                        && rollback_keep != Some((fetched.slot, *hash))
+                    {
+                        fetched.peers.retain(|p| *p != peer);
+                    }
+                }
             }
         }
         self.rescind_orphaned_blocks();
+        self.fetched.retain(|_, fetched| !fetched.peers.is_empty());
     }
 
     /// Handle a peer disconnecting — remove it from all blocks and tips.
@@ -368,7 +396,11 @@ impl BlockTracker {
         for announcers in self.blocks.values_mut() {
             announcers.retain(|p| *p != peer);
         }
+        for fetched in self.fetched.values_mut() {
+            fetched.peers.retain(|p| *p != peer);
+        }
         self.rescind_orphaned_blocks();
+        self.fetched.retain(|_, fetched| !fetched.peers.is_empty());
     }
 
     /// Remove blocks with no remaining announcers and emit Rescinded events.
@@ -395,15 +427,41 @@ impl BlockTracker {
         }
     }
 
+    fn candidate_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
+        if let Some(peers) = self.blocks.get(&(slot, hash)) {
+            return peers.clone();
+        }
+        self.fetched
+            .get(&hash)
+            .filter(|fetched| fetched.slot == slot)
+            .map(|fetched| fetched.peers.clone())
+            .unwrap_or_default()
+    }
+
+    fn knows_block(&self, slot: u64, hash: BlockHash) -> bool {
+        !self.candidate_announcers(slot, hash).is_empty()
+    }
+
     /// Get peers that announced a block and whose tip still covers it.
     fn announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
-        self.blocks
-            .get(&(slot, hash))
-            .into_iter()
-            .flat_map(|peers| peers.iter())
-            .filter(|peer| self.peer_can_have_block(**peer, slot))
+        let candidates = self.candidate_announcers(slot, hash);
+        if candidates.is_empty() {
+            return candidates;
+        }
+
+        let filtered: Vec<PeerId> = candidates
+            .iter()
             .copied()
-            .collect()
+            .filter(|peer| self.peer_can_have_block(*peer, slot))
+            .collect();
+
+        // If all tips look stale, still return known announcers as a best-effort
+        // fallback. Tip signals can lag behind announcements.
+        if filtered.is_empty() {
+            candidates
+        } else {
+            filtered
+        }
     }
 
     /// A block was successfully fetched — move its announcing peers from
@@ -412,14 +470,14 @@ impl BlockTracker {
     fn block_fetched(&mut self, slot: u64, hash: BlockHash) {
         let peers = self.blocks.remove(&(slot, hash)).unwrap_or_default();
         if !peers.is_empty() {
-            self.fetched.insert(hash, peers);
+            self.fetched.insert(hash, FetchedAnnouncers { slot, peers });
         }
     }
 
     /// Consume and return the peers that announced a fetched block, to be
     /// sanctioned after a `BlockRejected` from consensus.
     fn take_rejected_announcers(&mut self, hash: BlockHash) -> Vec<PeerId> {
-        self.fetched.remove(&hash).unwrap_or_default()
+        self.fetched.remove(&hash).map(|f| f.peers).unwrap_or_default()
     }
 
     /// Take all pending events for publishing.
@@ -477,6 +535,10 @@ impl ConsensusFlowState {
 
     fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
         self.tracker.announcers(slot, hash)
+    }
+
+    fn knows_block(&self, slot: u64, hash: BlockHash) -> bool {
+        self.tracker.knows_block(slot, hash)
     }
 
     /// Return the peers that announced a rejected block and clear the entry.
@@ -565,6 +627,9 @@ mod tests {
     const GENESIS_HASH: BlockHash = BlockHash::new([0; 32]);
     const BLOCK_HASH_A: BlockHash = BlockHash::new([1; 32]);
     const BLOCK_HASH_B: BlockHash = BlockHash::new([2; 32]);
+    const BLOCK_HASH_C: BlockHash = BlockHash::new([3; 32]);
+    const BLOCK_HASH_D: BlockHash = BlockHash::new([4; 32]);
+    const BLOCK_HASH_E: BlockHash = BlockHash::new([5; 32]);
 
     fn point(slot: u64, hash: BlockHash) -> Point {
         Point::Specific(slot, hash.to_vec())
@@ -682,14 +747,14 @@ mod tests {
     }
 
     #[test]
-    fn peer_with_stale_tip_excluded_from_announcers() {
+    fn stale_tip_falls_back_to_known_announcer() {
         let mut tracker = BlockTracker::new();
 
         tracker.handle_tip(PEER_1, point(200, BLOCK_HASH_B));
         tracker.track_announcement(PEER_1, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
         tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
 
-        assert!(tracker.announcers(200, BLOCK_HASH_B).is_empty());
+        assert_eq!(tracker.announcers(200, BLOCK_HASH_B), vec![PEER_1]);
     }
 
     #[test]
@@ -782,6 +847,42 @@ mod tests {
 
         let peers = tracker.take_rejected_announcers(BLOCK_HASH_A);
         assert!(peers.is_empty(), "expected empty for already-removed block");
+    }
+
+    #[test]
+    fn fetched_block_still_provides_announcers_for_rewant() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.block_fetched(100, BLOCK_HASH_A);
+
+        let announcers = tracker.announcers(100, BLOCK_HASH_A);
+        assert_eq!(announcers, vec![PEER_1]);
+    }
+
+    #[test]
+    fn rollback_removes_peer_from_fetched_entries() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(120, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 120, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.block_fetched(120, BLOCK_HASH_A);
+
+        tracker.handle_rollback(PEER_1, &point(100, GENESIS_HASH));
+        tracker.handle_tip(PEER_1, point(100, GENESIS_HASH));
+
+        assert!(tracker.announcers(120, BLOCK_HASH_A).is_empty());
+    }
+
+    #[test]
+    fn disconnect_removes_peer_from_fetched_entries() {
+        let mut tracker = BlockTracker::new();
+        tracker.handle_tip(PEER_1, point(120, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 120, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.block_fetched(120, BLOCK_HASH_A);
+
+        tracker.handle_disconnect(PEER_1);
+
+        assert!(tracker.announcers(120, BLOCK_HASH_A).is_empty());
     }
 
     #[test]
@@ -902,6 +1003,100 @@ mod tests {
         assert!(
             announcers.is_empty(),
             "Direct mode should return empty for block_rejected_announcers"
+        );
+    }
+
+    #[test]
+    fn lagging_peer_does_not_re_offer_already_fetched_blocks() {
+        let mut tracker = BlockTracker::new();
+
+        // Peer 1 announces blocks 1..3 and they get fetched
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_1, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_1, 300, 3, BLOCK_HASH_C, BLOCK_HASH_B);
+        let initial_events = tracker.take_events();
+        assert_eq!(initial_events.len(), 3, "3 offers from peer 1");
+
+        tracker.block_fetched(100, BLOCK_HASH_A);
+        tracker.block_fetched(200, BLOCK_HASH_B);
+        tracker.block_fetched(300, BLOCK_HASH_C);
+
+        // Peer 2 now announces the same blocks (it's behind)
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        tracker.track_announcement(PEER_2, 200, 2, BLOCK_HASH_B, BLOCK_HASH_A);
+        tracker.track_announcement(PEER_2, 300, 3, BLOCK_HASH_C, BLOCK_HASH_B);
+
+        let re_offer_events = tracker.take_events();
+        assert!(
+            re_offer_events.is_empty(),
+            "Already-fetched blocks should not be re-offered, got {:?}",
+            re_offer_events
+        );
+    }
+
+    #[test]
+    fn lagging_peer_adds_itself_as_announcer_for_fetched_block() {
+        let mut tracker = BlockTracker::new();
+
+        // Peer 1 announces and block gets fetched
+        tracker.handle_tip(PEER_1, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_1, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+        let _ = tracker.take_events();
+        tracker.block_fetched(100, BLOCK_HASH_A);
+
+        // Peer 2 announces the same block later
+        tracker.handle_tip(PEER_2, point(100, BLOCK_HASH_A));
+        tracker.track_announcement(PEER_2, 100, 1, BLOCK_HASH_A, GENESIS_HASH);
+
+        // No new Offered event
+        let events = tracker.take_events();
+        assert!(events.is_empty(), "expected no re-offer, got {:?}", events);
+
+        // But peer 2 should appear as an announcer (for future sanctioning)
+        let announcers = tracker.announcers(100, BLOCK_HASH_A);
+        assert!(
+            announcers.contains(&PEER_2),
+            "peer 2 should be an announcer for the fetched block, got {:?}",
+            announcers
+        );
+    }
+
+    #[test]
+    fn lagging_peer_does_not_flood_offers_during_fast_sync() {
+        let mut tracker = BlockTracker::new();
+
+        // Simulate fast sync: peer 1 announces a chain of 5 blocks, all fetched
+        let hashes = [
+            BLOCK_HASH_A,
+            BLOCK_HASH_B,
+            BLOCK_HASH_C,
+            BLOCK_HASH_D,
+            BLOCK_HASH_E,
+        ];
+        let mut parent = GENESIS_HASH;
+        for (i, &hash) in hashes.iter().enumerate() {
+            let slot = (i as u64 + 1) * 100;
+            let number = i as u64 + 1;
+            tracker.track_announcement(PEER_1, slot, number, hash, parent);
+            tracker.block_fetched(slot, hash);
+            parent = hash;
+        }
+        let _ = tracker.take_events(); // consume initial offers
+
+        // Peer 2 connects and starts announcing from the beginning
+        parent = GENESIS_HASH;
+        let mut re_offers = 0;
+        for (i, &hash) in hashes.iter().enumerate() {
+            let slot = (i as u64 + 1) * 100;
+            let number = i as u64 + 1;
+            tracker.track_announcement(PEER_2, slot, number, hash, parent);
+            re_offers += tracker.take_events().len();
+            parent = hash;
+        }
+
+        assert_eq!(
+            re_offers, 0,
+            "lagging peer should produce zero re-offers for already-fetched blocks"
         );
     }
 }
