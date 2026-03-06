@@ -381,7 +381,7 @@ impl SnapshotAccountValue {
             rewards: self.balance,
             delegated_spo: match &self.pool {
                 StrictMaybe::Nothing => None,
-                StrictMaybe::Just(pool) => Some(pool.clone()),
+                StrictMaybe::Just(pool) => Some(*pool),
             },
             delegated_drep: match &self.drep {
                 StrictMaybe::Nothing => None,
