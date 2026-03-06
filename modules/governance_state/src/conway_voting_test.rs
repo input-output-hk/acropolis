@@ -303,7 +303,6 @@ mod tests {
                             .as_result()?
                     }
                 }
-                conway_voting.include_pending_votes()?;
 
                 let current_drep = dreps.get(&epoch).unwrap();
                 let current_pool = pools.get(&epoch).unwrap();

@@ -72,8 +72,6 @@ impl CastVotes {
         let mut res = Self::default();
 
         for (n,line) in reader?.records().enumerate() {
-            println!("Line: {:?}", line);
-
             let split = line?.iter().map(|x| x.to_owned()).collect::<Vec<String>>();
             let [vtype, vhash, vote, vstake] = &split[..] else {
                 bail!("Unexpected elements count at line {n}, file {filename:?}: {split:?}");
@@ -351,6 +349,7 @@ impl ConwayVoting {
                 }
             }
         }
+        self.include_pending_votes()?;
         Ok(outcomes)
     }
 
