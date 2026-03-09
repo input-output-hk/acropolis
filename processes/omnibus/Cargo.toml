@@ -37,6 +37,7 @@ acropolis_module_snapshot_bootstrapper = { path = "../../modules/snapshot_bootst
 acropolis_module_fake_block_injector = { path = "../../modules/fake_block_injector" }
 acropolis_module_mcp_server = { path = "../../modules/mcp_server" }
 acropolis_module_midnight_state = { path = "../../modules/midnight_state" }
+acropolis_module_stats = { path = "../../modules/stats" }
 
 caryatid_process = { workspace = true }
 caryatid_module_clock = { workspace = true }
@@ -57,4 +58,4 @@ opentelemetry-otlp = { workspace = true }
 
 # Memory allocator
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6.0"
+tikv-jemallocator = { version = "0.6.1", features = ["profiling", "stats"] }

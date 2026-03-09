@@ -7,6 +7,7 @@
 network-name = "preview"
 startup-mode = "genesis"   # Options: "genesis" | "snapshot"
 sync-mode = "mithril"      # Options: "mithril" | "upstream"
+block-flow-mode = "direct" # Options: "direct" | "consensus"
 topic = "cardano.sequence.start"
 
 # ============================================================================
@@ -32,6 +33,8 @@ data-dir = "../../modules/snapshot_bootstrapper/data"
 # Core Module Configurations
 # ============================================================================
 [module.peer-network-interface]
+# Use "origin" for genesis+upstream: no bootstrap module sends the sync command.
+# Use "dynamic" for snapshot+upstream or genesis+mithril (bootstrapper/MSF sends it).
 sync-point = "dynamic"
 node-addresses = [
     "preview-node.play.dev.cardano.org:3001",
@@ -39,6 +42,12 @@ node-addresses = [
 magic-number = 2
 
 [module.consensus]
+validation-timeout = 60  # seconds (default 60)
+# Security parameter k — maximum fork depth (Praos Common Prefix parameter)
+security-parameter = 2160
+# Match PNI's consensus-mode topics
+consensus-offers-topic = "cardano.consensus.offers"
+consensus-wants-topic = "cardano.consensus.wants"
 # List of validation result topics to listen on
 validators = [
 # Add these once they are actually being sent
@@ -124,6 +133,7 @@ stake-spo-distribution-topic = "cardano.spo.distribution"
 [module.parameters-state]
 # Listen for governance actions
 enact-state-topic = "cardano.enact.state"
+# Enables /epochs/{number}/parameters
 store-history = false
 
 [module.stake-delta-filter]
@@ -131,6 +141,8 @@ cache-mode = "write" # "predefined", "read", "write", "write-if-absent"
 write-full-cache = "false"
 
 [module.epochs-state]
+
+#[module.historical-epochs-state]
 
 [module.accounts-state]
 # Optional subscription for when governance is active
@@ -172,9 +184,9 @@ store-totals = false
 # Enables /addresses/{address}/transactions endpoint
 store-transactions = false
 
-#[module.block-vrf-validator]
+[module.block-vrf-validator]
 
-#[module.block-kes-validator]
+[module.block-kes-validator]
 
 [module.clock]
 

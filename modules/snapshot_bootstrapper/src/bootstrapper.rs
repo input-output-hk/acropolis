@@ -14,6 +14,7 @@ use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
 use acropolis_common::configuration::{StartupMode, SyncMode};
 use acropolis_common::{
+    genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
     snapshot::streaming_snapshot::StreamingSnapshotParser,
 };
@@ -93,9 +94,9 @@ impl SnapshotBootstrapper {
         sync_mode: SyncMode,
         context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
-        Self::wait_for_genesis(bootstrapped_sub).await?;
+        let genesis = Self::wait_for_genesis(bootstrapped_sub).await?;
 
-        let bootstrap_ctx = BootstrapContext::load(&cfg)?;
+        let bootstrap_ctx = BootstrapContext::load(&cfg, genesis)?;
         info!(
             epoch = bootstrap_ctx.block_info.epoch,
             slot = bootstrap_ctx.block_info.slot,
@@ -145,12 +146,12 @@ impl SnapshotBootstrapper {
         Ok(())
     }
 
-    async fn wait_for_genesis(mut sub: Box<dyn Subscription<Message>>) -> Result<()> {
+    async fn wait_for_genesis(mut sub: Box<dyn Subscription<Message>>) -> Result<GenesisValues> {
         let (_, msg) = sub.read().await?;
         match msg.as_ref() {
-            Message::Cardano((_, CardanoMessage::GenesisComplete(_))) => {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(genesis_msg))) => {
                 info!("Genesis complete, starting snapshot bootstrap");
-                Ok(())
+                Ok(genesis_msg.values.clone())
             }
             other => bail!("Unexpected message: {other:?}"),
         }

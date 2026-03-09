@@ -43,7 +43,7 @@ pub fn validate_tx(
             validate_babbage_tx(&tx, genesis_delegs, shelley_params, era)?;
         }
         Era::Conway => {
-            validate_conway_tx(&tx, era)?;
+            validate_conway_tx(&tx, shelley_params, era)?;
         }
         _ => (),
     }
@@ -184,24 +184,32 @@ fn validate_babbage_tx(
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
     let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
-    if era == Era::Babbage {
-        babbage::utxow::validate(
-            mtx,
-            tx_hash,
-            &vkey_witnesses,
-            &native_scripts,
-            &metadata,
-            genesis_delegs,
-            shelley_params.update_quorum,
-            &shelley_params.protocol_params.protocol_version,
-        )
-        .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
-    }
+    babbage::utxow::validate(
+        mtx,
+        tx_hash,
+        &vkey_witnesses,
+        &native_scripts,
+        &metadata,
+        genesis_delegs,
+        shelley_params.update_quorum,
+        &shelley_params.protocol_params.protocol_version,
+    )
+    .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
     Ok(())
 }
 
-fn validate_conway_tx(tx: &MultiEraTx, era: Era) -> Result<(), Box<TransactionValidationError>> {
+fn validate_conway_tx(
+    tx: &MultiEraTx,
+    shelley_params: &Option<ShelleyParams>,
+    era: Era,
+) -> Result<(), Box<TransactionValidationError>> {
+    let Some(shelley_params) = shelley_params else {
+        return Err(Box::new(TransactionValidationError::Other(
+            "Shelley params are not set".to_string(),
+        )));
+    };
+
     let tx_hash = TxHash::from(*tx.hash());
 
     let mtx = tx.as_conway().ok_or_else(|| TransactionValidationError::CborDecodeError {
@@ -215,9 +223,17 @@ fn validate_conway_tx(tx: &MultiEraTx, era: Era) -> Result<(), Box<TransactionVa
         ));
     }
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
+    let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
-    conway::utxow::validate(mtx, tx_hash, &vkey_witnesses, &native_scripts)
-        .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    conway::utxow::validate(
+        mtx,
+        tx_hash,
+        &vkey_witnesses,
+        &native_scripts,
+        &metadata,
+        &shelley_params.protocol_params.protocol_version,
+    )
+    .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
 
     Ok(())
 }

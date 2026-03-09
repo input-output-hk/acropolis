@@ -572,9 +572,11 @@ impl SPOState {
             // Commit the new state, publish validation outcome
             if let Some(block_info) = &ctx.current_block {
                 history.lock().await.commit(block_info.number, state);
-            }
 
-            ctx.publish().await;
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
+            }
         }
     }
 

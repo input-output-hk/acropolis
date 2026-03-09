@@ -2,6 +2,8 @@
 //!
 //! Tests follow TDD approach: write test first (RED), then implement (GREEN).
 
+mod common;
+
 use acropolis_module_tx_unpacker::validations::phase2::{
     evaluate_raw_flat_program, evaluate_raw_flat_programs_parallel, evaluate_script, ExUnits,
     Phase2Error, PlutusVersion,
@@ -344,11 +346,16 @@ fn test_eval_always_succeeds() {
         eval_result.consumed_budget.mem > 0,
         "Memory consumed should be positive"
     );
-    // Script should complete within performance target (SC-001: <100ms)
+    // Script should complete within calibrated performance threshold
+    let cal = common::get_calibration();
+    let threshold = cal.default_threshold_ms();
     assert!(
-        eval_result.within_target(),
-        "Script took {:.2}ms, should be < 100ms",
-        eval_result.elapsed_ms()
+        eval_result.elapsed_ms() < threshold,
+        "Script took {:.2}ms, should be < {:.2}ms ({}x baseline {:.2}ms)",
+        eval_result.elapsed_ms(),
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        cal.median_ms,
     );
     println!(
         "  evaluate_script elapsed: {:.3}ms (cpu: {}, mem: {})",
@@ -637,13 +644,14 @@ fn test_eval_plutus_v3_script() {
 // =============================================================================
 
 /// Benchmark test to verify SC-001: individual script evaluation completes
-/// in under 0.1 seconds (100ms) at the 95th percentile.
+/// within the calibrated threshold at the 95th percentile.
 ///
 /// This test runs multiple iterations and calculates the p95 timing.
 #[test]
 fn test_sc001_eval_performance_p95() {
     const ITERATIONS: usize = 100;
-    const P95_TARGET_MS: f64 = 100.0;
+    let baseline = common::get_calibration();
+    let p95_target_ms = baseline.default_threshold_ms();
 
     let script_bytes = create_unit_program();
     let budget = ExUnits {
@@ -695,29 +703,41 @@ fn test_sc001_eval_performance_p95() {
 
     println!("\n=== SC-001 Performance Benchmark ===");
     println!("Iterations: {}", ITERATIONS);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x)",
+        baseline.median_ms,
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER
+    );
     println!("Min:    {:.3}ms", min);
     println!("Max:    {:.3}ms", max);
     println!("Mean:   {:.3}ms", mean);
     println!("Median: {:.3}ms", median);
-    println!("P95:    {:.3}ms", p95);
-    println!("Target: <{:.1}ms", P95_TARGET_MS);
+    println!(
+        "P95:    {:.3}ms (ratio: {:.1}x baseline)",
+        p95,
+        baseline.ratio(p95)
+    );
+    println!("Target: <{:.1}ms", p95_target_ms);
     println!(
         "Result: {} (p95 {:.3}ms vs target {:.1}ms)",
-        if p95 < P95_TARGET_MS {
+        if p95 < p95_target_ms {
             "PASS ✓"
         } else {
             "FAIL ✗"
         },
         p95,
-        P95_TARGET_MS
+        p95_target_ms
     );
     println!("====================================\n");
 
     assert!(
-        p95 < P95_TARGET_MS,
-        "SC-001 FAILED: P95 {:.3}ms exceeds target {:.1}ms",
+        p95 < p95_target_ms,
+        "SC-001 FAILED: P95 {:.3}ms exceeds calibrated threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
         p95,
-        P95_TARGET_MS
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -726,7 +746,8 @@ fn test_sc001_eval_performance_p95() {
 #[test]
 fn test_sc001_spending_validator_performance() {
     const ITERATIONS: usize = 50;
-    const P95_TARGET_MS: f64 = 100.0;
+    let baseline = common::get_calibration();
+    let p95_target_ms = baseline.default_threshold_ms();
 
     let script_bytes = create_spending_validator_succeeds();
     let budget = ExUnits {
@@ -775,11 +796,21 @@ fn test_sc001_spending_validator_performance() {
 
     println!("\n=== SC-001 Spending Validator Benchmark ===");
     println!("Iterations: {}", ITERATIONS);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x)",
+        baseline.median_ms,
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER
+    );
     println!("Mean:   {:.3}ms", mean);
-    println!("P95:    {:.3}ms", p95);
+    println!(
+        "P95:    {:.3}ms (ratio: {:.1}x baseline)",
+        p95,
+        baseline.ratio(p95)
+    );
     println!(
         "Result: {}",
-        if p95 < P95_TARGET_MS {
+        if p95 < p95_target_ms {
             "PASS ✓"
         } else {
             "FAIL ✗"
@@ -788,10 +819,12 @@ fn test_sc001_spending_validator_performance() {
     println!("==========================================\n");
 
     assert!(
-        p95 < P95_TARGET_MS,
-        "SC-001 FAILED: Spending validator P95 {:.3}ms exceeds target {:.1}ms",
+        p95 < p95_target_ms,
+        "SC-001 FAILED: Spending validator P95 {:.3}ms exceeds calibrated threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
         p95,
-        P95_TARGET_MS
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -900,12 +933,13 @@ fn create_large_realistic_script(target_bytes: usize) -> Vec<u8> {
 /// limits synthetic deep structures. Real mainnet scripts achieve large sizes
 /// through breadth (many branches, constants) not just depth.
 ///
-/// This test verifies our simple scripts meet SC-001's <100ms p95 target.
+/// This test verifies our simple scripts meet the calibrated p95 threshold.
 #[test]
 fn test_sc001_large_script_performance() {
     const NUM_FORCE_DELAY_PAIRS: usize = 100;
-    const P95_TARGET_MS: f64 = 100.0;
     const ITERATIONS: usize = 20;
+    let baseline = common::get_calibration();
+    let p95_target_ms = baseline.default_threshold_ms();
 
     // Create a script with some complexity
     let script_bytes = create_large_realistic_script(NUM_FORCE_DELAY_PAIRS * 2);
@@ -985,14 +1019,24 @@ fn test_sc001_large_script_performance() {
 
     println!();
     println!("Timing results ({} samples):", timings_ms.len());
+    println!(
+        "  Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x)",
+        baseline.median_ms,
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER
+    );
     println!("  Min:    {:.3}ms", min);
     println!("  Max:    {:.3}ms", max);
     println!("  Mean:   {:.3}ms", mean);
-    println!("  P95:    {:.3}ms", p95);
-    println!("  Target: <{:.1}ms", P95_TARGET_MS);
+    println!(
+        "  P95:    {:.3}ms (ratio: {:.1}x baseline)",
+        p95,
+        baseline.ratio(p95)
+    );
+    println!("  Target: <{:.1}ms", p95_target_ms);
     println!(
         "  Result: {}",
-        if p95 < P95_TARGET_MS {
+        if p95 < p95_target_ms {
             "PASS ✓"
         } else {
             "FAIL ✗"
@@ -1001,10 +1045,12 @@ fn test_sc001_large_script_performance() {
     println!("==========================================\n");
 
     assert!(
-        p95 < P95_TARGET_MS,
-        "SC-001 FAILED: Large script P95 {:.3}ms exceeds target {:.1}ms",
+        p95 < p95_target_ms,
+        "SC-001 FAILED: Large script P95 {:.3}ms exceeds calibrated threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
         p95,
-        P95_TARGET_MS
+        p95_target_ms,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -1167,11 +1213,12 @@ fn test_parallel_multi_script_block() {
 
 /// T035: SC-001 Parallel Performance Benchmark
 /// Run 5 different scripts in parallel, measure and report individual and total
-/// elapsed time. Total parallel execution time must be under 100ms.
+/// elapsed time. Total parallel execution time must be under the calibrated threshold.
 #[test]
 fn test_sc001_parallel_performance() {
     const NUM_SCRIPTS: usize = 5;
-    const TARGET_MS: f64 = 100.0;
+    let baseline = common::get_calibration();
+    let target_ms = baseline.default_threshold_ms();
 
     // Create 5 unique scripts with different bytecode to prevent caching
     let scripts: Vec<Vec<u8>> = (1..=NUM_SCRIPTS).map(create_unique_minting_policy).collect();
@@ -1235,38 +1282,54 @@ fn test_sc001_parallel_performance() {
 
     println!("\n=== SC-001 Parallel Performance Benchmark ===");
     println!("Number of scripts: {}", NUM_SCRIPTS);
-    println!("Target: <{:.1}ms total", TARGET_MS);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x)",
+        baseline.median_ms,
+        target_ms,
+        common::DEFAULT_MULTIPLIER
+    );
     println!();
     println!("Individual script execution times:");
     for (i, (_hash, eval_result)) in validation_result.script_results.iter().enumerate() {
-        println!("  Script {}: {:.3}ms", i + 1, eval_result.elapsed_ms());
+        println!(
+            "  Script {}: {:.3}ms (ratio: {:.1}x)",
+            i + 1,
+            eval_result.elapsed_ms(),
+            baseline.ratio(eval_result.elapsed_ms())
+        );
     }
     println!();
     println!("Sum of individual times: {:.3}ms", sum_individual_ms);
-    println!("Total parallel elapsed:  {:.3}ms", total_elapsed_ms);
+    println!(
+        "Total parallel elapsed:  {:.3}ms (ratio: {:.1}x baseline)",
+        total_elapsed_ms,
+        baseline.ratio(total_elapsed_ms)
+    );
     println!(
         "Speedup factor:          {:.2}x",
         sum_individual_ms / total_elapsed_ms
     );
     println!();
     println!(
-        "Result: {} (total {:.3}ms vs target {:.1}ms)",
-        if total_elapsed_ms < TARGET_MS {
+        "Result: {} (total {:.3}ms vs threshold {:.3}ms)",
+        if total_elapsed_ms < target_ms {
             "PASS ✓"
         } else {
             "FAIL ✗"
         },
         total_elapsed_ms,
-        TARGET_MS
+        target_ms
     );
     println!("=============================================\n");
 
-    // Assert performance target
+    // Assert calibrated performance target
     assert!(
-        total_elapsed_ms < TARGET_MS,
-        "SC-001 FAILED: Parallel execution {:.3}ms exceeds target {:.1}ms",
+        total_elapsed_ms < target_ms,
+        "SC-001 FAILED: Parallel execution {:.3}ms exceeds calibrated threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
         total_elapsed_ms,
-        TARGET_MS
+        target_ms,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -1655,6 +1718,8 @@ fn eval_benchmark_script(script_bytes: &[u8]) -> Result<f64, String> {
 /// This is a ~3.7KB real Plutus script from the uplc benchmark suite.
 #[test]
 fn test_eval_benchmark_auction() {
+    let baseline = common::get_calibration();
+    let threshold = baseline.default_threshold_ms();
     let script_bytes = load_plutus_script("auction_1-1.flat");
 
     println!("\n=== Benchmark: auction_1-1.flat ===");
@@ -1667,14 +1732,24 @@ fn test_eval_benchmark_auction() {
     let elapsed_ms = eval_benchmark_script(&script_bytes)
         .expect("auction_1-1.flat should evaluate successfully");
 
-    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x, floor {:.0}ms) | Elapsed: {:.3}ms | Ratio: {:.1}x",
+        baseline.median_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        common::DEFAULT_FLOOR_MS,
+        elapsed_ms,
+        baseline.ratio(elapsed_ms),
+    );
     println!("=====================================\n");
 
-    // SC-001: Must complete in <100ms
     assert!(
-        elapsed_ms < 100.0,
-        "auction_1-1 took {:.3}ms, expected <100ms",
-        elapsed_ms
+        elapsed_ms < threshold,
+        "auction_1-1 took {:.3}ms, threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
+        elapsed_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -1682,6 +1757,8 @@ fn test_eval_benchmark_auction() {
 /// This is a ~12.7KB real Plutus script - close to mainnet maximum size.
 #[test]
 fn test_eval_benchmark_uniswap() {
+    let baseline = common::get_calibration();
+    let threshold = baseline.default_threshold_ms();
     let script_bytes = load_plutus_script("uniswap-3.flat");
 
     println!("\n=== Benchmark: uniswap-3.flat ===");
@@ -1694,14 +1771,24 @@ fn test_eval_benchmark_uniswap() {
     let elapsed_ms =
         eval_benchmark_script(&script_bytes).expect("uniswap-3.flat should evaluate successfully");
 
-    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x, floor {:.0}ms) | Elapsed: {:.3}ms | Ratio: {:.1}x",
+        baseline.median_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        common::DEFAULT_FLOOR_MS,
+        elapsed_ms,
+        baseline.ratio(elapsed_ms),
+    );
     println!("=================================\n");
 
-    // SC-001: Must complete in <100ms
     assert!(
-        elapsed_ms < 100.0,
-        "uniswap-3 took {:.3}ms, expected <100ms",
-        elapsed_ms
+        elapsed_ms < threshold,
+        "uniswap-3 took {:.3}ms, threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
+        elapsed_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
@@ -1709,6 +1796,8 @@ fn test_eval_benchmark_uniswap() {
 /// This is a ~12.9KB real Plutus script - the largest in our test suite.
 #[test]
 fn test_eval_benchmark_stablecoin() {
+    let baseline = common::get_calibration();
+    let threshold = baseline.default_threshold_ms();
     let script_bytes = load_plutus_script("stablecoin_1-1.flat");
 
     println!("\n=== Benchmark: stablecoin_1-1.flat ===");
@@ -1721,27 +1810,46 @@ fn test_eval_benchmark_stablecoin() {
     let elapsed_ms = eval_benchmark_script(&script_bytes)
         .expect("stablecoin_1-1.flat should evaluate successfully");
 
-    println!("Evaluation time: {:.3}ms", elapsed_ms);
+    println!(
+        "Baseline: {:.3}ms | Threshold: {:.3}ms ({:.0}x, floor {:.0}ms) | Elapsed: {:.3}ms | Ratio: {:.1}x",
+        baseline.median_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        common::DEFAULT_FLOOR_MS,
+        elapsed_ms,
+        baseline.ratio(elapsed_ms),
+    );
     println!("======================================\n");
 
-    // SC-001: Must complete in <100ms
     assert!(
-        elapsed_ms < 100.0,
-        "stablecoin_1-1 took {:.3}ms, expected <100ms",
-        elapsed_ms
+        elapsed_ms < threshold,
+        "stablecoin_1-1 took {:.3}ms, threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
+        elapsed_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        baseline.median_ms,
     );
 }
 
 /// Generic test runner for all .flat scripts in the plutus_scripts directory.
 /// Runs scripts in parallel using our production evaluator pool, exactly like
 /// validate_transaction_phase2 does for real transactions.
-/// Reports timing for each script and validates against SC-001 target.
+/// Reports timing for each script and validates against calibrated thresholds.
 #[test]
 fn test_all_benchmark_scripts() {
+    let baseline = common::get_calibration();
+    let threshold = baseline.default_threshold_ms();
     let scripts_dir = get_plutus_scripts_dir();
 
     println!("\n=== All Benchmark Scripts Performance (Parallel) ===");
     println!("Directory: {}", scripts_dir.display());
+    println!(
+        "Calibration: baseline {:.3}ms | threshold {:.3}ms ({:.0}x, floor {:.0}ms)",
+        baseline.median_ms,
+        threshold,
+        common::DEFAULT_MULTIPLIER,
+        common::DEFAULT_FLOOR_MS,
+    );
     println!();
 
     // Load all .flat files
@@ -1785,17 +1893,26 @@ fn test_all_benchmark_scripts() {
         }
     }
 
-    // Print results table
-    println!("{:<30} {:>10} {:>12}", "Script", "Size", "Time (ms)");
-    println!("{:-<30} {:-<10} {:-<12}", "", "", "");
+    // Print results table with ratio column
+    println!(
+        "{:<30} {:>10} {:>12} {:>8}",
+        "Script", "Size", "Time (ms)", "Ratio"
+    );
+    println!("{:-<30} {:-<10} {:-<12} {:-<8}", "", "", "", "");
 
     for (name, size, elapsed_ms) in &results {
-        let status = if *elapsed_ms < 100.0 { "✓" } else { "✗" };
+        let ratio = baseline.ratio(*elapsed_ms);
+        let status = if *elapsed_ms < threshold {
+            "✓"
+        } else {
+            "✗"
+        };
         println!(
-            "{:<30} {:>10} {:>11.3} {}",
+            "{:<30} {:>10} {:>11.3} {:>6.1}x {}",
             name.replace(".flat", ""),
             format!("{:.1}KB", *size as f64 / 1024.0),
             elapsed_ms,
+            ratio,
             status
         );
     }
@@ -1826,12 +1943,20 @@ fn test_all_benchmark_scripts() {
             sum_individual_ms / parallel_elapsed_ms
         );
         println!(
-            "  Max individual time: {:.3}ms (SC-001 target: <100ms)",
-            max_time
+            "  Calibration baseline:    {:.3}ms ({}x multiplier, {:.0}ms floor)",
+            baseline.median_ms,
+            common::DEFAULT_MULTIPLIER,
+            common::DEFAULT_FLOOR_MS,
+        );
+        println!("  Threshold:               {:.3}ms", threshold,);
+        println!(
+            "  Max individual time:     {:.3}ms (ratio: {:.1}x baseline)",
+            max_time,
+            baseline.ratio(max_time),
         );
         println!(
             "  Result: {}",
-            if max_time < 50.0 {
+            if max_time < threshold {
                 "PASS ✓"
             } else {
                 "FAIL ✗"
@@ -1841,13 +1966,16 @@ fn test_all_benchmark_scripts() {
 
     println!("=====================================================\n");
 
-    // Assert all scripts pass SC-001
+    // Assert all scripts pass calibrated threshold
     for (name, _, elapsed_ms) in &results {
         assert!(
-            *elapsed_ms < 100.0,
-            "Script {} took {:.3}ms, expected <50ms",
+            *elapsed_ms < threshold,
+            "Script {} took {:.3}ms, threshold {:.3}ms ({:.0}x baseline {:.3}ms)",
             name,
-            elapsed_ms
+            elapsed_ms,
+            threshold,
+            common::DEFAULT_MULTIPLIER,
+            baseline.median_ms,
         );
     }
 
@@ -1857,4 +1985,109 @@ fn test_all_benchmark_scripts() {
         "Some scripts failed to evaluate: {:?}",
         failures.iter().map(|(n, _)| n).collect::<Vec<_>>()
     );
+}
+
+// =============================================================================
+// Calibration Script Selection (Phase 0 — temporary, mark #[ignore] when done)
+// =============================================================================
+
+/// Timing harness to evaluate all .flat scripts as calibration candidates.
+/// Runs each script 10 times, reports median/mean/stddev/CV for each.
+/// Goal: find a script that runs ~5ms on a developer laptop (~25ms on CI).
+///
+/// Run with: cargo test -p acropolis_module_tx_unpacker -- test_calibration_candidates --nocapture --ignored
+#[test]
+#[ignore = "One-time calibration script selection tool — run manually when re-evaluating candidates"]
+fn test_calibration_candidates() {
+    let scripts_dir = get_plutus_scripts_dir();
+    let iterations = 10;
+
+    println!("\n=== Calibration Script Candidate Selection ===");
+    println!("Iterations per script: {}", iterations);
+    println!();
+
+    // Load all .flat files
+    let mut script_data: Vec<(String, Vec<u8>)> = Vec::new();
+    let entries = std::fs::read_dir(&scripts_dir).expect("Failed to read plutus_scripts directory");
+
+    for entry in entries {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("flat") {
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let script_bytes = std::fs::read(&path).expect("Failed to read script");
+            script_data.push((name, script_bytes));
+        }
+    }
+
+    // Sort by file size for consistent output
+    script_data.sort_by_key(|(_, bytes)| bytes.len());
+
+    // Collect results: (name, size, median_ms, mean_ms, stddev_ms, cv_percent)
+    let mut results: Vec<(String, usize, f64, f64, f64, f64)> = Vec::new();
+
+    for (name, bytes) in &script_data {
+        let mut timings: Vec<f64> = Vec::with_capacity(iterations);
+
+        // Warmup run (discarded)
+        let _ = evaluate_raw_flat_program(bytes);
+
+        for _ in 0..iterations {
+            match evaluate_raw_flat_program(bytes) {
+                Ok(result) => timings.push(result.elapsed_ms()),
+                Err(e) => {
+                    println!("  {} FAILED: {}", name, e);
+                    break;
+                }
+            }
+        }
+
+        if timings.len() == iterations {
+            timings.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = timings[timings.len() / 2];
+            let mean = timings.iter().sum::<f64>() / timings.len() as f64;
+            let variance =
+                timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / timings.len() as f64;
+            let stddev = variance.sqrt();
+            let cv = if mean > 0.0 {
+                (stddev / mean) * 100.0
+            } else {
+                0.0
+            };
+            results.push((name.clone(), bytes.len(), median, mean, stddev, cv));
+        }
+    }
+
+    // Print results table
+    println!(
+        "{:<30} {:>8} {:>10} {:>10} {:>10} {:>8}",
+        "Script", "Size", "Median", "Mean", "StdDev", "CV%"
+    );
+    println!(
+        "{:-<30} {:-<8} {:-<10} {:-<10} {:-<10} {:-<8}",
+        "", "", "", "", "", ""
+    );
+
+    for (name, size, median, mean, stddev, cv) in &results {
+        let marker = if *median >= 3.0 && *median <= 8.0 {
+            " ★" // Target range for calibration (~5ms)
+        } else {
+            ""
+        };
+        println!(
+            "{:<30} {:>7.1}KB {:>9.3}ms {:>9.3}ms {:>9.3}ms {:>7.1}%{}",
+            name.replace(".flat", ""),
+            *size as f64 / 1024.0,
+            median,
+            mean,
+            stddev,
+            cv,
+            marker
+        );
+    }
+
+    println!();
+    println!("★ = candidate in target range (3-8ms median)");
+    println!("Target: ~5ms on developer laptop, ~25ms on CI");
+    println!("==================================================\n");
 }

@@ -1,4 +1,6 @@
 mod block_flow;
+#[cfg(test)]
+mod block_flow_consensus_scenarios_tests;
 mod chain_state;
 mod configuration;
 mod connection;
@@ -7,6 +9,7 @@ mod network;
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus, Era,
     commands::chain_sync::ChainSyncCommand,
+    configuration::BlockFlowMode,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -37,6 +40,7 @@ pub struct PeerNetworkInterface;
 impl PeerNetworkInterface {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = InterfaceConfig::try_load(&config)?;
+        let block_flow_mode = BlockFlowMode::from_config(&config);
         let genesis_complete = if cfg.genesis_values.is_none() {
             Some(context.subscribe(&cfg.genesis_completion_topic).await?)
         } else {
@@ -46,8 +50,13 @@ impl PeerNetworkInterface {
 
         let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
 
-        let flow_handler =
-            BlockFlowHandler::new(&cfg, context.clone(), events_sender.clone()).await?;
+        let flow_handler = BlockFlowHandler::new(
+            &cfg,
+            block_flow_mode,
+            context.clone(),
+            events_sender.clone(),
+        )
+        .await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -94,7 +103,7 @@ impl PeerNetworkInterface {
                 }
                 SyncPoint::Tip => {
                     // TODO: Temporary, only applicable in Direct mode
-                    if cfg.block_flow_mode == configuration::BlockFlowMode::Consensus {
+                    if block_flow_mode.is_consensus() {
                         warn!(
                             "Requested sync point is Tip, which is not supported in Consensus mode."
                         );
@@ -311,7 +320,7 @@ impl BlockSink {
             } else {
                 BlockStatus::Volatile
             },
-            intent: BlockIntent::Apply,
+            intent: BlockIntent::ValidateAndApply,
             slot,
             number: header.number,
             hash: header.hash,

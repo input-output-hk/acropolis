@@ -21,6 +21,18 @@ pub enum ScriptLang {
     PlutusV3,
 }
 
+impl ScriptLang {
+    pub fn is_native(&self) -> bool {
+        matches!(self, ScriptLang::Native)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScriptRef {
+    pub script_hash: ScriptHash,
+    pub script_lang: ScriptLang,
+}
+
 // The full CBOR bytes of a reference script
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum ReferenceScript {
@@ -31,12 +43,12 @@ pub enum ReferenceScript {
 }
 
 impl ReferenceScript {
-    pub fn compute_hash(&self) -> Option<ScriptHash> {
+    pub fn compute_hash(&self) -> ScriptHash {
         match self {
-            ReferenceScript::Native(_) => None,
-            ReferenceScript::PlutusV1(script) => Some(keyhash_224_tagged(1, script)),
-            ReferenceScript::PlutusV2(script) => Some(keyhash_224_tagged(2, script)),
-            ReferenceScript::PlutusV3(script) => Some(keyhash_224_tagged(3, script)),
+            ReferenceScript::Native(native_script) => native_script.compute_hash(),
+            ReferenceScript::PlutusV1(script) => keyhash_224_tagged(1, script),
+            ReferenceScript::PlutusV2(script) => keyhash_224_tagged(2, script),
+            ReferenceScript::PlutusV3(script) => keyhash_224_tagged(3, script),
         }
     }
 
@@ -46,6 +58,13 @@ impl ReferenceScript {
             ReferenceScript::PlutusV1(_) => ScriptLang::PlutusV1,
             ReferenceScript::PlutusV2(_) => ScriptLang::PlutusV2,
             ReferenceScript::PlutusV3(_) => ScriptLang::PlutusV3,
+        }
+    }
+
+    pub fn get_script_ref(&self) -> ScriptRef {
+        ScriptRef {
+            script_hash: self.compute_hash(),
+            script_lang: self.get_script_lang(),
         }
     }
 }
@@ -214,6 +233,15 @@ impl NativeScript {
 pub enum Datum {
     Hash(DatumHash),
     Inline(Vec<u8>),
+}
+
+impl Datum {
+    pub fn to_bytes(&self) -> Option<Vec<u8>> {
+        match self {
+            Datum::Hash(_) => None,
+            Datum::Inline(bytes) => Some(bytes.clone()),
+        }
+    }
 }
 
 #[derive(

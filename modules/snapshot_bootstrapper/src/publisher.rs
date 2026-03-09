@@ -15,8 +15,7 @@ use acropolis_common::{
         ProtocolParametersBootstrapMessage, SnapshotMessage, SnapshotStateMessage,
         UTxOPartialState,
     },
-    params::EPOCH_LENGTH,
-    protocol_params::{Nonces, PraosParams},
+    protocol_params::Nonces,
     snapshot::{
         streaming_snapshot::GovernanceProtocolParametersCallback, utxo::UtxoEntry,
         AccountsCallback, DRepCallback, EpochCallback, GovernanceProposal, GovernanceStateCallback,
@@ -69,6 +68,7 @@ impl EpochContext {
     /// * `epoch` - Target epoch number
     /// * `era` - Era of the target block
     /// * `genesis` - Genesis values for timestamp calculations
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         nonces: Nonces,
         header_slot: u64,
@@ -80,7 +80,7 @@ impl EpochContext {
     ) -> Self {
         let epoch_start_slot = genesis.epoch_to_first_slot(epoch);
         let epoch_start_time = genesis.slot_to_timestamp(epoch_start_slot);
-        let epoch_end_time = epoch_start_time + EPOCH_LENGTH;
+        let epoch_end_time = epoch_start_time + genesis.shelley_epoch_len;
         let last_block_time = genesis.slot_to_timestamp(header_slot);
 
         Self {
@@ -221,7 +221,6 @@ impl SnapshotPublisher {
             total_fees: data.total_fees_current,
             spo_blocks: data.spo_blocks_current.clone(),
             nonces: ctx.nonces.clone(),
-            praos_params: Some(PraosParams::mainnet()),
         }
     }
 

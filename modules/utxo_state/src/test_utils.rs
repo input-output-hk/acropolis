@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, Address, Datum, Era, ScriptHash, TxHash, UTXOValue,
+    protocol_params::ShelleyParams, Address, Datum, Era, ScriptRef, TxHash, UTXOValue,
     UTxOIdentifier, Value,
 };
 use pallas::ledger::traverse::Era as PallasEra;
@@ -11,7 +11,7 @@ pub struct UTxOValueJson {
     pub address: String,
     pub value: Value,
     pub datum: Option<Datum>,
-    pub reference_script_hash: Option<ScriptHash>,
+    pub script_ref: Option<ScriptRef>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -42,7 +42,7 @@ impl From<TestContextJson> for TestContext {
                             address: Address::from_string(&v.address).unwrap(),
                             value: v.value.clone(),
                             datum: v.datum.clone(),
-                            reference_script_hash: v.reference_script_hash,
+                            script_ref: v.script_ref.clone(),
                         },
                     )
                 })

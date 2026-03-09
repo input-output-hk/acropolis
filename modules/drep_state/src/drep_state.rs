@@ -192,7 +192,7 @@ impl DRepState {
                     }
                     RollbackWrapper::Rollback(msg) => {
                         ctx.handle(
-                            "rollback",
+                            "drep_state_rollback",
                             drep_state_publisher.publish_rollback(msg.clone()).await,
                         );
                         (None, None)

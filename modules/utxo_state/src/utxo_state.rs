@@ -81,17 +81,7 @@ impl UTXOState {
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let mut genesis_utxo_consumed = false;
-
-        if is_snapshot_mode {
-            if let Some(sub) = pool_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-
-            if let Some(sub) = stake_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-        }
+        let mut bootstrap_block_processed = false;
 
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
@@ -124,7 +114,7 @@ impl UTXOState {
 
             // Read from pool registration updates subscription if available
             let mut pool_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read pool registration updates subscription error");
@@ -143,7 +133,7 @@ impl UTXOState {
 
             // Read from stake registration updates subscription if available
             let mut stake_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read stake registration updates subscription error");
@@ -165,29 +155,38 @@ impl UTXOState {
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
                     let span = info_span!("utxo_state.validate", block = block.number);
-                    async {
-                        let mut state = state.lock().await;
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state
-                            .validate(
-                                block,
-                                deltas_msg,
-                                &pool_registration_updates,
-                                &stake_registration_updates,
-                                &current_protocol_params,
-                            )
-                            .await
-                        {
-                            validation_outcomes.push(*e);
-                        }
+                    if block.intent.do_validation() {
+                        async {
+                            let mut state = state.lock().await;
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state
+                                .validate(
+                                    block,
+                                    deltas_msg,
+                                    &pool_registration_updates,
+                                    &stake_registration_updates,
+                                    &current_protocol_params,
+                                )
+                                .await
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(&context, "utxo_state", &publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
+                            validation_outcomes
+                                .publish(
+                                    &context,
+                                    "utxo_state",
+                                    &publish_tx_validation_topic,
+                                    block,
+                                )
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to publish UTxO validation: {e}")
+                                });
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
 
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
@@ -201,8 +200,8 @@ impl UTXOState {
                     .instrument(span)
                     .await;
 
-                    if !genesis_utxo_consumed {
-                        genesis_utxo_consumed = true;
+                    if !bootstrap_block_processed {
+                        bootstrap_block_processed = true;
                     }
                 }
 

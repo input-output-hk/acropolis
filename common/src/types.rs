@@ -295,6 +295,12 @@ impl BlockInfo {
         copy
     }
 
+    pub fn with_status(&self, status: BlockStatus) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.status = status;
+        copy
+    }
+
     pub fn is_at_tip(&self) -> bool {
         // The slot of a newly-reported block can be later than the slot of the tip.
         // This is because the tip is the most recent slot with a _validated_ block,
@@ -357,8 +363,7 @@ impl PoolRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
             PoolRegistrationOutcome::Registered(deposit) => *deposit,
-            PoolRegistrationOutcome::Updated => 0,
-            PoolRegistrationOutcome::RetirementQueued => 0,
+            _ => 0,
         }
     }
 }
@@ -398,7 +403,7 @@ pub struct CreatedUTxOExtended {
     pub utxo: UTxOIdentifier,
 
     /// Full value of the created UTxO
-    pub value: Value,
+    pub value: ValueMap,
 
     /// Datum attached to the created UTxO, if present
     pub datum: Option<Datum>,
@@ -418,8 +423,8 @@ pub struct ExtendedAddressDelta {
     pub created_utxos: Vec<CreatedUTxOExtended>,
 
     /// Sums of spent and created UTxOs
-    pub sent: Value,
-    pub received: Value,
+    pub sent: ValueMap,
+    pub received: ValueMap,
 }
 
 /// Stake balance change
@@ -587,6 +592,20 @@ impl Value {
     pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
         iter.map(|v| v.lovelace).sum()
     }
+
+    pub fn token_amount(&self, policy_id: &PolicyId, asset_name: &AssetName) -> u64 {
+        for (pid, assets) in &self.assets {
+            if pid == policy_id {
+                for asset in assets {
+                    if &asset.name == asset_name {
+                        return asset.amount;
+                    }
+                }
+                return 0;
+            }
+        }
+        0
+    }
 }
 
 impl AddAssign<&Value> for Value {
@@ -625,7 +644,15 @@ impl Add for Value {
 
 /// Hashmap representation of Value (lovelace + multiasset)
 #[derive(
-    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct ValueMap {
     #[n(0)]
@@ -663,6 +690,27 @@ impl ValueMap {
                     .saturating_add(asset.amount);
             }
         }
+    }
+
+    pub fn remove_zero_amounts(&mut self) {
+        self.assets.retain(|_, assets| {
+            assets.retain(|_, amount| *amount != 0);
+            !assets.is_empty()
+        });
+    }
+}
+
+impl From<&Value> for ValueMap {
+    fn from(value: &Value) -> Self {
+        let mut map = Self::default();
+        map.add_value(value);
+        map
+    }
+}
+
+impl From<Value> for ValueMap {
+    fn from(value: Value) -> Self {
+        Self::from(&value)
     }
 }
 
@@ -1074,14 +1122,23 @@ impl Credential {
 
     pub fn from_json_string(credential: &str) -> Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
-            Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+            Self::script_hash_from_string(hash)
         } else if let Some(hash) = credential.strip_prefix("keyHash-") {
-            Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
+            Self::key_hash_from_string(hash)
+            //Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
         } else {
             Err(anyhow!(
                 "Incorrect credential {credential}, expected scriptHash- or keyHash- prefix"
             ))
         }
+    }
+
+    pub fn script_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+    }
+
+    pub fn key_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
     }
 
     pub fn to_json_string(&self) -> String {
@@ -2023,6 +2080,19 @@ pub enum Vote {
     Abstain,
 }
 
+impl TryFrom<&str> for Vote {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "yes" => Ok(Vote::Yes),
+            "no" => Ok(Vote::No),
+            "abstain" => Ok(Vote::Abstain),
+            _ => Err(anyhow!("Invalid vote string: {value}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedure {
     pub vote: Vote,
@@ -2057,6 +2127,14 @@ impl VoteCount {
             yes: 0,
             no: 0,
             abstain: 0,
+        }
+    }
+
+    pub fn register_vote(&mut self, v: &Vote, stake: Lovelace) {
+        match v {
+            Vote::Yes => self.yes += stake,
+            Vote::No => self.no += stake,
+            Vote::Abstain => self.abstain += stake,
         }
     }
 

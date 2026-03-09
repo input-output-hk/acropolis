@@ -954,7 +954,8 @@ impl UTxOREST {
             None => (None, None),
         };
 
-        let reference_script_hash = entry.reference_script_hash.as_ref().map(hex::encode);
+        let reference_script_hash =
+            entry.script_ref.as_ref().map(|s_ref| hex::encode(s_ref.script_hash));
 
         Self {
             address,
