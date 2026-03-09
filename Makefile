@@ -20,7 +20,7 @@ SNAP_URL ?= "https://pub-b844360df4774bb092a2bb2043b888e5.r2.dev/134092758.670ca
 
 SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
-.PHONY: help all build test run run-preview run-bootstrap run-midnight run-midnight-indexer fmt clippy
+.PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
 .PHONY: snap-test-streaming
 
@@ -32,9 +32,10 @@ help:
 	@echo "  build                    Build the omnibus process"
 	@echo "  run                      Run the omnibus (mainnet)"
 	@echo "  run-preview              Run the omnibus (preview network)"
-	@echo "  run-midnight             Run the omnibus with `midnight_state` enabled"
-	@echo "  run-bootstrap            Run the omnibus with bootstrap config (snapshot)"
-	@echo "  run-midnight             Run the midnight indexer omnibus config"
+	@echo "  run-bootstrap            Run the omnibus (mainnet) with bootstrap config"
+	@echo "  run-bootstrap-preview    Run the omnibus (preview) with bootstrap config"
+	@echo "  run-midnight-mainnet     Run the midnight indexer (mainnet)"
+	@echo "  run-midnight-preview     Run the midnight indexer (preview)"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
@@ -67,6 +68,9 @@ run-preview:
 
 run-bootstrap:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml
+
+run-bootstrap-preview:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml --config omnibus.bootstrap.preview.toml
 
 run-midnight-mainnet:
 	cd processes/midnight_indexer && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.mainnet.toml

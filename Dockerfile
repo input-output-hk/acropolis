@@ -23,12 +23,13 @@ FROM chef AS builder-omnibus
 ARG TARGETPLATFORM
 
 COPY --from=planner /app/recipe.json /app/recipe.json
-COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
     --mount=type=cache,id=acropolis-target-omnibus-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_omnibus
+
+COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
@@ -40,12 +41,13 @@ FROM chef AS builder-midnight-indexer
 ARG TARGETPLATFORM
 
 COPY --from=planner /app/recipe.json /app/recipe.json
-COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
     --mount=type=cache,id=acropolis-target-midnight-indexer-${TARGETPLATFORM},target=/app/target \
     cargo chef cook --locked --release --recipe-path /app/recipe.json --package acropolis_process_midnight_indexer
+
+COPY --from=workspace-src /app /app
 
 RUN --mount=type=cache,id=acropolis-cargo-registry-${TARGETPLATFORM},target=/cargo/registry \
     --mount=type=cache,id=acropolis-cargo-git-${TARGETPLATFORM},target=/cargo/git \
@@ -72,6 +74,7 @@ COPY --from=builder-omnibus /app/processes/omnibus/omnibus-local.toml /app/proce
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus-rewards.toml /app/processes/omnibus/omnibus-rewards.toml
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus-sancho.toml /app/processes/omnibus/omnibus-sancho.toml
 COPY --from=builder-omnibus /app/processes/omnibus/omnibus.bootstrap.toml /app/processes/omnibus/omnibus.bootstrap.toml
+COPY --from=builder-omnibus /app/processes/omnibus/omnibus.bootstrap.preview.toml /app/processes/omnibus/omnibus.bootstrap.preview.toml
 COPY --from=builder-omnibus /app/processes/omnibus/configs /app/processes/omnibus/configs
 COPY --from=builder-omnibus /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
 COPY --from=builder-omnibus /app/modules/accounts_state/test-data/pots.preview.csv /app/modules/accounts_state/test-data/pots.preview.csv
@@ -95,7 +98,9 @@ WORKDIR /app/processes/midnight_indexer
 
 COPY --from=builder-midnight-indexer /out/acropolis_process_midnight_indexer /usr/local/bin/acropolis_process_midnight_indexer
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.mainnet.toml /app/processes/midnight_indexer/config.mainnet.toml
+COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.mainnet.docker.toml /app/processes/midnight_indexer/config.mainnet.docker.toml
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.toml /app/processes/midnight_indexer/config.preview.toml
+COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.docker.toml /app/processes/midnight_indexer/config.preview.docker.toml
 COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
 COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.preview.csv /app/modules/accounts_state/test-data/pots.preview.csv
 
