@@ -144,8 +144,8 @@ impl SnapshotDownloader {
 mod tests {
     use super::*;
     use acropolis_common::{BlockHash, Point};
-    use flate2::Compression;
     use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::io::Write;
     use tempfile::TempDir;
     use wiremock::matchers::{method, path};

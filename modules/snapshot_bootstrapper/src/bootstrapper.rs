@@ -12,7 +12,7 @@ use crate::configuration::BootstrapConfig;
 use crate::context::{BootstrapContext, BootstrapContextError};
 use crate::downloader::{DownloadError, SnapshotDownloader};
 use crate::publisher::SnapshotPublisher;
-use acropolis_common::configuration::StartupMode;
+use acropolis_common::configuration::{StartupMode, SyncMode};
 use acropolis_common::{
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Message},
@@ -59,6 +59,8 @@ impl SnapshotBootstrapper {
             );
             return Ok(());
         }
+        let sync_mode = SyncMode::from_config(&config);
+
         let cfg = BootstrapConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");
@@ -75,7 +77,7 @@ impl SnapshotBootstrapper {
         context.clone().run(async move {
             let span = info_span!("snapshot_bootstrapper");
             async {
-                if let Err(e) = Self::run(bootstrapped_sub, cfg, context).await {
+                if let Err(e) = Self::run(bootstrapped_sub, cfg, sync_mode, context).await {
                     error!("Snapshot bootstrap failed: {e:#}");
                 }
             }
@@ -89,6 +91,7 @@ impl SnapshotBootstrapper {
     async fn run(
         bootstrapped_sub: Box<dyn Subscription<Message>>,
         cfg: BootstrapConfig,
+        sync_mode: SyncMode,
         context: Arc<Context<Message>>,
     ) -> Result<(), BootstrapError> {
         let genesis = Self::wait_for_genesis(bootstrapped_sub).await?;
@@ -108,6 +111,7 @@ impl SnapshotBootstrapper {
             context.clone(),
             cfg.snapshot_topic.clone(),
             cfg.sync_command_topic.clone(),
+            sync_mode,
             bootstrap_ctx.context(),
         );
         // Download
