@@ -20,9 +20,9 @@
 //! specified - see: https://github.com/IntersectMBO/cardano-ledger/blob/33e90ea03447b44a389985ca2b158568e5f4ad65/eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/Types.hs#L121-L131
 //! and https://github.com/rrruko/nes-cddl-hs/blob/main/nes.cddl
 
-use anyhow::{anyhow, Context, Result};
-use minicbor::data::Type;
+use anyhow::{Context, Result, anyhow};
 use minicbor::Decoder;
+use minicbor::data::Type;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -34,8 +34,8 @@ use tracing::{error, info};
 use crate::epoch_snapshot::SnapshotsContainer;
 use crate::hash::Hash;
 use crate::ledger_state::SPOState;
-use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 use crate::snapshot::RawSnapshot;
+use crate::snapshot::utxo::{SnapshotUTxO, UtxoEntry};
 pub use crate::stake_addresses::{AccountState, StakeAddressState};
 pub use crate::{
     Constitution, DRepChoice, DRepCredential, DRepRecord, EpochBootstrapData, Lovelace,
@@ -2329,19 +2329,75 @@ impl StreamingSnapshotParser {
         ctx: &mut SnapshotContext,
         map_name: &str,
     ) -> Result<BTreeMap<StakeCredential, NormalizedAccount>> {
-        let decoded: BTreeMap<StakeCredential, SnapshotAccountValue> = decoder
-            .decode_with(ctx)
-            .map_err(|err| {
-                error!(
-                    map = map_name,
-                    byte_offset = decoder.position(),
-                    error = %err,
-                    "Failed to decode accounts map"
-                );
-                err
-            })
-            .context(format!("Failed to decode {map_name}"))?;
+        let mut conway_decoder = decoder.clone();
+        match Self::decode_conway_accounts_map(&mut conway_decoder, ctx) {
+            Ok(decoded) => {
+                decoder.set_position(conway_decoder.position());
+                Ok(Self::normalize_account_state_map(
+                    decoded,
+                    map_name,
+                    "conway",
+                    decoder.position(),
+                ))
+            }
+            Err(conway_err) => {
+                let mut shelley_decoder = decoder.clone();
+                match Self::decode_shelley_accounts_map(&mut shelley_decoder, ctx) {
+                    Ok(decoded) => {
+                        decoder.set_position(shelley_decoder.position());
+                        Ok(Self::normalize_account_state_map(
+                            decoded,
+                            map_name,
+                            "shelley",
+                            decoder.position(),
+                        ))
+                    }
+                    Err(shelley_err) => {
+                        error!(
+                            map = map_name,
+                            byte_offset = decoder.position(),
+                            conway_error = %conway_err,
+                            shelley_error = %shelley_err,
+                            "Failed to decode accounts map"
+                        );
+                        Err(anyhow!(
+                            "Failed to decode {map_name} as ConwayAccounts or ShelleyAccounts"
+                        ))
+                    }
+                }
+            }
+        }
+    }
 
+    fn decode_conway_accounts_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+    ) -> Result<BTreeMap<StakeCredential, SnapshotAccountValue>, minicbor::decode::Error> {
+        decoder.decode_with(ctx)
+    }
+
+    fn decode_shelley_accounts_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+    ) -> Result<BTreeMap<StakeCredential, SnapshotAccountValue>, minicbor::decode::Error> {
+        let len = decoder.array()?;
+        if !matches!(len, Some(2)) {
+            return Err(minicbor::decode::Error::message(
+                "Expected ShelleyAccounts array length 2",
+            ));
+        }
+
+        let states = decoder.decode_with(ctx)?;
+        decoder.skip()?; // saPtrs
+        Ok(states)
+    }
+
+    fn normalize_account_state_map(
+        decoded: BTreeMap<StakeCredential, SnapshotAccountValue>,
+        map_name: &str,
+        layout: &str,
+        byte_offset: usize,
+    ) -> BTreeMap<StakeCredential, NormalizedAccount> {
         let entry_count = decoded.len();
         let normalized = decoded
             .into_iter()
@@ -2350,12 +2406,13 @@ impl StreamingSnapshotParser {
 
         info!(
             map = map_name,
+            layout,
             entries = entry_count,
-            byte_offset = decoder.position(),
+            byte_offset,
             "Decoded accounts map"
         );
 
-        Ok(normalized)
+        normalized
     }
 
     fn parse_pool_params_map(
@@ -2799,6 +2856,74 @@ mod tests {
         assert_eq!(parsed.rewards, 300);
         assert!(parsed.delegated_spo.is_some());
         assert!(matches!(parsed.delegated_drep, Some(DRepChoice::Abstain)));
+    }
+
+    fn encode_addr_key_hash_credential(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
+        enc.array(2).unwrap();
+        enc.u16(0).unwrap();
+        enc.bytes(&[seed; 28]).unwrap();
+    }
+
+    fn decode_accounts_map(bytes: &[u8]) -> BTreeMap<StakeCredential, NormalizedAccount> {
+        let mut dec = Decoder::new(bytes);
+        let mut ctx = SnapshotContext {
+            network: NetworkId::Testnet,
+        };
+
+        StreamingSnapshotParser::decode_account_state_map(&mut dec, &mut ctx, "test").unwrap()
+    }
+
+    #[test]
+    fn test_decode_account_state_map_conway_accounts_layout() {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+
+        enc.map(1).unwrap();
+        encode_addr_key_hash_credential(&mut enc, 0x11);
+        enc.array(4).unwrap();
+        enc.u64(300).unwrap();
+        enc.u64(40).unwrap();
+        enc.bytes(&[0x22; 28]).unwrap();
+        enc.null().unwrap();
+
+        let parsed = decode_accounts_map(&buf);
+        let account = parsed.get(&StakeCredential::AddrKeyHash(Hash::new([0x11; 28]))).unwrap();
+
+        assert_eq!(account.rewards, 300);
+        assert_eq!(
+            account.delegated_spo,
+            Some(PoolId::new(Hash::new([0x22; 28])))
+        );
+        assert!(account.delegated_drep.is_none());
+    }
+
+    #[test]
+    fn test_decode_account_state_map_shelley_accounts_layout() {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+
+        enc.array(2).unwrap();
+        enc.map(1).unwrap();
+        encode_addr_key_hash_credential(&mut enc, 0x33);
+        enc.array(4).unwrap();
+        enc.array(3).unwrap();
+        enc.u64(1).unwrap();
+        enc.u64(2).unwrap();
+        enc.u64(3).unwrap();
+        enc.u64(500).unwrap();
+        enc.u64(60).unwrap();
+        enc.bytes(&[0x44; 28]).unwrap();
+        enc.map(0).unwrap(); // saPtrs
+
+        let parsed = decode_accounts_map(&buf);
+        let account = parsed.get(&StakeCredential::AddrKeyHash(Hash::new([0x33; 28]))).unwrap();
+
+        assert_eq!(account.rewards, 500);
+        assert_eq!(
+            account.delegated_spo,
+            Some(PoolId::new(Hash::new([0x44; 28])))
+        );
+        assert!(account.delegated_drep.is_none());
     }
 
     fn encode_margin(enc: &mut Encoder<&mut Vec<u8>>) {
