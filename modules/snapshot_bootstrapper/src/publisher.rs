@@ -191,16 +191,20 @@ impl SnapshotPublisher {
             self.sync_command_topic,
             point.slot()
         );
-        let message = if self.sync_mode.is_mithril() {
-            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
-        } else {
-            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
-        };
+        let message = Self::chain_sync_message(&self.sync_mode, point);
         self.context
             .publish(&self.sync_command_topic, Arc::new(message))
             .await
             .unwrap_or_else(|e| tracing::error!("Failed to publish sync command message: {}", e));
         Ok(())
+    }
+
+    fn chain_sync_message(sync_mode: &SyncMode, point: Point) -> Message {
+        if sync_mode.is_mithril() {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point)))
+        } else {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(point)))
+        }
     }
 
     fn build_epoch_bootstrap_message(&self, data: &EpochBootstrapData) -> EpochBootstrapMessage {
@@ -661,7 +665,9 @@ impl SnapshotCallbacks for SnapshotPublisher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use acropolis_common::configuration::SyncMode;
     use acropolis_common::protocol_params::Nonce;
+    use acropolis_common::{BlockHash, Point};
 
     fn make_test_nonces() -> Nonces {
         Nonces {
@@ -713,5 +719,39 @@ mod tests {
 
         // Verify nonce conversion works
         assert_eq!(ctx.nonces, nonces);
+    }
+
+    #[test]
+    fn test_snapshot_bootstrapper_chain_sync_message_uses_find_intersect_for_upstream_sync() {
+        let point = Point::Specific {
+            slot: 42,
+            hash: BlockHash::new([0x11; 32]),
+        };
+
+        let message = SnapshotPublisher::chain_sync_message(&SyncMode::Upstream, point.clone());
+
+        match message {
+            Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(actual))) => {
+                assert_eq!(actual, point);
+            }
+            other => panic!("unexpected chain sync message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_snapshot_bootstrapper_chain_sync_message_uses_start_mithril_for_mithril_sync() {
+        let point = Point::Specific {
+            slot: 42,
+            hash: BlockHash::new([0x22; 32]),
+        };
+
+        let message = SnapshotPublisher::chain_sync_message(&SyncMode::Mithril, point.clone());
+
+        match message {
+            Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(actual))) => {
+                assert_eq!(actual, point);
+            }
+            other => panic!("unexpected chain sync message: {other:?}"),
+        }
     }
 }

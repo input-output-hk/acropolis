@@ -60,7 +60,6 @@ impl SnapshotBootstrapper {
             return Ok(());
         }
         let sync_mode = SyncMode::from_config(&config);
-
         let cfg = BootstrapConfig::try_load(&config)?;
 
         info!("Snapshot bootstrapper initializing");

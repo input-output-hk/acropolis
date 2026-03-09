@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration as SystemDuration;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, info_span, Instrument};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 mod pause;
 use pause::PauseType;
@@ -537,15 +537,27 @@ async fn get_start_point(
         loop {
             let (_, sync_msg) = sync_sub.read().await?;
 
-            if let Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point))) =
-                sync_msg.as_ref()
-            {
-                return Ok(match point {
-                    Point::Origin => hardano::immutable::Point::Origin,
-                    Point::Specific { hash, slot } => {
-                        hardano::immutable::Point::Specific(*slot, hash.to_vec())
-                    }
-                });
+            match sync_msg.as_ref() {
+                Message::Command(Command::ChainSync(ChainSyncCommand::StartMithril(point))) => {
+                    return Ok(match point {
+                        Point::Origin => hardano::immutable::Point::Origin,
+                        Point::Specific { hash, slot } => {
+                            hardano::immutable::Point::Specific(*slot, hash.to_vec())
+                        }
+                    });
+                }
+                Message::Command(Command::ChainSync(other)) => {
+                    warn!(
+                        ?other,
+                        "Ignoring non-Mithril chain sync command while waiting for snapshot handoff"
+                    );
+                }
+                other => {
+                    warn!(
+                        ?other,
+                        "Ignoring unexpected message on sync command topic while waiting for snapshot handoff"
+                    );
+                }
             }
         }
     } else {
