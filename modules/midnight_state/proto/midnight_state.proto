@@ -14,11 +14,14 @@ service MidnightState {
   rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
   rpc GetCouncilDatum (CouncilDatumRequest) returns (CouncilDatumResponse);
   rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
+  rpc GetBlockByHash (BlockByHashRequest) returns (BlockByHashResponse);
+  rpc GetUtxoEvents (UtxoEventsRequest) returns (UtxoEventsResponse);
 }
 
 message AssetCreatesRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_block = 1;
+  uint32 start_tx_index = 2;
+  uint32 utxo_capacity = 3;
 }
 message AssetCreate {
   bytes address = 1;
@@ -38,8 +41,9 @@ message AssetCreatesResponse {
 }
 
 message AssetSpendsRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_block = 1;
+  uint32 start_tx_index = 2;
+  uint32 utxo_capacity = 3;
 }
 message AssetSpend {
   bytes address = 1;
@@ -60,8 +64,9 @@ message AssetSpendsResponse {
 }
 
 message RegistrationsRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_block = 1;
+  uint32 start_tx_index = 2;
+  uint32 utxo_capacity = 3;
 }
 message Registration {
   bytes full_datum = 1;
@@ -80,8 +85,9 @@ message RegistrationsResponse {
 }
 
 message DeregistrationsRequest {
-  uint64 start_block = 1;
-  uint64 end_block = 2;
+  uint32 start_block = 1;
+  uint32 start_tx_index = 2;
+  uint32 utxo_capacity = 3;
 }
 message Deregistration {
   bytes full_datum = 1;
@@ -123,4 +129,30 @@ message AriadneParametersRequest {
 message AriadneParametersResponse {
   uint64 source_epoch = 1;
   bytes datum = 2;
+}
+
+message UtxoEventsRequest {
+  uint32 start_block = 1;
+  uint32 start_tx_index = 2;
+  uint32 tx_capacity = 3;
+}
+message UtxoEvent {
+  oneof kind {
+    AssetCreate asset_create = 1;
+    AssetSpend asset_spend = 2;
+    Registration registration = 3;
+    Deregistration deregistration = 4;
+  }
+}
+message UtxoEventsResponse {
+  repeated UtxoEvent events = 1;
+}
+
+message BlockByHashRequest {
+  bytes block_hash = 1;
+}
+message BlockByHashResponse {
+  uint32 block_number = 1;
+  uint32 tx_count = 2;
+  int64 block_timestamp_unix = 3;
 }

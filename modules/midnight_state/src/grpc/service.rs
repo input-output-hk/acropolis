@@ -1,26 +1,44 @@
 use std::sync::Arc;
 
 use crate::{
-    grpc::midnight_state_proto::{
-        self, midnight_state_server::MidnightState, AriadneParametersRequest,
-        AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse, AssetSpendsRequest,
-        AssetSpendsResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-        DeregistrationsResponse, RegistrationsRequest, RegistrationsResponse,
-        TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+    grpc::{
+        midnight_state_proto::{
+            midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
+            AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
+            AssetSpendsRequest, AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse,
+            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
+            DeregistrationsResponse, RegistrationsRequest, RegistrationsResponse,
+            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
+            UtxoEventsRequest, UtxoEventsResponse,
+        },
+        utxo_events::truncate_by_tx_capacity,
     },
     state::State,
 };
-use acropolis_common::state_history::StateHistory;
+use acropolis_common::{
+    messages::{Message, StateQuery, StateQueryResponse},
+    queries::{
+        blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+        errors::QueryError,
+        utils::query_state,
+    },
+    state_history::StateHistory,
+    BlockHash,
+};
+use caryatid_sdk::Context;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
+const MAX_EVENTS_PER_TX: usize = 64;
+
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
+    context: Arc<Context<Message>>,
 }
 
 impl MidnightStateService {
-    pub fn new(history: Arc<Mutex<StateHistory<State>>>) -> Self {
-        Self { history }
+    pub fn new(history: Arc<Mutex<StateHistory<State>>>, context: Arc<Context<Message>>) -> Self {
+        Self { history, context }
     }
 }
 
@@ -31,13 +49,13 @@ impl MidnightState for MidnightStateService {
         request: Request<AssetCreatesRequest>,
     ) -> Result<Response<AssetCreatesResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
+
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let creates = {
             let history = self.history.lock().await;
@@ -46,28 +64,11 @@ impl MidnightState for MidnightStateService {
 
             state
                 .utxos
-                .get_asset_creates(req.start_block, req.end_block)
+                .get_asset_creates(req.start_block.into(), req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_creates = creates
-            .into_iter()
-            .map(|c| {
-                let address =
-                    c.holder_address.to_bytes_key().map_err(|e| Status::internal(e.to_string()))?;
-
-                Ok(midnight_state_proto::AssetCreate {
-                    address,
-                    quantity: c.quantity,
-                    tx_hash: c.tx_hash.to_vec(),
-                    output_index: c.utxo_index.into(),
-                    block_number: c.block_number,
-                    block_hash: c.block_hash.to_vec(),
-                    tx_index: c.tx_index_in_block,
-                    block_timestamp_unix: c.block_timestamp,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
+        let proto_creates = creates.into_iter().map(Into::into).collect();
 
         Ok(Response::new(AssetCreatesResponse {
             creates: proto_creates,
@@ -79,13 +80,13 @@ impl MidnightState for MidnightStateService {
         request: Request<AssetSpendsRequest>,
     ) -> Result<Response<AssetSpendsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
+
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let spends = {
             let history = self.history.lock().await;
@@ -94,29 +95,11 @@ impl MidnightState for MidnightStateService {
 
             state
                 .utxos
-                .get_asset_spends(req.start_block, req.end_block)
+                .get_asset_spends(req.start_block.into(), req.start_tx_index, utxo_capacity)
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_spends = spends
-            .into_iter()
-            .map(|c| {
-                let address =
-                    c.holder_address.to_bytes_key().map_err(|e| Status::internal(e.to_string()))?;
-
-                Ok(midnight_state_proto::AssetSpend {
-                    address,
-                    quantity: c.quantity,
-                    spending_tx_hash: c.spending_tx_hash.to_vec(),
-                    block_number: c.block_number,
-                    block_hash: c.block_hash.to_vec(),
-                    tx_index: c.tx_index_in_block,
-                    utxo_tx_hash: c.utxo_tx_hash.to_vec(),
-                    utxo_index: c.utxo_index.into(),
-                    block_timestamp_unix: c.block_timestamp,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
+        let proto_spends = spends.into_iter().map(Into::into).collect();
 
         Ok(Response::new(AssetSpendsResponse {
             spends: proto_spends,
@@ -128,41 +111,27 @@ impl MidnightState for MidnightStateService {
         request: Request<RegistrationsRequest>,
     ) -> Result<Response<RegistrationsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
+
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let registrations = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_registrations(req.start_block, req.end_block)
+            state.candidates.get_registrations(
+                req.start_block.into(),
+                req.start_tx_index,
+                utxo_capacity,
+            )
         };
 
-        let proto_registrations = registrations
-            .into_iter()
-            .map(|c| {
-                let full_datum = c
-                    .full_datum
-                    .to_bytes()
-                    .ok_or_else(|| Status::internal("full_datum is not inline"))?;
-
-                Ok(midnight_state_proto::Registration {
-                    full_datum,
-                    tx_hash: c.tx_hash.to_vec(),
-                    output_index: c.utxo_index.into(),
-                    block_number: c.block_number,
-                    block_hash: c.block_hash.to_vec(),
-                    tx_index: c.tx_index_in_block,
-                    block_timestamp_unix: c.block_timestamp,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
+        let proto_registrations = registrations.into_iter().map(Into::into).collect();
 
         Ok(Response::new(RegistrationsResponse {
             registrations: proto_registrations,
@@ -174,45 +143,106 @@ impl MidnightState for MidnightStateService {
         request: Request<DeregistrationsRequest>,
     ) -> Result<Response<DeregistrationsResponse>, Status> {
         let req = request.into_inner();
-        if req.start_block > req.end_block {
-            return Err(Status::invalid_argument("start_block must be <= end_block"));
-        }
+
+        let utxo_capacity = usize::try_from(req.utxo_capacity)
+            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
 
         // TODO: Add additional request parameter constraints:
-        // 1. end_block <= tip
-        // 2. (end_block - start_block) < some_max_blocks
+        // 1. start_block <= tip
+        // 2. utxo_capacity <= MAX_CAPACITY
 
         let deregistrations = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_deregistrations(req.start_block, req.end_block)
+            state.candidates.get_deregistrations(
+                req.start_block.into(),
+                req.start_tx_index,
+                utxo_capacity,
+            )
         };
 
-        let proto_deregistrations = deregistrations
-            .into_iter()
-            .map(|c| {
-                let full_datum = c
-                    .full_datum
-                    .to_bytes()
-                    .ok_or_else(|| Status::internal("full_datum is not inline"))?;
+        let proto_deregistrations = deregistrations.into_iter().map(Into::into).collect();
 
-                Ok(midnight_state_proto::Deregistration {
-                    full_datum,
-                    tx_hash: c.tx_hash.to_vec(),
-                    block_number: c.block_number,
-                    block_hash: c.block_hash.to_vec(),
-                    tx_index: c.tx_index_in_block,
-                    utxo_tx_hash: c.utxo_tx_hash.to_vec(),
-                    utxo_index: c.utxo_index.into(),
-                    block_timestamp_unix: c.block_timestamp,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?;
         Ok(Response::new(DeregistrationsResponse {
             deregistrations: proto_deregistrations,
         }))
+    }
+
+    async fn get_utxo_events(
+        &self,
+        request: Request<UtxoEventsRequest>,
+    ) -> Result<Response<UtxoEventsResponse>, Status> {
+        let req = request.into_inner();
+
+        let start_block = req.start_block;
+        let start_tx_index = req.start_tx_index;
+
+        let tx_capacity = usize::try_from(req.tx_capacity)
+            .map_err(|_| Status::invalid_argument("tx_capacity too large"))?;
+
+        // TODO: Add additional request parameter constraints:
+        // 1. start_block <= tip
+        // 2. tx_capacity <= MAX_CAPACITY
+
+        let event_capacity = tx_capacity.saturating_mul(MAX_EVENTS_PER_TX);
+
+        let events = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            let mut events = Vec::with_capacity(event_capacity);
+
+            events.extend(
+                state
+                    .utxos
+                    .get_asset_creates(start_block.into(), start_tx_index, event_capacity)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .into_iter()
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::AssetCreate(e.into())),
+                    }),
+            );
+
+            events.extend(
+                state
+                    .utxos
+                    .get_asset_spends(start_block.into(), start_tx_index, event_capacity)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .into_iter()
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::AssetSpend(e.into())),
+                    }),
+            );
+
+            events.extend(
+                state
+                    .candidates
+                    .get_registrations(start_block.into(), start_tx_index, event_capacity)
+                    .into_iter()
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::Registration(e.into())),
+                    }),
+            );
+
+            events.extend(
+                state
+                    .candidates
+                    .get_deregistrations(start_block.into(), start_tx_index, event_capacity)
+                    .into_iter()
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::Deregistration(e.into())),
+                    }),
+            );
+
+            events
+        };
+
+        let events = truncate_by_tx_capacity(events, tx_capacity);
+
+        Ok(Response::new(UtxoEventsResponse { events }))
     }
 
     async fn get_technical_committee_datum(
@@ -304,11 +334,53 @@ impl MidnightState for MidnightStateService {
             datum,
         }))
     }
+
+    async fn get_block_by_hash(
+        &self,
+        request: Request<BlockByHashRequest>,
+    ) -> Result<Response<BlockByHashResponse>, Status> {
+        let req = request.into_inner();
+        let block_hash = BlockHash::try_from(req.block_hash)
+            .map_err(|_| Status::invalid_argument("invalid block hash"))?;
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+            BlocksStateQuery::GetBlockByHash { block_hash },
+        )));
+
+        let block_info =
+            query_state(
+                &self.context,
+                "cardano.query.blocks",
+                msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::BlockByHash(block_info),
+                    )) => Ok(block_info),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving block info",
+                    )),
+                },
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(BlockByHashResponse {
+            block_number: u32::try_from(block_info.number)
+                .map_err(|_| Status::internal("block number overflow"))?,
+            block_timestamp_unix: i64::try_from(block_info.timestamp)
+                .map_err(|_| Status::internal("timestamp overflow"))?,
+            tx_count: u32::try_from(block_info.tx_count)
+                .map_err(|_| Status::internal("tx count overflow"))?,
+        }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use acropolis_common::{
         messages::AddressDeltasMessage,
@@ -317,6 +389,8 @@ mod tests {
         Datum, DatumHash, Era, ExtendedAddressDelta, PolicyId, TxHash, TxIdentifier,
         UTxOIdentifier, ValueMap,
     };
+    use caryatid_sdk::{async_trait, Context, MessageBounds, MessageBus, Subscription};
+    use config::Config;
     use tokio::sync::Mutex;
     use tonic::{Code, Request};
 
@@ -327,6 +401,26 @@ mod tests {
 
     use super::{MidnightState, MidnightStateService};
 
+    pub struct DummyBus;
+
+    #[async_trait]
+    impl<M: MessageBounds> MessageBus<M> for DummyBus {
+        async fn publish(&self, _topic: &str, _message: Arc<M>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn request_timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<M>>> {
+            Err(anyhow::anyhow!("subscriptions not supported in tests"))
+        }
+
+        async fn shutdown(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
     fn test_block_info(number: u64, epoch: u64) -> BlockInfo {
         BlockInfo {
             status: BlockStatus::Volatile,
@@ -381,7 +475,16 @@ mod tests {
     fn service_with_committed_state(state: State, block_number: u64) -> MidnightStateService {
         let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
         history.commit(block_number, state);
-        MidnightStateService::new(Arc::new(Mutex::new(history)))
+
+        let (_, startup_watch) = tokio::sync::watch::channel(true);
+        MidnightStateService::new(
+            Arc::new(Mutex::new(history)),
+            Arc::new(Context::new(
+                Arc::new(Config::default()),
+                Arc::new(DummyBus),
+                startup_watch,
+            )),
+        )
     }
 
     #[tokio::test]

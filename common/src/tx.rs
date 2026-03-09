@@ -169,7 +169,7 @@ pub struct TxUTxODeltas {
 
     // State needed for validation
 
-    // Reference scripts (needed for phase 2 validation)
+    // Reference scripts (needed for Babbage Reference script validation and Phase 2 validation)
     pub reference_scripts: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Certificates
