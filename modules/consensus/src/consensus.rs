@@ -676,7 +676,7 @@ impl ConsensusRuntime {
                 error!("Failed to mark block validated: {e}");
             }
 
-            // There is nothing more to be done here. Since the blocks on the favored chain
+            // There is nothing more to be done here. Since the blocks on the favoured chain
             // are 'proposed', i.e., already sent to listening downstream modules, it is up to
             // the downstream modules to handle rollbacks, should that happen on 'NoGo' below.
         } else {
