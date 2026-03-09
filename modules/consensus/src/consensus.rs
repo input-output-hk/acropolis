@@ -672,11 +672,13 @@ impl ConsensusRuntime {
         if all_say_go {
             self.stats.validated += 1;
 
-            // TODO: Actually send message with validated block
-
             if let Err(e) = self.tree.mark_validated(block_info.hash) {
                 error!("Failed to mark block validated: {e}");
             }
+
+            // There is nothing more to be done here. Since the blocks on the favoured chain
+            // are 'proposed', i.e., already sent to listening downstream modules, it is up to
+            // the downstream modules to handle rollbacks, should that happen on 'NoGo' below.
         } else {
             error!(
                 block = block_info.number,
@@ -727,7 +729,8 @@ impl ConsensusRuntime {
                 }
                 ObserverEvent::Rollback { to_block_number } => {
                     let point = self.find_point_at_number(to_block_number);
-                    let block_info = self.find_block_info_at_number(to_block_number);
+                    let block_info =
+                        self.find_block_info_at_number(to_block_number, BlockStatus::RolledBack);
                     let msg = Arc::new(Message::Cardano((
                         block_info,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
@@ -836,28 +839,33 @@ impl ConsensusRuntime {
     }
 
     /// Find or construct a BlockInfo for a block at a given number.
-    fn find_block_info_at_number(&self, number: u64) -> BlockInfo {
+    fn find_block_info_at_number(&self, number: u64, status: BlockStatus) -> BlockInfo {
         let mut current = self.tree.favoured_tip();
         while let Some(h) = current {
             if let Some(b) = self.tree.get_block(&h) {
                 if b.number == number {
                     if let Some((info, _)) = self.block_data.get(&h) {
-                        return info.clone();
+                        return info.with_status(status);
                     }
-                    return Self::default_block_info(b.number, b.slot, b.hash);
+                    return Self::default_block_info(b.number, b.slot, b.hash, status);
                 }
                 current = b.parent;
             } else {
                 break;
             }
         }
-        Self::default_block_info(number, 0, BlockHash::default())
+        Self::default_block_info(number, 0, BlockHash::default(), status)
     }
 
     /// Construct a default BlockInfo with minimal fields populated.
-    fn default_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
+    fn default_block_info(
+        number: u64,
+        slot: u64,
+        hash: BlockHash,
+        status: BlockStatus,
+    ) -> BlockInfo {
         BlockInfo {
-            status: BlockStatus::Volatile,
+            status,
             intent: BlockIntent::Apply,
             slot,
             number,

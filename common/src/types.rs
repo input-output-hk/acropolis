@@ -295,6 +295,12 @@ impl BlockInfo {
         copy
     }
 
+    pub fn with_status(&self, status: BlockStatus) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.status = status;
+        copy
+    }
+
     pub fn is_at_tip(&self) -> bool {
         // The slot of a newly-reported block can be later than the slot of the tip.
         // This is because the tip is the most recent slot with a _validated_ block,
