@@ -125,7 +125,16 @@ impl Snapshot {
 
     pub fn cbor_path(&self, network_dir: &Path) -> PathBuf {
         let filename = format!(
-            "{}.{}.cbor",
+            "nes.{}.{}.cbor",
+            self.point.slot(),
+            self.point.hash().expect("snapshot point must have hash")
+        );
+        network_dir.join(filename)
+    }
+
+    pub fn utxos_cbor_path(&self, network_dir: &Path) -> PathBuf {
+        let filename = format!(
+            "utxos.{}.{}.cbor",
             self.point.slot(),
             self.point.hash().expect("snapshot point must have hash")
         );

@@ -163,36 +163,62 @@ where
 {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
         match d.datatype()? {
-            Type::Array | Type::ArrayIndef => match d.array()? {
-                Some(0) => Ok(StrictMaybe::Nothing),
-                Some(1) => {
-                    let value = T::decode(d, ctx)?;
-                    Ok(StrictMaybe::Just(value))
-                }
-                Some(len) => Err(minicbor::decode::Error::message(format!(
-                    "Expected StrictMaybe array length 0 or 1, got {len}"
-                ))),
-                None => {
-                    if matches!(d.datatype()?, Type::Break) {
-                        d.skip()?;
-                        return Ok(StrictMaybe::Nothing);
+            Type::Null | Type::Undefined => {
+                d.skip()?;
+                Ok(StrictMaybe::Nothing)
+            }
+            Type::Array | Type::ArrayIndef => {
+                // Support both CBOR encodings we see in snapshots:
+                //   [] / [value]          (wrapped StrictMaybe)
+                //   null / value          (null-direct StrictMaybe)
+                // If the array probe does not look like a wrapper, fall back to decoding `T`
+                // directly, since some `T` values are arrays themselves (for example `DRep`).
+                let mut probe = d.clone();
+                match probe.array()? {
+                    Some(0) => {
+                        d.array()?;
+                        Ok(StrictMaybe::Nothing)
                     }
-
-                    let value = T::decode(d, ctx)?;
-                    match d.datatype()? {
-                        Type::Break => {
-                            d.skip()?;
+                    Some(1) => {
+                        if T::decode(&mut probe, ctx).is_ok() {
+                            d.array()?;
+                            let value = T::decode(d, ctx)?;
+                            Ok(StrictMaybe::Just(value))
+                        } else {
+                            let value = T::decode(d, ctx)?;
                             Ok(StrictMaybe::Just(value))
                         }
-                        other => Err(minicbor::decode::Error::message(format!(
-                            "Expected break token after indefinite StrictMaybe value, got {other:?}"
-                        ))),
+                    }
+                    None => match probe.datatype()? {
+                        Type::Break => {
+                            d.array()?;
+                            d.skip()?;
+                            Ok(StrictMaybe::Nothing)
+                        }
+                        _ => {
+                            if T::decode(&mut probe, ctx).is_ok()
+                                && matches!(probe.datatype()?, Type::Break)
+                            {
+                                d.array()?;
+                                let value = T::decode(d, ctx)?;
+                                d.skip()?;
+                                Ok(StrictMaybe::Just(value))
+                            } else {
+                                let value = T::decode(d, ctx)?;
+                                Ok(StrictMaybe::Just(value))
+                            }
+                        }
+                    },
+                    Some(_) => {
+                        let value = T::decode(d, ctx)?;
+                        Ok(StrictMaybe::Just(value))
                     }
                 }
-            },
-            _ => Err(minicbor::decode::Error::message(
-                "Expected array for StrictMaybe",
-            )),
+            }
+            _ => {
+                let value = T::decode(d, ctx)?;
+                Ok(StrictMaybe::Just(value))
+            }
         }
     }
 }
@@ -347,24 +373,97 @@ struct SnapshotAccountValue {
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
     fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        let len = d.array()?;
-
-        if let Some(array_len) = len {
-            if array_len < 5 {
-                return Err(minicbor::decode::Error::message(format!(
-                    "Expected account array with at least 5 fields, got {array_len}"
-                )));
-            }
+        let mut conway_decoder = d.clone();
+        if let Ok(account) = Self::decode_conway_layout(&mut conway_decoder, ctx) {
+            d.set_position(conway_decoder.position());
+            return Ok(account);
         }
 
-        // Conway account state: [ptr, balance, deposit, stake_pool_delegation, drep_delegation, ...]
-        // ptr is currently not materialized in AccountState, but must be consumed.
-        d.skip()?; // ptr
+        let mut shelley_decoder = d.clone();
+        if let Ok(account) = Self::decode_shelley_layout(&mut shelley_decoder, ctx) {
+            d.set_position(shelley_decoder.position());
+            return Ok(account);
+        }
+
+        let mut pointer_decoder = d.clone();
+        if let Ok(account) = Self::decode_pointer_prefixed_conway_layout(&mut pointer_decoder, ctx)
+        {
+            d.set_position(pointer_decoder.position());
+            return Ok(account);
+        }
+
+        Err(minicbor::decode::Error::message(
+            "Expected account value in Conway, Shelley, or pointer-prefixed Conway layout",
+        ))
+    }
+}
+
+impl SnapshotAccountValue {
+    fn decode_conway_layout<'b, C>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        if !matches!(len, Some(4)) {
+            return Err(minicbor::decode::Error::message(
+                "Expected Conway account array length 4",
+            ));
+        }
+
         let balance = d.decode_with(ctx)?;
         d.skip()?; // deposit
         let pool = d.decode_with(ctx)?;
         let drep = d.decode_with(ctx)?;
 
+        Ok(Self {
+            balance,
+            pool,
+            drep,
+        })
+    }
+
+    fn decode_shelley_layout<'b, C>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        if !matches!(len, Some(4)) {
+            return Err(minicbor::decode::Error::message(
+                "Expected Shelley account array length 4",
+            ));
+        }
+
+        d.skip()?; // ptr
+        let balance = d.decode_with(ctx)?;
+        d.skip()?; // deposit
+        let pool = d.decode_with(ctx)?;
+
+        Ok(Self {
+            balance,
+            pool,
+            drep: StrictMaybe::Nothing,
+        })
+    }
+
+    fn decode_pointer_prefixed_conway_layout<'b, C>(
+        d: &mut Decoder<'b>,
+        ctx: &mut C,
+    ) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        match len {
+            Some(array_len) if array_len >= 5 => {}
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "Expected pointer-prefixed Conway account array length >= 5",
+                ));
+            }
+        }
+
+        d.skip()?; // ptr
+        let balance = d.decode_with(ctx)?;
+        d.skip()?; // deposit
+        let pool = d.decode_with(ctx)?;
+        let drep = d.decode_with(ctx)?;
         skip_remaining_array_items(d, len, 5)?;
 
         Ok(Self {
@@ -373,9 +472,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotAccountValue {
             drep,
         })
     }
-}
 
-impl SnapshotAccountValue {
     fn to_normalized(&self) -> NormalizedAccount {
         NormalizedAccount {
             rewards: self.balance,
@@ -460,6 +557,35 @@ where
             Type::Null | Type::Undefined => {
                 d.skip()?;
                 Ok(SnapshotOption(None))
+            }
+            Type::Array | Type::ArrayIndef => {
+                let mut probe = d.clone();
+                match probe.array()? {
+                    Some(0) => {
+                        d.array()?;
+                        Ok(SnapshotOption(None))
+                    }
+                    Some(1) => {
+                        d.array()?;
+                        let t = T::decode(d, ctx)?;
+                        Ok(SnapshotOption(Some(t)))
+                    }
+                    Some(_) => {
+                        let t = T::decode(d, ctx)?;
+                        Ok(SnapshotOption(Some(t)))
+                    }
+                    None => match probe.datatype()? {
+                        Type::Break => {
+                            d.array()?;
+                            d.skip()?;
+                            Ok(SnapshotOption(None))
+                        }
+                        _ => {
+                            let t = T::decode(d, ctx)?;
+                            Ok(SnapshotOption(Some(t)))
+                        }
+                    },
+                }
             }
             _ => {
                 let t = T::decode(d, ctx)?;
@@ -897,22 +1023,7 @@ struct ParsedMetadataWithoutUtxoPosition {
 /// Streaming snapshot parser with callback interface
 pub struct StreamingSnapshotParser {
     file_path: String,
-    chunk_size: usize,
-}
-
-/// Chunked CBOR reader for large files (infrastructure for future optimization)
-struct ChunkedCborReader {
-    file: File,
-    file_size: u64,
-}
-
-impl ChunkedCborReader {
-    fn new(mut file: File, _chunk_size: usize) -> Result<Self> {
-        let file_size = file.seek(SeekFrom::End(0))?;
-        file.seek(SeekFrom::Start(0))?;
-
-        Ok(ChunkedCborReader { file, file_size })
-    }
+    utxo_sidecar_path: Option<String>,
 }
 
 impl StreamingSnapshotParser {
@@ -930,13 +1041,12 @@ impl StreamingSnapshotParser {
     }
 
     fn find_utxo_sidecar_path(&self) -> Option<PathBuf> {
-        let snapshot_path = Path::new(&self.file_path);
-        let candidate = Self::utxo_sidecar_path(snapshot_path);
-
-        match candidate {
-            Some(path) if path.exists() => Some(path),
-            _ => None,
+        if let Some(path) = &self.utxo_sidecar_path {
+            return Some(PathBuf::from(path));
         }
+
+        let snapshot_path = Path::new(&self.file_path);
+        Self::utxo_sidecar_path(snapshot_path)
     }
 
     fn parse_empty_utxo_placeholder_bytes(file: &mut File, offset: u64) -> Result<u64> {
@@ -986,16 +1096,16 @@ impl StreamingSnapshotParser {
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
             file_path: file_path.into(),
-            chunk_size: 16 * 1024 * 1024, // 16MB chunks
+            utxo_sidecar_path: None,
         }
     }
 
-    /// Create a new streaming parser with custom chunk size
-    pub fn with_chunk_size(file_path: impl Into<String>, chunk_size: usize) -> Self {
-        Self {
-            file_path: file_path.into(),
-            chunk_size,
-        }
+    /// Set explicit UTxO sidecar path.
+    ///
+    /// When set, the parser uses this path directly instead of inferring from snapshot file name.
+    pub fn with_utxo_sidecar_path(mut self, utxo_sidecar_path: impl Into<String>) -> Self {
+        self.utxo_sidecar_path = Some(utxo_sidecar_path.into());
+        self
     }
 
     /// Parse the snapshot file and invoke callbacks
@@ -1030,25 +1140,22 @@ impl StreamingSnapshotParser {
     /// ]
     /// ```
     pub fn parse<C: SnapshotCallbacks>(&self, callbacks: &mut C, network: NetworkId) -> Result<()> {
-        let file = File::open(&self.file_path)
+        let mut snapshot_file = File::open(&self.file_path)
             .context(format!("Failed to open snapshot file: {}", self.file_path))?;
+        let snapshot_file_size = snapshot_file.metadata()?.len();
 
         let mut ctx = SnapshotContext {
             network: network.clone(),
         };
 
-        let mut chunked_reader = ChunkedCborReader::new(file, self.chunk_size)?;
+        // Read the initial portion into memory so we can decode metadata and locate the UTxO placeholder.
+        let metadata_size = 512 * 1024 * 1024;
+        let actual_metadata_size = metadata_size.min(snapshot_file_size as usize);
 
-        // Phase 1: Parse metadata efficiently using larger buffer to handle protocol parameters
-        // Read initial portion for metadata parsing (512MB to handle large protocol parameters)
-        let metadata_size = 512 * 1024 * 1024; // 512MB for metadata parsing (increased for PParams)
-        let actual_metadata_size = metadata_size.min(chunked_reader.file_size as usize);
-
-        // Read metadata portion
         let metadata_buffer = {
             let mut buffer = vec![0u8; actual_metadata_size];
-            chunked_reader.file.seek(SeekFrom::Start(0))?;
-            chunked_reader.file.read_exact(&mut buffer)?;
+            snapshot_file.seek(SeekFrom::Start(0))?;
+            snapshot_file.read_exact(&mut buffer)?;
             buffer
         };
 
@@ -1274,13 +1381,14 @@ impl StreamingSnapshotParser {
                 snapshot_path.display()
             )
         })?;
+        if !utxo_file_path.exists() {
+            return Err(anyhow!(
+                "Expected UTxO sidecar file does not exist: {}",
+                utxo_file_path.display()
+            ));
+        }
 
-        // Continue remainder parsing from the snapshot file.
-        // New snapshot format expects an empty UTxO placeholder map in NES.
-        let mut snapshot_file = File::open(&self.file_path).context(format!(
-            "Failed to open snapshot file for remainder parsing: {}",
-            self.file_path
-        ))?;
+        // The NES file now carries only an empty placeholder for the UTxO map.
         let utxo_placeholder_bytes =
             Self::parse_empty_utxo_placeholder_bytes(&mut snapshot_file, utxo_file_position)?;
 
@@ -1296,7 +1404,6 @@ impl StreamingSnapshotParser {
             "Using split snapshot sources"
         );
 
-        // TRUE STREAMING: Process UTXOs one by one with minimal memory usage
         utxo_file.seek(SeekFrom::Start(0))?;
         let (utxo_count, bytes_consumed_from_file, stake_utxo_values) =
             Self::stream_utxos(&mut utxo_file, callbacks)
@@ -1312,30 +1419,6 @@ impl StreamingSnapshotParser {
             "UTxO streaming complete"
         );
 
-        // ========================================================================
-        // HYBRID APPROACH: MEMORY-BASED PARSING OF REMAINDER
-        // ========================================================================
-        // After extensive analysis, the remaining snapshot data (deposits, fees,
-        // protocol parameters, and mark/set snapshots) can be efficiently
-        // parsed by reading the entire remainder of the file into memory (~500MB)
-        // rather than streaming. This is much smaller than the full 2.5GB file.
-        //
-        // The CBOR structure from this point:
-        // UTxOState[1] = deposits
-        // UTxOState[2] = fees
-        // UTxOState[3] = gov_state
-        // UTxOState[4] = donations
-        // EpochState[2] = PParams (100-300MB)
-        // EpochState[3] = PParamsPrev (100-300MB)
-        // EpochState[4] = SnapShots (100+ MB stake distribution)
-        //
-        // This hybrid approach allows us to:
-        // 1. Continue using efficient UTXO streaming (11M UTXOs in 5s)
-        // 2. Parse remaining sections using snapshot.rs functions
-        // 3. Access mark/set snapshots that were previously unreachable
-        // ========================================================================
-
-        // Calculate remaining file size from current position
         let current_file_size = snapshot_file.metadata()?.len();
         let remaining_bytes = current_file_size.saturating_sub(position_after_utxos);
 
@@ -2656,54 +2739,79 @@ mod tests {
     }
 
     #[test]
-    fn test_account_decode_conway_shape_with_ptr() {
+    fn test_strict_maybe_decode_null_and_direct_layout() {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        enc.array(2).unwrap();
+        enc.null().unwrap();
+        enc.u64(42).unwrap();
+
+        let mut dec = Decoder::new(&buf);
+        dec.array().unwrap();
+
+        let null_case: StrictMaybe<u64> = dec.decode().unwrap();
+        let direct_value_case: StrictMaybe<u64> = dec.decode().unwrap();
+
+        assert!(matches!(null_case, StrictMaybe::Nothing));
+        assert!(matches!(direct_value_case, StrictMaybe::Just(42)));
+    }
+
+    #[test]
+    fn test_account_decode_shelley_shape_with_ptr() {
         fn decode_account(bytes: &[u8]) -> SnapshotAccountValue {
             let mut dec = Decoder::new(bytes);
             dec.decode().unwrap()
         }
 
-        // Schema-aligned form: [ptr, balance, deposit, pool, drep]
+        // Shelley account state: [ptr, balance, deposit, stake_pool_delegation]
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
-        enc.array(5).unwrap();
-        enc.null().unwrap(); // ptr
+        enc.array(4).unwrap();
+        enc.array(3).unwrap();
+        enc.u64(1).unwrap();
+        enc.u64(2).unwrap();
+        enc.u64(3).unwrap();
         enc.u64(300).unwrap();
         enc.u64(40).unwrap();
-        enc.array(1).unwrap();
         enc.bytes(&[0x33; 28]).unwrap();
-        enc.array(1).unwrap();
-        enc.array(1).unwrap();
-        enc.u16(2).unwrap(); // DRep::Abstain
 
         let parsed = decode_account(&buf).to_normalized();
         assert_eq!(parsed.rewards, 300);
         assert!(parsed.delegated_spo.is_some());
-        assert!(matches!(parsed.delegated_drep, Some(DRepChoice::Abstain)));
+        assert!(parsed.delegated_drep.is_none());
     }
 
     #[test]
-    fn test_account_decode_without_ptr_rejected() {
-        // Missing ptr field: [balance, deposit, pool, drep]
+    fn test_account_decode_conway_shape_without_ptr() {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
         enc.array(4).unwrap();
         enc.u64(300).unwrap();
         enc.u64(40).unwrap();
-        enc.array(1).unwrap();
         enc.bytes(&[0x33; 28]).unwrap();
-        enc.array(1).unwrap();
         enc.array(1).unwrap();
         enc.u16(2).unwrap(); // DRep::Abstain
 
         let mut dec = Decoder::new(&buf);
-        let decoded: Result<SnapshotAccountValue, _> = dec.decode();
-        assert!(decoded.is_err());
+        let decoded: SnapshotAccountValue = dec.decode().unwrap();
+        let parsed = decoded.to_normalized();
+
+        assert_eq!(parsed.rewards, 300);
+        assert!(parsed.delegated_spo.is_some());
+        assert!(matches!(parsed.delegated_drep, Some(DRepChoice::Abstain)));
     }
 
     fn encode_margin(enc: &mut Encoder<&mut Vec<u8>>) {
         enc.array(2).unwrap();
         enc.u64(1).unwrap();
         enc.u64(2).unwrap();
+    }
+
+    fn encode_wrapped_pool_metadata(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
+        enc.array(1).unwrap();
+        enc.array(2).unwrap();
+        enc.str("https://example.com").unwrap();
+        enc.bytes(&[seed; 32]).unwrap();
     }
 
     fn encode_pool_params_without_operator(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
@@ -2723,6 +2831,28 @@ mod tests {
         enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
         enc.array(0).unwrap(); // relays
         enc.null().unwrap(); // metadata
+    }
+
+    fn encode_pool_params_without_operator_with_wrapped_metadata(
+        enc: &mut Encoder<&mut Vec<u8>>,
+        seed: u8,
+    ) {
+        let reward_address = StakeAddress::new(
+            StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
+            NetworkId::Testnet,
+        )
+        .to_binary();
+
+        enc.array(8).unwrap();
+        enc.bytes(&[seed.wrapping_add(2); 32]).unwrap(); // vrf
+        enc.u64(1_000).unwrap(); // pledge
+        enc.u64(340).unwrap(); // cost
+        encode_margin(enc);
+        enc.bytes(&reward_address).unwrap(); // reward account
+        enc.array(1).unwrap(); // owners
+        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
+        enc.array(0).unwrap(); // relays
+        encode_wrapped_pool_metadata(enc, seed.wrapping_add(4));
     }
 
     fn encode_new_layout_pstate(future_mode: &str) -> Vec<u8> {
@@ -2784,5 +2914,50 @@ mod tests {
         assert_eq!(parsed.pools.len(), 1);
         assert_eq!(parsed.updates.len(), 1);
         assert_eq!(parsed.retiring.len(), 0);
+    }
+
+    #[test]
+    fn test_snapshot_option_decodes_wrapped_pool_metadata() {
+        let mut buf = Vec::new();
+        let mut enc = Encoder::new(&mut buf);
+        encode_wrapped_pool_metadata(&mut enc, 0x44);
+
+        let mut dec = Decoder::new(&buf);
+        let parsed: SnapshotOption<SnapshotPoolMetadata> = dec.decode().unwrap();
+        let metadata = parsed.0.unwrap().0;
+
+        assert_eq!(metadata.url, "https://example.com");
+        assert_eq!(metadata.hash, Hash::new([0x44; 32]));
+    }
+
+    #[test]
+    fn test_parse_pstate_new_layout_with_wrapped_pool_metadata() {
+        let mut bytes = Vec::new();
+        let mut enc = Encoder::new(&mut bytes);
+
+        enc.array(4).unwrap();
+        enc.map(0).unwrap(); // PState[0] psVRFKeyHashes
+        enc.map(1).unwrap(); // PState[1] psStakePools
+        enc.bytes(&[0x11; 28]).unwrap();
+        encode_pool_params_without_operator_with_wrapped_metadata(&mut enc, 0x21);
+        enc.map(0).unwrap(); // PState[2] psFutureStakePoolParams
+        enc.map(0).unwrap(); // PState[3] psRetiring
+
+        let mut decoder = Decoder::new(&bytes);
+        let mut ctx = SnapshotContext {
+            network: NetworkId::Testnet,
+        };
+
+        let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
+        let pool = parsed.pools.values().next().unwrap();
+
+        assert_eq!(
+            pool.pool_metadata.as_ref().unwrap().url,
+            "https://example.com"
+        );
+        assert_eq!(
+            pool.pool_metadata.as_ref().unwrap().hash,
+            Hash::new([0x25; 32])
+        );
     }
 }
