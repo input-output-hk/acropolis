@@ -10,6 +10,24 @@ use pallas_traverse::{
     OriginalHash,
 };
 
+pub fn extract_plutus_scripts_witnesses(tx: &MultiEraTx) -> Vec<ReferenceScript> {
+    let mut plutus_scripts_witnesses = Vec::new();
+
+    for script in tx.plutus_v1_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV1(script.as_ref().to_vec()));
+    }
+
+    for script in tx.plutus_v2_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV2(script.as_ref().to_vec()));
+    }
+
+    for script in tx.plutus_v3_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV3(script.as_ref().to_vec()));
+    }
+
+    plutus_scripts_witnesses
+}
+
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
     inputs
         .iter()

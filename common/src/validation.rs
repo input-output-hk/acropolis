@@ -371,6 +371,20 @@ pub enum UTxOWValidationError {
         utxo_identifier: UTxOIdentifier,
         input_index: usize,
     },
+
+    /// **Cause:** Malformed Script Witnesses
+    #[error("Malformed script witness: script_hash={script_hash}, reason={reason}")]
+    MalformedScriptWitnesses {
+        script_hash: ScriptHash,
+        reason: String,
+    },
+
+    /// **Cause:** Malformed Reference Script
+    #[error("Malformed reference script: script_hash={script_hash}, reason={reason}")]
+    MalformedReferenceScript {
+        script_hash: ScriptHash,
+        reason: String,
+    },
 }
 
 /// Reference
