@@ -633,7 +633,108 @@ where
     }
 }
 
-/// Stake pool params in PState are encoded without operator because map key is pool id.
+/// Stake pool state in PState is keyed by pool id, so the value omits the operator.
+/// The reward account is stored as a staking credential rather than a full reward address.
+struct SnapshotPoolStateWithoutOperator(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolStateWithoutOperator
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let len = d.array()?;
+        match len {
+            Some(array_len) if array_len >= 10 => {}
+            _ => {
+                return Err(minicbor::decode::Error::message(
+                    "Expected StakePoolState array length >= 10",
+                ));
+            }
+        }
+
+        let vrf_key_hash = d.decode_with(ctx).map_err(|e| {
+            minicbor::decode::Error::message(format!("failed to decode vrf key hash: {e}"))
+        })?;
+        let pledge = d.decode_with(ctx).map_err(|e| {
+            minicbor::decode::Error::message(format!("failed to decode pledge: {e}"))
+        })?;
+        let cost = d
+            .decode_with(ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode cost: {e}")))?;
+        let margin = SnapshotRatio::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode margin: {e}")))?
+            .0;
+        let reward_credential = StakeCredential::decode(d, ctx).map_err(|e| {
+            minicbor::decode::Error::message(format!(
+                "failed to decode reward account credential: {e}"
+            ))
+        })?;
+        let pool_owners = SnapshotSet::<SnapshotStakeKeyHash>::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode owners: {e}")))?
+            .0
+            .into_iter()
+            .map(|owner| {
+                StakeAddress::new(
+                    StakeCredential::AddrKeyHash(owner.0),
+                    ctx.as_ref().network.clone(),
+                )
+            })
+            .collect();
+        let relays = Vec::<SnapshotRelay>::decode(d, ctx)
+            .map_err(|e| minicbor::decode::Error::message(format!("failed to decode relays: {e}")))?
+            .into_iter()
+            .map(|r| r.0)
+            .collect();
+        let pool_metadata = SnapshotOption::<SnapshotPoolMetadata>::decode(d, ctx)
+            .map_err(|e| {
+                minicbor::decode::Error::message(format!("failed to decode pool metadata: {e}"))
+            })?
+            .0
+            .map(|m| m.0);
+
+        skip_remaining_array_items(d, len, 8)?;
+
+        Ok(Self(PoolRegistration {
+            operator: PoolId::default(),
+            vrf_key_hash,
+            pledge,
+            cost,
+            margin,
+            reward_account: StakeAddress::new(reward_credential, ctx.as_ref().network.clone()),
+            pool_owners,
+            relays,
+            pool_metadata,
+        }))
+    }
+}
+
+struct SnapshotCurrentPoolRegistration(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotCurrentPoolRegistration
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let mut state_decoder = d.clone();
+        if let Ok(pool) = SnapshotPoolStateWithoutOperator::decode(&mut state_decoder, ctx) {
+            d.set_position(state_decoder.position());
+            return Ok(Self(pool.0));
+        }
+
+        let mut params_decoder = d.clone();
+        if let Ok(pool) = SnapshotPoolRegistrationWithoutOperator::decode(&mut params_decoder, ctx)
+        {
+            d.set_position(params_decoder.position());
+            return Ok(Self(pool.0));
+        }
+
+        Err(minicbor::decode::Error::message(
+            "Expected StakePoolState or operator-less StakePoolParams",
+        ))
+    }
+}
+
+/// Fallback for operator-less pool params encodings where the map key carries the pool id.
 struct SnapshotPoolRegistrationWithoutOperator(pub PoolRegistration);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotPoolRegistrationWithoutOperator
@@ -693,6 +794,33 @@ where
     }
 }
 
+struct SnapshotFuturePoolRegistration(pub PoolRegistration);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotFuturePoolRegistration
+where
+    C: AsRef<SnapshotContext>,
+{
+    fn decode(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let mut params_decoder = d.clone();
+        if let Ok(pool) = SnapshotPoolRegistration::decode(&mut params_decoder, ctx) {
+            d.set_position(params_decoder.position());
+            return Ok(Self(pool.0));
+        }
+
+        let mut fallback_decoder = d.clone();
+        if let Ok(pool) =
+            SnapshotPoolRegistrationWithoutOperator::decode(&mut fallback_decoder, ctx)
+        {
+            d.set_position(fallback_decoder.position());
+            return Ok(Self(pool.0));
+        }
+
+        Err(minicbor::decode::Error::message(
+            "Expected StakePoolParams with or without embedded operator",
+        ))
+    }
+}
+
 struct SnapshotRatio(pub Ratio);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotRatio {
@@ -742,6 +870,17 @@ where
             StakeCredential::AddrKeyHash(bytes),
             ctx.as_ref().network.clone(),
         )))
+    }
+}
+
+struct SnapshotStakeKeyHash(pub AddrKeyhash);
+
+impl<'b, C> minicbor::Decode<'b, C> for SnapshotStakeKeyHash {
+    fn decode(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let bytes = d.bytes()?;
+        let hash = Hash::<28>::try_from(bytes)
+            .map_err(|e| minicbor::decode::Error::message(e.to_string()))?;
+        Ok(Self(hash))
     }
 }
 
@@ -2415,7 +2554,7 @@ impl StreamingSnapshotParser {
         normalized
     }
 
-    fn parse_pool_params_map(
+    fn parse_current_pool_state_map(
         decoder: &mut Decoder,
         ctx: &mut SnapshotContext,
         map_name: &str,
@@ -2424,7 +2563,7 @@ impl StreamingSnapshotParser {
             decoder.tag()?;
         }
 
-        let map: BTreeMap<PoolId, SnapshotPoolRegistrationWithoutOperator> = decoder
+        let map: BTreeMap<PoolId, SnapshotCurrentPoolRegistration> = decoder
             .decode_with(ctx)
             .map_err(|err| {
                 error!(
@@ -2442,7 +2581,47 @@ impl StreamingSnapshotParser {
             map = map_name,
             entries = entry_count,
             byte_offset = decoder.position(),
-            "Decoded pool params map without operator"
+            "Decoded current pool state map"
+        );
+
+        Ok(map
+            .into_iter()
+            .map(|(pool_id, pool)| {
+                let mut pool_registration = pool.0;
+                pool_registration.operator = pool_id;
+                (pool_id, pool_registration)
+            })
+            .collect())
+    }
+
+    fn parse_future_pool_params_map(
+        decoder: &mut Decoder,
+        ctx: &mut SnapshotContext,
+        map_name: &str,
+    ) -> Result<BTreeMap<PoolId, PoolRegistration>> {
+        if matches!(decoder.datatype()?, Type::Tag) {
+            decoder.tag()?;
+        }
+
+        let map: BTreeMap<PoolId, SnapshotFuturePoolRegistration> = decoder
+            .decode_with(ctx)
+            .map_err(|err| {
+                error!(
+                    map = map_name,
+                    byte_offset = decoder.position(),
+                    error = %err,
+                    "Failed to decode future pool params map"
+                );
+                err
+            })
+            .context(format!("Failed to decode {map_name}"))?;
+
+        let entry_count = map.len();
+        info!(
+            map = map_name,
+            entries = entry_count,
+            byte_offset = decoder.position(),
+            "Decoded future pool params map"
         );
 
         Ok(map
@@ -2504,11 +2683,11 @@ impl StreamingSnapshotParser {
         decoder.skip().context("Failed to skip PState[0] VRF key hash map (new-era layout)")?;
 
         // [1] psStakePools
-        let pools = Self::parse_pool_params_map(decoder, ctx, "PState[1] stake_pools")?;
+        let pools = Self::parse_current_pool_state_map(decoder, ctx, "PState[1] stake_pools")?;
 
         // [2] psFutureStakePoolParams
         let updates =
-            Self::parse_pool_params_map(decoder, ctx, "PState[2] future_stake_pool_params")?;
+            Self::parse_future_pool_params_map(decoder, ctx, "PState[2] future_stake_pool_params")?;
 
         // [3] psRetiring
         let retiring = Self::parse_retiring_map(decoder, "PState[3] retiring")?;
@@ -2939,6 +3118,59 @@ mod tests {
         enc.bytes(&[seed; 32]).unwrap();
     }
 
+    fn encode_pool_state_without_operator(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
+        enc.array(10).unwrap();
+        enc.bytes(&[seed.wrapping_add(1); 32]).unwrap(); // vrf
+        enc.u64(1_000).unwrap(); // pledge
+        enc.u64(340).unwrap(); // cost
+        encode_margin(enc);
+        encode_addr_key_hash_credential(enc, seed.wrapping_add(2)); // reward account credential
+        enc.array(1).unwrap(); // owners
+        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
+        enc.array(0).unwrap(); // relays
+        enc.null().unwrap(); // metadata
+        enc.u64(500).unwrap(); // deposit
+        enc.array(0).unwrap(); // delegators
+    }
+
+    fn encode_pool_state_without_operator_with_wrapped_metadata(
+        enc: &mut Encoder<&mut Vec<u8>>,
+        seed: u8,
+    ) {
+        enc.array(10).unwrap();
+        enc.bytes(&[seed.wrapping_add(1); 32]).unwrap(); // vrf
+        enc.u64(1_000).unwrap(); // pledge
+        enc.u64(340).unwrap(); // cost
+        encode_margin(enc);
+        encode_addr_key_hash_credential(enc, seed.wrapping_add(2)); // reward account credential
+        enc.array(1).unwrap(); // owners
+        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
+        enc.array(0).unwrap(); // relays
+        encode_wrapped_pool_metadata(enc, seed.wrapping_add(4));
+        enc.u64(500).unwrap(); // deposit
+        enc.array(0).unwrap(); // delegators
+    }
+
+    fn encode_pool_params_with_operator(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
+        let reward_address = StakeAddress::new(
+            StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
+            NetworkId::Testnet,
+        )
+        .to_binary();
+
+        enc.array(9).unwrap();
+        enc.bytes(&[seed; 28]).unwrap(); // operator
+        enc.bytes(&[seed.wrapping_add(2); 32]).unwrap(); // vrf
+        enc.u64(1_000).unwrap(); // pledge
+        enc.u64(340).unwrap(); // cost
+        encode_margin(enc);
+        enc.bytes(&reward_address).unwrap(); // reward account
+        enc.array(1).unwrap(); // owners
+        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
+        enc.array(0).unwrap(); // relays
+        enc.null().unwrap(); // metadata
+    }
+
     fn encode_pool_params_without_operator(enc: &mut Encoder<&mut Vec<u8>>, seed: u8) {
         let reward_address = StakeAddress::new(
             StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
@@ -2958,28 +3190,6 @@ mod tests {
         enc.null().unwrap(); // metadata
     }
 
-    fn encode_pool_params_without_operator_with_wrapped_metadata(
-        enc: &mut Encoder<&mut Vec<u8>>,
-        seed: u8,
-    ) {
-        let reward_address = StakeAddress::new(
-            StakeCredential::AddrKeyHash(Hash::new([seed.wrapping_add(1); 28])),
-            NetworkId::Testnet,
-        )
-        .to_binary();
-
-        enc.array(8).unwrap();
-        enc.bytes(&[seed.wrapping_add(2); 32]).unwrap(); // vrf
-        enc.u64(1_000).unwrap(); // pledge
-        enc.u64(340).unwrap(); // cost
-        encode_margin(enc);
-        enc.bytes(&reward_address).unwrap(); // reward account
-        enc.array(1).unwrap(); // owners
-        enc.bytes(&[seed.wrapping_add(3); 28]).unwrap();
-        enc.array(0).unwrap(); // relays
-        encode_wrapped_pool_metadata(enc, seed.wrapping_add(4));
-    }
-
     fn encode_new_layout_pstate(future_mode: &str) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut enc = Encoder::new(&mut buf);
@@ -2989,17 +3199,22 @@ mod tests {
         // PState[0] psVRFKeyHashes
         enc.map(0).unwrap();
 
-        // PState[1] psStakePools (no operator in value)
+        // PState[1] psStakePools (StakePoolState values, keyed by pool id)
         enc.map(1).unwrap();
         enc.bytes(&[0x11; 28]).unwrap();
-        encode_pool_params_without_operator(&mut enc, 0x21);
+        encode_pool_state_without_operator(&mut enc, 0x21);
 
         // PState[2] psFutureStakePoolParams
         match future_mode {
             "empty" => {
                 enc.map(0).unwrap();
             }
-            "without_operator" => {
+            "with_operator" => {
+                enc.map(1).unwrap();
+                enc.bytes(&[0x23; 28]).unwrap();
+                encode_pool_params_with_operator(&mut enc, 0x23);
+            }
+            "without_operator_fallback" => {
                 enc.map(1).unwrap();
                 enc.bytes(&[0x23; 28]).unwrap();
                 encode_pool_params_without_operator(&mut enc, 0x32);
@@ -3028,8 +3243,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_pstate_new_layout_without_operator_future_map() {
-        let bytes = encode_new_layout_pstate("without_operator");
+    fn test_parse_pstate_new_layout_with_haskell_shapes() {
+        let bytes = encode_new_layout_pstate("with_operator");
         let mut decoder = Decoder::new(&bytes);
         let mut ctx = SnapshotContext {
             network: NetworkId::Testnet,
@@ -3039,6 +3254,28 @@ mod tests {
         assert_eq!(parsed.pools.len(), 1);
         assert_eq!(parsed.updates.len(), 1);
         assert_eq!(parsed.retiring.len(), 0);
+
+        let pool = parsed.pools.get(&PoolId::new(Hash::new([0x11; 28]))).unwrap();
+        assert_eq!(
+            pool.reward_account,
+            StakeAddress::new(
+                StakeCredential::AddrKeyHash(Hash::new([0x23; 28])),
+                NetworkId::Testnet,
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_pstate_new_layout_future_map_without_operator_fallback() {
+        let bytes = encode_new_layout_pstate("without_operator_fallback");
+        let mut decoder = Decoder::new(&bytes);
+        let mut ctx = SnapshotContext {
+            network: NetworkId::Testnet,
+        };
+
+        let parsed = StreamingSnapshotParser::parse_pstate(&mut decoder, &mut ctx).unwrap();
+        assert_eq!(parsed.pools.len(), 1);
+        assert_eq!(parsed.updates.len(), 1);
     }
 
     #[test]
@@ -3064,7 +3301,7 @@ mod tests {
         enc.map(0).unwrap(); // PState[0] psVRFKeyHashes
         enc.map(1).unwrap(); // PState[1] psStakePools
         enc.bytes(&[0x11; 28]).unwrap();
-        encode_pool_params_without_operator_with_wrapped_metadata(&mut enc, 0x21);
+        encode_pool_state_without_operator_with_wrapped_metadata(&mut enc, 0x21);
         enc.map(0).unwrap(); // PState[2] psFutureStakePoolParams
         enc.map(0).unwrap(); // PState[3] psRetiring
 
