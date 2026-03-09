@@ -886,25 +886,34 @@ impl State {
         tx.produces.first().map(|output| output.utxo_identifier.tx_hash)
     }
 
-    async fn collect_utxos(
+    async fn collect_utxos_and_reference_scripts(
         &self,
         inputs: &[&UTxOIdentifier],
-    ) -> HashMap<UTxOIdentifier, UTXOValue> {
+    ) -> (
+        HashMap<UTxOIdentifier, UTXOValue>,
+        HashMap<ScriptHash, ReferenceScript>,
+    ) {
         let mut utxos = HashMap::new();
+        let mut reference_scripts = HashMap::new();
+
         for input in inputs.iter().cloned() {
             if utxos.contains_key(input) {
                 continue;
             }
             if let Ok(Some(utxo)) = self.lookup_utxo(input).await {
-                utxos.insert(*input, Some(utxo));
-            } else {
-                utxos.insert(*input, None);
+                if let Some(script_ref) = utxo.script_ref.as_ref() {
+                    if let Some(reference_script) =
+                        self.lookup_reference_script(&script_ref.script_hash)
+                    {
+                        reference_scripts.insert(script_ref.script_hash, reference_script);
+                    }
+                }
+
+                utxos.insert(*input, utxo);
             }
         }
-        utxos
-            .into_iter()
-            .filter_map(|(input, utxo)| utxo.map(|utxo| (input, utxo)))
-            .collect::<HashMap<_, _>>()
+
+        (utxos, reference_scripts)
     }
 
     pub async fn validate(
@@ -922,7 +931,8 @@ impl State {
         let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
-        let mut utxos = self.collect_utxos(&all_inputs).await;
+        let (mut utxos, mut reference_scripts) =
+            self.collect_utxos_and_reference_scripts(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
@@ -931,6 +941,7 @@ impl State {
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
+                    &reference_scripts,
                     protocol_params.shelley.as_ref(),
                     block.era,
                 ) {
@@ -939,8 +950,23 @@ impl State {
             }
 
             // add this transaction's outputs to the utxos
+            // if there are reference scripts in outputs,
+            // add them to reference_scripts
             for output in &tx_deltas.produces {
                 utxos.insert(output.utxo_identifier, output.utxo_value());
+                let tx_reference_scripts = match tx_deltas.reference_scripts.as_ref() {
+                    Some(scripts) => scripts,
+                    None => &vec![],
+                };
+
+                if let Some(script_ref) = output.script_ref.as_ref() {
+                    if let Some((hash, ref_script)) = tx_reference_scripts
+                        .iter()
+                        .find(|(script_hash, _)| *script_hash == script_ref.script_hash)
+                    {
+                        reference_scripts.insert(*hash, ref_script.clone());
+                    }
+                }
             }
         }
 

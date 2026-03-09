@@ -5,8 +5,8 @@ use acropolis_common::{
     get_scripts_needed_from_certificates, get_scripts_needed_from_inputs,
     get_scripts_needed_from_mint_burn, get_scripts_needed_from_proposal,
     get_scripts_needed_from_voting, get_scripts_needed_from_withdrawals,
-    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash, ScriptLang,
-    ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ReferenceScript, ScriptHash,
+    ScriptLang, ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 
 /// Get VKey Hashes needed for transaction
@@ -178,4 +178,37 @@ pub fn get_scripts_provided(
         }
     }
     scripts_provided
+}
+
+/// Get Reference Scripts provided by transaction
+/// from TxUTxODeltas message
+/// Reference scripts can be provided from inputs UTxOs and Reference Inputs
+pub fn get_reference_scripts(
+    tx_deltas: &TxUTxODeltas,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    ref_scripts: &HashMap<ScriptHash, ReferenceScript>,
+) -> HashMap<ScriptHash, ReferenceScript> {
+    let mut reference_scripts = HashMap::new();
+
+    for input in tx_deltas.consumes.iter() {
+        if let Some(utxo) = utxos.get(input) {
+            if let Some(script_ref) = utxo.script_ref.as_ref() {
+                if let Some(ref_script) = ref_scripts.get(&script_ref.script_hash) {
+                    reference_scripts.insert(script_ref.script_hash, ref_script.clone());
+                }
+            }
+        }
+    }
+
+    for input in tx_deltas.reference_inputs.iter() {
+        if let Some(utxo) = utxos.get(input) {
+            if let Some(script_ref) = utxo.script_ref.as_ref() {
+                if let Some(ref_script) = ref_scripts.get(&script_ref.script_hash) {
+                    reference_scripts.insert(script_ref.script_hash, ref_script.clone());
+                }
+            }
+        }
+    }
+
+    reference_scripts
 }

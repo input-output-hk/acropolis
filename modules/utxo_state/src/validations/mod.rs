@@ -3,12 +3,14 @@ use std::collections::{HashMap, HashSet};
 use acropolis_common::{
     protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
+    TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 
 use crate::utils;
 mod alonzo;
+mod babbage;
 mod shelley;
 
 pub fn validate_tx(
@@ -16,6 +18,7 @@ pub fn validate_tx(
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    reference_scripts: &HashMap<ScriptHash, ReferenceScript>,
     shelley_params: Option<&ShelleyParams>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
@@ -52,11 +55,11 @@ pub fn validate_tx(
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
-    let outputs = &tx_deltas.produces;
-    let ref_inputs = &tx_deltas.reference_inputs;
-    let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
-    let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
     if era >= Era::Alonzo {
+        let outputs = &tx_deltas.produces;
+        let ref_inputs = &tx_deltas.reference_inputs;
+        let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
+        let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
         alonzo::utxow::validate(
             inputs,
             outputs,
@@ -69,6 +72,12 @@ pub fn validate_tx(
             tx_deltas.is_valid,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
+    if era >= Era::Babbage {
+        let tx_ref_scripts = utils::get_reference_scripts(tx_deltas, utxos, reference_scripts);
+        babbage::utxow::validate(&tx_ref_scripts)
+            .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
     Ok(())

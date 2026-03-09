@@ -1,8 +1,8 @@
 use std::{collections::HashMap, str::FromStr};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, Address, Datum, Era, ScriptRef, TxHash, UTXOValue,
-    UTxOIdentifier, Value,
+    protocol_params::ShelleyParams, Address, Datum, Era, ReferenceScript, ScriptHash, ScriptRef,
+    TxHash, UTXOValue, UTxOIdentifier, Value,
 };
 use pallas::ledger::traverse::Era as PallasEra;
 
@@ -18,12 +18,15 @@ pub struct UTxOValueJson {
 pub struct TestContextJson {
     pub shelley_params: ShelleyParams,
     pub utxos: HashMap<String, UTxOValueJson>,
+    #[serde(default)]
+    pub reference_scripts: HashMap<String, ReferenceScript>,
 }
 
 #[derive(Debug)]
 pub struct TestContext {
     pub shelley_params: ShelleyParams,
     pub utxos: HashMap<UTxOIdentifier, UTXOValue>,
+    pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
 }
 
 impl From<TestContextJson> for TestContext {
@@ -46,6 +49,11 @@ impl From<TestContextJson> for TestContext {
                         },
                     )
                 })
+                .collect(),
+            reference_scripts: json
+                .reference_scripts
+                .iter()
+                .map(|(k, v)| (ScriptHash::from_str(k).unwrap(), v.clone()))
                 .collect(),
         }
     }
