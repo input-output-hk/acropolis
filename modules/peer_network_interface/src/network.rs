@@ -9,7 +9,7 @@ use acropolis_common::BlockHash;
 use anyhow::{Context as _, Result, bail};
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{info, warn};
 
 struct PeerData {
     conn: PeerConnection,
@@ -58,6 +58,10 @@ pub struct NetworkManager {
     events_sender: mpsc::Sender<NetworkEvent>,
     block_sink: BlockSink,
     published_blocks: u64,
+    /// Wanted blocks that could not be fetched immediately because
+    /// no current announcer was available. Retried opportunistically when
+    /// peer events arrive.
+    pending_wanted: BTreeMap<(u64, BlockHash), ()>,
     sync_point: Option<Point>,
     flow_handler: BlockFlowHandler,
 }
@@ -79,6 +83,7 @@ impl NetworkManager {
             events_sender,
             block_sink,
             published_blocks: 0,
+            pending_wanted: BTreeMap::new(),
             sync_point: None,
             flow_handler,
         };
@@ -106,6 +111,7 @@ impl NetworkManager {
             }
             NetworkEvent::SyncPointUpdate { point } => {
                 self.flow_handler.handle_sync_reset();
+                self.pending_wanted.clear();
 
                 for peer in self.peers.values_mut() {
                     peer.reqs.clear();
@@ -125,8 +131,25 @@ impl NetworkManager {
             NetworkEvent::BlockWanted { hash, slot } => {
                 if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
                     self.request_block(slot, hash, announcers);
+                    self.pending_wanted.remove(&(slot, hash));
                 } else {
-                    warn!("BlockWanted for unknown block {hash} at slot {slot}");
+                    if self.flow_handler.knows_block(slot, hash) {
+                        warn!(
+                            "BlockWanted for known block {hash} at slot {slot}, but no eligible announcers yet"
+                        );
+                    } else {
+                        warn!("BlockWanted for unknown block {hash} at slot {slot}");
+                    }
+                    self.pending_wanted.insert((slot, hash), ());
+                }
+            }
+            NetworkEvent::BlockRejected { hash, slot } => {
+                let peers = self.flow_handler.block_rejected_announcers(hash);
+                if peers.is_empty() {
+                    warn!("BlockRejected for unknown block {hash} at slot {slot}");
+                }
+                for peer in peers {
+                    self.handle_disconnect(peer);
                 }
             }
         }
@@ -195,6 +218,7 @@ impl NetworkManager {
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::RollBackward(point, tip)) => {
                 self.flow_handler.handle_tip(peer, tip);
+                info!("peer {:?} rolled back to {:?}", peer, point);
                 self.flow_handler.handle_roll_backward(peer, point);
             }
             PeerEvent::ChainSync(PeerChainSyncEvent::IntersectNotFound(tip)) => {
@@ -215,6 +239,10 @@ impl NetworkManager {
                 self.handle_disconnect(peer);
             }
         }
+
+        // Retry wants that were temporarily unresolved (e.g. out-of-order
+        // BlockWanted vs announcement, or announcer churn during disconnects).
+        self.retry_pending_wanted();
     }
 
     fn handle_disconnect(&mut self, id: PeerId) {
@@ -226,18 +254,38 @@ impl NetworkManager {
         // The next peer is temporary needed for Direct mode flow handler only
         self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
 
-        if self.flow_handler.should_rerequest_on_disconnect() {
-            for (requested_hash, requested_slot) in peer.reqs {
-                if let Some(announcers) =
-                    self.flow_handler.block_announcers(requested_slot, requested_hash)
-                {
-                    self.request_block(requested_slot, requested_hash, announcers);
-                }
+        // Re-request any in-flight block fetches from remaining announcers.
+        // Once a block has been requested, losing the serving peer must not leave that fetch
+        // permanently stuck waiting for a fresh BlockWanted.
+        for (requested_hash, requested_slot) in peer.reqs {
+            if let Some(announcers) =
+                self.flow_handler.block_announcers(requested_slot, requested_hash)
+            {
+                self.request_block(requested_slot, requested_hash, announcers);
             }
         }
 
         let address = peer.conn.address.clone();
         self.handle_new_connection(address, Duration::from_secs(5));
+    }
+
+    fn retry_pending_wanted(&mut self) {
+        if self.pending_wanted.is_empty() {
+            return;
+        }
+
+        let pending: Vec<(u64, BlockHash)> = self.pending_wanted.keys().copied().collect();
+        for (slot, hash) in pending {
+            if !self.flow_handler.knows_block(slot, hash) {
+                self.pending_wanted.remove(&(slot, hash));
+                continue;
+            }
+
+            if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
+                self.request_block(slot, hash, announcers);
+                self.pending_wanted.remove(&(slot, hash));
+            }
+        }
     }
 
     fn request_block(&mut self, slot: u64, hash: BlockHash, announcers: Vec<PeerId>) {
@@ -258,6 +306,7 @@ pub enum NetworkEvent {
     PeerUpdate { peer: PeerId, event: PeerEvent },
     SyncPointUpdate { point: Point },
     BlockWanted { hash: BlockHash, slot: u64 },
+    BlockRejected { hash: BlockHash, slot: u64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -277,5 +326,185 @@ impl PeerMessageSender {
             })
             .await
             .context("network manager has shut down")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block_flow::BlockFlowHandler;
+    use crate::configuration::{InterfaceConfig, SyncPoint};
+    use crate::connection::{Header, PeerChainSyncEvent, PeerEvent};
+    use acropolis_common::configuration::BlockFlowMode;
+    use acropolis_common::genesis_values::GenesisValues;
+    use acropolis_common::messages::Message;
+    use acropolis_common::{BlockHash, Era};
+    use caryatid_sdk::Context;
+    use caryatid_sdk::mock_bus::MockBus;
+    use config::Config;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::sync::watch;
+
+    fn test_context() -> Arc<Context<Message>> {
+        let config = Arc::new(Config::builder().build().unwrap());
+        let bus = Arc::new(MockBus::<Message>::new(&config));
+        let (_tx, rx) = watch::channel(true);
+        Arc::new(Context::new(config, bus, rx))
+    }
+
+    fn test_sink(context: Arc<Context<Message>>) -> BlockSink {
+        BlockSink {
+            context,
+            topic: "cardano.block.available".to_string(),
+            genesis_values: GenesisValues::mainnet(),
+            upstream_cache: None,
+            last_epoch: None,
+            era: None,
+            rolled_back: false,
+        }
+    }
+
+    async fn test_consensus_manager() -> NetworkManager {
+        let context = test_context();
+        let (events_sender, events) = mpsc::channel(32);
+
+        let cfg = InterfaceConfig {
+            block_topic: "cardano.block.available".to_string(),
+            sync_point: SyncPoint::Origin,
+            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
+            sync_command_topic: "cardano.sync.command".to_string(),
+            node_addresses: vec![],
+            cache_dir: PathBuf::from("/tmp"),
+            genesis_values: None,
+            consensus_topic: "cardano.consensus.offers".to_string(),
+            block_wanted_topic: "cardano.consensus.wants".to_string(),
+        };
+
+        let flow_handler = BlockFlowHandler::new(
+            &cfg,
+            BlockFlowMode::Consensus,
+            context.clone(),
+            events_sender.clone(),
+        )
+        .await
+        .unwrap();
+
+        NetworkManager::new(
+            vec![],
+            0,
+            events,
+            events_sender,
+            test_sink(context),
+            flow_handler,
+        )
+    }
+
+    fn add_test_peer(manager: &mut NetworkManager, peer: PeerId) {
+        let sender = PeerMessageSender {
+            sink: manager.events_sender.clone(),
+            id: peer,
+        };
+        // Delay prevents immediate network activity; tests drive state manually.
+        let conn = PeerConnection::new(
+            "test-peer:3001".to_string(),
+            0,
+            sender,
+            Duration::from_secs(3600),
+        );
+        manager.peers.insert(peer, PeerData::new(conn));
+    }
+
+    fn test_header(slot: u64, number: u64, hash: BlockHash, parent_hash: BlockHash) -> Header {
+        Header {
+            hash,
+            slot,
+            number,
+            bytes: vec![],
+            era: Era::Conway,
+            parent_hash: Some(parent_hash),
+        }
+    }
+
+    #[tokio::test]
+    async fn block_wanted_for_fetched_block_uses_fetched_announcers() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(1);
+        add_test_peer(&mut manager, peer);
+
+        let slot = 100;
+        let parent = BlockHash::new([1; 32]);
+        let hash = BlockHash::new([2; 32]);
+        let header = test_header(slot, 10, hash, parent);
+
+        manager.flow_handler.handle_tip(peer, Point::Specific(slot, hash.to_vec()));
+        let _ = manager.flow_handler.handle_roll_forward(peer, header);
+        manager.flow_handler.handle_block_fetched(slot, hash, vec![1, 2, 3]);
+
+        manager.on_network_event(NetworkEvent::BlockWanted { hash, slot }).await.unwrap();
+
+        assert!(
+            !manager.pending_wanted.contains_key(&(slot, hash)),
+            "wanted must not remain pending once a fetched announcer exists"
+        );
+
+        let reqs = &manager.peers.get(&peer).unwrap().reqs;
+        assert!(
+            reqs.contains(&(hash, slot)),
+            "peer should receive a fetch request for re-wanted fetched block"
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_wanted_retries_after_late_announcement() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(2);
+        add_test_peer(&mut manager, peer);
+
+        let slot = 200;
+        let parent = BlockHash::new([3; 32]);
+        let hash = BlockHash::new([4; 32]);
+        let header = test_header(slot, 20, hash, parent);
+
+        manager.on_network_event(NetworkEvent::BlockWanted { hash, slot }).await.unwrap();
+        assert!(manager.pending_wanted.contains_key(&(slot, hash)));
+
+        manager.handle_peer_update(
+            peer,
+            PeerEvent::ChainSync(PeerChainSyncEvent::RollForward(
+                header,
+                Point::Specific(slot, hash.to_vec()),
+            )),
+        );
+
+        assert!(
+            !manager.pending_wanted.contains_key(&(slot, hash)),
+            "pending wanted should be cleared once announcement arrives"
+        );
+        let reqs = &manager.peers.get(&peer).unwrap().reqs;
+        assert!(
+            reqs.contains(&(hash, slot)),
+            "late announcement should trigger block fetch retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_pending_wanted_evicts_unknown_blocks() {
+        let mut manager = test_consensus_manager().await;
+        let peer = PeerId(3);
+        add_test_peer(&mut manager, peer);
+
+        let slot = 300;
+        let hash = BlockHash::new([5; 32]);
+
+        manager.pending_wanted.insert((slot, hash), ());
+        assert!(manager.pending_wanted.contains_key(&(slot, hash)));
+
+        manager.retry_pending_wanted();
+
+        assert!(
+            !manager.pending_wanted.contains_key(&(slot, hash)),
+            "stale entry for unknown block should be evicted"
+        );
     }
 }

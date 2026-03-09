@@ -424,6 +424,7 @@ name = "acropolis_module_peer_network_interface"
 version = "0.2.0"
 dependencies = [
  "acropolis_common",
+ "acropolis_module_consensus",
  "anyhow",
  "caryatid_sdk",
  "config",

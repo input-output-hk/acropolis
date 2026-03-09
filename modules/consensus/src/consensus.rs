@@ -25,6 +25,7 @@ use pallas::ledger::traverse::MultiEraHeader;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::timeout};
 use tracing::{debug, error, info, info_span, warn, Instrument};
+use tree_error::ConsensusTreeError;
 use tree_observer::ConsensusTreeObserver;
 
 const DEFAULT_BLOCKS_AVAILABLE_TOPIC: &str = "cardano.block.available";
@@ -94,7 +95,6 @@ struct ConsensusRuntime {
 }
 
 /// Periodic logging counters.
-#[derive(Default)]
 struct ConsensusStats {
     offered: u64,
     wanted: u64,
@@ -103,16 +103,34 @@ struct ConsensusStats {
     proposed: u64,
     rollbacks: u64,
     rejected: u64,
+    parent_missing: u64,
+    last_logged_at: std::time::Instant,
+}
+
+impl Default for ConsensusStats {
+    fn default() -> Self {
+        Self {
+            offered: 0,
+            wanted: 0,
+            available: 0,
+            validated: 0,
+            proposed: 0,
+            rollbacks: 0,
+            rejected: 0,
+            parent_missing: 0,
+            last_logged_at: std::time::Instant::now(),
+        }
+    }
 }
 
 impl ConsensusStats {
-    fn maybe_log(&self) {
-        const STATS_LOG_INTERVAL: u64 = 100;
-        if self.available > 0 && self.available.is_multiple_of(STATS_LOG_INTERVAL) {
+    fn maybe_log(&mut self) {
+        if self.last_logged_at.elapsed() >= Duration::from_secs(60) {
             info!(
-                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}",
-                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected
+                "Consensus stats: offered={}, wanted={}, available={}, validated={}, proposed={}, rollbacks={}, rejected={}, parent_missing={}",
+                self.offered, self.wanted, self.available, self.validated, self.proposed, self.rollbacks, self.rejected, self.parent_missing
             );
+            self.last_logged_at = std::time::Instant::now();
         }
     }
 }
@@ -306,6 +324,8 @@ impl ConsensusRuntime {
 
                         _ => debug!("Ignoring unknown consensus message"),
                     }
+
+                    self.stats.maybe_log();
                 }
             }
         }
@@ -317,64 +337,89 @@ impl ConsensusRuntime {
         block_info: BlockInfo,
         raw_block: RawBlockMessage,
     ) {
-        // Parse header to extract parent hash
+        // Fast path: if the block was previously offered, the tree already knows its
+        // parent hash. We can skip the expensive CBOR header parse and use the
+        // trusted tree metadata. Downstream validators (KES, VRF) still verify the
+        // header cryptographically, so this is safe.
+        if let Some(existing) = self.tree.get_block(&block_info.hash) {
+            if existing.number != block_info.number {
+                warn!(
+                    block = block_info.number,
+                    hash = %block_info.hash,
+                    tree_number = existing.number,
+                    "BlockAvailable number conflicts with tree — dropping"
+                );
+                return;
+            }
+
+            self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
+
+            let had_body = existing.body.is_some();
+            if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
+                error!("Failed to add block body: {e}");
+            }
+
+            let proposed = self.drain_and_publish_events().await;
+            self.stats.available += 1;
+
+            if !had_body {
+                self.validate_proposed_blocks(&proposed).await;
+            }
+
+            if let Err(e) = self.tree.prune() {
+                error!("Prune failed: {e}");
+            }
+            self.prune_block_data();
+            return;
+        }
+
+        // Slow path: block not in tree (Mithril bootstrap or unexpected).
+        // Parse the CBOR header to discover the parent hash.
         let parent_hash = match Self::extract_parent_hash(block_info.era, &raw_block.header) {
             Ok(Some(h)) => h,
             Ok(None) => {
-                // Genesis/epoch boundary block — no parent
                 debug!(
                     "Block {} has no parent hash (genesis/EB)",
                     block_info.number
                 );
-                if self.tree.get_block(&block_info.hash).is_none() {
-                    if block_info.status == BlockStatus::Immutable {
-                        // Mithril bootstrap: genesis block arrives as BlockAvailable without prior BlockOffered.
-                        // Use synthetic root so we can add the block with its real body.
-                        let genesis_root = BlockHash::default();
-                        debug!(
-                            "Adding Immutable genesis block {} from Mithril bootstrap",
-                            block_info.number
-                        );
-                        // Use wrapping subtraction so block 0 gets a synthetic parent number
-                        // of u64::MAX. That preserves the tree invariant:
-                        // child.number == parent.number + 1 (with wraparound at genesis).
-                        if let Err(e) =
-                            self.tree.set_root(genesis_root, block_info.number.wrapping_sub(1), 0)
-                        {
-                            error!("Failed to set root for Immutable genesis: {e}");
-                            return;
-                        }
-                        if let Err(e) = self.tree.check_block_wanted(
-                            block_info.hash,
-                            genesis_root,
-                            block_info.number,
-                            block_info.slot,
-                        ) {
-                            error!("Failed to add Immutable genesis block: {e}");
-                            return;
-                        }
-                        self.stats.offered += 1;
-                    } else {
-                        error!(
-                            "BlockAvailable for unknown block {} (not offered) — dropping",
-                            block_info.hash
-                        );
+                if block_info.status == BlockStatus::Immutable {
+                    let genesis_root = BlockHash::default();
+                    debug!(
+                        "Adding Immutable genesis block {} from Mithril bootstrap",
+                        block_info.number
+                    );
+                    if let Err(e) =
+                        self.tree.set_root(genesis_root, block_info.number.wrapping_sub(1), 0)
+                    {
+                        error!("Failed to set root for Immutable genesis: {e}");
                         return;
                     }
+                    if let Err(e) = self.tree.check_block_wanted(
+                        block_info.hash,
+                        genesis_root,
+                        block_info.number,
+                        block_info.slot,
+                    ) {
+                        error!("Failed to add Immutable genesis block: {e}");
+                        return;
+                    }
+                    self.stats.offered += 1;
+                } else {
+                    error!(
+                        "BlockAvailable for unknown block {} (not offered) — dropping",
+                        block_info.hash
+                    );
+                    return;
                 }
 
-                // Preserve full payload for downstream re-publication; the tree does not own BlockInfo.
                 self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
 
                 if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
                     error!("Failed to add genesis block body: {e}");
                 }
                 self.stats.available += 1;
-                self.drain_and_publish_events().await;
-
-                // Must consume validation results for any block we proposed, otherwise
-                // the validator subscriptions drift out of sync (off-by-one).
-                self.maybe_validate_if_on_favoured_chain(&block_info).await;
+                let proposed = self.drain_and_publish_events().await;
+                self.validate_proposed_blocks(&proposed).await;
 
                 return;
             }
@@ -384,71 +429,15 @@ impl ConsensusRuntime {
             }
         };
 
-        if block_info.number <= 2 {
-            info!(
-                block = block_info.number,
-                hash = %block_info.hash,
-                tree_empty = self.tree.is_empty(),
-                parent_hash = %parent_hash,
-                "Received BlockAvailable"
-            );
+        if block_info.status == BlockStatus::Immutable {
+            return self.handle_immutable_bootstrap(block_info, raw_block, parent_hash).await;
         }
 
-        let existing = self.tree.get_block(&block_info.hash);
-        let existing = match existing {
-            Some(e) => e,
-            None => {
-                if block_info.status == BlockStatus::Immutable {
-                    // Mithril bootstrap: block arrives as BlockAvailable without prior BlockOffered
-                    return self
-                        .handle_immutable_bootstrap(block_info, raw_block, parent_hash)
-                        .await;
-                }
-                error!(
-                    "BlockAvailable for unknown block {} (not offered) — dropping",
-                    block_info.hash
-                );
-                return;
-            }
-        };
-
-        // If this block was previously offered, guard against conflicting metadata.
-        if existing.parent != Some(parent_hash) || existing.number != block_info.number {
-            warn!(
-                "Ignoring block {} due to conflicting tree metadata",
-                block_info.number
-            );
-            return;
-        }
-
-        // Store full payload for later re-publication (tree only tracks chain metadata).
-        self.block_data.insert(block_info.hash, (block_info.clone(), raw_block.clone()));
-
-        // We already have the body — store it (idempotent if already stored).
-        let had_body =
-            self.tree.get_block(&block_info.hash).map(|b| b.body.is_some()).unwrap_or(false);
-
-        if let Err(e) = self.tree.add_block(block_info.hash, raw_block.body.clone()) {
-            error!("Failed to add block body: {e}");
-        }
-
-        // Collect and publish observer events
-        self.drain_and_publish_events().await;
-
-        self.stats.available += 1;
-
-        // Validate only when this call newly supplied body for a favoured block.
-        if !had_body {
-            self.maybe_validate_if_on_favoured_chain(&block_info).await;
-        }
-
-        self.prune_block_data();
-
-        // Prune periodically
-        if let Err(e) = self.tree.prune() {
-            error!("Prune failed: {e}");
-        }
-        self.prune_block_data();
+        error!(
+            block = block_info.number,
+            hash = %block_info.hash,
+            "BlockAvailable for unknown block (not offered, not immutable) — dropping"
+        );
     }
 
     /// Handle BlockAvailable for Immutable blocks from Mithril bootstrap (no prior BlockOffered).
@@ -496,10 +485,10 @@ impl ConsensusRuntime {
             error!("Failed to add Immutable block body: {e}");
         }
 
-        self.drain_and_publish_events().await;
+        let proposed = self.drain_and_publish_events().await;
         self.stats.available += 1;
 
-        self.maybe_validate_if_on_favoured_chain(&block_info).await;
+        self.validate_proposed_blocks(&proposed).await;
 
         self.prune_block_data();
         if let Err(e) = self.tree.prune() {
@@ -530,8 +519,12 @@ impl ConsensusRuntime {
         }
 
         if self.tree.get_block(&parent_hash).is_none() {
-            debug!(
-                "Parent {parent_hash} not in tree for offered block {hash} (block {number}) — ignoring"
+            self.stats.parent_missing += 1;
+            info!(
+                block = number,
+                %hash,
+                %parent_hash,
+                "Parent not in tree for offered block — ignoring"
             );
             return;
         }
@@ -539,7 +532,7 @@ impl ConsensusRuntime {
         let wanted = match self.tree.check_block_wanted(hash, parent_hash, number, slot) {
             Ok(w) => w,
             Err(e) => {
-                warn!("Offered block {hash} rejected: {e}");
+                warn!(block = number, %hash, "Offered block rejected: {e}");
                 return;
             }
         };
@@ -548,7 +541,7 @@ impl ConsensusRuntime {
         self.stats.wanted += wanted.len() as u64;
 
         // Collect and publish observer events
-        self.drain_and_publish_events().await;
+        let _ = self.drain_and_publish_events().await;
 
         let wanted_msgs = self.build_block_wanted_messages(&wanted);
         self.publish_block_wanted_messages(&wanted_msgs).await;
@@ -558,11 +551,16 @@ impl ConsensusRuntime {
     async fn handle_block_rescinded(&mut self, hash: BlockHash) {
         match self.tree.remove_block(hash) {
             Ok(newly_wanted) => {
-                self.drain_and_publish_events().await;
+                let _ = self.drain_and_publish_events().await;
 
                 let wanted_msgs = self.build_block_wanted_messages(&newly_wanted);
                 self.publish_block_wanted_messages(&wanted_msgs).await;
                 self.prune_block_data();
+            }
+            Err(ConsensusTreeError::BlockNotInTree { .. }) => {
+                // Rescinds can arrive for stale/off-fork hashes already removed by an
+                // earlier rollback/prune. Treat as idempotent.
+                debug!("Ignoring rescinded block not in tree: {hash}");
             }
             Err(e) => {
                 warn!("Failed to remove rescinded block {hash}: {e}");
@@ -571,11 +569,17 @@ impl ConsensusRuntime {
     }
 
     /// Collect observer events, resolve to messages, and publish.
-    async fn drain_and_publish_events(&mut self) {
+    ///
+    /// Returns hashes for blocks that were proposed in this batch.
+    async fn drain_and_publish_events(&mut self) -> Vec<BlockHash> {
         let raw_events: Vec<ObserverEvent> = self.event_queue.lock().unwrap().drain(..).collect();
+        let mut proposed = Vec::new();
         for event in &raw_events {
             match event {
-                ObserverEvent::BlockProposed { .. } => self.stats.proposed += 1,
+                ObserverEvent::BlockProposed { hash } => {
+                    self.stats.proposed += 1;
+                    proposed.push(*hash);
+                }
                 ObserverEvent::Rollback { .. } => self.stats.rollbacks += 1,
                 ObserverEvent::BlockRejected { .. } => self.stats.rejected += 1,
             }
@@ -590,6 +594,7 @@ impl ConsensusRuntime {
                 .await
                 .unwrap_or_else(|e| error!("Failed to publish to {topic}: {e}"));
         }
+        proposed
     }
 
     /// Publish `BlockWanted` messages for each hash.
@@ -611,16 +616,34 @@ impl ConsensusRuntime {
         self.block_data.retain(|hash, _| self.tree.get_block(hash).is_some());
     }
 
-    /// Run validation if enabled and the block is on the favoured chain.
-    async fn maybe_validate_if_on_favoured_chain(&mut self, block_info: &BlockInfo) {
-        if self.do_validation
-            && block_info.intent.do_validation()
-            && self
-                .tree
-                .favoured_tip()
-                .is_some_and(|tip| self.tree.chain_contains(block_info.hash, tip))
-        {
-            self.handle_validation(block_info).await;
+    /// Consume validation responses for each block proposed in this batch.
+    ///
+    /// A single tree update can propose multiple contiguous blocks. We must
+    /// consume one validator response set per proposed block to keep
+    /// subscriptions aligned.
+    async fn validate_proposed_blocks(&mut self, proposed: &[BlockHash]) {
+        if !self.do_validation || proposed.is_empty() {
+            return;
+        }
+
+        debug!(
+            count = proposed.len(),
+            "Validating batch of proposed blocks"
+        );
+
+        for &hash in proposed {
+            let Some((block_info, _)) = self.block_data.get(&hash) else {
+                warn!("No block data for proposed block {hash}, skipping validation");
+                continue;
+            };
+            let block_info = block_info.clone();
+
+            if !block_info.intent.do_validation() {
+                debug!(block = block_info.number, "Skipping validation (intent)");
+                continue;
+            }
+
+            self.handle_validation(&block_info).await;
         }
     }
 
@@ -671,7 +694,7 @@ impl ConsensusRuntime {
             }
 
             // Collect and publish events from mark_rejected
-            self.drain_and_publish_events().await;
+            let _ = self.drain_and_publish_events().await;
             self.prune_block_data();
         }
     }
