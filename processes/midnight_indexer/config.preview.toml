@@ -36,7 +36,6 @@ sync-point = "dynamic"
 node-addresses = [
     "preview-node.play.dev.cardano.org:3001",
 ]
-magic-number = 2
 
 [module.midnight-state]
 address-deltas-topic = "cardano.address.deltas"
