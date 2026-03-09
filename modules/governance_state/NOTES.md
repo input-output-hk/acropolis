@@ -260,6 +260,23 @@ Since there is no special 'end of epoch' block, then we use the first block as t
 signal for the previous epoch end. The governance module discovers end of the epoch,
 publishes update, then parameter state module catches it and publishes new parameters.
 
+### Counting votes timing
+
+TO BE CHECKED:
+
+Let us have DReps and SPO actual for epoch E.
+In epoch border E/E+1 these DReps and SPOs become Mark.
+The votes cast during epoch E are counted (???)
+The votes counting happens during E+1 epoch (and the results
+are printed during epoch E+1).
+The results of ratification are published at E+1/E+2 border.
+
+Current Acropolis implementation:
+
+At epoch E/E+1 border we have actual SPO for epoch E and DReps for epoch E-1.
+We count votes, cast during epoch E.
+We have ratification at E/E+1 border and publish results immediately.
+
 ### Testing
 
 https://cexplorer.io/params
