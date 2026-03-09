@@ -729,7 +729,8 @@ impl ConsensusRuntime {
                 }
                 ObserverEvent::Rollback { to_block_number } => {
                     let point = self.find_point_at_number(to_block_number);
-                    let block_info = self.find_block_info_at_number(to_block_number, BlockStatus::RolledBack);
+                    let block_info =
+                        self.find_block_info_at_number(to_block_number, BlockStatus::RolledBack);
                     let msg = Arc::new(Message::Cardano((
                         block_info,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
@@ -857,7 +858,12 @@ impl ConsensusRuntime {
     }
 
     /// Construct a default BlockInfo with minimal fields populated.
-    fn default_block_info(number: u64, slot: u64, hash: BlockHash, status: BlockStatus) -> BlockInfo {
+    fn default_block_info(
+        number: u64,
+        slot: u64,
+        hash: BlockHash,
+        status: BlockStatus,
+    ) -> BlockInfo {
         BlockInfo {
             status,
             intent: BlockIntent::Apply,
