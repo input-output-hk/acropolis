@@ -153,13 +153,12 @@ fn validate_script_wellformedness(
     };
 
     let arena = Arena::new();
-    let program: &Program<DeBruijn> = flat::decode(&arena, script_bytes).map_err(|e| {
+    let _: &Program<DeBruijn> = flat::decode(&arena, script_bytes).map_err(|e| {
         Box::new(UTxOWValidationError::MalformedScriptWitnesses {
             script_hash: reference_script.compute_hash(),
             reason: format!("Invalid script: {}", e),
         })
     })?;
-    println!("program: {:?}", program.version);
     Ok(())
 }
 
