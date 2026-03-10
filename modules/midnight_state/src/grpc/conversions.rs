@@ -1,11 +1,13 @@
 use crate::{
     grpc::midnight_state_proto::{
         AssetCreate as AssetCreateProto, AssetSpend as AssetSpendProto,
-        Deregistration as DeregistrationProto, Registration as RegistrationProto,
+        Deregistration as DeregistrationProto, EpochCandidate, Registration as RegistrationProto,
+        UtxoId,
     },
     types::{
         AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal,
         Deregistration as DeregistrationInternal, Registration as RegistrationInternal,
+        RegistrationEvent,
     },
 };
 
@@ -69,6 +71,30 @@ impl From<DeregistrationInternal> for DeregistrationProto {
             utxo_tx_hash: c.utxo_tx_hash.to_vec(),
             utxo_index: c.utxo_index.into(),
             block_timestamp_unix: c.block_timestamp,
+        }
+    }
+}
+
+impl From<&RegistrationEvent> for EpochCandidate {
+    fn from(event: &RegistrationEvent) -> Self {
+        let full_datum = event.datum.to_bytes().expect("datum  should always be inline");
+
+        EpochCandidate {
+            full_datum,
+            utxo_tx_hash: event.tx_hash.to_vec(),
+            utxo_index: event.utxo_index as u32,
+            epoch_number: event.epoch,
+            block_number: event.block_number,
+            slot_number: event.slot_number,
+            tx_index: event.tx_index,
+            tx_inputs: event
+                .tx_inputs
+                .iter()
+                .map(|i| UtxoId {
+                    tx_hash: i.tx_hash.to_vec(),
+                    index: i.output_index as u32,
+                })
+                .collect(),
         }
     }
 }

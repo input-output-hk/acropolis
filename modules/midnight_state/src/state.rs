@@ -3,13 +3,15 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta,
-    UTxOIdentifier,
+    messages::AddressDeltasMessage, protocol_params::Nonce, BlockInfo, BlockNumber, Datum, Epoch,
+    ExtendedAddressDelta, UTxOIdentifier,
 };
+use imbl::HashMap;
 
 use crate::{
     configuration::MidnightConfig,
     epoch_totals::EpochTotals,
+    grpc::midnight_state_proto::EpochCandidate,
     indexes::{
         candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
         governance_state::GovernanceState, parameters_state::ParametersState,
@@ -30,6 +32,8 @@ pub struct State {
     governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
+    // Nonces indexed by epoch
+    nonces: HashMap<Epoch, Nonce>,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -42,12 +46,24 @@ impl State {
         }
     }
 
-    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
+    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo, nonce_opt: Option<Nonce>) {
+        if let Some(nonce) = nonce_opt {
+            self.nonces.insert(block_info.epoch, nonce);
+        }
+        self.candidates.snapshot_epoch(block_info.epoch);
         self.epoch_totals.summarise_completed_epoch(block_info);
     }
 
     pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
         self.parameters.get_ariadne_parameters_with_epoch(epoch)
+    }
+
+    pub fn get_epoch_nonce(&self, epoch: Epoch) -> Option<Vec<u8>> {
+        self.nonces.get(&epoch).and_then(|n| n.hash.map(|h| h.to_vec()))
+    }
+
+    pub fn get_epoch_candidates(&self, epoch: Epoch) -> Vec<EpochCandidate> {
+        self.candidates.get_epoch_candidates(epoch)
     }
 
     pub fn handle_address_deltas(
@@ -245,11 +261,15 @@ impl State {
                 block_created_registrations.insert(created.utxo);
 
                 registrations.push(RegistrationEvent {
+                    block_number: block_info.number,
                     block_hash: block_info.hash,
                     block_timestamp: i64::try_from(block_info.timestamp)?,
+                    epoch: block_info.epoch,
+                    slot_number: block_info.slot,
                     tx_index: delta.tx_identifier.tx_index().into(),
                     tx_hash: created.utxo.tx_hash,
                     utxo_index: created.utxo.output_index,
+                    tx_inputs: delta.spent_utxos.iter().map(|s| s.utxo).collect(),
                     datum: datum.clone(),
                 });
             }

@@ -1,4 +1,4 @@
-use acropolis_common::{Address, BlockHash, BlockNumber, Datum, TxHash, UTxOIdentifier};
+use acropolis_common::{Address, BlockHash, BlockNumber, Datum, Epoch, TxHash, UTxOIdentifier};
 use anyhow::{anyhow, Error};
 
 /// ---------------------------------------------------------------------------
@@ -126,11 +126,15 @@ pub struct CNightSpend {
 
 #[derive(Clone)]
 pub struct RegistrationEvent {
+    pub block_number: u64,
     pub block_hash: BlockHash,
     pub block_timestamp: i64,
+    pub epoch: Epoch,
+    pub slot_number: u64,
     pub tx_index: u32,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
+    pub tx_inputs: Vec<UTxOIdentifier>,
     pub datum: Datum,
 }
 
