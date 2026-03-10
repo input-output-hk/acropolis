@@ -247,7 +247,6 @@ impl State {
     }
 
     //// Loop up a reference script
-    #[allow(dead_code)]
     pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
         self.reference_scripts_history
             .get_current_state()
@@ -890,6 +889,8 @@ impl State {
                         self.lookup_reference_script(&script_ref.script_hash)
                     {
                         reference_scripts.insert(script_ref.script_hash, reference_script);
+                    } else {
+                        error!("Reference script {} not found", script_ref.script_hash);
                     }
                 }
 
