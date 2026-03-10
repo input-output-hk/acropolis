@@ -1,0 +1,291 @@
+//! Peer-sharing mini-protocol client for discovering new peer addresses.
+#![deny(missing_docs)]
+
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
+    time::Duration,
+};
+
+use pallas::network::{
+    miniprotocols::handshake,
+    multiplexer::{Bearer, Plexer},
+};
+use tracing::{debug, warn};
+
+/// Protocol ID for the peer-sharing mini-protocol (no constant in pallas 0.34).
+const PROTOCOL_N2N_PEER_SHARING: u16 = 10;
+
+/// Errors that can occur during a peer-sharing exchange.
+#[derive(thiserror::Error, Debug)]
+pub enum PeerSharingError {
+    /// CBOR decode error from a malformed response.
+    #[error("CBOR decode error: {0}")]
+    CborDecode(String),
+    /// Handshake negotiation failed (e.g. incompatible versions).
+    #[error("Handshake failed: {0}")]
+    HandshakeFailed(String),
+    /// TCP connection to the peer failed.
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(String),
+    /// The full peer-sharing exchange did not complete within the timeout.
+    #[error("Peer-sharing exchange timed out")]
+    Timeout,
+}
+
+/// Validate and normalise a peer address string + port.
+///
+/// Returns `Some("ip:port")` for publicly routable addresses, `None` for rejected ones.
+/// Rejected: loopback, unspecified, link-local, RFC1918 private, port 0.
+/// IPv4-mapped IPv6 (`::ffff:x.x.x.x`) is normalised to IPv4 form before dedup.
+pub fn validate_and_normalise(addr_str: &str, port: u16) -> Option<String> {
+    if port == 0 {
+        return None;
+    }
+    let ip = IpAddr::from_str(addr_str).ok()?;
+    let ip = normalise_ip(ip);
+    if is_rejected(&ip) {
+        return None;
+    }
+    Some(format!("{ip}:{port}"))
+}
+
+/// Normalise IPv4-mapped IPv6 (`::ffff:x.x.x.x`) to its IPv4 form.
+fn normalise_ip(ip: IpAddr) -> IpAddr {
+    if let IpAddr::V6(v6) = ip
+        && let Some(v4) = v6_to_v4_mapped(v6)
+    {
+        return IpAddr::V4(v4);
+    }
+    ip
+}
+
+fn v6_to_v4_mapped(v6: Ipv6Addr) -> Option<Ipv4Addr> {
+    let segs = v6.segments();
+    if segs[0] == 0
+        && segs[1] == 0
+        && segs[2] == 0
+        && segs[3] == 0
+        && segs[4] == 0
+        && segs[5] == 0xffff
+    {
+        let [a, b] = segs[6].to_be_bytes();
+        let [c, d] = segs[7].to_be_bytes();
+        return Some(Ipv4Addr::new(a, b, c, d));
+    }
+    None
+}
+
+fn is_rejected(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()      // 127.0.0.0/8
+                || v4.is_unspecified()  // 0.0.0.0
+                || v4.is_link_local()   // 169.254.0.0/16
+                || v4.is_private() // 10.x, 172.16-31.x, 192.168.x
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()          // ::1
+                || v6.is_unspecified() // ::
+                || is_v6_link_local(v6) // fe80::/10
+        }
+    }
+}
+
+fn is_v6_link_local(v6: &Ipv6Addr) -> bool {
+    // fe80::/10 — first 10 bits are 1111111010
+    let segs = v6.segments();
+    (segs[0] & 0xffc0) == 0xfe80
+}
+
+// ---- CBOR message encoding / decoding ----
+// Peer-sharing protocol messages (manual CBOR):
+//   MsgShareRequest  = [0, amount]
+//   MsgSharePeers    = [1, [[addr_type, ip_bytes, port], ...]]
+//   MsgDone          = [2]
+//   addr_type: 0 = IPv4 (4 bytes), 1 = IPv6 (16 bytes)
+
+fn encode_request(amount: u8) -> Vec<u8> {
+    // CBOR: array(2) = 0x82, uint(0) = 0x00, uint(amount)
+    if amount <= 23 {
+        vec![0x82, 0x00, amount]
+    } else {
+        vec![0x82, 0x00, 0x18, amount] // 0x18 = uint8 follows
+    }
+}
+
+fn encode_done() -> Vec<u8> {
+    // CBOR: array(1) = 0x81, uint(2) = 0x02
+    vec![0x81, 0x02]
+}
+
+/// Decode a `MsgSharePeers` CBOR response, accepting at most `limit` addresses.
+///
+/// CBOR format: `[1, [[addr_type, ip_bytes, port], ...]]`
+/// Extra entries beyond `limit` are skipped without allocation (FR-014).
+fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharingError> {
+    use minicbor::Decoder;
+
+    let mut dec = Decoder::new(bytes);
+
+    // Outer array (message envelope): must have length 2
+    let outer_len = dec.array().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+    if outer_len != Some(2) {
+        return Err(PeerSharingError::CborDecode(format!(
+            "expected outer array len 2, got {outer_len:?}"
+        )));
+    }
+
+    // Message type tag: must be 1 (MsgSharePeers)
+    let tag: u64 = dec.u64().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+    if tag != 1 {
+        return Err(PeerSharingError::CborDecode(format!(
+            "expected MsgSharePeers tag 1, got {tag}"
+        )));
+    }
+
+    // Inner array: list of peer entries
+    let entries_len = dec.array().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+    let total = entries_len.unwrap_or(u64::MAX) as usize;
+
+    let mut results = Vec::new();
+
+    for idx in 0..total {
+        // Try to begin reading an entry; on any decode error, stop (indefinite arrays use
+        // break code 0xff, which minicbor surfaces as an error on the next array() call).
+        let entry_len = match dec.array() {
+            Ok(Some(n)) => n,
+            _ => break, // break code or end of input
+        };
+        if entry_len != 3 {
+            return Err(PeerSharingError::CborDecode(format!(
+                "expected address entry len 3, got {entry_len}"
+            )));
+        }
+
+        let addr_type: u64 = dec.u64().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+        let ip_bytes =
+            dec.bytes().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?.to_vec();
+        let port: u16 = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+
+        // Only process up to `limit` entries (FR-014); continue consuming but don't allocate
+        if idx >= limit {
+            continue;
+        }
+
+        let addr_str = match addr_type {
+            0 if ip_bytes.len() == 4 => {
+                let octets: [u8; 4] = ip_bytes.try_into().unwrap();
+                Ipv4Addr::from(octets).to_string()
+            }
+            1 if ip_bytes.len() == 16 => {
+                let octets: [u8; 16] = ip_bytes.try_into().unwrap();
+                Ipv6Addr::from(octets).to_string()
+            }
+            _ => continue,
+        };
+
+        if let Some(normalised) = validate_and_normalise(&addr_str, port) {
+            results.push(normalised);
+        }
+    }
+
+    Ok(results)
+}
+
+// ---- Public API ----
+
+/// Request peer addresses from the peer at `address` using the peer-sharing mini-protocol.
+///
+/// Wraps `request_peers_inner` with a configurable timeout. Returns `Ok(vec![])` on timeout
+/// or if the peer does not support V11+ (peer-sharing requires V11+).
+pub async fn request_peers(
+    address: &str,
+    magic: u32,
+    amount: u8,
+    timeout: Duration,
+) -> Result<Vec<String>, PeerSharingError> {
+    match tokio::time::timeout(timeout, request_peers_inner(address, magic, amount)).await {
+        Ok(result) => result,
+        Err(_) => {
+            warn!(peer = %address, "peer-sharing exchange timed out");
+            Ok(vec![])
+        }
+    }
+}
+
+async fn request_peers_inner(
+    address: &str,
+    magic: u32,
+    amount: u8,
+) -> Result<Vec<String>, PeerSharingError> {
+    // Step 1: TCP connect
+    let bearer = Bearer::connect_tcp(address)
+        .await
+        .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
+
+    // Step 2: Set up multiplexer — subscribe channels before spawning
+    let mut plexer = Plexer::new(bearer);
+    let hs_channel = plexer.subscribe_client(0); // handshake protocol
+    let mut ps_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
+    let running = plexer.spawn();
+
+    // Step 3: V11 handshake (peer-sharing requires V11+)
+    let versions = handshake::n2n::VersionTable::v11_and_above(magic as u64);
+    let mut hs_client = handshake::Client::new(hs_channel);
+
+    match hs_client.handshake(versions).await {
+        Err(e) => {
+            debug!(peer = %address, error = %e, "V11 handshake failed (peer may not support V11+)");
+            running.abort().await;
+            return Ok(vec![]);
+        }
+        Ok(handshake::Confirmation::Rejected(reason)) => {
+            debug!(peer = %address, ?reason, "V11 handshake rejected by peer");
+            running.abort().await;
+            return Ok(vec![]);
+        }
+        Ok(_) => {} // Accepted — proceed
+    }
+
+    // Step 4: Send MsgShareRequest
+    let request_bytes = encode_request(amount);
+    ps_channel
+        .enqueue_chunk(request_bytes)
+        .await
+        .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
+
+    // Step 5: Receive MsgSharePeers — accumulate chunks until we can decode
+    let mut buffer = Vec::new();
+    loop {
+        let chunk = ps_channel
+            .dequeue_chunk()
+            .await
+            .map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+        buffer.extend_from_slice(&chunk);
+
+        // Try decoding — succeed on valid CBOR, continue if incomplete
+        match decode_response(&buffer, amount as usize) {
+            Ok(addrs) => {
+                // Step 6: Send MsgDone (best-effort)
+                let _ = ps_channel.enqueue_chunk(encode_done()).await;
+                running.abort().await;
+                return Ok(addrs);
+            }
+            Err(PeerSharingError::CborDecode(_)) if !looks_complete(&buffer) => {
+                // Incomplete CBOR — wait for more chunks
+                continue;
+            }
+            Err(e) => {
+                running.abort().await;
+                return Err(e);
+            }
+        }
+    }
+}
+
+/// Heuristic: check if the buffer contains enough bytes for a minimal CBOR value.
+/// Used to distinguish "incomplete input" from "malformed CBOR".
+fn looks_complete(buf: &[u8]) -> bool {
+    !buf.is_empty() && buf.len() >= 3
+}

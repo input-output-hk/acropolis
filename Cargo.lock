@@ -441,8 +441,11 @@ dependencies = [
  "anyhow",
  "caryatid_sdk",
  "config",
+ "minicbor 0.25.1",
  "pallas",
+ "rand 0.9.2",
  "serde",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
