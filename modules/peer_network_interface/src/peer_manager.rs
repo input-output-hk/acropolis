@@ -79,10 +79,18 @@ impl PeerManager {
     }
 
     /// Seed the cold peer set from the static `node_addresses` config, excluding any
-    /// address already in the `hot` set.
+    /// address already in the `hot` set. Applies the same cap-and-evict policy as
+    /// `add_discovered` to satisfy the D-010 cold cap invariant.
     pub fn seed(&mut self, addresses: &[String], hot: &HashSet<String>) {
+        let cold_cap = self.config.target_peer_count * 4;
         for addr in addresses {
-            if !hot.contains(addr) && !self.failed_peers.contains(addr) {
+            if !hot.contains(addr)
+                && !self.failed_peers.contains(addr)
+                && !self.cold_peers.contains(addr.as_str())
+            {
+                if self.cold_peers.len() >= cold_cap {
+                    self.evict_random_cold();
+                }
                 self.cold_peers.insert(addr.clone());
             }
         }
@@ -97,8 +105,9 @@ impl PeerManager {
     /// # TODO(ledger-peers): `seed_from_ledger(addresses, hot)` follows the same pattern —
     /// add a sibling method that accepts relay addresses from `SPOStateMessage` and applies
     /// the same deduplication and cap enforcement.
-    pub fn add_discovered(&mut self, addresses: Vec<String>, hot: &HashSet<String>) {
+    pub fn add_discovered(&mut self, addresses: Vec<String>, hot: &HashSet<String>) -> usize {
         let cold_cap = self.config.target_peer_count * 4;
+        let mut added = 0usize;
         for addr in addresses {
             if self.is_known(&addr, hot) {
                 continue;
@@ -106,8 +115,11 @@ impl PeerManager {
             if self.cold_peers.len() >= cold_cap {
                 self.evict_random_cold();
             }
-            self.cold_peers.insert(addr);
+            if self.cold_peers.insert(addr) {
+                added += 1;
+            }
         }
+        added
     }
 
     /// Remove and return a randomly selected cold peer address for promotion.
@@ -121,6 +133,23 @@ impl PeerManager {
     /// Remove an address from the cold set when it is promoted to a hot connection.
     pub fn mark_as_promoted(&mut self, address: &str) {
         self.cold_peers.remove(address);
+    }
+
+    /// Return a previously hot peer to the cold set after churn demotion.
+    ///
+    /// Unlike `add_discovered`, this skips the `failed_peers` check: a peer that was
+    /// successfully running as hot should not remain blacklisted just because an earlier
+    /// cold promotion from the same session failed. The peer is also removed from
+    /// `failed_peers` if present.  Cap-and-evict applies as normal.
+    pub fn demote_to_cold(&mut self, address: String, hot: &HashSet<String>) {
+        self.failed_peers.remove(&address);
+        if !self.cold_peers.contains(&address) && !hot.contains(&address) {
+            let cold_cap = self.config.target_peer_count * 4;
+            if self.cold_peers.len() >= cold_cap {
+                self.evict_random_cold();
+            }
+            self.cold_peers.insert(address);
+        }
     }
 
     /// Mark an address as failed (session blacklist).
@@ -187,6 +216,11 @@ impl PeerManager {
     fn evict_random_cold(&mut self) {
         if let Some(victim) = self.cold_peers.iter().choose(&mut rand::rng()).cloned() {
             self.cold_peers.remove(&victim);
+            tracing::info!(
+                evicted_addr = %victim,
+                cold_count = self.cold_peers.len(),
+                "evicted cold peer"
+            );
         }
     }
 }

@@ -38,6 +38,12 @@ pub struct InterfaceConfig {
     pub churn_interval_secs: u64,
     #[serde(default = "default_peer_sharing_timeout_secs")]
     pub peer_sharing_timeout_secs: u64,
+    #[serde(default = "default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    #[serde(default = "default_ipv6_enabled")]
+    pub ipv6_enabled: bool,
+    #[serde(default = "default_allow_non_public_peer_addrs")]
+    pub allow_non_public_peer_addrs: bool,
 }
 
 fn default_consensus_topic() -> String {
@@ -66,6 +72,18 @@ fn default_churn_interval_secs() -> u64 {
 
 fn default_peer_sharing_timeout_secs() -> u64 {
     10
+}
+
+fn default_connect_timeout_secs() -> u64 {
+    15
+}
+
+fn default_ipv6_enabled() -> bool {
+    false
+}
+
+fn default_allow_non_public_peer_addrs() -> bool {
+    true
 }
 
 impl InterfaceConfig {
