@@ -77,7 +77,7 @@ impl From<DeregistrationInternal> for DeregistrationProto {
 
 impl From<&RegistrationEvent> for EpochCandidate {
     fn from(event: &RegistrationEvent) -> Self {
-        let full_datum = event.datum.to_bytes().expect("datum  should always be inline");
+        let full_datum = event.datum.to_bytes().expect("datum should always be inline");
 
         EpochCandidate {
             full_datum,
