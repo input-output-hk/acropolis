@@ -16,6 +16,8 @@ service MidnightState {
   rpc GetAriadneParameters (AriadneParametersRequest) returns (AriadneParametersResponse);
   rpc GetBlockByHash (BlockByHashRequest) returns (BlockByHashResponse);
   rpc GetUtxoEvents (UtxoEventsRequest) returns (UtxoEventsResponse);
+  rpc GetEpochNonce (EpochNonceRequest) returns (EpochNonceResponse);
+  rpc GetEpochCandidates (EpochCandidatesRequest) returns (EpochCandidatesResponse);
 }
 
 message AssetCreatesRequest {
@@ -129,6 +131,42 @@ message AriadneParametersRequest {
 message AriadneParametersResponse {
   uint64 source_epoch = 1;
   bytes datum = 2;
+}
+
+message EpochNonceRequest {
+  uint64 epoch = 1;
+}
+message EpochNonceResponse {
+  optional bytes nonce = 1;
+}
+
+message EpochCandidatesRequest {
+  uint64 epoch = 1;
+}
+message UtxoId {
+  bytes tx_hash = 1;
+  uint32 index = 2;
+}
+message EpochCandidate {
+  bytes full_datum = 1;
+
+  bytes utxo_tx_hash = 2;
+  uint32 utxo_index = 3;
+
+  repeated UtxoId tx_inputs = 4;
+
+  uint64 epoch_number = 5;
+  uint64 block_number = 6;
+  uint64 slot_number = 7;
+  uint32 tx_index = 8;
+}
+message StakePoolEntry {
+  bytes pool_hash = 1;
+  uint64 stake = 2;
+}
+message EpochCandidatesResponse {
+  repeated EpochCandidate candidates = 1;
+  repeated StakePoolEntry stake_distribution = 2;
 }
 
 message UtxoEventsRequest {
