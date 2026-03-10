@@ -15,8 +15,11 @@ caryatid_sdk = { workspace = true }
 
 anyhow = { workspace = true }
 config = { workspace = true }
+minicbor = { workspace = true }
 pallas = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
