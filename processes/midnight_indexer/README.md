@@ -30,3 +30,11 @@ Build and run mainnet:
 ```shell
 docker compose up --build midnight-indexer-mainnet
 ```
+
+Default host gRPC ports:
+- `midnight-indexer-preview`: `50051`
+- `midnight-indexer-mainnet`: `60051`
+
+Override with:
+- `MIDNIGHT_PREVIEW_GRPC_PORT`
+- `MIDNIGHT_MAINNET_GRPC_PORT`
