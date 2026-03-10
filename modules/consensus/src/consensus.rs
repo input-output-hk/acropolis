@@ -520,7 +520,7 @@ impl ConsensusRuntime {
 
         if self.tree.get_block(&parent_hash).is_none() {
             self.stats.parent_missing += 1;
-            info!(
+            debug!(
                 block = number,
                 %hash,
                 %parent_hash,

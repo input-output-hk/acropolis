@@ -113,6 +113,9 @@ async fn make_harness() -> TestHarness {
         peer_sharing_enabled: false,
         churn_interval_secs: 600,
         peer_sharing_timeout_secs: 10,
+        connect_timeout_secs: 15,
+        ipv6_enabled: false,
+        allow_non_public_peer_addrs: true,
     };
 
     let flow = BlockFlowHandler::new(
