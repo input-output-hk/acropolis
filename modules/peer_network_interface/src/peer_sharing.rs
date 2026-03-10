@@ -53,27 +53,11 @@ pub fn validate_and_normalise(addr_str: &str, port: u16) -> Option<String> {
 /// Normalise IPv4-mapped IPv6 (`::ffff:x.x.x.x`) to its IPv4 form.
 fn normalise_ip(ip: IpAddr) -> IpAddr {
     if let IpAddr::V6(v6) = ip
-        && let Some(v4) = v6_to_v4_mapped(v6)
+        && let Some(v4) = v6.to_ipv4_mapped()
     {
         return IpAddr::V4(v4);
     }
     ip
-}
-
-fn v6_to_v4_mapped(v6: Ipv6Addr) -> Option<Ipv4Addr> {
-    let segs = v6.segments();
-    if segs[0] == 0
-        && segs[1] == 0
-        && segs[2] == 0
-        && segs[3] == 0
-        && segs[4] == 0
-        && segs[5] == 0xffff
-    {
-        let [a, b] = segs[6].to_be_bytes();
-        let [c, d] = segs[7].to_be_bytes();
-        return Some(Ipv4Addr::new(a, b, c, d));
-    }
-    None
 }
 
 fn is_rejected(ip: &IpAddr) -> bool {

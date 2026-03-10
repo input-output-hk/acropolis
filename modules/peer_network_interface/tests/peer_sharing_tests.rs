@@ -37,6 +37,11 @@ fn link_local_ipv4_rejected() {
 }
 
 #[test]
+fn link_local_ipv6_rejected() {
+    assert!(validate_and_normalise("fe80::1", 3001).is_none());
+}
+
+#[test]
 fn port_zero_rejected() {
     assert!(validate_and_normalise("1.2.3.4", 0).is_none());
 }

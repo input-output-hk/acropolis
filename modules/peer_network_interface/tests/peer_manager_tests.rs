@@ -180,6 +180,44 @@ fn cooldown_allows_requery_after_five_minutes() {
     );
 }
 
+// --- Issue 3: seed() cap enforcement ---
+
+#[test]
+fn seed_enforces_cold_cap() {
+    let config = PeerManagerConfig {
+        target_peer_count: 1, // cold_cap = 4
+        ..PeerManagerConfig::default()
+    };
+    let cold_cap = 4;
+    let mut pm = PeerManager::new(config);
+    let hot: HashSet<String> = HashSet::new();
+    // Seed more addresses than the cap allows
+    let addrs: Vec<String> = (0..cold_cap + 5).map(|i| format!("10.0.{}.1:3001", i)).collect();
+    pm.seed(&addrs, &hot);
+    assert_eq!(
+        pm.cold_count(),
+        cold_cap,
+        "seed() must not exceed 4×target_peer_count"
+    );
+}
+
+// --- Issue 4: demote_to_cold bypasses failed_peers ---
+
+#[test]
+fn demote_to_cold_bypasses_failed_peers_blacklist() {
+    let mut pm = PeerManager::new(default_config());
+    let hot: HashSet<String> = HashSet::new();
+    // Simulate a prior failed promotion
+    pm.mark_failed("1.2.3.4:3001".to_string());
+    assert_eq!(pm.cold_count(), 0, "failed peer must not be in cold set");
+    // Churn demotion should re-add it regardless of failed_peers
+    pm.demote_to_cold("1.2.3.4:3001".to_string(), &hot);
+    assert_eq!(pm.cold_count(), 1, "demote_to_cold must re-add despite failed_peers");
+    // Verify it was also cleared from failed_peers (re-promotable)
+    pm.add_discovered(vec!["1.2.3.4:3001".to_string()], &hot);
+    assert_eq!(pm.cold_count(), 1, "address is already in cold, dedup applies");
+}
+
 // --- US3 tests ---
 
 #[test]
