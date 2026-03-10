@@ -183,32 +183,39 @@ pub fn get_scripts_provided(
 /// Get Reference Scripts provided by transaction
 /// from TxUTxODeltas message
 /// Reference scripts can be provided from inputs UTxOs and Reference Inputs
+/// And consider created Reference scripts in transaction outputs
 pub fn get_reference_scripts(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    ref_scripts: &HashMap<ScriptHash, ReferenceScript>,
+    reference_scripts: &HashMap<ScriptHash, ReferenceScript>,
 ) -> HashMap<ScriptHash, ReferenceScript> {
-    let mut reference_scripts = HashMap::new();
+    let mut tx_reference_scripts = HashMap::new();
 
     for input in tx_deltas.consumes.iter() {
         if let Some(utxo) = utxos.get(input) {
             if let Some(script_ref) = utxo.script_ref.as_ref() {
-                if let Some(ref_script) = ref_scripts.get(&script_ref.script_hash) {
-                    reference_scripts.insert(script_ref.script_hash, ref_script.clone());
+                if let Some(ref_script) = reference_scripts.get(&script_ref.script_hash) {
+                    tx_reference_scripts.insert(script_ref.script_hash, ref_script.clone());
                 }
             }
         }
+    }
+
+    for (script_hash, reference_script) in
+        tx_deltas.created_reference_scripts.as_deref().unwrap_or(&[]).iter()
+    {
+        tx_reference_scripts.insert(*script_hash, reference_script.clone());
     }
 
     for input in tx_deltas.reference_inputs.iter() {
         if let Some(utxo) = utxos.get(input) {
             if let Some(script_ref) = utxo.script_ref.as_ref() {
-                if let Some(ref_script) = ref_scripts.get(&script_ref.script_hash) {
-                    reference_scripts.insert(script_ref.script_hash, ref_script.clone());
+                if let Some(ref_script) = reference_scripts.get(&script_ref.script_hash) {
+                    tx_reference_scripts.insert(script_ref.script_hash, ref_script.clone());
                 }
             }
         }
     }
 
-    reference_scripts
+    tx_reference_scripts
 }

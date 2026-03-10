@@ -432,19 +432,15 @@ impl State {
     /// Observe TxUTxODelta's Reference scripts
     pub fn observe_reference_scripts(
         &mut self,
-        reference_scripts: &[(ScriptHash, ReferenceScript)],
-        spent_reference_scripts: &Vec<ScriptHash>,
+        created_reference_scripts: &[(ScriptHash, ReferenceScript)],
+        spent_reference_scripts: &[ScriptHash],
         block_info: &BlockInfo,
     ) {
-        if reference_scripts.is_empty() {
-            return;
-        }
-
         let mut current_state =
             self.reference_scripts_history.get_rolled_back_state(block_info.number);
 
         // Add newly created reference scripts
-        for (script_hash, reference_script) in reference_scripts {
+        for (script_hash, reference_script) in created_reference_scripts {
             current_state.entry(*script_hash).or_insert((reference_script.clone(), 0)).1 += 1;
         }
 
@@ -630,11 +626,8 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
+        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
 
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
@@ -713,11 +706,8 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
+        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
 
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
@@ -777,11 +767,8 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
+        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
 
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
@@ -859,11 +846,8 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
+        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
 
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
@@ -927,7 +911,7 @@ impl State {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
 
-        // collect utxos needed for validation
+        // collect utxos and reference scripts needed for validation
         let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
@@ -949,24 +933,15 @@ impl State {
                 }
             }
 
-            // add this transaction's outputs to the utxos
-            // if there are reference scripts in outputs,
-            // add them to reference_scripts
+            // add created UTxOs to the utxos
+            // add created Reference scripts to reference_scripts
             for output in &tx_deltas.produces {
                 utxos.insert(output.utxo_identifier, output.utxo_value());
-                let tx_reference_scripts = match tx_deltas.reference_scripts.as_ref() {
-                    Some(scripts) => scripts,
-                    None => &vec![],
-                };
-
-                if let Some(script_ref) = output.script_ref.as_ref() {
-                    if let Some((hash, ref_script)) = tx_reference_scripts
-                        .iter()
-                        .find(|(script_hash, _)| *script_hash == script_ref.script_hash)
-                    {
-                        reference_scripts.insert(*hash, ref_script.clone());
-                    }
-                }
+            }
+            for (script_hash, reference_script) in
+                tx_deltas.created_reference_scripts.as_deref().unwrap_or(&[]).iter()
+            {
+                reference_scripts.insert(*script_hash, reference_script.clone());
             }
         }
 
@@ -1103,7 +1078,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(ref_script.compute_hash(), ref_script.clone())]),
+            created_reference_scripts: Some(vec![(ref_script.compute_hash(), ref_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };
@@ -1307,7 +1282,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(v1_script.compute_hash(), v1_script.clone())]),
+            created_reference_scripts: Some(vec![(v1_script.compute_hash(), v1_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };
@@ -1334,7 +1309,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(v2_script.compute_hash(), v2_script.clone())]),
+            created_reference_scripts: Some(vec![(v2_script.compute_hash(), v2_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };

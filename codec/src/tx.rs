@@ -48,7 +48,7 @@ pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHa
 }
 
 /// Parse transaction consumes and produces,
-/// and return the parsed consumes, produces, reference scripts and errors
+/// and return the parsed consumes, produces, created reference scripts and errors
 /// NOTE:
 /// This function returns consumes sorted lexicographically by UTxO identifier
 #[allow(clippy::type_complexity)]
@@ -66,7 +66,7 @@ pub fn map_transaction_consumes_produces(
     };
     let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
-    let mut reference_scripts = Vec::new();
+    let mut created_reference_scripts = Vec::new();
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
@@ -82,7 +82,7 @@ pub fn map_transaction_consumes_produces(
                     if let (Some(r_script), Some(s_ref)) =
                         (reference_script.as_ref(), script_ref.as_ref())
                     {
-                        reference_scripts.push((s_ref.script_hash, r_script.clone()));
+                        created_reference_scripts.push((s_ref.script_hash, r_script.clone()));
                     }
 
                     // Add TxOutput to utxo_deltas
@@ -104,7 +104,12 @@ pub fn map_transaction_consumes_produces(
         }
     }
 
-    (parsed_consumes, parsed_produces, reference_scripts, errors)
+    (
+        parsed_consumes,
+        parsed_produces,
+        created_reference_scripts,
+        errors,
+    )
 }
 
 pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
@@ -186,7 +191,7 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (mut consumes, produces, reference_scripts, input_output_errors) =
+    let (mut consumes, produces, created_reference_scripts, input_output_errors) =
         map_transaction_consumes_produces(tx);
     consumes.sort();
 
@@ -327,7 +332,7 @@ pub fn map_transaction(
         reference_inputs,
         fee,
         donation,
-        reference_scripts,
+        created_reference_scripts,
         stated_total_collateral,
         is_valid,
         certs,
