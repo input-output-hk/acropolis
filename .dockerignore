@@ -1,4 +1,4 @@
-# Ignore everything by default, then allow only what the omnibus build needs.
+# Ignore everything by default, then allow only what Docker builds need.
 **
 
 # Workspace sources and manifests needed for cargo build
@@ -23,6 +23,7 @@ processes/omnibus/fjall*/**
 modules/snapshot_bootstrapper/data/**
 modules/accounts_state/test-data/**
 !modules/accounts_state/test-data/pots.mainnet.csv
+!modules/accounts_state/test-data/pots.preview.csv
 **/target/**
 **/db/**
 **/*.db

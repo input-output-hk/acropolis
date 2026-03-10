@@ -42,3 +42,27 @@ Build and run mainnet:
 ```shell
 docker compose up --build omnibus-mainnet
 ```
+
+Build and run preview bootstrap mode:
+
+```shell
+docker compose up --build omnibus-bootstrap-preview
+```
+
+Build and run mainnet bootstrap mode:
+
+```shell
+docker compose up --build omnibus-bootstrap-mainnet
+```
+
+Default host ports:
+- `omnibus-preview`: `4340` (REST), `4341` (MCP)
+- `omnibus-mainnet`: `5340` (REST), `5341` (MCP)
+- `omnibus-bootstrap-preview`: `6340` (REST), `6341` (MCP)
+- `omnibus-bootstrap-mainnet`: `7340` (REST), `7341` (MCP)
+
+Override with:
+- `OMNIBUS_PREVIEW_REST_PORT`, `OMNIBUS_PREVIEW_MCP_PORT`
+- `OMNIBUS_MAINNET_REST_PORT`, `OMNIBUS_MAINNET_MCP_PORT`
+- `OMNIBUS_BOOTSTRAP_PREVIEW_REST_PORT`, `OMNIBUS_BOOTSTRAP_PREVIEW_MCP_PORT`
+- `OMNIBUS_BOOTSTRAP_MAINNET_REST_PORT`, `OMNIBUS_BOOTSTRAP_MAINNET_MCP_PORT`
