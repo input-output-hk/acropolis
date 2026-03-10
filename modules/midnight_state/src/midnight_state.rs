@@ -35,8 +35,8 @@ declare_cardano_reader!(
 
 declare_cardano_reader!(
     EpochNonceReader,
-    "epoch-activity-topic",
-    "cardano.epoch.activity",
+    "epoch-nonce-topic",
+    "cardano.epoch.nonce",
     EpochNonce,
     Option<Nonce>
 );
@@ -74,7 +74,7 @@ impl MidnightState {
                         );
                     }
 
-                    if blk_info.new_epoch {
+                    if blk_info.new_epoch && blk_info.epoch > 0 {
                         let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
                         let nonce = nonce.as_ref().clone();
 
