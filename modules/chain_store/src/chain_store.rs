@@ -539,6 +539,52 @@ impl ChainStore {
                     },
                 ))
             }
+            BlocksStateQuery::GetBlockByTipOffset { offset } => {
+                let Some(tip) = store.get_tip_block_number() else {
+                    return Ok(BlocksStateQueryResponse::BlockByTipOffset(None));
+                };
+
+                let stable_block_number = tip.saturating_sub(*offset as u64);
+
+                let block_opt = match store.get_block_by_number(stable_block_number) {
+                    Ok(b) => b,
+                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
+                };
+
+                let block_info_opt = match block_opt
+                    .map(|b| Self::to_block_info(b, store, state, false))
+                    .transpose()
+                {
+                    Ok(v) => v,
+                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
+                };
+
+                Ok(BlocksStateQueryResponse::BlockByTipOffset(block_info_opt))
+            }
+            BlocksStateQuery::GetStableBlockByHash { block_hash, offset } => {
+                let Some(tip) = store.get_tip_block_number() else {
+                    return Ok(BlocksStateQueryResponse::StableBlockByHash(None));
+                };
+
+                let stable_boundary = tip.saturating_sub(*offset as u64);
+
+                let block_opt = match store.get_block_by_hash(block_hash.as_slice()) {
+                    Ok(b) => b,
+                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
+                };
+
+                let block_info_opt = match block_opt
+                    .map(|b| Self::to_block_info(b, store, state, false))
+                    .transpose()
+                {
+                    Ok(v) => v,
+                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
+                };
+
+                let stable_block = block_info_opt.filter(|b| b.number <= stable_boundary);
+
+                Ok(BlocksStateQueryResponse::StableBlockByHash(stable_block))
+            }
         }
     }
 

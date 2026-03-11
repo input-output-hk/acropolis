@@ -120,6 +120,10 @@ impl super::Store for FjallStore {
         self.blocks.get_by_epoch_slot(epoch, epoch_slot)
     }
 
+    fn get_tip_block_number(&self) -> Option<u64> {
+        self.last_persisted_block
+    }
+
     fn get_latest_block(&self) -> Result<Option<Block>> {
         self.blocks.get_latest()
     }
