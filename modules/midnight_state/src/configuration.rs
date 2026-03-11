@@ -11,6 +11,14 @@ pub struct MidnightConfig {
     pub cnight_policy_id: PolicyId,
     pub cnight_asset_name: AssetName,
 
+    // Bridge config
+    #[serde(default)]
+    pub bridge_token_policy_id: PolicyId,
+    #[serde(default)]
+    pub bridge_token_asset_name: AssetName,
+    #[serde(default)]
+    pub illiquid_circulation_supply_validator_address: Address,
+
     // Candidate config
     pub mapping_validator_address: Address,
     pub auth_token_asset_name: AssetName,

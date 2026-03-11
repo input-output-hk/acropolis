@@ -1,13 +1,13 @@
 use crate::{
     grpc::midnight_state_proto::{
         AssetCreate as AssetCreateProto, AssetSpend as AssetSpendProto,
-        Deregistration as DeregistrationProto, EpochCandidate, Registration as RegistrationProto,
-        UtxoId,
+        BridgeUtxo as BridgeUtxoProto, Deregistration as DeregistrationProto, EpochCandidate,
+        Registration as RegistrationProto, UtxoId,
     },
     types::{
         AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal,
-        Deregistration as DeregistrationInternal, Registration as RegistrationInternal,
-        RegistrationEvent,
+        BridgeAssetUtxo as BridgeAssetUtxoInternal, Deregistration as DeregistrationInternal,
+        Registration as RegistrationInternal, RegistrationEvent,
     },
 };
 
@@ -38,6 +38,22 @@ impl From<AssetSpendInternal> for AssetSpendProto {
             utxo_tx_hash: c.utxo_tx_hash.to_vec(),
             utxo_index: c.utxo_index.into(),
             block_timestamp_unix: c.block_timestamp,
+        }
+    }
+}
+
+impl From<BridgeAssetUtxoInternal> for BridgeUtxoProto {
+    fn from(utxo: BridgeAssetUtxoInternal) -> Self {
+        BridgeUtxoProto {
+            tx_hash: utxo.tx_hash.to_vec(),
+            output_index: utxo.output_index.into(),
+            block_number: utxo.block_number,
+            block_hash: utxo.block_hash.to_vec(),
+            tx_index: utxo.tx_index_in_block,
+            block_timestamp_unix: utxo.block_timestamp,
+            tokens_out: utxo.tokens_out,
+            tokens_in: utxo.tokens_in,
+            datum: utxo.datum,
         }
     }
 }
