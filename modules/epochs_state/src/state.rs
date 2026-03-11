@@ -7,7 +7,7 @@ use acropolis_common::{
     messages::{BlockTxsMessage, EpochActivityMessage, ProtocolParamsMessage},
     params::EPOCH_LENGTH,
     protocol_params::{Nonce, Nonces, PraosParams},
-    BlockHash, BlockInfo, PoolId,
+    BlockHash, BlockInfo, Era, PoolId,
 };
 use anyhow::{bail, Result};
 use imbl::HashMap;
@@ -108,7 +108,6 @@ impl State {
         self.blocks_minted = epoch_data.spo_blocks.iter().map(|(k, v)| (*k, *v as usize)).collect();
 
         self.nonces = Some(epoch_data.nonces.clone());
-        self.praos_params = epoch_data.praos_params.clone();
 
         info!(
             "Bootstrapped epoch state: epoch={}, blocks={}",
@@ -132,18 +131,23 @@ impl State {
     ) -> Result<()> {
         let new_epoch = block_info.new_epoch;
 
-        // update nonces starting from Shelley Era
-        if block_info.epoch >= genesis.shelley_epoch {
+        // Skip blocks that don't participate in nonce evolution:
+        // - Pre-Shelley epochs: nonce evolution starts at shelley_epoch
+        // - Byron-era blocks: no VRF nonces (relevant on preview where shelley_epoch=0)
+        if block_info.epoch >= genesis.shelley_epoch && block_info.era != Era::Byron {
             let Some(praos_params) = self.praos_params.as_ref() else {
                 bail!("Praos Param is not set");
             };
 
-            // if Shelley Era's first epoch
-            if new_epoch && block_info.epoch == genesis.shelley_epoch {
+            // Initialize nonces from genesis if not yet set. This covers:
+            // - The normal case: first block of shelley_epoch with new_epoch=true
+            // - Preview-like networks: shelley_epoch=0, module starts mid-epoch
+            //   so new_epoch is false but nonces still need initialization.
+            if self.nonces.is_none() {
                 self.nonces = Some(Nonces::shelley_genesis_nonces(genesis));
             }
 
-            // current nonces must be set
+            // current nonces must be set (guaranteed by the block above)
             let Some(current_nonces) = self.nonces.as_ref() else {
                 bail!("Current Nonces are not set after Shelley Era");
             };
@@ -165,9 +169,13 @@ impl State {
             // output.
             let evolving = Nonces::evolve(&current_nonces.evolving, &nonce_vrf_output)?;
 
-            // there must be parent hash
-            let Some(parent_hash) = header.previous_hash().map(|h| BlockHash::from(*h)) else {
-                bail!("Header Parent hash error");
+            // LAB nonce from the header's previous hash.
+            // GenesisHash (None) maps to NeutralNonce, matching the Haskell node's
+            // prevHashToNonce(GenesisHash) = NeutralNonce. This matters on networks
+            // like preview where the first Shelley block has no predecessor.
+            let lab_nonce: Nonce = match header.previous_hash() {
+                Some(h) => BlockHash::from(*h).into(),
+                None => Nonce::default(),
             };
 
             let new_nonces = Nonces {
@@ -201,8 +209,8 @@ impl State {
                 } else {
                     current_nonces.candidate.clone()
                 },
-                // Last Applied Block is the Header's Prev hash.
-                lab: parent_hash.into(),
+                // Last Applied Block is the Header's Previous Hash.
+                lab: lab_nonce,
                 // Previous LAB stay same during epoch
                 // only Epoch's Boundary, will be last block's Previous Epoch's LAB
                 prev_lab: if new_epoch {

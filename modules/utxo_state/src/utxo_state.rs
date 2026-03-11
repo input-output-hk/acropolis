@@ -22,6 +22,8 @@ use tracing::{error, info, info_span, Instrument};
 
 mod state;
 use state::{ImmutableUTXOStore, State};
+mod address_delta_mode;
+use address_delta_mode::AddressDeltaPublishMode;
 
 #[cfg(test)]
 mod test_utils;
@@ -56,6 +58,7 @@ const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
 const DEFAULT_UTXO_VALIDATION_TOPIC: (&str, &str) =
     ("utxo-validation-publish-topic", "cardano.validation.utxo");
+const DEFAULT_ADDRESS_DELTA_PUBLISH_MODE: &str = "compact";
 
 /// UTXO state module
 #[module(
@@ -78,17 +81,7 @@ impl UTXOState {
         publish_tx_validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let mut genesis_utxo_consumed = false;
-
-        if is_snapshot_mode {
-            if let Some(sub) = pool_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-
-            if let Some(sub) = stake_registration_updates_subscription.as_mut() {
-                let _ = sub.read().await?;
-            }
-        }
+        let mut bootstrap_block_processed = false;
 
         loop {
             let mut current_block_info: Option<BlockInfo> = None;
@@ -121,7 +114,7 @@ impl UTXOState {
 
             // Read from pool registration updates subscription if available
             let mut pool_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = pool_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read pool registration updates subscription error");
@@ -140,7 +133,7 @@ impl UTXOState {
 
             // Read from stake registration updates subscription if available
             let mut stake_registration_updates = vec![];
-            if genesis_utxo_consumed {
+            if is_snapshot_mode || bootstrap_block_processed {
                 if let Some(subscription) = stake_registration_updates_subscription.as_mut() {
                     let Ok((_, message)) = subscription.read().await else {
                         error!("Failed to read stake registration updates subscription error");
@@ -162,29 +155,38 @@ impl UTXOState {
             match message.as_ref() {
                 Message::Cardano((block, CardanoMessage::UTXODeltas(deltas_msg))) => {
                     let span = info_span!("utxo_state.validate", block = block.number);
-                    async {
-                        let mut state = state.lock().await;
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state
-                            .validate(
-                                block,
-                                deltas_msg,
-                                &pool_registration_updates,
-                                &stake_registration_updates,
-                                &current_protocol_params,
-                            )
-                            .await
-                        {
-                            validation_outcomes.push(*e);
-                        }
+                    if block.intent.do_validation() {
+                        async {
+                            let mut state = state.lock().await;
+                            let mut validation_outcomes = ValidationOutcomes::new();
+                            if let Err(e) = state
+                                .validate(
+                                    block,
+                                    deltas_msg,
+                                    &pool_registration_updates,
+                                    &stake_registration_updates,
+                                    &current_protocol_params,
+                                )
+                                .await
+                            {
+                                validation_outcomes.push(*e);
+                            }
 
-                        validation_outcomes
-                            .publish(&context, &publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
+                            validation_outcomes
+                                .publish(
+                                    &context,
+                                    "utxo_state",
+                                    &publish_tx_validation_topic,
+                                    block,
+                                )
+                                .await
+                                .unwrap_or_else(|e| {
+                                    error!("Failed to publish UTxO validation: {e}")
+                                });
+                        }
+                        .instrument(span)
+                        .await;
                     }
-                    .instrument(span)
-                    .await;
 
                     let span = info_span!("utxo_state.handle", block = block.number);
                     async {
@@ -198,8 +200,8 @@ impl UTXOState {
                     .instrument(span)
                     .await;
 
-                    if !genesis_utxo_consumed {
-                        genesis_utxo_consumed = true;
+                    if !bootstrap_block_processed {
+                        bootstrap_block_processed = true;
                     }
                 }
 
@@ -267,6 +269,15 @@ impl UTXOState {
             .unwrap_or(DEFAULT_UTXO_VALIDATION_TOPIC.1.to_string());
         info!("Creating UTxO validation publisher on '{utxo_validation_publish_topic}'");
 
+        let address_delta_publish_mode = config
+            .get_string("address-delta-publish-mode")
+            .unwrap_or_else(|_| DEFAULT_ADDRESS_DELTA_PUBLISH_MODE.to_string())
+            .parse::<AddressDeltaPublishMode>()?;
+        info!(
+            mode = ?address_delta_publish_mode,
+            "Address delta publish mode"
+        );
+
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
         // Create store
@@ -280,10 +291,11 @@ impl UTXOState {
             _ => return Err(anyhow!("Unknown store type {store_type}")),
         };
         let snapshot_store = store.clone();
-        let mut state = State::new(store);
+        let mut state = State::new(store, address_delta_publish_mode);
 
         // Create address delta publisher and pass it observations
-        let deltas_publisher = AddressDeltaPublisher::new(context.clone(), config.clone());
+        let deltas_publisher =
+            AddressDeltaPublisher::new(context.clone(), config.clone(), address_delta_publish_mode);
         state.register_address_delta_observer(Arc::new(deltas_publisher));
 
         // Create block totals publisher and pass it observations

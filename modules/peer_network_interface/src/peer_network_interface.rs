@@ -1,3 +1,6 @@
+mod block_flow;
+#[cfg(test)]
+mod block_flow_consensus_scenarios_tests;
 mod chain_state;
 mod configuration;
 mod connection;
@@ -6,6 +9,7 @@ mod network;
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus, Era,
     commands::chain_sync::ChainSyncCommand,
+    configuration::BlockFlowMode,
     genesis_values::GenesisValues,
     messages::{CardanoMessage, Command, Message, RawBlockMessage, StateTransitionMessage},
     upstream_cache::{UpstreamCache, UpstreamCacheRecord},
@@ -15,11 +19,12 @@ use caryatid_sdk::{Context, Subscription, module};
 use config::Config;
 use pallas::network::miniprotocols::Point;
 use tokio::sync::mpsc;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc};
 
 use crate::{
+    block_flow::BlockFlowHandler,
     configuration::{InterfaceConfig, SyncPoint},
     connection::Header,
     network::{NetworkEvent, NetworkManager},
@@ -35,12 +40,23 @@ pub struct PeerNetworkInterface;
 impl PeerNetworkInterface {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = InterfaceConfig::try_load(&config)?;
+        let block_flow_mode = BlockFlowMode::from_config(&config);
         let genesis_complete = if cfg.genesis_values.is_none() {
             Some(context.subscribe(&cfg.genesis_completion_topic).await?)
         } else {
             None
         };
         let mut command_subscription = context.subscribe(&cfg.sync_command_topic).await?;
+
+        let (events_sender, events) = mpsc::channel(1024); // TODO: This might be way too small
+
+        let flow_handler = BlockFlowHandler::new(
+            &cfg,
+            block_flow_mode,
+            context.clone(),
+            events_sender.clone(),
+        )
+        .await?;
 
         context.clone().run(async move {
             let genesis_values = if let Some(mut sub) = genesis_complete {
@@ -71,7 +87,7 @@ impl PeerNetworkInterface {
             }
 
             let mut sink = BlockSink {
-                context,
+                context: context.clone(),
                 topic: cfg.block_topic.clone(),
                 genesis_values: genesis_values.clone(),
                 upstream_cache,
@@ -80,42 +96,25 @@ impl PeerNetworkInterface {
                 rolled_back: false,
             };
 
-            let manager = match cfg.sync_point {
+            let sync_point = match cfg.sync_point {
                 SyncPoint::Origin => {
-                    tracing::info!("Starting sync from origin");
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                    );
-                    manager.sync_to_point(Point::Origin);
-                    manager
+                    info!("Starting sync from origin");
+                    Some(Point::Origin)
                 }
                 SyncPoint::Tip => {
-                    tracing::info!("Starting sync from tip");
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                    );
-                    if let Err(error) = manager.sync_to_tip().await {
-                        warn!("could not sync to tip: {error:#}");
+                    // TODO: Temporary, only applicable in Direct mode
+                    if block_flow_mode.is_consensus() {
+                        warn!(
+                            "Requested sync point is Tip, which is not supported in Consensus mode."
+                        );
                         return;
                     }
-                    manager
+                    info!("Starting sync from tip");
+                    None
                 }
                 SyncPoint::Cache => {
-                    tracing::info!("Starting sync from cache at {:?}", cache_sync_point);
-                    let mut manager = Self::init_manager(
-                        cfg.node_addresses,
-                        genesis_values.magic_number.into(),
-                        sink,
-                        command_subscription,
-                    );
-                    manager.sync_to_point(cache_sync_point);
-                    manager
+                    info!("Starting sync from cache at {:?}", cache_sync_point);
+                    Some(cache_sync_point)
                 }
                 SyncPoint::Dynamic => {
                     match Self::wait_initial_command(&mut command_subscription).await {
@@ -123,20 +122,9 @@ impl PeerNetworkInterface {
                             if let Point::Specific(slot, _) = &point {
                                 let (epoch, _) = sink.genesis_values.slot_to_epoch(*slot);
                                 sink.last_epoch = Some(epoch);
-                                tracing::info!(
-                                    "Starting sync from slot {} in epoch {}",
-                                    slot,
-                                    epoch,
-                                );
+                                info!("Starting sync from slot {} in epoch {}", slot, epoch);
                             }
-                            let mut manager = Self::init_manager(
-                                cfg.node_addresses,
-                                genesis_values.magic_number.into(),
-                                sink,
-                                command_subscription,
-                            );
-                            manager.sync_to_point(point);
-                            manager
+                            Some(point)
                         }
                         Err(error) => {
                             warn!("sync command never received: {error:#}");
@@ -146,6 +134,31 @@ impl PeerNetworkInterface {
                 }
             };
 
+            context.run(Self::forward_commands_to_events(
+                command_subscription,
+                events_sender.clone(),
+            ));
+
+            let mut manager = NetworkManager::new(
+                cfg.node_addresses,
+                genesis_values.magic_number.into(),
+                events,
+                events_sender,
+                sink,
+                flow_handler,
+            );
+
+            match sync_point {
+                Some(point) => manager.sync_to_point(point),
+                None => {
+                    // Tip mode
+                    if let Err(error) = manager.sync_to_tip().await {
+                        warn!("could not sync to tip: {error:#}");
+                        return;
+                    }
+                }
+            }
+
             if let Err(err) = manager.run().await {
                 error!("chain sync failed: {err:#}");
             }
@@ -154,28 +167,10 @@ impl PeerNetworkInterface {
         Ok(())
     }
 
-    fn init_manager(
-        node_addresses: Vec<String>,
-        magic_number: u32,
-        sink: BlockSink,
-        command_subscription: Box<dyn Subscription<Message>>,
-    ) -> NetworkManager {
-        let (events_sender, events) = mpsc::channel(1024);
-        tokio::spawn(Self::forward_commands_to_events(
-            command_subscription,
-            events_sender.clone(),
-        ));
-        let mut manager = NetworkManager::new(magic_number, events, events_sender, sink);
-        for address in node_addresses {
-            manager.handle_new_connection(address, Duration::ZERO);
-        }
-        manager
-    }
-
     async fn forward_commands_to_events(
         mut subscription: Box<dyn Subscription<Message>>,
         events_sender: mpsc::Sender<NetworkEvent>,
-    ) -> Result<()> {
+    ) {
         while let Ok((_, msg)) = subscription.read().await {
             if let Message::Command(Command::ChainSync(ChainSyncCommand::FindIntersect(p))) =
                 msg.as_ref()
@@ -188,12 +183,13 @@ impl PeerNetworkInterface {
                 };
 
                 if events_sender.send(NetworkEvent::SyncPointUpdate { point }).await.is_err() {
-                    bail!("event channel closed");
+                    error!("event channel closed");
+                    return;
                 }
             }
         }
 
-        bail!("subscription closed");
+        error!("subscription closed");
     }
 
     async fn init_cache(
@@ -260,6 +256,7 @@ struct BlockSink {
     era: Option<Era>,
     rolled_back: bool,
 }
+
 impl BlockSink {
     pub async fn announce_roll_forward(
         &mut self,
@@ -323,7 +320,7 @@ impl BlockSink {
             } else {
                 BlockStatus::Volatile
             },
-            intent: BlockIntent::Apply,
+            intent: BlockIntent::ValidateAndApply,
             slot,
             number: header.number,
             hash: header.hash,

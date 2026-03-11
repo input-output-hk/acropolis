@@ -5,6 +5,7 @@
 use crate::certificate::TxCertificateIdentifier;
 use crate::crypto::keyhash_224;
 use crate::drep::{Anchor, DRepVotingThresholds};
+use crate::script::Datum;
 use crate::UTxOIdentifier;
 // Re-export certificate types for backward compatibility
 pub use crate::certificate::{
@@ -26,7 +27,8 @@ use bech32::{Bech32, Hrp};
 use bitmask_enum::bitmask;
 use hex::decode;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -293,6 +295,12 @@ impl BlockInfo {
         copy
     }
 
+    pub fn with_status(&self, status: BlockStatus) -> BlockInfo {
+        let mut copy = self.clone();
+        copy.status = status;
+        copy
+    }
+
     pub fn is_at_tip(&self) -> bool {
         // The slot of a newly-reported block can be later than the slot of the tip.
         // This is because the tip is the most recent slot with a _validated_ block,
@@ -355,8 +363,7 @@ impl PoolRegistrationOutcome {
     pub fn deposit(&self) -> Lovelace {
         match self {
             PoolRegistrationOutcome::Registered(deposit) => *deposit,
-            PoolRegistrationOutcome::Updated => 0,
-            PoolRegistrationOutcome::RetirementQueued => 0,
+            _ => 0,
         }
     }
 }
@@ -377,6 +384,47 @@ pub struct AddressDelta {
     // Sums of spent and created UTxOs
     pub sent: Value,
     pub received: Value,
+}
+
+/// Extended spent UTxO details for address delta messages
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SpentUTxOExtended {
+    /// UTxO identifier being spent
+    pub utxo: UTxOIdentifier,
+
+    /// Hash of the transaction spending this UTxO
+    pub spent_by: TxHash,
+}
+
+/// Extended created UTxO details for address delta messages
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CreatedUTxOExtended {
+    /// UTxO identifier being created
+    pub utxo: UTxOIdentifier,
+
+    /// Full value of the created UTxO
+    pub value: ValueMap,
+
+    /// Datum attached to the created UTxO, if present
+    pub datum: Option<Datum>,
+}
+
+/// Extended per-address balance change with UTxO-level details
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExtendedAddressDelta {
+    /// Address involved in delta
+    pub address: Address,
+
+    /// Transaction in which delta occurred
+    pub tx_identifier: TxIdentifier,
+
+    /// Address impacted spent and created UTxOs
+    pub spent_utxos: Vec<SpentUTxOExtended>,
+    pub created_utxos: Vec<CreatedUTxOExtended>,
+
+    /// Sums of spent and created UTxOs
+    pub sent: ValueMap,
+    pub received: ValueMap,
 }
 
 /// Stake balance change
@@ -443,6 +491,7 @@ pub type NativeAssetsMap = HashMap<PolicyId, HashMap<AssetName, u64>>;
 pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
 
 #[derive(
+    Default,
     Debug,
     Copy,
     Clone,
@@ -450,7 +499,6 @@ pub type NativeAssetsDeltaMap = HashMap<PolicyId, HashMap<AssetName, i64>>;
     PartialEq,
     Hash,
     serde::Serialize,
-    serde::Deserialize,
     minicbor::Encode,
     minicbor::Decode,
 )]
@@ -484,6 +532,17 @@ impl AssetName {
 
     pub fn as_slice(&self) -> &[u8] {
         &self.bytes[..self.len as usize]
+    }
+}
+
+impl<'de> Deserialize<'de> for AssetName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        AssetName::new(s.as_bytes())
+            .ok_or_else(|| SerdeError::custom("AssetName too long (max 32 bytes)"))
     }
 }
 
@@ -533,6 +592,20 @@ impl Value {
     pub fn sum_lovelace<'a>(iter: impl Iterator<Item = &'a Value>) -> u64 {
         iter.map(|v| v.lovelace).sum()
     }
+
+    pub fn token_amount(&self, policy_id: &PolicyId, asset_name: &AssetName) -> u64 {
+        for (pid, assets) in &self.assets {
+            if pid == policy_id {
+                for asset in assets {
+                    if &asset.name == asset_name {
+                        return asset.amount;
+                    }
+                }
+                return 0;
+            }
+        }
+        0
+    }
 }
 
 impl AddAssign<&Value> for Value {
@@ -571,7 +644,15 @@ impl Add for Value {
 
 /// Hashmap representation of Value (lovelace + multiasset)
 #[derive(
-    Debug, Default, Clone, serde::Serialize, serde::Deserialize, minicbor::Encode, minicbor::Decode,
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    minicbor::Encode,
+    minicbor::Decode,
 )]
 pub struct ValueMap {
     #[n(0)]
@@ -609,6 +690,27 @@ impl ValueMap {
                     .saturating_add(asset.amount);
             }
         }
+    }
+
+    pub fn remove_zero_amounts(&mut self) {
+        self.assets.retain(|_, assets| {
+            assets.retain(|_, amount| *amount != 0);
+            !assets.is_empty()
+        });
+    }
+}
+
+impl From<&Value> for ValueMap {
+    fn from(value: &Value) -> Self {
+        let mut map = Self::default();
+        map.add_value(value);
+        map
+    }
+}
+
+impl From<Value> for ValueMap {
+    fn from(value: Value) -> Self {
+        Self::from(&value)
     }
 }
 
@@ -817,6 +919,12 @@ impl Display for VKeyWitness {
 /// Slot
 pub type Slot = u64;
 
+/// Block Number
+pub type BlockNumber = u64;
+
+/// Epoch
+pub type Epoch = u64;
+
 /// Point on the chain
 #[derive(
     Debug,
@@ -1014,14 +1122,23 @@ impl Credential {
 
     pub fn from_json_string(credential: &str) -> Result<Self> {
         if let Some(hash) = credential.strip_prefix("scriptHash-") {
-            Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+            Self::script_hash_from_string(hash)
         } else if let Some(hash) = credential.strip_prefix("keyHash-") {
-            Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
+            Self::key_hash_from_string(hash)
+            //Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
         } else {
             Err(anyhow!(
                 "Incorrect credential {credential}, expected scriptHash- or keyHash- prefix"
             ))
         }
+    }
+
+    pub fn script_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::ScriptHash(Self::hex_string_to_hash(hash)?))
+    }
+
+    pub fn key_hash_from_string(hash: &str) -> Result<Self> {
+        Ok(Credential::AddrKeyHash(Self::hex_string_to_hash(hash)?))
     }
 
     pub fn to_json_string(&self) -> String {
@@ -1963,6 +2080,19 @@ pub enum Vote {
     Abstain,
 }
 
+impl TryFrom<&str> for Vote {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "yes" => Ok(Vote::Yes),
+            "no" => Ok(Vote::No),
+            "abstain" => Ok(Vote::Abstain),
+            _ => Err(anyhow!("Invalid vote string: {value}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VotingProcedure {
     pub vote: Vote,
@@ -1997,6 +2127,14 @@ impl VoteCount {
             yes: 0,
             no: 0,
             abstain: 0,
+        }
+    }
+
+    pub fn register_vote(&mut self, v: &Vote, stake: Lovelace) {
+        match v {
+            Vote::Yes => self.yes += stake,
+            Vote::No => self.no += stake,
+            Vote::Abstain => self.abstain += stake,
         }
     }
 

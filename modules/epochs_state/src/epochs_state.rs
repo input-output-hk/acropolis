@@ -156,14 +156,21 @@ impl EpochsState {
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis.values).await?;
 
-        // Consume initial protocol parameters and txs (only needed for genesis bootstrap)
+        // Consume initial protocol parameters and block txs published at epoch 0.
+        // These messages are published when the first new_epoch block flows through the
+        // pipeline (governance_state → parameters_state, utxo_state → block_txs).
+        // Without consuming them here, they desync the readers in the main loop
+        // (epoch N boundary reads epoch N-1 params instead of epoch N params).
         if !is_snapshot_mode {
-            let _ = params_reader.read_skip_rollbacks().await?;
+            let (_, initial_params) = params_reader.read_skip_rollbacks().await?;
+            let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
+            state.handle_protocol_parameters(&initial_params);
+            history.lock().await.commit(0, state);
             let _ = txs_reader.read_skip_rollbacks().await?;
         }
 
         loop {
-            let mut ctx = ValidationContext::new(&context, &validation_topic);
+            let mut ctx = ValidationContext::new(&context, &validation_topic, "epochs_state");
 
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));

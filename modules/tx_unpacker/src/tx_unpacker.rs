@@ -33,6 +33,7 @@ const DEFAULT_TRANSACTIONS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("transactions-subscribe-topic", "cardano.txs");
 
 const CIP25_METADATA_LABEL: u64 = 721;
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 
 /// Tx unpacker module
 /// Parameterised by the outer message enum used on the bus
@@ -90,7 +91,7 @@ impl TxUnpacker {
                 return Err(anyhow::anyhow!("Failed to read txs subscription"));
             };
 
-            let new_epoch = match message.as_ref() {
+            let (new_epoch, validate) = match message.as_ref() {
                 Message::Cardano((block_info, _)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
@@ -99,12 +100,12 @@ impl TxUnpacker {
                     current_block = Some(block_info.clone());
 
                     // new_epoch? first_epoch?
-                    block_info.new_epoch
+                    (block_info.new_epoch, block_info.intent.do_validation())
                 }
 
                 _ => {
                     error!("Unexpected message type: {message:?}");
-                    false
+                    (false, false)
                 }
             };
 
@@ -199,8 +200,7 @@ impl TxUnpacker {
                                     }
 
                                     if publish_utxo_deltas_topic.is_some() {
-                                        let deltas = mapped_tx.convert_to_utxo_deltas(true);
-                                        utxo_deltas.push(deltas);
+                                        utxo_deltas.push(mapped_tx.convert_to_utxo_deltas(true));
                                     }
                                 }
 
@@ -331,26 +331,36 @@ impl TxUnpacker {
                 }
             }
 
-            if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
-                if let Some(ref genesis) = genesis {
-                    if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
-                        message.as_ref()
-                    {
-                        let span = info_span!("tx_unpacker.validate", block = block.number);
-                        async {
-                            let mut validation_outcomes = ValidationOutcomes::new();
-                            if let Err(e) = state.validate(block, txs_msg, &genesis.genesis_delegs)
-                            {
-                                validation_outcomes.push(*e);
-                            }
+            if validate {
+                if let Some(publish_tx_validation_topic) = publish_tx_validation_topic.as_ref() {
+                    if let Some(ref genesis) = genesis {
+                        if let Message::Cardano((block, CardanoMessage::ReceivedTxs(txs_msg))) =
+                            message.as_ref()
+                        {
+                            let span = info_span!("tx_unpacker.validate", block = block.number);
+                            async {
+                                let mut validation_outcomes = ValidationOutcomes::new();
+                                if let Err(e) =
+                                    state.validate(block, txs_msg, &genesis.genesis_delegs)
+                                {
+                                    validation_outcomes.push(*e);
+                                }
 
-                            validation_outcomes
-                                .publish(&context, publish_tx_validation_topic, block)
-                                .await
-                                .unwrap_or_else(|e| error!("Failed to publish tx validation: {e}"));
+                                validation_outcomes
+                                    .publish(
+                                        &context,
+                                        "tx_unpacker",
+                                        publish_tx_validation_topic,
+                                        block,
+                                    )
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        error!("Failed to publish tx validation: {e}")
+                                    });
+                            }
+                            .instrument(span)
+                            .await;
                         }
-                        .instrument(span)
-                        .await;
                     }
                 }
             }
@@ -426,8 +436,14 @@ impl TxUnpacker {
             None => None,
         };
 
-        let network_id: NetworkId =
-            config.get_string("network-id").unwrap_or("mainnet".to_string()).into();
+        let network_id = match config
+            .get_string("startup.network-name")
+            .unwrap_or(DEFAULT_NETWORK_NAME.to_string())
+            .as_ref()
+        {
+            "mainnet" => NetworkId::Mainnet,
+            _ => NetworkId::Testnet,
+        };
 
         // Phase 2 script validation (disabled by default)
         let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);

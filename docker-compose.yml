@@ -1,0 +1,137 @@
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  ulimits:
+    nofile:
+      soft: ${NOFILE_SOFT_LIMIT:-4096}
+      hard: ${NOFILE_HARD_LIMIT:-4096}
+  environment: &service-env
+    RUST_LOG: ${RUST_LOG:-info}
+
+x-omnibus-build: &omnibus-build
+  image: acropolis/omnibus:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime-omnibus
+
+x-midnight-indexer-build: &midnight-indexer-build
+  image: acropolis/midnight-indexer:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime-midnight-indexer
+
+x-omnibus-base: &omnibus-base
+  <<: [*service-defaults, *omnibus-build]
+  working_dir: /app/processes/omnibus
+  user: "${OMNIBUS_UID:-0}:${OMNIBUS_GID:-0}"
+
+x-midnight-indexer-base: &midnight-indexer-base
+  <<: [*service-defaults, *midnight-indexer-build]
+  working_dir: /app/processes/midnight_indexer
+  user: "${MIDNIGHT_UID:-0}:${MIDNIGHT_GID:-0}"
+
+services:
+  omnibus-preview:
+    <<: *omnibus-base
+    command: ["--config", "omnibus-preview.toml"]
+    ports:
+      - "${OMNIBUS_PREVIEW_REST_PORT:-4340}:4340"
+      - "${OMNIBUS_PREVIEW_MCP_PORT:-4341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_PREVIEW:-omnibus_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_PREVIEW:-omnibus_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_PREVIEW:-omnibus_preview_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_PREVIEW:-omnibus_preview_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_preview_spdd:/app/processes/omnibus/fjall-spdd
+
+  omnibus-mainnet:
+    <<: *omnibus-base
+    command: ["--config", "omnibus.toml"]
+    ports:
+      - "${OMNIBUS_MAINNET_REST_PORT:-5340}:4340"
+      - "${OMNIBUS_MAINNET_MCP_PORT:-5341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_MAINNET:-omnibus_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_MAINNET:-omnibus_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_MAINNET:-omnibus_mainnet_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_MAINNET:-omnibus_mainnet_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_mainnet_spdd:/app/processes/omnibus/fjall-spdd
+
+  omnibus-bootstrap-preview:
+    <<: *omnibus-base
+    command: ["--config", "omnibus-preview.toml", "--config", "omnibus.bootstrap.preview.toml"]
+    ports:
+      - "${OMNIBUS_BOOTSTRAP_PREVIEW_REST_PORT:-6340}:4340"
+      - "${OMNIBUS_BOOTSTRAP_PREVIEW_MCP_PORT:-6341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_BOOTSTRAP_PREVIEW:-omnibus_bootstrap_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_BOOTSTRAP_PREVIEW:-omnibus_bootstrap_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_BOOTSTRAP_PREVIEW:-omnibus_bootstrap_preview_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_BOOTSTRAP_PREVIEW:-omnibus_bootstrap_preview_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_bootstrap_preview_spdd:/app/processes/omnibus/fjall-spdd
+
+  omnibus-bootstrap-mainnet:
+    <<: *omnibus-base
+    command: ["--config", "omnibus.toml", "--config", "omnibus.bootstrap.toml"]
+    ports:
+      - "${OMNIBUS_BOOTSTRAP_MAINNET_REST_PORT:-7340}:4340"
+      - "${OMNIBUS_BOOTSTRAP_MAINNET_MCP_PORT:-7341}:4341"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_BOOTSTRAP_MAINNET:-omnibus_bootstrap_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_BOOTSTRAP_MAINNET:-omnibus_bootstrap_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${ADDRESS_STATE_DB_DIR_BOOTSTRAP_MAINNET:-omnibus_bootstrap_mainnet_address_state_db}:/app/modules/address_state/db
+      - ${HISTORICAL_ACCOUNTS_DB_DIR_BOOTSTRAP_MAINNET:-omnibus_bootstrap_mainnet_historical_accounts_state_db}:/app/modules/historical_accounts_state/db
+      - omnibus_bootstrap_mainnet_spdd:/app/processes/omnibus/fjall-spdd
+
+  midnight-indexer-preview:
+    <<: *midnight-indexer-base
+    command: ["--config", "config.preview.toml", "--config", "config.preview.docker.toml"]
+    ports:
+      - "${MIDNIGHT_PREVIEW_GRPC_PORT:-50051}:50051"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_PREVIEW:-midnight_indexer_preview_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_PREVIEW:-midnight_indexer_preview_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${CHAIN_STORE_DB_DIR_PREVIEW:-midnight_indexer_preview_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-preview
+      - ${SPDD_DB_DIR_PREVIEW:-midnight_indexer_preview_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
+
+  midnight-indexer-mainnet:
+    <<: *midnight-indexer-base
+    command: ["--config", "config.mainnet.toml", "--config", "config.mainnet.docker.toml"]
+    ports:
+      - "${MIDNIGHT_MAINNET_GRPC_PORT:-60051}:50051"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_MAINNET:-midnight_indexer_mainnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_MAINNET:-midnight_indexer_mainnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${CHAIN_STORE_DB_DIR_MAINNET:-midnight_indexer_mainnet_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-mainnet
+      - ${SPDD_DB_DIR_MAINNET:-midnight_indexer_mainnet_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
+
+volumes:
+  omnibus_preview_spdd:
+  omnibus_preview_downloads:
+  omnibus_preview_snapshot_data:
+  omnibus_preview_address_state_db:
+  omnibus_preview_historical_accounts_state_db:
+  omnibus_mainnet_spdd:
+  omnibus_mainnet_downloads:
+  omnibus_mainnet_snapshot_data:
+  omnibus_mainnet_address_state_db:
+  omnibus_mainnet_historical_accounts_state_db:
+  omnibus_bootstrap_preview_spdd:
+  omnibus_bootstrap_preview_downloads:
+  omnibus_bootstrap_preview_snapshot_data:
+  omnibus_bootstrap_preview_address_state_db:
+  omnibus_bootstrap_preview_historical_accounts_state_db:
+  omnibus_bootstrap_mainnet_spdd:
+  omnibus_bootstrap_mainnet_downloads:
+  omnibus_bootstrap_mainnet_snapshot_data:
+  omnibus_bootstrap_mainnet_address_state_db:
+  omnibus_bootstrap_mainnet_historical_accounts_state_db:
+  midnight_indexer_preview_downloads:
+  midnight_indexer_preview_snapshot_data:
+  midnight_indexer_preview_chain_store_db:
+  midnight_indexer_preview_spdd_db:
+  midnight_indexer_mainnet_downloads:
+  midnight_indexer_mainnet_snapshot_data:
+  midnight_indexer_mainnet_chain_store_db:
+  midnight_indexer_mainnet_spdd_db:

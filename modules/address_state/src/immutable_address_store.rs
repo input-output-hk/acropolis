@@ -98,7 +98,7 @@ impl ImmutableAddressStore {
 
         for (address, deltas) in Self::merge_block_deltas(drained_blocks) {
             change_count += 1;
-            let addr_key = address.to_bytes_key()?;
+            let addr_key = address.to_bytes_key();
 
             if persist_utxos && (!deltas.created_utxos.is_empty() || !deltas.spent_utxos.is_empty())
             {
@@ -172,7 +172,7 @@ impl ImmutableAddressStore {
     }
 
     pub async fn get_utxos(&self, address: &Address) -> Result<Option<Vec<UTxOIdentifier>>> {
-        let key = address.to_bytes_key()?;
+        let key = address.to_bytes_key();
 
         let db_raw = self.utxos.get(&key)?;
         let db_had_key = db_raw.is_some();
@@ -209,7 +209,7 @@ impl ImmutableAddressStore {
     }
 
     pub async fn get_txs(&self, address: &Address) -> Result<Option<Vec<TxIdentifier>>> {
-        let key = address.to_bytes_key()?;
+        let key = address.to_bytes_key();
         let mut live: Vec<TxIdentifier> =
             self.txs.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();
 
@@ -230,7 +230,7 @@ impl ImmutableAddressStore {
     }
 
     pub async fn get_totals(&self, address: &Address) -> Result<Option<AddressTotals>> {
-        let key = address.to_bytes_key()?;
+        let key = address.to_bytes_key();
 
         let mut live: AddressTotals =
             self.totals.get(&key)?.map(|bytes| decode(&bytes)).transpose()?.unwrap_or_default();

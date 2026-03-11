@@ -8,6 +8,8 @@ use crate::{Credential, KeyHash, NetworkId, ScriptHash, StakeCredential};
 use anyhow::{anyhow, bail, Result};
 use crc::{Crc, CRC_32_ISO_HDLC};
 use minicbor::data::IanaTag;
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
@@ -69,19 +71,19 @@ impl ByronAddress {
         Self::from_cbor(&mut dec)
     }
 
-    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes_key(&self) -> Vec<u8> {
         let crc = self.compute_crc32();
 
         let mut buf = Vec::new();
-        {
-            let mut enc = minicbor::Encoder::new(&mut buf);
-            enc.array(2)?;
-            enc.tag(minicbor::data::IanaTag::Cbor)?;
-            enc.bytes(&self.payload)?;
-            enc.u32(crc)?;
-        }
+        let mut enc = minicbor::Encoder::new(&mut buf);
 
-        Ok(buf)
+        let _ = enc
+            .array(2)
+            .and_then(|e| e.tag(minicbor::data::IanaTag::Cbor))
+            .and_then(|e| e.bytes(&self.payload))
+            .and_then(|e| e.u32(crc));
+
+        buf
     }
 
     /// Check if this Byron address is a redeem (AVVM) address.
@@ -121,6 +123,15 @@ pub enum ShelleyAddressPaymentPart {
     /// Payment to a script
     #[n(1)]
     ScriptHash(#[n(0)] ScriptHash),
+}
+
+impl ShelleyAddressPaymentPart {
+    pub fn to_script_hash(&self) -> Option<ScriptHash> {
+        match self {
+            ShelleyAddressPaymentPart::PaymentKeyHash(_) => None,
+            ShelleyAddressPaymentPart::ScriptHash(hash) => Some(*hash),
+        }
+    }
 }
 
 impl Default for ShelleyAddressPaymentPart {
@@ -578,7 +589,7 @@ impl StakeAddress {
         })
     }
 
-    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes_key(&self) -> Vec<u8> {
         let mut out = Vec::new();
         let (bits, hash): (u8, &[u8]) = match &self.credential {
             StakeCredential::AddrKeyHash(h) => (0b1110, h.as_slice()),
@@ -593,7 +604,7 @@ impl StakeAddress {
         let header = net_bit | (bits << 4);
         out.push(header);
         out.extend_from_slice(hash);
-        Ok(out)
+        out
     }
 }
 
@@ -636,7 +647,7 @@ impl Default for StakeAddress {
 }
 
 /// A Cardano address
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, Default)]
 pub enum Address {
     #[default]
     None,
@@ -688,15 +699,15 @@ impl Address {
         }
     }
 
-    pub fn to_bytes_key(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes_key(&self) -> Vec<u8> {
         match self {
             Address::Byron(b) => b.to_bytes_key(),
 
-            Address::Shelley(s) => Ok(s.to_bytes_key()),
+            Address::Shelley(s) => s.to_bytes_key(),
 
             Address::Stake(stake) => stake.to_bytes_key(),
 
-            Address::None => Err(anyhow!("No address to convert")),
+            Address::None => Vec::new(),
         }
     }
 
@@ -732,6 +743,16 @@ impl Address {
             Address::Byron(byron) => byron.is_redeem_address(),
             _ => false,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Address::from_string(&s).map_err(|e| SerdeError::custom(format!("Invalid address: {}", e)))
     }
 }
 

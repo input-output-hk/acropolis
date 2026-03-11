@@ -35,5 +35,5 @@ npm run test:drdd
 This validator will:
 * Compare Acropolis SPDD data with DB Sync epoch stake data
 * Display total stake and per-pool differences 
-* Pause for review when mismatches are detected
+* Pause for review when mismatches are detected, unless CI environment variable is set
 * Stop automatically when Acropolis stops returning data

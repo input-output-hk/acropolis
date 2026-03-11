@@ -24,6 +24,18 @@ pub struct InterfaceConfig {
     pub cache_dir: PathBuf,
     #[serde(flatten)]
     pub genesis_values: Option<GenesisValues>,
+    #[serde(default = "default_consensus_topic")]
+    pub consensus_topic: String,
+    #[serde(default = "default_block_wanted_topic")]
+    pub block_wanted_topic: String,
+}
+
+fn default_consensus_topic() -> String {
+    "cardano.consensus.offers".to_string()
+}
+
+fn default_block_wanted_topic() -> String {
+    "cardano.consensus.wants".to_string()
 }
 
 impl InterfaceConfig {

@@ -135,13 +135,15 @@ impl SPOStateImpl {
 
     pub async fn publish(&mut self) {
         if let Some(blk) = &self.current_block {
-            if let Err(e) =
-                self.validation.publish(&self.context, &self.validation_topic, blk).await
+            if let Err(e) = self
+                .validation
+                .publish(&self.context, "spo_state", &self.validation_topic, blk)
+                .await
             {
                 error!("Publish failed: {:?}", e);
             }
         } else {
-            self.validation.print_errors(None);
+            self.validation.print_errors("spo_state", None);
         }
     }
 
@@ -570,9 +572,11 @@ impl SPOState {
             // Commit the new state, publish validation outcome
             if let Some(block_info) = &ctx.current_block {
                 history.lock().await.commit(block_info.number, state);
-            }
 
-            ctx.publish().await;
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
+            }
         }
     }
 

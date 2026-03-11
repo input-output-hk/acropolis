@@ -69,16 +69,20 @@ pub fn validate(
     vkey_witness_hashes: &HashSet<KeyHash>,
     script_witness_hashes: &HashSet<ScriptHash>,
     script_hashes_provided: &HashSet<ScriptHash>,
+    is_valid: bool,
 ) -> Result<(), Box<UTxOWValidationError>> {
     // validate missing vkey witnesses
     validate_needed_witnesses(vkey_hashes_needed, vkey_witness_hashes)?;
 
     // validate missing & extra scripts
-    validate_missing_extra_scripts(
-        script_hashes_needed,
-        script_witness_hashes,
-        script_hashes_provided,
-    )?;
+    // only when the transaction is valid
+    if is_valid {
+        validate_missing_extra_scripts(
+            script_hashes_needed,
+            script_witness_hashes,
+            script_hashes_provided,
+        )?;
+    }
 
     Ok(())
 }
@@ -101,14 +105,28 @@ mod tests {
         "da350a9e2a14717172cee9e37df02b14b5718ea1934ce6bea25d739d9226f01b"
     ) =>
         matches Ok(());
-        "valid transaction 1"
+        "shelley - valid transaction 1"
     )]
     #[test_case(validation_fixture!(
         "shelley",
         "b516588da34b58b7d32b6a057f513e16ea8c87de46615631be3316d8a8847d46"
     ) =>
         matches Ok(());
-        "valid transaction 2 - with protocol update"
+        "shelley - valid transaction 2 - with protocol update"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "d8f8be5410a1791a7c82dedf9b9f2d03aa014ea3e81a73b48e65441193017bdc"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - with CCMember Certificate"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "dddcbbead098914e61907b832c3c95ac985c032f02960d5dc569fd4176447064"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 2 - failed transaction"
     )]
     #[test_case(validation_fixture!(
         "shelley",
@@ -154,6 +172,7 @@ mod tests {
             &vkey_witness_hashes,
             &script_witness_hashes,
             &script_hashes_provided,
+            tx_deltas.is_valid,
         )
         .map_err(|e| *e)
     }

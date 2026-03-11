@@ -360,9 +360,12 @@ impl State {
         let vld = ValidationOutcomes::new();
         let cfg = self.config;
 
-        let drep_activity = drep_activity.ok_or_else(|| {
-            anyhow!("Missing Conway parameter d_rep_activity (required to compute drepExpiry)")
-        })?;
+        let Some(drep_activity) = drep_activity else {
+            if !total_voting_procedures.is_empty() {
+                bail!("Missing drep activity, epoch {epoch}, voting {total_voting_procedures:?}");
+            }
+            return Ok(vld);
+        };
 
         // Update `drep_expiry` for DReps that vote. Update historical only if enabled.
         for (tx_hash, voting_procedures) in total_voting_procedures {

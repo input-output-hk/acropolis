@@ -47,8 +47,11 @@ const DEFAULT_GENESIS_KEY: &str = r#"
 382c3139362c3231372c352c31342c32302c35372c37392c33392c3137365d"#;
 const DEFAULT_PAUSE: (&str, PauseType) = ("pause", PauseType::NoPause);
 const DEFAULT_STOP: (&str, PauseType) = ("stop", PauseType::NoPause);
+#[cfg(not(target_env = "msvc"))]
+const DEFAULT_PROFILE: (&str, PauseType) = ("profile", PauseType::NoPause);
 const DEFAULT_DOWNLOAD_MAX_AGE: &str = "download-max-age";
-const DEFAULT_DIRECTORY: &str = "downloads";
+const DEFAULT_DIRECTORY: &str = "../../modules/mithril_snapshot_fetcher/downloads";
+const DEFAULT_NETWORK_NAME: &str = "mainnet";
 const SNAPSHOT_METADATA_FILE: &str = "snapshot_metadata.json";
 
 /// Mithril feedback receiver
@@ -118,6 +121,19 @@ impl FeedbackReceiver for FeedbackLogger {
 pub struct MithrilSnapshotFetcher;
 
 impl MithrilSnapshotFetcher {
+    /// Resolve the download directory, namespaced by network to avoid cross-network collisions.
+    /// Uses `../../modules/mithril_snapshot_fetcher/downloads/{network-name}` by default
+    /// (e.g. `.../downloads/mainnet`, `.../downloads/preview`).
+    /// Can be overridden with the `directory` config key.
+    fn resolve_directory(config: &Config) -> String {
+        config.get_string("directory").unwrap_or_else(|_| {
+            let network = config
+                .get_string("startup.network-name")
+                .unwrap_or(DEFAULT_NETWORK_NAME.to_string());
+            format!("{DEFAULT_DIRECTORY}/{network}")
+        })
+    }
+
     fn load_snapshot_metadata(path: &Path) -> Result<Snapshot> {
         let snapshot_metadata_file = File::open(path)?;
         let snapshot_metadata = serde_json::from_reader::<_, Snapshot>(snapshot_metadata_file)?;
@@ -181,7 +197,7 @@ impl MithrilSnapshotFetcher {
             config.get_string("aggregator-url").unwrap_or(DEFAULT_AGGREGATOR_URL.to_string());
         let genesis_key =
             config.get_string("genesis-key").unwrap_or(DEFAULT_GENESIS_KEY.to_string());
-        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let directory = Self::resolve_directory(&config);
         let snapshot_metadata_path = Path::new(&directory).join(SNAPSHOT_METADATA_FILE);
 
         let feedback_logger = Arc::new(FeedbackLogger::new());
@@ -254,11 +270,14 @@ impl MithrilSnapshotFetcher {
             .unwrap_or(DEFAULT_SYNC_COMMAND_TOPIC.1.to_string());
         info!("Publishing completion on '{sync_command_topic}'");
 
-        let directory = config.get_string("directory").unwrap_or(DEFAULT_DIRECTORY.to_string());
+        let directory = Self::resolve_directory(&config);
         let mut pause_constraint =
             PauseType::from_config(&config, DEFAULT_PAUSE).unwrap_or(PauseType::NoPause);
         let stop_constraint =
             PauseType::from_config(&config, DEFAULT_STOP).unwrap_or(PauseType::NoPause);
+        #[cfg(not(target_env = "msvc"))]
+        let profile_constraint =
+            PauseType::from_config(&config, DEFAULT_PROFILE).unwrap_or(PauseType::NoPause);
 
         // Path to immutable DB
         let path = Path::new(&directory).join("immutable");
@@ -345,6 +364,23 @@ impl MithrilSnapshotFetcher {
                             tip_slot: None,
                             era,
                         };
+
+                        // Check profile constraint
+                        #[cfg(not(target_env = "msvc"))]
+                        if profile_constraint.should_pause(&block_info) {
+                            let filename = format!(
+                                "memory-{}.jeprof",
+                                profile_constraint.get_filename_part(&block_info)
+                            );
+                            info!("Dumping jemalloc profile to {} ...", filename);
+                            let cfn = std::ffi::CString::new(filename)?;
+                            unsafe {
+                                let _ = tikv_jemalloc_ctl::raw::write(
+                                    b"prof.dump\0",
+                                    cfn.as_ptr() as *const _,
+                                );
+                            }
+                        }
 
                         // Check pause constraint
                         if pause_constraint.should_pause(&block_info) {

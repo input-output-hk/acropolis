@@ -10,7 +10,8 @@ use crate::{
     rational_number::RationalNumber,
     Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
     KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
-    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, Value, Voter, VrfKeyHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValueMap, Voter,
+    VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -231,7 +232,10 @@ pub enum UTxOValidationError {
     /// **Cause:** The value of the UTXO is not conserved.
     /// Consumed = inputs + withdrawals + refunds, Produced = outputs + fees + deposits
     #[error("Value not conserved: consumed={consumed:?}, produced={produced:?}]")]
-    ValueNotConservedUTxO { consumed: Value, produced: Value },
+    ValueNotConservedUTxO {
+        consumed: ValueMap,
+        produced: ValueMap,
+    },
 
     /// **Cause:** Some of the outputs don't have minimum required lovelace
     #[error(
@@ -362,8 +366,11 @@ pub enum UTxOWValidationError {
     /// **Cause:** Unspendable UTxO without datum hash
     /// To spend a UTxO locked at Plutus scripts
     /// datum must be provided
-    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}")]
-    UnspendableUTxONoDatumHash { utxo_identifier: UTxOIdentifier },
+    #[error("Unspendable UTxO without datum hash: utxo_identifier={utxo_identifier:?}, input_index={input_index}")]
+    UnspendableUTxONoDatumHash {
+        utxo_identifier: UTxOIdentifier,
+        input_index: usize,
+    },
 }
 
 /// Reference
@@ -854,12 +861,9 @@ impl ValidationOutcomes {
         self.outcomes.push(ValidationError::Unclassified(format!("{}", error)));
     }
 
-    pub fn print_errors(&mut self, block: Option<&BlockInfo>) {
+    pub fn print_errors(&mut self, module: &str, block: Option<&BlockInfo>) {
         if !self.outcomes.is_empty() {
-            error!(
-                "Error in validation, block {block:?}: outcomes {:?}",
-                self.outcomes
-            );
+            error!("{module}: block {block:?}, outcomes {:?}", self.outcomes);
             self.outcomes.clear();
         }
     }
@@ -867,6 +871,7 @@ impl ValidationOutcomes {
     pub async fn publish(
         &mut self,
         context: &Arc<Context<Message>>,
+        module: &str,
         topic_field: &str,
         block: &BlockInfo,
     ) -> anyhow::Result<()> {
@@ -882,7 +887,7 @@ impl ValidationOutcomes {
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
         } else {
-            self.print_errors(Some(block));
+            self.print_errors(module, Some(block));
         }
         self.outcomes.clear();
         Ok(())

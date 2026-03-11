@@ -136,6 +136,12 @@ get_feature_paths() {
     # Use prefix-based lookup to support multiple branches per spec
     local feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_branch")
 
+    # Escape values for safe use in shell assignments using printf %q
+    # This handles all special characters including single quotes
+    repo_root=$(printf '%s' "$repo_root" | sed "s/'/'\\\\''/g")
+    current_branch=$(printf '%s' "$current_branch" | sed "s/'/'\\\\''/g")
+    feature_dir=$(printf '%s' "$feature_dir" | sed "s/'/'\\\\''/g")
+
     cat <<EOF
 REPO_ROOT='$repo_root'
 CURRENT_BRANCH='$current_branch'
