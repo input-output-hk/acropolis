@@ -146,6 +146,16 @@ impl SPDDState {
                             state.get_epoch_total_active_stakes(*epoch).unwrap_or(0),
                         )
                     }
+                    SPDDStateQuery::GetEpochSPDD { epoch } => SPDDStateQueryResponse::EpochSPDD(
+                        state
+                            .get_epoch(*epoch)
+                            .map(|map| {
+                                map.iter()
+                                    .map(|(pool_id, stake)| (*pool_id, stake.active))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                    ),
                 };
 
                 Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(

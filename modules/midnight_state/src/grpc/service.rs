@@ -7,9 +7,10 @@ use crate::{
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
             AssetSpendsRequest, AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse,
             CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-            DeregistrationsResponse, RegistrationsRequest, RegistrationsResponse,
-            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
-            UtxoEventsRequest, UtxoEventsResponse,
+            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
+            EpochNonceRequest, EpochNonceResponse, RegistrationsRequest, RegistrationsResponse,
+            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
         },
         utxo_events::truncate_by_tx_capacity,
     },
@@ -20,6 +21,7 @@ use acropolis_common::{
     queries::{
         blocks::{BlocksStateQuery, BlocksStateQueryResponse},
         errors::QueryError,
+        spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
     state_history::StateHistory,
@@ -374,6 +376,74 @@ impl MidnightState for MidnightStateService {
                 .map_err(|_| Status::internal("timestamp overflow"))?,
             tx_count: u32::try_from(block_info.tx_count)
                 .map_err(|_| Status::internal("tx count overflow"))?,
+        }))
+    }
+
+    async fn get_epoch_nonce(
+        &self,
+        request: Request<EpochNonceRequest>,
+    ) -> Result<Response<EpochNonceResponse>, Status> {
+        let req = request.into_inner();
+
+        let nonce_opt = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.get_epoch_nonce(req.epoch)
+        };
+
+        Ok(Response::new(EpochNonceResponse { nonce: nonce_opt }))
+    }
+
+    async fn get_epoch_candidates(
+        &self,
+        request: Request<EpochCandidatesRequest>,
+    ) -> Result<Response<EpochCandidatesResponse>, Status> {
+        let req = request.into_inner();
+
+        let candidates = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state.get_epoch_candidates(req.epoch)
+        };
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::SPDD(
+            SPDDStateQuery::GetEpochSPDD { epoch: req.epoch },
+        )));
+
+        let spdd = query_state(
+            &self.context,
+            "cardano.query.spdd",
+            msg,
+            |message| match message {
+                Message::StateQueryResponse(StateQueryResponse::SPDD(
+                    SPDDStateQueryResponse::EpochSPDD(block_info),
+                )) => Ok(block_info),
+                Message::StateQueryResponse(StateQueryResponse::SPDD(
+                    SPDDStateQueryResponse::Error(e),
+                )) => Err(e),
+                _ => Err(QueryError::internal_error(
+                    "Unexpected message type while retrieving SPDD",
+                )),
+            },
+        )
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let stake_distribution = spdd
+            .into_iter()
+            .map(|(pool_id, stake)| StakePoolEntry {
+                pool_hash: pool_id.to_vec(),
+                stake,
+            })
+            .collect();
+
+        Ok(Response::new(EpochCandidatesResponse {
+            candidates,
+            stake_distribution,
         }))
     }
 }

@@ -1,0 +1,5 @@
+# Docker-specific overrides for the Midnight indexer (mainnet).
+# Keep persistent mounts intact across restarts.
+
+[module.chain-store]
+clear-on-start = false

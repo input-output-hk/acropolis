@@ -4,6 +4,7 @@ use acropolis_common::{
     caryatid::RollbackWrapper,
     declare_cardano_reader,
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
+    protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
@@ -32,6 +33,14 @@ declare_cardano_reader!(
     AddressDeltasMessage
 );
 
+declare_cardano_reader!(
+    EpochNonceReader,
+    "epoch-nonce-topic",
+    "cardano.epoch.nonce",
+    EpochNonce,
+    Option<Nonce>
+);
+
 /// Midnight State module
 #[module(
     message_type(Message),
@@ -46,6 +55,7 @@ impl MidnightState {
         history: Arc<Mutex<StateHistory<State>>>,
         config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
+        mut epoch_nonce_reader: EpochNonceReader,
     ) -> Result<()> {
         loop {
             let mut state = {
@@ -64,8 +74,11 @@ impl MidnightState {
                         );
                     }
 
-                    if blk_info.new_epoch {
-                        state.handle_new_epoch(blk_info.as_ref());
+                    if blk_info.new_epoch && blk_info.epoch > 0 {
+                        let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
+                        let nonce = nonce.as_ref().clone();
+
+                        state.handle_new_epoch(blk_info.as_ref(), nonce);
                     }
 
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;
@@ -89,6 +102,7 @@ impl MidnightState {
 
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
+        let epoch_nonce_reader = EpochNonceReader::new(&context, &config).await?;
 
         // Initialize unbounded state history for rollback-safe replay.
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -99,7 +113,7 @@ impl MidnightState {
         let grpc_context = context.clone();
         // Start the main run loop
         context.run(async move {
-            Self::run(history, cfg, address_deltas_reader)
+            Self::run(history, cfg, address_deltas_reader, epoch_nonce_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
