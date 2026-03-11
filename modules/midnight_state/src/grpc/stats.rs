@@ -14,6 +14,7 @@ pub struct RequestStats {
     pub epoch_candidates: AtomicU64,
     pub latest_stable_block: AtomicU64,
     pub stable_block_by_hash: AtomicU64,
+    pub latest_block: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -27,6 +28,7 @@ pub struct RequestStatsSnapshot {
     pub epoch_candidates: u64,
     pub latest_stable_block: u64,
     pub stable_block_by_hash: u64,
+    pub latest_block: u64,
 }
 
 impl fmt::Display for RequestStatsSnapshot {
@@ -35,7 +37,7 @@ impl fmt::Display for RequestStatsSnapshot {
             f,
             "utxo_events={} council_datum={} technical_committee_datum={} \
              ariadne_parameters={} block_by_hash={} epoch_nonce={} epoch_candidates={} \
-             latest_stable_block={} stable_block_by_hash={}",
+             latest_stable_block={} stable_block_by_hash={} latest_block={}",
             self.utxo_events,
             self.council_datum,
             self.technical_committee_datum,
@@ -44,7 +46,8 @@ impl fmt::Display for RequestStatsSnapshot {
             self.epoch_nonce,
             self.epoch_candidates,
             self.latest_stable_block,
-            self.stable_block_by_hash
+            self.stable_block_by_hash,
+            self.latest_block,
         )
     }
 }
@@ -61,6 +64,7 @@ impl RequestStats {
             epoch_candidates: self.epoch_candidates.load(Ordering::Relaxed),
             latest_stable_block: self.latest_stable_block.load(Ordering::Relaxed),
             stable_block_by_hash: self.stable_block_by_hash.load(Ordering::Relaxed),
+            latest_block: self.latest_block.load(Ordering::Relaxed),
         }
     }
 }
