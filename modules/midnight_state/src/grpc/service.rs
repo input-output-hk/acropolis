@@ -1,23 +1,20 @@
 use std::sync::Arc;
 
 use crate::{
-    grpc::conversions::{try_asset_create_proto, try_asset_spend_proto, CNightOwnerAddressError},
     grpc::{
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
-            AriadneParametersResponse, AssetCreate as AssetCreateProto, AssetCreatesRequest,
-            AssetCreatesResponse, AssetSpend as AssetSpendProto, AssetSpendsRequest,
-            AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse, CouncilDatumRequest,
-            CouncilDatumResponse, DeregistrationsRequest, DeregistrationsResponse,
-            EpochCandidatesRequest, EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse,
-            RegistrationsRequest, RegistrationsResponse, StakePoolEntry,
-            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
-            UtxoEventsRequest, UtxoEventsResponse,
+            AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
+            AssetSpendsRequest, AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse,
+            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
+            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
+            EpochNonceRequest, EpochNonceResponse, RegistrationsRequest, RegistrationsResponse,
+            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
         },
         utxo_events::truncate_by_tx_capacity,
     },
     state::State,
-    types::{AssetCreate as CNightAssetCreate, AssetSpend as CNightAssetSpend},
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
@@ -33,58 +30,8 @@ use acropolis_common::{
 use caryatid_sdk::Context;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
-use tracing::warn;
 
 const MAX_EVENTS_PER_TX: usize = 64;
-
-fn convert_asset_creates(creates: Vec<CNightAssetCreate>) -> Vec<AssetCreateProto> {
-    creates
-        .into_iter()
-        .filter_map(|create| match try_asset_create_proto(&create) {
-            Ok(proto) => Some(proto),
-            Err(err) => {
-                warn_skipped_asset_create(&create, &err);
-                None
-            }
-        })
-        .collect()
-}
-
-fn convert_asset_spends(spends: Vec<CNightAssetSpend>) -> Vec<AssetSpendProto> {
-    spends
-        .into_iter()
-        .filter_map(|spend| match try_asset_spend_proto(&spend) {
-            Ok(proto) => Some(proto),
-            Err(err) => {
-                warn_skipped_asset_spend(&spend, &err);
-                None
-            }
-        })
-        .collect()
-}
-
-fn warn_skipped_asset_create(create: &CNightAssetCreate, err: &CNightOwnerAddressError) {
-    warn!(
-        block_number = create.block_number,
-        tx_hash = %create.tx_hash,
-        utxo_index = create.utxo_index,
-        address_kind = create.holder_address.kind(),
-        reason = %err,
-        "skipping cNIGHT asset create with unsupported owner address"
-    );
-}
-
-fn warn_skipped_asset_spend(spend: &CNightAssetSpend, err: &CNightOwnerAddressError) {
-    warn!(
-        block_number = spend.block_number,
-        tx_hash = %spend.spending_tx_hash,
-        utxo_tx_hash = %spend.utxo_tx_hash,
-        utxo_index = spend.utxo_index,
-        address_kind = spend.holder_address.kind(),
-        reason = %err,
-        "skipping cNIGHT asset spend with unsupported owner address"
-    );
-}
 
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
@@ -123,7 +70,7 @@ impl MidnightState for MidnightStateService {
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_creates = convert_asset_creates(creates);
+        let proto_creates = creates.into_iter().map(Into::into).collect();
 
         Ok(Response::new(AssetCreatesResponse {
             creates: proto_creates,
@@ -154,7 +101,7 @@ impl MidnightState for MidnightStateService {
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_spends = convert_asset_spends(spends);
+        let proto_spends = spends.into_iter().map(Into::into).collect();
 
         Ok(Response::new(AssetSpendsResponse {
             spends: proto_spends,
@@ -256,18 +203,8 @@ impl MidnightState for MidnightStateService {
                     .get_asset_creates(start_block.into(), start_tx_index, event_capacity)
                     .map_err(|e| Status::internal(e.to_string()))?
                     .into_iter()
-                    .filter_map(|e| {
-                        let proto = match try_asset_create_proto(&e) {
-                            Ok(proto) => proto,
-                            Err(err) => {
-                                warn_skipped_asset_create(&e, &err);
-                                return None;
-                            }
-                        };
-
-                        Some(UtxoEvent {
-                            kind: Some(utxo_event::Kind::AssetCreate(proto)),
-                        })
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::AssetCreate(e.into())),
                     }),
             );
 
@@ -277,18 +214,8 @@ impl MidnightState for MidnightStateService {
                     .get_asset_spends(start_block.into(), start_tx_index, event_capacity)
                     .map_err(|e| Status::internal(e.to_string()))?
                     .into_iter()
-                    .filter_map(|e| {
-                        let proto = match try_asset_spend_proto(&e) {
-                            Ok(proto) => proto,
-                            Err(err) => {
-                                warn_skipped_asset_spend(&e, &err);
-                                return None;
-                            }
-                        };
-
-                        Some(UtxoEvent {
-                            kind: Some(utxo_event::Kind::AssetSpend(proto)),
-                        })
+                    .map(|e| UtxoEvent {
+                        kind: Some(utxo_event::Kind::AssetSpend(e.into())),
                     }),
             );
 

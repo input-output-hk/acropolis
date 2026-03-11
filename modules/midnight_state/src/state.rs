@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, protocol_params::Nonce, BlockInfo, BlockNumber, Datum, Epoch,
-    ExtendedAddressDelta, UTxOIdentifier,
+    messages::AddressDeltasMessage, protocol_params::Nonce, Address, BlockInfo, BlockNumber, Datum,
+    Epoch, ExtendedAddressDelta, ShelleyAddressDelegationPart, StakeAddress, StakeCredential,
+    UTxOIdentifier,
 };
 use imbl::HashMap;
+use tracing::warn;
 
 use crate::{
     configuration::MidnightConfig,
@@ -184,8 +186,23 @@ impl State {
                 continue;
             }
 
+            let owner_address = match cnight_owner_address(&delta.address) {
+                Ok(owner_address) => owner_address,
+                Err(err) => {
+                    warn!(
+                        block_number = block_info.number,
+                        tx_identifier = %delta.tx_identifier,
+                        utxo = %created.utxo,
+                        address_kind = delta.address.kind(),
+                        reason = %err,
+                        "skipping cNIGHT creation with unsupported owner address"
+                    );
+                    continue;
+                }
+            };
+
             let creation = CNightCreation {
-                address: delta.address.clone(),
+                owner_address,
                 quantity: token_amount,
                 utxo: created.utxo,
                 block_number: block_info.number,
@@ -362,6 +379,30 @@ impl State {
             }
         }
         (indexed_technical_committee, indexed_council)
+    }
+}
+
+fn cnight_owner_address(address: &Address) -> Result<StakeAddress> {
+    match address {
+        Address::Shelley(shelley) => match &shelley.delegation {
+            ShelleyAddressDelegationPart::StakeKeyHash(hash) => Ok(StakeAddress::new(
+                StakeCredential::AddrKeyHash(*hash),
+                shelley.network.clone(),
+            )),
+            ShelleyAddressDelegationPart::ScriptHash(hash) => Ok(StakeAddress::new(
+                StakeCredential::ScriptHash(*hash),
+                shelley.network.clone(),
+            )),
+            ShelleyAddressDelegationPart::Pointer(_) => {
+                Err(anyhow!("holder address uses pointer delegation"))
+            }
+            ShelleyAddressDelegationPart::None => {
+                Err(anyhow!("holder address has no delegation part"))
+            }
+        },
+        Address::Stake(stake) => Ok(stake.clone()),
+        Address::Byron(_) => Err(anyhow!("byron addresses are not supported")),
+        Address::None => Err(anyhow!("none addresses are not supported")),
     }
 }
 
@@ -591,7 +632,9 @@ mod tests {
 
         // Creation delta
         let create_delta = ExtendedAddressDelta {
-            address: Address::default(),
+            address: test_address(
+                "addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5",
+            ),
             tx_identifier: TxIdentifier::default(),
             created_utxos: vec![
                 CreatedUTxOExtended {
