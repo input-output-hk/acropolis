@@ -8,13 +8,18 @@ use std::{
 };
 
 use pallas::network::{
-    miniprotocols::handshake,
+    miniprotocols::handshake::{self, n2n::VersionData},
     multiplexer::{Bearer, Plexer},
 };
 use tracing::{debug, warn};
 
 /// Protocol ID for the peer-sharing mini-protocol (no constant in pallas 0.34).
 const PROTOCOL_N2N_PEER_SHARING: u16 = 10;
+
+/// Peer-sharing mode value sent during the V11+ handshake.
+/// Pallas 0.34 hardcodes `PEER_SHARING_DISABLED (0)` in all convenience
+/// constructors, so we build the version table ourselves.
+const PEER_SHARING_ENABLED: u8 = 1;
 
 /// Errors that can occur during a peer-sharing exchange.
 #[derive(thiserror::Error, Debug)]
@@ -85,9 +90,12 @@ fn is_v6_link_local(v6: &Ipv6Addr) -> bool {
 // ---- CBOR message encoding / decoding ----
 // Peer-sharing protocol messages (manual CBOR):
 //   MsgShareRequest  = [0, amount]
-//   MsgSharePeers    = [1, [[addr_type, ip_bytes, port], ...]]
+//   MsgSharePeers    = [1, [peer_address, ...]]
 //   MsgDone          = [2]
-//   addr_type: 0 = IPv4 (4 bytes), 1 = IPv6 (16 bytes)
+//
+// peer_address (Cardano wire format — SockAddr CBOR encoding):
+//   IPv4 = [0, word32, word16]           (3 elements)
+//   IPv6 = [1, word32, word32, word32, word32, word16]  (6 elements)
 
 fn encode_request(amount: u8) -> Vec<u8> {
     // CBOR: array(2) = 0x82, uint(0) = 0x00, uint(amount)
@@ -141,33 +149,44 @@ fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharin
             Ok(Some(n)) => n,
             _ => break, // break code or end of input
         };
-        if entry_len != 3 {
-            return Err(PeerSharingError::CborDecode(format!(
-                "expected address entry len 3, got {entry_len}"
-            )));
-        }
 
         let addr_type: u64 = dec.u64().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
-        let ip_bytes =
-            dec.bytes().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?.to_vec();
-        let port: u16 = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+
+        let (addr_str, port) = match (addr_type, entry_len) {
+            // IPv4: [0, word32, word16]
+            (0, 3) => {
+                let ip = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let port = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                (Ipv4Addr::from(ip).to_string(), port)
+            }
+            // IPv6: [1, word32, word32, word32, word32, word16]
+            (1, 6) => {
+                let w0 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let w1 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let w2 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let w3 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let port = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                let octets: [u8; 16] = [
+                    (w0 >> 24) as u8, (w0 >> 16) as u8, (w0 >> 8) as u8, w0 as u8,
+                    (w1 >> 24) as u8, (w1 >> 16) as u8, (w1 >> 8) as u8, w1 as u8,
+                    (w2 >> 24) as u8, (w2 >> 16) as u8, (w2 >> 8) as u8, w2 as u8,
+                    (w3 >> 24) as u8, (w3 >> 16) as u8, (w3 >> 8) as u8, w3 as u8,
+                ];
+                (Ipv6Addr::from(octets).to_string(), port)
+            }
+            _ => {
+                // Unknown addr_type/entry_len — skip remaining fields to keep decoder aligned
+                for _ in 1..entry_len {
+                    dec.skip().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                }
+                continue;
+            }
+        };
 
         // Only process up to `limit` entries (FR-014); continue consuming but don't allocate
         if idx >= limit {
             continue;
         }
-
-        let addr_str = match addr_type {
-            0 if ip_bytes.len() == 4 => {
-                let octets: [u8; 4] = ip_bytes.try_into().unwrap();
-                Ipv4Addr::from(octets).to_string()
-            }
-            1 if ip_bytes.len() == 16 => {
-                let octets: [u8; 16] = ip_bytes.try_into().unwrap();
-                Ipv6Addr::from(octets).to_string()
-            }
-            _ => continue,
-        };
 
         if let Some(normalised) = validate_and_normalise(&addr_str, port) {
             results.push(normalised);
@@ -214,8 +233,10 @@ async fn request_peers_inner(
     let mut ps_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
     let running = plexer.spawn();
 
-    // Step 3: V11 handshake (peer-sharing requires V11+)
-    let versions = handshake::n2n::VersionTable::v11_and_above(magic as u64);
+    // Step 3: V11 handshake with PeerSharing=Enabled.
+    // Pallas 0.34 hardcodes PeerSharing=Disabled(0) in all convenience constructors,
+    // so we build the table manually with PeerSharing=Enabled(1).
+    let versions = version_table_peer_sharing_enabled(magic as u64);
     let mut hs_client = handshake::Client::new(hs_channel);
 
     match hs_client.handshake(versions).await {
@@ -245,7 +266,7 @@ async fn request_peers_inner(
         let chunk = ps_channel
             .dequeue_chunk()
             .await
-            .map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+            .map_err(|e| PeerSharingError::ConnectionFailed(e.to_string()))?;
         buffer.extend_from_slice(&chunk);
 
         // Try decoding — succeed on valid CBOR, continue if incomplete
@@ -272,4 +293,18 @@ async fn request_peers_inner(
 /// Used to distinguish "incomplete input" from "malformed CBOR".
 fn looks_complete(buf: &[u8]) -> bool {
     !buf.is_empty() && buf.len() >= 3
+}
+
+/// Build a V11–V14 version table with `PeerSharing = Enabled (1)`.
+fn version_table_peer_sharing_enabled(network_magic: u64) -> handshake::n2n::VersionTable {
+    use std::collections::HashMap;
+    let values: HashMap<u64, VersionData> = (11..=14)
+        .map(|v| {
+            (
+                v,
+                VersionData::new(network_magic, true, Some(PEER_SHARING_ENABLED), Some(false)),
+            )
+        })
+        .collect();
+    handshake::n2n::VersionTable { values }
 }

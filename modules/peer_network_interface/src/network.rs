@@ -293,6 +293,11 @@ impl NetworkManager {
         };
         let hot_count = self.peers.len();
         if !pm.needs_discovery(hot_count) {
+            debug!(
+                hot_count,
+                cold_count = pm.cold_count(),
+                "discovery tick: peer counts sufficient, skipping"
+            );
             return;
         }
 
@@ -305,6 +310,11 @@ impl NetworkManager {
             .collect();
 
         if eligible.is_empty() {
+            debug!(
+                hot_count,
+                cold_count = pm.cold_count(),
+                "discovery tick: no cooldown-eligible peers to query"
+            );
             return;
         }
 
@@ -320,9 +330,22 @@ impl NetworkManager {
         let timeout = Duration::from_secs(pm.config().peer_sharing_timeout_secs);
         let sender = self.events_sender.clone();
 
+        info!(
+            peer = %address,
+            requesting = amount,
+            hot_count,
+            cold_count = pm.cold_count(),
+            "discovery tick: querying peer for peer-sharing"
+        );
+
         tokio::spawn(async move {
             match request_peers(&address, magic, amount, timeout).await {
                 Ok(addrs) => {
+                    info!(
+                        peer = %address,
+                        received = addrs.len(),
+                        "peer-sharing response received"
+                    );
                     let _ = sender
                         .send(NetworkEvent::PeersDiscovered {
                             from_peer: peer_id,
