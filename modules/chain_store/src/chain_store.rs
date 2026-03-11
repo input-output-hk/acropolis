@@ -540,9 +540,7 @@ impl ChainStore {
                 ))
             }
             BlocksStateQuery::GetBlockByTipOffset { offset } => {
-                let Some(tip) = store.get_tip_block_number() else {
-                    return Ok(BlocksStateQueryResponse::BlockByTipOffset(None));
-                };
+                let tip = store.get_tip_block_number();
 
                 let stable_block_number = tip.saturating_sub(*offset as u64);
 
@@ -562,9 +560,7 @@ impl ChainStore {
                 Ok(BlocksStateQueryResponse::BlockByTipOffset(block_info_opt))
             }
             BlocksStateQuery::GetStableBlockByHash { block_hash, offset } => {
-                let Some(tip) = store.get_tip_block_number() else {
-                    return Ok(BlocksStateQueryResponse::StableBlockByHash(None));
-                };
+                let tip = store.get_tip_block_number();
 
                 let stable_boundary = tip.saturating_sub(*offset as u64);
 
