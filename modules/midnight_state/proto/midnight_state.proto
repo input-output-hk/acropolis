@@ -18,6 +18,8 @@ service MidnightState {
   rpc GetUtxoEvents (UtxoEventsRequest) returns (UtxoEventsResponse);
   rpc GetEpochNonce (EpochNonceRequest) returns (EpochNonceResponse);
   rpc GetEpochCandidates (EpochCandidatesRequest) returns (EpochCandidatesResponse);
+  rpc GetStableBlock (StableBlockRequest) returns (StableBlockResponse);
+  rpc GetLatestStableBlock (LatestStableBlockRequest) returns (LatestStableBlockResponse);
 }
 
 message AssetCreatesRequest {
@@ -193,4 +195,28 @@ message BlockByHashResponse {
   uint32 block_number = 1;
   uint32 tx_count = 2;
   int64 block_timestamp_unix = 3;
+  uint32 epoch_number = 4;
+  uint64 slot_number = 5;
+}
+
+message Block {
+  uint32 block_number = 1;
+  bytes block_hash = 2;
+  uint32 epoch_number = 3;
+  uint64 slot_number = 4;
+  uint64 block_timestamp_unix = 5;
+}
+message LatestStableBlockRequest {
+  uint32 offset = 1;
+}
+message LatestStableBlockResponse {
+  optional Block block = 1;
+}
+
+message StableBlockRequest {
+  bytes block_hash = 1;
+  uint32 offset = 2;
+}
+message StableBlockResponse {
+  optional Block block = 1;
 }
