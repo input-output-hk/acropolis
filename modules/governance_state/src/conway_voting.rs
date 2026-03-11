@@ -40,8 +40,8 @@ impl ActionStatus {
         }
     }
 
-    pub fn is_active(&self, current_epoch: u64) -> bool {
-        self.voting_epochs.contains(&current_epoch)
+    pub fn is_active(&self, new_epoch: u64) -> bool {
+        self.voting_epochs.contains(&(new_epoch-1))
     }
 
     pub fn is_accepted(&self) -> bool {
@@ -372,7 +372,6 @@ impl ConwayVoting {
                 }
             }
         }
-        self.include_pending_votes()?;
         Ok(outcomes)
     }
 
@@ -507,12 +506,14 @@ impl ConwayVoting {
 
     /// Replaces {action_id} with first 8 characters of transaction_id in hex and
     /// action_id.action_index, and {epoch} with epoch number.
-    fn apply_votes_pattern(&self, action_id: &GovActionId, new_epoch: u64) -> Option<String> {
+    /// The `epoch_to_compare` is the current epoch from Haskell node *at the moment of votes
+    /// calculation*. So, votes, computed during E, are done for Mark of E-2/E-1 border.
+    fn apply_votes_pattern(&self, action_id: &GovActionId, epoch_to_compare: u64) -> Option<String> {
         let pattern = self.verify_votes_files.as_ref()?;
         let tx_hash = hex::encode(action_id.transaction_id)[0..8].to_string();
         let act_id = format!("{tx_hash}_{}", action_id.action_index);
-        let applied =
-            pattern.replace("{action_id}", &act_id).replace("{epoch}", &new_epoch.to_string());
+        let applied = pattern.replace("{action_id}", &act_id)
+            .replace("{epoch}", &epoch_to_compare.to_string());
         Some(applied)
     }
 
@@ -528,7 +529,10 @@ impl ConwayVoting {
     ) -> Result<Option<VotingOutcome>> {
         let cast_votes = self.get_actual_votes(action_id, drep_stake, spo_stake)?;
 
-        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch) {
+        // Checking ratification for new_epoch-1/new_epoch transition.
+        // This computation is done in Haskell node at new_epoch-1 epoch, and related to
+        // new_epoch-3/new_epoch-2 mark.
+        if let Some(ref_file) = self.apply_votes_pattern(action_id, new_epoch-1) {
             let ref_path = Path::new(&ref_file);
             if ref_path.exists() {
                 info!("Verifying {action_id:?} at epoch {new_epoch}: file '{ref_path:?}'...");
@@ -714,7 +718,7 @@ impl ConwayVoting {
     /// updates `action_status` data structrure.
     pub fn update_action_status_with_outcomes(
         &mut self,
-        epoch: u64,
+        new_epoch: u64,
         outcomes: &[GovernanceOutcome],
     ) -> Result<()> {
         for one_outcome in outcomes.iter() {
@@ -725,16 +729,16 @@ impl ConwayVoting {
                 .ok_or_else(|| anyhow!("Cannot get action status for {action_id}"))?;
 
             if one_outcome.voting.accepted {
-                action.ratification_epoch = Some(epoch);
-                action.enactment_epoch = Some(epoch + 1);
+                action.ratification_epoch = Some(new_epoch - 1);
+                action.enactment_epoch = Some(new_epoch);
             } else {
-                if action.is_active(epoch) {
+                if action.is_active(new_epoch) {
                     bail!(
-                        "Impossible outcome: {action_id} votes {:?}, not ended at {epoch}",
+                        "Impossible outcome: {action_id} votes {:?}, not ended at {new_epoch}",
                         action.voting_epochs
                     );
                 }
-                action.expiration_epoch = Some(epoch);
+                action.expiration_epoch = Some(new_epoch - 1);
             }
         }
         Ok(())

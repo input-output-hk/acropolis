@@ -378,7 +378,7 @@ impl AccountsState {
 
                 // Handle epoch activity
                 let (_, message) = ea_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
+                let deltas_block_info = match message.as_ref() {
                     Message::Cardano((block_info, CardanoMessage::EpochActivity(ea_msg))) => {
                         let span = info_span!(
                             "account_state.handle_epoch_activity",
@@ -408,23 +408,21 @@ impl AccountsState {
                             if let Some(refund_deltas) = after_epoch_result {
                                 // publish stake reward deltas
                                 stake_reward_deltas.extend(refund_deltas);
-                                stake_reward_deltas_publisher
-                                    .publish_stake_reward_deltas(block_info, stake_reward_deltas)
-                                    .await
-                                    .inspect_err(|e| {
-                                        vld.push_anyhow(anyhow!(
-                                            "Error publishing stake reward deltas: {e:#}"
-                                        ))
-                                    })
-                                    .ok();
+                                Some(block_info)
+                            }
+                            else {
+                                None
                             }
                         }
                         .instrument(span)
-                        .await;
+                        .await
                     }
 
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
+                    _ => {
+                        error!("Unexpected message type: {message:?}");
+                        None
+                    }
+                };
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
                 let (_, message) =
@@ -440,20 +438,39 @@ impl AccountsState {
                         );
                         async {
                             Self::check_sync(&current_block, block_info);
-                            state
+                            if let Some(refund_deltas) = state
                                 .handle_governance_outcomes(outcomes_msg)
                                 .inspect_err(|e| {
                                     vld.push_anyhow(anyhow!(
                                         "GovernanceOutcomes handling error: {e:#}"
                                     ))
                                 })
-                                .ok();
+                                .ok()
+                            {
+                                stake_reward_deltas.extend(refund_deltas);
+                            }
                         }
                         .instrument(span)
                         .await;
                     }
 
                     _ => error!("Unexpected message type: {message:?}"),
+                }
+
+                if let Some(block_info) = deltas_block_info {
+                    async {
+                        stake_reward_deltas_publisher
+                            .publish_stake_reward_deltas(block_info, stake_reward_deltas)
+                            .await
+                            .inspect_err(|e| {
+                                vld.push_anyhow(anyhow!(
+                                    "Error publishing stake reward deltas: {e:#}"
+                                ))
+                            })
+                            .ok();
+                    }
+                    //.instrument(span)
+                    .await;
                 }
 
                 // Clear the skip flag after first epoch transition
