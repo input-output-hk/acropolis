@@ -474,6 +474,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<StableBlockRequest>,
     ) -> Result<Response<StableBlockResponse>, Status> {
+        self.stats.stable_block_by_hash.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
@@ -526,6 +527,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<LatestStableBlockRequest>,
     ) -> Result<Response<LatestStableBlockResponse>, Status> {
+        self.stats.latest_stable_block.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
