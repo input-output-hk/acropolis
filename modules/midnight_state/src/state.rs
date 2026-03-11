@@ -186,7 +186,7 @@ impl State {
                 continue;
             }
 
-            let owner_address = match cnight_owner_address(&delta.address) {
+            let holder_address = match cnight_owner_address(&delta.address) {
                 Ok(owner_address) => owner_address,
                 Err(err) => {
                     warn!(
@@ -202,7 +202,7 @@ impl State {
             };
 
             let creation = CNightCreation {
-                owner_address,
+                holder_address,
                 quantity: token_amount,
                 utxo: created.utxo,
                 block_number: block_info.number,

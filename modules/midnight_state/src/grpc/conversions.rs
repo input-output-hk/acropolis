@@ -13,7 +13,7 @@ use crate::{
 impl From<AssetCreateInternal> for AssetCreateProto {
     fn from(c: AssetCreateInternal) -> Self {
         AssetCreateProto {
-            address: c.owner_address.to_bytes_key(),
+            address: c.holder_address.to_bytes_key(),
             quantity: c.quantity,
             tx_hash: c.tx_hash.to_vec(),
             output_index: c.utxo_index.into(),
@@ -28,7 +28,7 @@ impl From<AssetCreateInternal> for AssetCreateProto {
 impl From<AssetSpendInternal> for AssetSpendProto {
     fn from(c: AssetSpendInternal) -> Self {
         AssetSpendProto {
-            address: c.owner_address.to_bytes_key(),
+            address: c.holder_address.to_bytes_key(),
             quantity: c.quantity,
             spending_tx_hash: c.spending_tx_hash.to_vec(),
             block_number: c.block_number,
@@ -115,7 +115,7 @@ mod tests {
 
     fn asset_create(owner_address: StakeAddress) -> AssetCreateInternal {
         AssetCreateInternal {
-            owner_address,
+            holder_address: owner_address,
             quantity: 10,
             utxo_index: 1,
             tx_hash: TxHash::new([9u8; 32]),
@@ -128,7 +128,7 @@ mod tests {
 
     fn asset_spend(owner_address: StakeAddress) -> AssetSpendInternal {
         AssetSpendInternal {
-            owner_address,
+            holder_address: owner_address,
             quantity: 10,
             spending_tx_hash: TxHash::new([11u8; 32]),
             block_number: 12,
@@ -151,7 +151,7 @@ mod tests {
     #[test]
     fn asset_spend_proto_uses_owner_stake_address_bytes() {
         let proto: AssetSpendProto = AssetSpendInternal {
-            owner_address: StakeAddress::new(
+            holder_address: StakeAddress::new(
                 StakeCredential::ScriptHash(key_hash(4)),
                 NetworkId::Mainnet,
             ),

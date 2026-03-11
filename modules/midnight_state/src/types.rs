@@ -11,7 +11,7 @@ use anyhow::{anyhow, Error};
 /// public getter methods.
 /// ---------------------------------------------------------------------------
 pub struct AssetCreate {
-    pub owner_address: StakeAddress,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
@@ -22,7 +22,7 @@ pub struct AssetCreate {
 }
 
 pub struct AssetSpend {
-    pub owner_address: StakeAddress,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub spending_tx_hash: TxHash,
     pub block_number: BlockNumber,
@@ -79,7 +79,7 @@ impl TryFrom<&UTxOMeta> for AssetCreate {
             block_timestamp: creation.block_timestamp,
             tx_index_in_block: creation.tx_index,
             quantity: creation.quantity,
-            owner_address: creation.owner_address.clone(),
+            holder_address: creation.holder_address.clone(),
             tx_hash: creation.utxo.tx_hash,
             utxo_index: creation.utxo.output_index,
         })
@@ -98,7 +98,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
             block_timestamp: spend.block_timestamp,
             tx_index_in_block: spend.tx_index,
             quantity: meta.creation.quantity,
-            owner_address: meta.creation.owner_address.clone(),
+            holder_address: meta.creation.holder_address.clone(),
             utxo_tx_hash: meta.creation.utxo.tx_hash,
             utxo_index: meta.creation.utxo.output_index,
             spending_tx_hash: spend.tx_hash,
@@ -108,7 +108,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
 
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
-    pub owner_address: StakeAddress,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,

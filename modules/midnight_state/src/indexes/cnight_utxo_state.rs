@@ -122,7 +122,7 @@ mod tests {
 
     fn creation(utxo: UTxOIdentifier, tx_index: u32) -> CNightCreation {
         CNightCreation {
-            owner_address: StakeAddress::new(
+            holder_address: StakeAddress::new(
                 StakeCredential::AddrKeyHash([7u8; 28].into()),
                 NetworkId::Testnet,
             ),
