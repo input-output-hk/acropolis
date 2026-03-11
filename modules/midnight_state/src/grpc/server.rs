@@ -6,6 +6,7 @@ use anyhow::Result;
 use caryatid_sdk::Context;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tonic::transport::Server;
 
 use crate::grpc::midnight_state_proto::midnight_state_server::MidnightStateServer;
@@ -23,6 +24,17 @@ pub async fn run(
     tracing::info!("gRPC server listening on {}", addr);
 
     let service = MidnightStateService::new(history, context);
+
+    // background stats logger
+    let stats_service = service.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(60)).await;
+            let stats = stats_service.stats();
+            tracing::info!("gRPC request stats: {}", stats);
+        }
+    });
+
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
         .build_v1()?;

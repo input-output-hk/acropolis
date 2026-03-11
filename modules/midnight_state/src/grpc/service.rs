@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use crate::{
     grpc::{
@@ -12,6 +12,7 @@ use crate::{
             StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
             UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
         },
+        stats::{RequestStats, RequestStatsSnapshot},
         utxo_events::truncate_by_tx_capacity,
     },
     state::State,
@@ -33,14 +34,24 @@ use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
 
+#[derive(Clone)]
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
     context: Arc<Context<Message>>,
+    stats: Arc<RequestStats>,
 }
 
 impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>, context: Arc<Context<Message>>) -> Self {
-        Self { history, context }
+        Self {
+            history,
+            context,
+            stats: Arc::new(RequestStats::default()),
+        }
+    }
+
+    pub fn stats(&self) -> RequestStatsSnapshot {
+        self.stats.snapshot()
     }
 }
 
@@ -176,6 +187,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<UtxoEventsRequest>,
     ) -> Result<Response<UtxoEventsResponse>, Status> {
+        self.stats.utxo_events.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let start_block = req.start_block;
@@ -251,6 +263,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<TechnicalCommitteeDatumRequest>,
     ) -> Result<Response<TechnicalCommitteeDatumResponse>, Status> {
+        self.stats.technical_committee_datum.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let technical_committee = {
@@ -281,6 +294,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<CouncilDatumRequest>,
     ) -> Result<Response<CouncilDatumResponse>, Status> {
+        self.stats.council_datum.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let council = {
@@ -311,6 +325,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<AriadneParametersRequest>,
     ) -> Result<Response<AriadneParametersResponse>, Status> {
+        self.stats.ariadne_parameters.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let params = {
@@ -341,6 +356,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<BlockByHashRequest>,
     ) -> Result<Response<BlockByHashResponse>, Status> {
+        self.stats.block_by_hash.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
@@ -383,6 +399,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<EpochNonceRequest>,
     ) -> Result<Response<EpochNonceResponse>, Status> {
+        self.stats.epoch_nonce.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let nonce_opt = {
@@ -400,6 +417,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<EpochCandidatesRequest>,
     ) -> Result<Response<EpochCandidatesResponse>, Status> {
+        self.stats.epoch_candidates.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let candidates = {
