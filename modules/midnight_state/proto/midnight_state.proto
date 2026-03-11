@@ -26,6 +26,8 @@ message AssetCreatesRequest {
   uint32 utxo_capacity = 3;
 }
 message AssetCreate {
+  // 29-byte owner stake/reward address bytes used by cNIGHT observation.
+  // This is not the raw payment/base address bytes from the originating UTxO.
   bytes address = 1;
   uint64 quantity = 2;
 
@@ -48,6 +50,8 @@ message AssetSpendsRequest {
   uint32 utxo_capacity = 3;
 }
 message AssetSpend {
+  // 29-byte owner stake/reward address bytes used by cNIGHT observation.
+  // This is not the raw payment/base address bytes from the originating UTxO.
   bytes address = 1;
   uint64 quantity = 2;
 

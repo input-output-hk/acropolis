@@ -1,20 +1,23 @@
 use std::sync::Arc;
 
 use crate::{
+    grpc::conversions::{try_asset_create_proto, try_asset_spend_proto, CNightOwnerAddressError},
     grpc::{
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
-            AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
-            AssetSpendsRequest, AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse,
-            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
-            EpochNonceRequest, EpochNonceResponse, RegistrationsRequest, RegistrationsResponse,
-            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
-            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
+            AriadneParametersResponse, AssetCreate as AssetCreateProto, AssetCreatesRequest,
+            AssetCreatesResponse, AssetSpend as AssetSpendProto, AssetSpendsRequest,
+            AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse, CouncilDatumRequest,
+            CouncilDatumResponse, DeregistrationsRequest, DeregistrationsResponse,
+            EpochCandidatesRequest, EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse,
+            RegistrationsRequest, RegistrationsResponse, StakePoolEntry,
+            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
+            UtxoEventsRequest, UtxoEventsResponse,
         },
         utxo_events::truncate_by_tx_capacity,
     },
     state::State,
+    types::{AssetCreate as CNightAssetCreate, AssetSpend as CNightAssetSpend},
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
@@ -30,8 +33,58 @@ use acropolis_common::{
 use caryatid_sdk::Context;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
+use tracing::warn;
 
 const MAX_EVENTS_PER_TX: usize = 64;
+
+fn convert_asset_creates(creates: Vec<CNightAssetCreate>) -> Vec<AssetCreateProto> {
+    creates
+        .into_iter()
+        .filter_map(|create| match try_asset_create_proto(&create) {
+            Ok(proto) => Some(proto),
+            Err(err) => {
+                warn_skipped_asset_create(&create, &err);
+                None
+            }
+        })
+        .collect()
+}
+
+fn convert_asset_spends(spends: Vec<CNightAssetSpend>) -> Vec<AssetSpendProto> {
+    spends
+        .into_iter()
+        .filter_map(|spend| match try_asset_spend_proto(&spend) {
+            Ok(proto) => Some(proto),
+            Err(err) => {
+                warn_skipped_asset_spend(&spend, &err);
+                None
+            }
+        })
+        .collect()
+}
+
+fn warn_skipped_asset_create(create: &CNightAssetCreate, err: &CNightOwnerAddressError) {
+    warn!(
+        block_number = create.block_number,
+        tx_hash = %create.tx_hash,
+        utxo_index = create.utxo_index,
+        address_kind = create.holder_address.kind(),
+        reason = %err,
+        "skipping cNIGHT asset create with unsupported owner address"
+    );
+}
+
+fn warn_skipped_asset_spend(spend: &CNightAssetSpend, err: &CNightOwnerAddressError) {
+    warn!(
+        block_number = spend.block_number,
+        tx_hash = %spend.spending_tx_hash,
+        utxo_tx_hash = %spend.utxo_tx_hash,
+        utxo_index = spend.utxo_index,
+        address_kind = spend.holder_address.kind(),
+        reason = %err,
+        "skipping cNIGHT asset spend with unsupported owner address"
+    );
+}
 
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
@@ -70,7 +123,7 @@ impl MidnightState for MidnightStateService {
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_creates = creates.into_iter().map(Into::into).collect();
+        let proto_creates = convert_asset_creates(creates);
 
         Ok(Response::new(AssetCreatesResponse {
             creates: proto_creates,
@@ -101,7 +154,7 @@ impl MidnightState for MidnightStateService {
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let proto_spends = spends.into_iter().map(Into::into).collect();
+        let proto_spends = convert_asset_spends(spends);
 
         Ok(Response::new(AssetSpendsResponse {
             spends: proto_spends,
@@ -203,8 +256,18 @@ impl MidnightState for MidnightStateService {
                     .get_asset_creates(start_block.into(), start_tx_index, event_capacity)
                     .map_err(|e| Status::internal(e.to_string()))?
                     .into_iter()
-                    .map(|e| UtxoEvent {
-                        kind: Some(utxo_event::Kind::AssetCreate(e.into())),
+                    .filter_map(|e| {
+                        let proto = match try_asset_create_proto(&e) {
+                            Ok(proto) => proto,
+                            Err(err) => {
+                                warn_skipped_asset_create(&e, &err);
+                                return None;
+                            }
+                        };
+
+                        Some(UtxoEvent {
+                            kind: Some(utxo_event::Kind::AssetCreate(proto)),
+                        })
                     }),
             );
 
@@ -214,8 +277,18 @@ impl MidnightState for MidnightStateService {
                     .get_asset_spends(start_block.into(), start_tx_index, event_capacity)
                     .map_err(|e| Status::internal(e.to_string()))?
                     .into_iter()
-                    .map(|e| UtxoEvent {
-                        kind: Some(utxo_event::Kind::AssetSpend(e.into())),
+                    .filter_map(|e| {
+                        let proto = match try_asset_spend_proto(&e) {
+                            Ok(proto) => proto,
+                            Err(err) => {
+                                warn_skipped_asset_spend(&e, &err);
+                                return None;
+                            }
+                        };
+
+                        Some(UtxoEvent {
+                            kind: Some(utxo_event::Kind::AssetSpend(proto)),
+                        })
                     }),
             );
 
@@ -456,8 +529,9 @@ mod tests {
         messages::AddressDeltasMessage,
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
-        Datum, DatumHash, Era, ExtendedAddressDelta, PolicyId, TxHash, TxIdentifier,
-        UTxOIdentifier, ValueMap,
+        Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress,
+        ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, SpentUTxOExtended, StakeAddress,
+        StakeCredential, TxHash, TxIdentifier, UTxOIdentifier, ValueMap,
     };
     use caryatid_sdk::{async_trait, Context, MessageBounds, MessageBus, Subscription};
     use config::Config;
@@ -465,7 +539,11 @@ mod tests {
     use tonic::{Code, Request};
 
     use crate::{
-        configuration::MidnightConfig, grpc::midnight_state_proto::AriadneParametersRequest,
+        configuration::MidnightConfig,
+        grpc::midnight_state_proto::{
+            utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
+            UtxoEventsRequest,
+        },
         state::State,
     };
 
@@ -518,6 +596,92 @@ mod tests {
         ValueMap {
             lovelace: 0,
             assets,
+        }
+    }
+
+    fn key_hash(byte: u8) -> KeyHash {
+        [byte; 28].into()
+    }
+
+    fn supported_owner_holder_address() -> Address {
+        Address::Shelley(ShelleyAddress {
+            network: NetworkId::Testnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(key_hash(1)),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(key_hash(2)),
+        })
+    }
+
+    fn unsupported_owner_holder_address() -> Address {
+        Address::Shelley(ShelleyAddress {
+            network: NetworkId::Testnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(key_hash(3)),
+            delegation: ShelleyAddressDelegationPart::None,
+        })
+    }
+
+    fn expected_owner_address() -> Vec<u8> {
+        StakeAddress::new(
+            StakeCredential::AddrKeyHash(key_hash(2)),
+            NetworkId::Testnet,
+        )
+        .to_bytes_key()
+    }
+
+    fn mapping_validator_address() -> Address {
+        Address::Shelley(ShelleyAddress {
+            network: NetworkId::Testnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(key_hash(4)),
+            delegation: ShelleyAddressDelegationPart::None,
+        })
+    }
+
+    fn cnight_delta(
+        address: Address,
+        policy: PolicyId,
+        asset: AssetName,
+        tx_hash: TxHash,
+        output_index: u16,
+        tx_index: u16,
+        block_number: u64,
+    ) -> ExtendedAddressDelta {
+        let value = test_value_with_token(policy, asset, 1);
+
+        ExtendedAddressDelta {
+            address,
+            tx_identifier: TxIdentifier::new(block_number as u32, tx_index),
+            spent_utxos: vec![],
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(tx_hash, output_index),
+                value: value.clone(),
+                datum: None,
+            }],
+            received: value,
+            sent: ValueMap::default(),
+        }
+    }
+
+    fn candidate_registration_delta(
+        address: Address,
+        policy: PolicyId,
+        asset: AssetName,
+        tx_hash: TxHash,
+        output_index: u16,
+        tx_index: u16,
+        block_number: u64,
+    ) -> ExtendedAddressDelta {
+        let value = test_value_with_token(policy, asset, 1);
+
+        ExtendedAddressDelta {
+            address,
+            tx_identifier: TxIdentifier::new(block_number as u32, tx_index),
+            spent_utxos: vec![],
+            created_utxos: vec![CreatedUTxOExtended {
+                utxo: UTxOIdentifier::new(tx_hash, output_index),
+                value: value.clone(),
+                datum: Some(Datum::Inline(vec![0xAA])),
+            }],
+            received: value,
+            sent: ValueMap::default(),
         }
     }
 
@@ -640,5 +804,217 @@ mod tests {
 
         let err = result.expect_err("hash datum should be rejected");
         assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn should_skip_asset_creates_with_unsupported_owner_addresses() {
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"cnight").unwrap();
+        let block = test_block_info(1, 1);
+        let mut state = State::new(MidnightConfig {
+            cnight_policy_id: cnight_policy,
+            cnight_asset_name: cnight_asset,
+            ..Default::default()
+        });
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    cnight_delta(
+                        supported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        TxHash::new([1u8; 32]),
+                        0,
+                        1,
+                        block.number,
+                    ),
+                    cnight_delta(
+                        unsupported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        TxHash::new([2u8; 32]),
+                        1,
+                        2,
+                        block.number,
+                    ),
+                ]),
+            )
+            .expect("address delta handling should succeed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_asset_creates(Request::new(AssetCreatesRequest {
+                start_block: 0,
+                start_tx_index: 0,
+                utxo_capacity: 10,
+            }))
+            .await
+            .expect("asset creates should be returned")
+            .into_inner();
+
+        assert_eq!(response.creates.len(), 1);
+        assert_eq!(response.creates[0].address, expected_owner_address());
+    }
+
+    #[tokio::test]
+    async fn should_skip_asset_spends_with_unsupported_owner_addresses() {
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"cnight").unwrap();
+        let mut state = State::new(MidnightConfig {
+            cnight_policy_id: cnight_policy,
+            cnight_asset_name: cnight_asset,
+            ..Default::default()
+        });
+        let create_block = test_block_info(1, 1);
+        let spend_block = test_block_info(2, 1);
+
+        let supported_utxo = UTxOIdentifier::new(TxHash::new([1u8; 32]), 0);
+        let unsupported_utxo = UTxOIdentifier::new(TxHash::new([2u8; 32]), 1);
+
+        state
+            .handle_address_deltas(
+                &create_block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    cnight_delta(
+                        supported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        supported_utxo.tx_hash,
+                        supported_utxo.output_index,
+                        1,
+                        create_block.number,
+                    ),
+                    cnight_delta(
+                        unsupported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        unsupported_utxo.tx_hash,
+                        unsupported_utxo.output_index,
+                        2,
+                        create_block.number,
+                    ),
+                ]),
+            )
+            .expect("create delta handling should succeed");
+
+        state
+            .handle_address_deltas(
+                &spend_block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![ExtendedAddressDelta {
+                    address: Address::default(),
+                    tx_identifier: TxIdentifier::new(spend_block.number as u32, 4),
+                    spent_utxos: vec![
+                        SpentUTxOExtended {
+                            spent_by: TxHash::new([3u8; 32]),
+                            utxo: supported_utxo,
+                        },
+                        SpentUTxOExtended {
+                            spent_by: TxHash::new([4u8; 32]),
+                            utxo: unsupported_utxo,
+                        },
+                    ],
+                    created_utxos: vec![],
+                    received: ValueMap::default(),
+                    sent: ValueMap::default(),
+                }]),
+            )
+            .expect("spend delta handling should succeed");
+
+        let service = service_with_committed_state(state, spend_block.number);
+        let response = service
+            .get_asset_spends(Request::new(AssetSpendsRequest {
+                start_block: 0,
+                start_tx_index: 0,
+                utxo_capacity: 10,
+            }))
+            .await
+            .expect("asset spends should be returned")
+            .into_inner();
+
+        assert_eq!(response.spends.len(), 1);
+        assert_eq!(response.spends[0].address, expected_owner_address());
+    }
+
+    #[tokio::test]
+    async fn should_keep_non_cnight_events_when_skipping_unsupported_utxo_events() {
+        let cnight_policy = PolicyId::new([1u8; 28]);
+        let cnight_asset = AssetName::new(b"cnight").unwrap();
+        let auth_policy = PolicyId::new([9u8; 28]);
+        let auth_asset = AssetName::new(b"auth").unwrap();
+        let mapping_address = mapping_validator_address();
+        let block = test_block_info(1, 1);
+        let mut state = State::new(MidnightConfig {
+            cnight_policy_id: cnight_policy,
+            cnight_asset_name: cnight_asset,
+            mapping_validator_address: mapping_address.clone(),
+            auth_token_policy_id: auth_policy,
+            auth_token_asset_name: auth_asset,
+            ..Default::default()
+        });
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    cnight_delta(
+                        supported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        TxHash::new([1u8; 32]),
+                        0,
+                        1,
+                        block.number,
+                    ),
+                    cnight_delta(
+                        unsupported_owner_holder_address(),
+                        cnight_policy,
+                        cnight_asset,
+                        TxHash::new([2u8; 32]),
+                        1,
+                        2,
+                        block.number,
+                    ),
+                    candidate_registration_delta(
+                        mapping_address,
+                        auth_policy,
+                        auth_asset,
+                        TxHash::new([3u8; 32]),
+                        2,
+                        3,
+                        block.number,
+                    ),
+                ]),
+            )
+            .expect("address delta handling should succeed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_utxo_events(Request::new(UtxoEventsRequest {
+                start_block: 0,
+                start_tx_index: 0,
+                tx_capacity: 10,
+            }))
+            .await
+            .expect("utxo events should be returned")
+            .into_inner();
+
+        assert_eq!(response.events.len(), 2);
+
+        let mut asset_creates = response.events.iter().filter_map(|event| match &event.kind {
+            Some(utxo_event::Kind::AssetCreate(create)) => Some(create),
+            _ => None,
+        });
+        let registrations = response
+            .events
+            .iter()
+            .filter(|event| matches!(event.kind, Some(utxo_event::Kind::Registration(_))))
+            .count();
+
+        let asset_create = asset_creates.next().expect("supported cNIGHT create should remain");
+        assert!(asset_creates.next().is_none());
+        assert_eq!(asset_create.address, expected_owner_address());
+        assert_eq!(registrations, 1);
     }
 }
