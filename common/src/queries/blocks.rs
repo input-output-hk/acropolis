@@ -41,6 +41,13 @@ pub enum BlocksStateQuery {
     GetBlockBySlot {
         slot: u64,
     },
+    GetBlockByTipOffset {
+        offset: u32,
+    },
+    GetStableBlockByHash {
+        block_hash: BlockHash,
+        offset: u32,
+    },
     GetBlockByHash {
         block_hash: BlockHash,
     },
@@ -108,6 +115,8 @@ pub enum BlocksStateQueryResponse {
     BlockHashesAndIndexOfTransactionHashes(Vec<BlockHashAndTxIndex>),
     TransactionHashes(TransactionHashes),
     TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),
+    BlockByTipOffset(Option<BlockInfo>),
+    StableBlockByHash(Option<BlockInfo>),
     Error(QueryError),
 }
 

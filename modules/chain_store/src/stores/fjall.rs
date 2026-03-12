@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
@@ -11,7 +15,7 @@ pub struct FjallStore {
     database: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
-    last_persisted_block: Option<u64>,
+    last_persisted_block: AtomicU64,
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
@@ -40,13 +44,21 @@ impl FjallStore {
         let blocks = FjallBlockStore::new(&database)?;
         let txs = FjallTXStore::new(&database)?;
 
-        let last_persisted_block = if !clear {
-            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
-                res.key().ok().and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-            })
+        let last_persisted_block = AtomicU64::new(if !clear {
+            blocks
+                .block_hashes_by_number
+                .iter()
+                .next_back()
+                .and_then(|res| {
+                    res.key()
+                        .ok()
+                        .and_then(|key| <[u8; 8]>::try_from(key.as_ref()).ok())
+                        .map(u64::from_be_bytes)
+                })
+                .unwrap_or(0)
         } else {
-            None
-        };
+            0
+        });
 
         Ok(Self {
             database,
@@ -90,14 +102,14 @@ impl super::Store for FjallStore {
 
         batch.commit()?;
 
+        self.last_persisted_block.store(info.number, std::sync::atomic::Ordering::Relaxed);
+
         Ok(())
     }
 
     fn should_persist(&self, block_number: u64) -> bool {
-        match self.last_persisted_block {
-            Some(last) => block_number > last,
-            None => true,
-        }
+        let tip = self.last_persisted_block.load(std::sync::atomic::Ordering::Relaxed);
+        tip == 0 || block_number > tip
     }
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
@@ -118,6 +130,10 @@ impl super::Store for FjallStore {
 
     fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
         self.blocks.get_by_epoch_slot(epoch, epoch_slot)
+    }
+
+    fn get_tip_block_number(&self) -> u64 {
+        self.last_persisted_block.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn get_latest_block(&self) -> Result<Option<Block>> {

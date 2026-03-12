@@ -142,6 +142,7 @@ impl State {
             self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
         }
 
+        self.epoch_totals.add_indexed_bridge_utxos(bridge_creations.len());
         if !bridge_creations.is_empty() {
             self.bridge.add_created_utxos(block_info.number, bridge_creations);
         }
