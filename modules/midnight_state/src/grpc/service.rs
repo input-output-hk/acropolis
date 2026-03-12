@@ -8,9 +8,9 @@ use crate::{
             AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
             BlockByHashResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
             DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
-            EpochNonceRequest, EpochNonceResponse, LatestStableBlockRequest,
-            LatestStableBlockResponse, RegistrationsRequest, RegistrationsResponse,
-            StableBlockRequest, StableBlockResponse, StakePoolEntry,
+            EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
+            LatestStableBlockRequest, LatestStableBlockResponse, RegistrationsRequest,
+            RegistrationsResponse, StableBlockRequest, StableBlockResponse, StakePoolEntry,
             TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
             UtxoEventsRequest, UtxoEventsResponse,
         },
@@ -570,6 +570,54 @@ impl MidnightState for MidnightStateService {
 
         Ok(Response::new(LatestStableBlockResponse {
             block: block_proto,
+        }))
+    }
+
+    async fn get_latest_block(
+        &self,
+        _request: Request<LatestBlockRequest>,
+    ) -> Result<Response<LatestBlockResponse>, Status> {
+        self.stats.latest_block.fetch_add(1, Ordering::Relaxed);
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+            BlocksStateQuery::GetBlockByTipOffset { offset: 0 },
+        )));
+
+        let block_info =
+            query_state(
+                &self.context,
+                "cardano.query.blocks",
+                msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::BlockByTipOffset(Some(block_info)),
+                    )) => Ok(block_info),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::BlockByTipOffset(None),
+                    )) => Err(QueryError::not_found("No blocks available")),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving block info",
+                    )),
+                },
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let block_proto = Block {
+            block_number: u32::try_from(block_info.number)
+                .map_err(|_| Status::internal("block number overflow"))?,
+            block_hash: block_info.hash.to_vec(),
+            epoch_number: u32::try_from(block_info.epoch)
+                .map_err(|_| Status::internal("epoch overflow"))?,
+            slot_number: block_info.slot,
+            block_timestamp_unix: block_info.timestamp,
+        };
+
+        Ok(Response::new(LatestBlockResponse {
+            block: Some(block_proto),
         }))
     }
 }

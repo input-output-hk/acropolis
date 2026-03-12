@@ -20,6 +20,7 @@ service MidnightState {
   rpc GetEpochCandidates (EpochCandidatesRequest) returns (EpochCandidatesResponse);
   rpc GetStableBlock (StableBlockRequest) returns (StableBlockResponse);
   rpc GetLatestStableBlock (LatestStableBlockRequest) returns (LatestStableBlockResponse);
+  rpc GetLatestBlock (LatestBlockRequest) returns (LatestBlockResponse);
 }
 
 message AssetCreatesRequest {
@@ -212,6 +213,12 @@ message LatestStableBlockRequest {
 message LatestStableBlockResponse {
   optional Block block = 1;
 }
+
+message LatestBlockRequest {}
+message LatestBlockResponse {
+  Block block = 1;
+}
+
 
 message StableBlockRequest {
   bytes block_hash = 1;
