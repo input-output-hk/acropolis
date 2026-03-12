@@ -15,7 +15,7 @@ impl ReferenceScriptsState {
     ) {
         for script_hash in spent_reference_scripts {
             if let Some((_, count)) = self.reference_scripts.get_mut(script_hash) {
-                *count -= 1;
+                *count = count.saturating_sub(1);
                 if *count == 0 {
                     self.reference_scripts.remove(script_hash);
                 }
