@@ -613,7 +613,11 @@ mod tests {
     fn utxo_entry_tx_hash_hex() {
         let id = make_utxo_id(0xAB, 5);
         let value = make_utxo_value(1_000_000, Address::None);
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         let hex = entry.tx_hash_hex();
         assert!(hex.starts_with("abab"));
@@ -624,7 +628,11 @@ mod tests {
     fn utxo_entry_output_index() {
         let id = make_utxo_id(0x00, 42);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         assert_eq!(entry.output_index(), 42);
     }
@@ -633,7 +641,11 @@ mod tests {
     fn utxo_entry_coin() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(5_000_000, Address::None);
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         assert_eq!(entry.coin(), 5_000_000);
     }
@@ -645,7 +657,11 @@ mod tests {
 
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         assert_eq!(entry.address_bytes(), expected_bytes);
     }
@@ -654,7 +670,11 @@ mod tests {
     fn utxo_entry_address_bytes_none() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         assert!(entry.address_bytes().is_empty());
     }
@@ -664,7 +684,11 @@ mod tests {
         let shelley = make_shelley_base_address();
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         let credential = entry.extract_stake_credential();
         assert!(credential.is_some());
@@ -682,7 +706,11 @@ mod tests {
         let shelley = make_enterprise_address();
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         // Enterprise addresses have no stake credential
         assert!(entry.extract_stake_credential().is_none());
@@ -692,7 +720,11 @@ mod tests {
     fn utxo_entry_extract_stake_credential_none_address() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value, reference_script: None };
+        let entry = UtxoEntry {
+            id,
+            value,
+            reference_script: None,
+        };
 
         assert!(entry.extract_stake_credential().is_none());
     }
