@@ -84,7 +84,8 @@ impl PeerManager {
     pub fn seed(&mut self, addresses: &[String], hot: &HashSet<String>) {
         let cold_cap = self.config.target_peer_count * 4;
         for addr in addresses {
-            if !hot.contains(addr) && !self.failed_peers.contains(addr)
+            if !hot.contains(addr)
+                && !self.failed_peers.contains(addr)
                 && !self.cold_peers.contains(addr.as_str())
             {
                 if self.cold_peers.len() >= cold_cap {

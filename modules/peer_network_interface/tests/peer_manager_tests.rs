@@ -128,7 +128,7 @@ fn peer_sharing_runs_at_cap() {
 
 #[test]
 fn discovery_runs_above_target_count() {
-    let mut pm = PeerManager::new(default_config());
+    let pm = PeerManager::new(default_config());
     // Even with lots of cold peers, discovery should still run
     assert!(pm.needs_discovery(5), "discovery must run continuously");
     assert!(
@@ -212,10 +212,18 @@ fn demote_to_cold_bypasses_failed_peers_blacklist() {
     assert_eq!(pm.cold_count(), 0, "failed peer must not be in cold set");
     // Churn demotion should re-add it regardless of failed_peers
     pm.demote_to_cold("1.2.3.4:3001".to_string(), &hot);
-    assert_eq!(pm.cold_count(), 1, "demote_to_cold must re-add despite failed_peers");
+    assert_eq!(
+        pm.cold_count(),
+        1,
+        "demote_to_cold must re-add despite failed_peers"
+    );
     // Verify it was also cleared from failed_peers (re-promotable)
     pm.add_discovered(vec!["1.2.3.4:3001".to_string()], &hot);
-    assert_eq!(pm.cold_count(), 1, "address is already in cold, dedup applies");
+    assert_eq!(
+        pm.cold_count(),
+        1,
+        "address is already in cold, dedup applies"
+    );
 }
 
 // --- US3 tests ---
