@@ -26,6 +26,8 @@ pub struct TestContextJson {
 pub struct TestContext {
     pub shelley_params: ShelleyParams,
     pub utxos: HashMap<UTxOIdentifier, UTXOValue>,
+    /// This will be used for test cases of phase 2 validation.
+    #[allow(dead_code)]
     pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
 }
 

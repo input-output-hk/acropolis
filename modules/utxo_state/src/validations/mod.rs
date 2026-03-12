@@ -18,7 +18,6 @@ pub fn validate_tx(
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    reference_scripts: &HashMap<ScriptHash, ReferenceScript>,
     shelley_params: Option<&ShelleyParams>,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
@@ -75,8 +74,14 @@ pub fn validate_tx(
     }
 
     if era >= Era::Babbage {
-        let tx_ref_scripts = utils::get_reference_scripts(tx_deltas, utxos, reference_scripts);
-        babbage::utxow::validate(&tx_ref_scripts)
+        let created_reference_scripts: HashMap<ScriptHash, &ReferenceScript> = tx_deltas
+            .created_reference_scripts
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|(hash, script)| (*hash, script))
+            .collect();
+        babbage::utxow::validate(created_reference_scripts)
             .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 

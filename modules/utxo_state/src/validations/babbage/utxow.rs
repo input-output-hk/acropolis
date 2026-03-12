@@ -9,15 +9,18 @@ use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, program::Program};
 ///
 /// 1. MalformedReferenceScripts
 pub fn validate(
-    reference_scripts: &HashMap<ScriptHash, ReferenceScript>,
+    created_reference_scripts: HashMap<ScriptHash, &ReferenceScript>,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    validate_reference_scripts(reference_scripts)?;
+    validate_reference_scripts(created_reference_scripts)?;
 
     Ok(())
 }
 
+/// Validate that the reference scripts created by the transaction are well-formed.
+/// Deduplication by script hash is expected to happen at the call site
+/// (via HashMap), so each script is only validated once.
 pub fn validate_reference_scripts(
-    reference_scripts: &HashMap<ScriptHash, ReferenceScript>,
+    reference_scripts: HashMap<ScriptHash, &ReferenceScript>,
 ) -> Result<(), Box<UTxOWValidationError>> {
     reference_scripts.par_iter().try_for_each(|(script_hash, reference_script)| {
         validate_script_wellformedness(script_hash, reference_script)
@@ -52,28 +55,21 @@ mod tests {
     use super::*;
     use crate::test_utils::TestContext;
     use crate::test_utils::{to_era, to_pallas_era};
-    use crate::{utils, validation_fixture};
+    use crate::validation_fixture;
     use acropolis_common::{NetworkId, TxIdentifier};
     use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
     #[test_case(validation_fixture!(
         "conway",
-        "5ed7de96fba4fd5dbf5eecd3a6abee9b8bc3cacce55672257fe3a2a97006bda3"
+        "2536194d2a976370a932174c10975493ab58fd7c16395d50e62b7c0e1949baea"
     ) =>
         matches Ok(());
-        "conway - valid transaction 1 - 3 reference scripts"
-    )]
-    #[test_case(validation_fixture!(
-        "conway",
-        "502f7a04cf763d681931adc0f20ad3e1f8f5515e78f36d6fcb97f9a374ae76d2"
-    ) =>
-        matches Ok(());
-        "conway - valid transaction 2 - one reference script but that is native script"
+        "conway - valid transaction 1 - created 1 reference script"
     )]
     #[allow(clippy::result_large_err)]
     fn babbage_utxow_test(
-        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
@@ -89,9 +85,14 @@ mod tests {
         assert!(tx_error.is_none());
 
         let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
-        let tx_ref_scripts =
-            utils::get_reference_scripts(&tx_deltas, &ctx.utxos, &ctx.reference_scripts);
+        let created_reference_scripts = tx_deltas
+            .created_reference_scripts
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|(k, v)| (*k, v))
+            .collect::<HashMap<ScriptHash, &ReferenceScript>>();
 
-        validate(&tx_ref_scripts).map_err(|e| *e)
+        validate(created_reference_scripts).map_err(|e| *e)
     }
 }

@@ -247,6 +247,7 @@ impl State {
     }
 
     //// Loop up a reference script
+    #[allow(dead_code)]
     pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
         self.reference_scripts_history
             .get_current_state()
@@ -869,36 +870,22 @@ impl State {
         tx.produces.first().map(|output| output.utxo_identifier.tx_hash)
     }
 
-    async fn collect_utxos_and_reference_scripts(
+    async fn collect_utxos(
         &self,
         inputs: &[&UTxOIdentifier],
-    ) -> (
-        HashMap<UTxOIdentifier, UTXOValue>,
-        HashMap<ScriptHash, ReferenceScript>,
-    ) {
+    ) -> HashMap<UTxOIdentifier, UTXOValue> {
         let mut utxos = HashMap::new();
-        let mut reference_scripts = HashMap::new();
 
         for input in inputs.iter().cloned() {
             if utxos.contains_key(input) {
                 continue;
             }
             if let Ok(Some(utxo)) = self.lookup_utxo(input).await {
-                if let Some(script_ref) = utxo.script_ref.as_ref() {
-                    if let Some(reference_script) =
-                        self.lookup_reference_script(&script_ref.script_hash)
-                    {
-                        reference_scripts.insert(script_ref.script_hash, reference_script);
-                    } else {
-                        error!("Reference script {} not found", script_ref.script_hash);
-                    }
-                }
-
                 utxos.insert(*input, utxo);
             }
         }
 
-        (utxos, reference_scripts)
+        utxos
     }
 
     pub async fn validate(
@@ -916,8 +903,7 @@ impl State {
         let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
-        let (mut utxos, mut reference_scripts) =
-            self.collect_utxos_and_reference_scripts(&all_inputs).await;
+        let mut utxos = self.collect_utxos(&all_inputs).await;
 
         for tx_deltas in deltas.iter() {
             if block.status != BlockStatus::Bootstrap {
@@ -926,7 +912,6 @@ impl State {
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
-                    &reference_scripts,
                     protocol_params.shelley.as_ref(),
                     block.era,
                 ) {
@@ -935,14 +920,8 @@ impl State {
             }
 
             // add created UTxOs to the utxos
-            // add created Reference scripts to reference_scripts
             for output in &tx_deltas.produces {
                 utxos.insert(output.utxo_identifier, output.utxo_value());
-            }
-            for (script_hash, reference_script) in
-                tx_deltas.created_reference_scripts.as_deref().unwrap_or(&[]).iter()
-            {
-                reference_scripts.insert(*script_hash, reference_script.clone());
             }
         }
 
