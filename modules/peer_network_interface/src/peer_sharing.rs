@@ -167,10 +167,22 @@ fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharin
                 let w3 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
                 let port = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
                 let octets: [u8; 16] = [
-                    (w0 >> 24) as u8, (w0 >> 16) as u8, (w0 >> 8) as u8, w0 as u8,
-                    (w1 >> 24) as u8, (w1 >> 16) as u8, (w1 >> 8) as u8, w1 as u8,
-                    (w2 >> 24) as u8, (w2 >> 16) as u8, (w2 >> 8) as u8, w2 as u8,
-                    (w3 >> 24) as u8, (w3 >> 16) as u8, (w3 >> 8) as u8, w3 as u8,
+                    (w0 >> 24) as u8,
+                    (w0 >> 16) as u8,
+                    (w0 >> 8) as u8,
+                    w0 as u8,
+                    (w1 >> 24) as u8,
+                    (w1 >> 16) as u8,
+                    (w1 >> 8) as u8,
+                    w1 as u8,
+                    (w2 >> 24) as u8,
+                    (w2 >> 16) as u8,
+                    (w2 >> 8) as u8,
+                    w2 as u8,
+                    (w3 >> 24) as u8,
+                    (w3 >> 16) as u8,
+                    (w3 >> 8) as u8,
+                    w3 as u8,
                 ];
                 (Ipv6Addr::from(octets).to_string(), port)
             }
