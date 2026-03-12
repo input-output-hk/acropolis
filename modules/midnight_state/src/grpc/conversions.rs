@@ -10,7 +10,6 @@ use crate::{
         Registration as RegistrationInternal, RegistrationEvent,
     },
 };
-
 impl From<AssetCreateInternal> for AssetCreateProto {
     fn from(c: AssetCreateInternal) -> Self {
         AssetCreateProto {
@@ -112,5 +111,71 @@ impl From<&RegistrationEvent> for EpochCandidate {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::{AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal};
+    use acropolis_common::{BlockHash, KeyHash, NetworkId, StakeAddress, StakeCredential, TxHash};
+
+    use super::{AssetCreateProto, AssetSpendProto};
+
+    fn key_hash(byte: u8) -> KeyHash {
+        [byte; 28].into()
+    }
+
+    fn owner_address(network: NetworkId, byte: u8) -> StakeAddress {
+        StakeAddress::new(StakeCredential::AddrKeyHash(key_hash(byte)), network)
+    }
+
+    fn asset_create(owner_address: StakeAddress) -> AssetCreateInternal {
+        AssetCreateInternal {
+            holder_address: owner_address,
+            quantity: 10,
+            utxo_index: 1,
+            tx_hash: TxHash::new([9u8; 32]),
+            block_number: 11,
+            block_hash: BlockHash::new([10u8; 32]),
+            tx_index_in_block: 12,
+            block_timestamp: 13,
+        }
+    }
+
+    fn asset_spend(owner_address: StakeAddress) -> AssetSpendInternal {
+        AssetSpendInternal {
+            holder_address: owner_address,
+            quantity: 10,
+            spending_tx_hash: TxHash::new([11u8; 32]),
+            block_number: 12,
+            block_hash: BlockHash::new([12u8; 32]),
+            tx_index_in_block: 13,
+            block_timestamp: 14,
+            utxo_tx_hash: TxHash::new([13u8; 32]),
+            utxo_index: 2,
+        }
+    }
+
+    #[test]
+    fn asset_create_proto_uses_owner_stake_address_bytes() {
+        let proto: AssetCreateProto = asset_create(owner_address(NetworkId::Testnet, 2)).into();
+
+        assert_eq!(proto.address.len(), 29);
+        assert_eq!(proto.address[0], 0b1110_0000);
+    }
+
+    #[test]
+    fn asset_spend_proto_uses_owner_stake_address_bytes() {
+        let proto: AssetSpendProto = AssetSpendInternal {
+            holder_address: StakeAddress::new(
+                StakeCredential::ScriptHash(key_hash(4)),
+                NetworkId::Mainnet,
+            ),
+            ..asset_spend(owner_address(NetworkId::Mainnet, 7))
+        }
+        .into();
+
+        assert_eq!(proto.address.len(), 29);
+        assert_eq!(proto.address[0], 0b1111_0001);
     }
 }

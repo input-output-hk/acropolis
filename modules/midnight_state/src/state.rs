@@ -6,7 +6,8 @@ use acropolis_common::{
     messages::AddressDeltasMessage, protocol_params::Nonce, BlockInfo, BlockNumber, Datum, Epoch,
     ExtendedAddressDelta, UTxOIdentifier,
 };
-use imbl::HashMap as ImHashMap;
+use imbl::HashMap;
+use tracing::warn;
 
 use crate::{
     configuration::MidnightConfig,
@@ -36,7 +37,7 @@ pub struct State {
     // Parameters indexed by epoch
     parameters: ParametersState,
     // Nonces indexed by epoch
-    nonces: ImHashMap<Epoch, Nonce>,
+    nonces: HashMap<Epoch, Nonce>,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -202,8 +203,22 @@ impl State {
                 continue;
             }
 
+            let holder_address = match delta.address.to_stake_address() {
+                Some(owner_address) => owner_address,
+                None => {
+                    warn!(
+                        block_number = block_info.number,
+                        tx_identifier = %delta.tx_identifier,
+                        utxo = %created.utxo,
+                        address_kind = delta.address.kind(),
+                        "skipping cNIGHT creation with unsupported owner address"
+                    );
+                    continue;
+                }
+            };
+
             let creation = CNightCreation {
-                address: delta.address.clone(),
+                holder_address,
                 quantity: token_amount,
                 utxo: created.utxo,
                 block_number: block_info.number,
@@ -707,7 +722,9 @@ mod tests {
 
         // Creation delta
         let create_delta = ExtendedAddressDelta {
-            address: Address::default(),
+            address: test_address(
+                "addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5",
+            ),
             tx_identifier: TxIdentifier::default(),
             created_utxos: vec![
                 CreatedUTxOExtended {
