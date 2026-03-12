@@ -1,17 +1,20 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use crate::{
     grpc::{
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
-            AssetSpendsRequest, AssetSpendsResponse, BlockByHashRequest, BlockByHashResponse,
-            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
+            AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
+            BlockByHashResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
             DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
-            EpochNonceRequest, EpochNonceResponse, RegistrationsRequest, RegistrationsResponse,
-            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
-            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
+            EpochNonceRequest, EpochNonceResponse, LatestStableBlockRequest,
+            LatestStableBlockResponse, RegistrationsRequest, RegistrationsResponse,
+            StableBlockRequest, StableBlockResponse, StakePoolEntry,
+            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
+            UtxoEventsRequest, UtxoEventsResponse,
         },
+        stats::{RequestStats, RequestStatsSnapshot},
         utxo_events::truncate_by_tx_capacity,
     },
     state::State,
@@ -33,14 +36,24 @@ use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
 
+#[derive(Clone)]
 pub struct MidnightStateService {
     history: Arc<Mutex<StateHistory<State>>>,
     context: Arc<Context<Message>>,
+    stats: Arc<RequestStats>,
 }
 
 impl MidnightStateService {
     pub fn new(history: Arc<Mutex<StateHistory<State>>>, context: Arc<Context<Message>>) -> Self {
-        Self { history, context }
+        Self {
+            history,
+            context,
+            stats: Arc::new(RequestStats::default()),
+        }
+    }
+
+    pub fn stats(&self) -> RequestStatsSnapshot {
+        self.stats.snapshot()
     }
 }
 
@@ -176,6 +189,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<UtxoEventsRequest>,
     ) -> Result<Response<UtxoEventsResponse>, Status> {
+        self.stats.utxo_events.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let start_block = req.start_block;
@@ -251,6 +265,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<TechnicalCommitteeDatumRequest>,
     ) -> Result<Response<TechnicalCommitteeDatumResponse>, Status> {
+        self.stats.technical_committee_datum.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let technical_committee = {
@@ -281,6 +296,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<CouncilDatumRequest>,
     ) -> Result<Response<CouncilDatumResponse>, Status> {
+        self.stats.council_datum.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let council = {
@@ -311,6 +327,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<AriadneParametersRequest>,
     ) -> Result<Response<AriadneParametersResponse>, Status> {
+        self.stats.ariadne_parameters.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let params = {
@@ -341,6 +358,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<BlockByHashRequest>,
     ) -> Result<Response<BlockByHashResponse>, Status> {
+        self.stats.block_by_hash.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
@@ -376,6 +394,9 @@ impl MidnightState for MidnightStateService {
                 .map_err(|_| Status::internal("timestamp overflow"))?,
             tx_count: u32::try_from(block_info.tx_count)
                 .map_err(|_| Status::internal("tx count overflow"))?,
+            epoch_number: u32::try_from(block_info.epoch)
+                .map_err(|_| Status::internal("epoch overflow"))?,
+            slot_number: block_info.slot,
         }))
     }
 
@@ -383,6 +404,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<EpochNonceRequest>,
     ) -> Result<Response<EpochNonceResponse>, Status> {
+        self.stats.epoch_nonce.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let nonce_opt = {
@@ -400,6 +422,7 @@ impl MidnightState for MidnightStateService {
         &self,
         request: Request<EpochCandidatesRequest>,
     ) -> Result<Response<EpochCandidatesResponse>, Status> {
+        self.stats.epoch_candidates.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
         let candidates = {
@@ -444,6 +467,109 @@ impl MidnightState for MidnightStateService {
         Ok(Response::new(EpochCandidatesResponse {
             candidates,
             stake_distribution,
+        }))
+    }
+
+    async fn get_stable_block(
+        &self,
+        request: Request<StableBlockRequest>,
+    ) -> Result<Response<StableBlockResponse>, Status> {
+        self.stats.stable_block_by_hash.fetch_add(1, Ordering::Relaxed);
+        let req = request.into_inner();
+        let block_hash = BlockHash::try_from(req.block_hash)
+            .map_err(|_| Status::invalid_argument("invalid block hash"))?;
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+            BlocksStateQuery::GetStableBlockByHash {
+                block_hash,
+                offset: req.offset,
+            },
+        )));
+
+        let block_info_opt =
+            query_state(
+                &self.context,
+                "cardano.query.blocks",
+                msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::StableBlockByHash(block_info),
+                    )) => Ok(block_info),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving block info",
+                    )),
+                },
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let block_proto = block_info_opt
+            .map(|b| {
+                Ok::<Block, Status>(Block {
+                    block_number: u32::try_from(b.number)
+                        .map_err(|_| Status::internal("block number overflow"))?,
+                    block_hash: b.hash.to_vec(),
+                    epoch_number: u32::try_from(b.epoch)
+                        .map_err(|_| Status::internal("epoch overflow"))?,
+                    slot_number: b.slot,
+                    block_timestamp_unix: b.timestamp,
+                })
+            })
+            .transpose()?;
+
+        Ok(Response::new(StableBlockResponse { block: block_proto }))
+    }
+
+    async fn get_latest_stable_block(
+        &self,
+        request: Request<LatestStableBlockRequest>,
+    ) -> Result<Response<LatestStableBlockResponse>, Status> {
+        self.stats.latest_stable_block.fetch_add(1, Ordering::Relaxed);
+        let req = request.into_inner();
+
+        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+            BlocksStateQuery::GetBlockByTipOffset { offset: req.offset },
+        )));
+
+        let block_info_opt =
+            query_state(
+                &self.context,
+                "cardano.query.blocks",
+                msg,
+                |message| match message {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::BlockByTipOffset(block_info),
+                    )) => Ok(block_info),
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::Error(e),
+                    )) => Err(e),
+                    _ => Err(QueryError::internal_error(
+                        "Unexpected message type while retrieving block info",
+                    )),
+                },
+            )
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let block_proto = block_info_opt
+            .map(|b| {
+                Ok::<Block, Status>(Block {
+                    block_number: u32::try_from(b.number)
+                        .map_err(|_| Status::internal("block number overflow"))?,
+                    block_hash: b.hash.to_vec(),
+                    epoch_number: u32::try_from(b.epoch)
+                        .map_err(|_| Status::internal("epoch overflow"))?,
+                    slot_number: b.slot,
+                    block_timestamp_unix: b.timestamp,
+                })
+            })
+            .transpose()?;
+
+        Ok(Response::new(LatestStableBlockResponse {
+            block: block_proto,
         }))
     }
 }

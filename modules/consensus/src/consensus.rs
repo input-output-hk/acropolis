@@ -885,7 +885,7 @@ impl ConsensusRuntime {
     async fn run_direct(
         &mut self,
         mut block_subscription: Box<dyn Subscription<Message>>,
-        _force_validation: bool,
+        force_validation: bool,
     ) {
         loop {
             let Ok((_, message)) = block_subscription.read().await else {
@@ -896,7 +896,12 @@ impl ConsensusRuntime {
             match message.as_ref() {
                 Message::Cardano((raw_blk_info, CardanoMessage::BlockAvailable(raw_block))) => {
                     // Direct mode is pass-through only: do not request validation.
-                    let block_info = raw_blk_info.with_intent(BlockIntent::Apply);
+                    let intent = if force_validation {
+                        BlockIntent::ValidateAndApply
+                    } else {
+                        BlockIntent::Apply
+                    };
+                    let block_info = raw_blk_info.with_intent(intent);
                     let span = info_span!("consensus", block = block_info.number);
                     self.handle_block_available_direct(block_info, raw_block.clone())
                         .instrument(span)
