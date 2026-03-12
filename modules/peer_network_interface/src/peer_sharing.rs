@@ -157,7 +157,10 @@ fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharin
             (0, 3) => {
                 let ip = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
                 let port = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
-                (Ipv4Addr::from(ip).to_string(), port)
+                // Haskell encodes the raw HostAddress Word32 (network byte order)
+                // without ntohl; on LE hosts the CBOR value has reversed octets.
+                let octets = ip.to_le_bytes();
+                (Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]).to_string(), port)
             }
             // IPv6: [1, word32, word32, word32, word32, word16]
             (1, 6) => {
@@ -166,11 +169,12 @@ fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharin
                 let w2 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
                 let w3 = dec.u32().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
                 let port = dec.u16().map_err(|e| PeerSharingError::CborDecode(e.to_string()))?;
+                // Same LE byte-order issue as IPv4: each word is NBO without ntohl.
                 let mut octets = [0u8; 16];
-                octets[0..4].copy_from_slice(&w0.to_be_bytes());
-                octets[4..8].copy_from_slice(&w1.to_be_bytes());
-                octets[8..12].copy_from_slice(&w2.to_be_bytes());
-                octets[12..16].copy_from_slice(&w3.to_be_bytes());
+                octets[0..4].copy_from_slice(&w0.to_le_bytes());
+                octets[4..8].copy_from_slice(&w1.to_le_bytes());
+                octets[8..12].copy_from_slice(&w2.to_le_bytes());
+                octets[12..16].copy_from_slice(&w3.to_le_bytes());
                 (Ipv6Addr::from(octets).to_string(), port)
             }
             _ => {
