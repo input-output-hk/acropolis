@@ -24,6 +24,7 @@ mod state;
 use state::{ImmutableUTXOStore, State};
 mod address_delta_mode;
 use address_delta_mode::AddressDeltaPublishMode;
+mod reference_scripts_state;
 
 #[cfg(test)]
 mod test_utils;

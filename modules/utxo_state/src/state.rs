@@ -1,5 +1,6 @@
 //! Acropolis UTXOState: State storage
 use crate::address_delta_mode::AddressDeltaPublishMode;
+use crate::reference_scripts_state::ReferenceScriptsState;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
@@ -16,7 +17,6 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use imbl::HashMap as ImblHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -96,8 +96,7 @@ pub struct State {
     volatile_utxos: HashMap<UTxOIdentifier, UTXOValue>,
 
     /// Reference scripts history
-    /// <script hash, (ref script struct, and its occurrence count)>
-    reference_scripts_history: StateHistory<ImblHashMap<ScriptHash, (ReferenceScript, u64)>>,
+    reference_scripts_history: StateHistory<ReferenceScriptsState>,
 
     /// Index of volatile UTXOs by created block
     volatile_created: VolatileIndex,
@@ -246,13 +245,10 @@ impl State {
         }
     }
 
-    //// Loop up a reference script
+    /// Look up a Reference script
     #[allow(dead_code)]
     pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
-        self.reference_scripts_history
-            .get_current_state()
-            .get(script_hash)
-            .map(|(script, _)| script.clone())
+        self.reference_scripts_history.get_current_state().lookup_reference_script(script_hash)
     }
 
     /// Get the number of valid UTXOs - that is, that have a valid created_at
@@ -429,34 +425,6 @@ impl State {
         Ok(())
     }
 
-    /// Observe TxUTxODelta's Reference scripts
-    pub fn observe_reference_scripts(
-        &mut self,
-        created_reference_scripts: &[(ScriptHash, ReferenceScript)],
-        spent_reference_scripts: &[ScriptHash],
-        block_info: &BlockInfo,
-    ) {
-        let mut current_state =
-            self.reference_scripts_history.get_rolled_back_state(block_info.number);
-
-        // Add newly created reference scripts
-        for (script_hash, reference_script) in created_reference_scripts {
-            current_state.entry(*script_hash).or_insert((reference_script.clone(), 0)).1 += 1;
-        }
-
-        // Remove spent reference scripts
-        for script_hash in spent_reference_scripts {
-            if let Some((_, count)) = current_state.get_mut(script_hash) {
-                *count -= 1;
-                if *count == 0 {
-                    current_state.remove(script_hash);
-                }
-            }
-        }
-
-        self.reference_scripts_history.commit(block_info.number, current_state);
-    }
-
     /// Background prune
     async fn prune(&mut self) -> Result<()> {
         // Remove all volatile UTXOs that have now become immutably spent
@@ -524,6 +492,10 @@ impl State {
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
     ) -> Result<()> {
+        // get current reference scripts state
+        let mut current_reference_scripts_state =
+            self.reference_scripts_history.get_rolled_back_state(block.number);
+
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -546,7 +518,7 @@ impl State {
 
         // Process the deltas
         for tx in &deltas.deltas {
-            if tx.is_valid {
+            let spent_reference_scripts = if tx.is_valid {
                 match self.address_delta_publish_mode {
                     AddressDeltaPublishMode::Compact => {
                         self.handle_valid_tx_compact(tx, block).await?
@@ -564,8 +536,17 @@ impl State {
                         self.handle_invalid_tx_extended(tx, block).await?
                     }
                 }
-            }
+            };
+
+            let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+            current_reference_scripts_state.apply_reference_scripts_from_tx(
+                &spent_reference_scripts,
+                created_reference_scripts,
+            );
         }
+
+        // Commit updated reference scripts state to history
+        self.reference_scripts_history.commit(block.number, current_reference_scripts_state);
 
         // End the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -578,11 +559,13 @@ impl State {
         Ok(())
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_valid_tx_compact(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
 
@@ -626,21 +609,20 @@ impl State {
             }
         }
 
-        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
-        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_valid_tx_extended(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         // Temporary map to sum UTxO deltas efficiently
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
@@ -706,21 +688,20 @@ impl State {
             }
         }
 
-        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
-        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_invalid_tx_compact(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
         let mut tx_fees = 0;
@@ -767,21 +748,20 @@ impl State {
             }
         }
 
-        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
-        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_invalid_tx_extended(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
         let mut tx_fees = 0;
@@ -846,14 +826,11 @@ impl State {
             }
         }
 
-        let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
-        self.observe_reference_scripts(created_reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
     pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
