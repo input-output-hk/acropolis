@@ -8,7 +8,7 @@ pub struct ReferenceScriptsState {
 }
 
 impl ReferenceScriptsState {
-    pub fn apply_reference_scripts_from_tx(
+    pub fn apply_reference_scripts(
         &mut self,
         spent_reference_scripts: &[ScriptHash],
         created_reference_scripts: &[(ScriptHash, ReferenceScript)],

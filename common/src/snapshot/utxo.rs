@@ -48,6 +48,9 @@ pub struct UtxoEntry {
     pub id: UTxOIdentifier,
     /// UTxO value (address, lovelace, assets, datum, script_ref)
     pub value: UTXOValue,
+    /// Reference script (if any)
+    /// We need this to store the reference scripts created before the snapshot
+    pub reference_script: Option<ReferenceScript>,
 }
 
 impl UtxoEntry {
@@ -101,6 +104,7 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxO {
         Ok(Self(UtxoEntry {
             id: id.0,
             value: value.0,
+            reference_script: value.1,
         }))
     }
 }
@@ -131,7 +135,8 @@ impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTxOIdentifier {
 
 /// Wrapper for decoding transaction output (TxOut)
 /// CDDL: transaction_output = shelley_transaction_output / babbage_transaction_output
-struct SnapshotUTXOValue(pub UTXOValue);
+/// Also store the Reference script (with raw script bytes)
+struct SnapshotUTXOValue(pub UTXOValue, pub Option<ReferenceScript>);
 
 impl<'b, C> minicbor::Decode<'b, C> for SnapshotUTXOValue {
     fn decode(d: &mut Decoder<'b>, _: &mut C) -> Result<Self, minicbor::decode::Error> {
@@ -195,12 +200,15 @@ impl SnapshotUTXOValue {
             }
         }
 
-        Ok(Self(UTXOValue {
-            address: address.0,
-            value: value.0,
-            datum,
-            script_ref: None,
-        }))
+        Ok(Self(
+            UTXOValue {
+                address: address.0,
+                value: value.0,
+                datum,
+                script_ref: None,
+            },
+            None,
+        ))
     }
 
     /// Decode Babbage/Conway-era map format: {0: address, 1: value, ? 2: datum, ? 3: script_ref}
@@ -243,12 +251,15 @@ impl SnapshotUTXOValue {
         }
 
         match (address, value) {
-            (Some(address), Some(value)) => Ok(Self(UTXOValue {
-                address,
-                value,
-                datum,
-                script_ref: reference_script.map(|s| s.get_script_ref()),
-            })),
+            (Some(address), Some(value)) => Ok(Self(
+                UTXOValue {
+                    address,
+                    value,
+                    datum,
+                    script_ref: reference_script.as_ref().map(|s| s.get_script_ref()),
+                },
+                reference_script,
+            )),
             _ => Err(minicbor::decode::Error::message(
                 "map-based TxOut missing required fields",
             )),
@@ -602,7 +613,7 @@ mod tests {
     fn utxo_entry_tx_hash_hex() {
         let id = make_utxo_id(0xAB, 5);
         let value = make_utxo_value(1_000_000, Address::None);
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         let hex = entry.tx_hash_hex();
         assert!(hex.starts_with("abab"));
@@ -613,7 +624,7 @@ mod tests {
     fn utxo_entry_output_index() {
         let id = make_utxo_id(0x00, 42);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         assert_eq!(entry.output_index(), 42);
     }
@@ -622,7 +633,7 @@ mod tests {
     fn utxo_entry_coin() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(5_000_000, Address::None);
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         assert_eq!(entry.coin(), 5_000_000);
     }
@@ -634,7 +645,7 @@ mod tests {
 
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         assert_eq!(entry.address_bytes(), expected_bytes);
     }
@@ -643,7 +654,7 @@ mod tests {
     fn utxo_entry_address_bytes_none() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         assert!(entry.address_bytes().is_empty());
     }
@@ -653,7 +664,7 @@ mod tests {
         let shelley = make_shelley_base_address();
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         let credential = entry.extract_stake_credential();
         assert!(credential.is_some());
@@ -671,7 +682,7 @@ mod tests {
         let shelley = make_enterprise_address();
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::Shelley(shelley));
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         // Enterprise addresses have no stake credential
         assert!(entry.extract_stake_credential().is_none());
@@ -681,7 +692,7 @@ mod tests {
     fn utxo_entry_extract_stake_credential_none_address() {
         let id = make_utxo_id(0x00, 0);
         let value = make_utxo_value(0, Address::None);
-        let entry = UtxoEntry { id, value };
+        let entry = UtxoEntry { id, value, reference_script: None };
 
         assert!(entry.extract_stake_credential().is_none());
     }

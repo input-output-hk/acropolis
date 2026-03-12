@@ -227,6 +227,14 @@ impl State {
         self.protocol_parameters_history.commit(block_info.number, protocol_params);
     }
 
+    pub fn commit_reference_scripts(
+        &mut self,
+        block_number: u64,
+        reference_scripts: ReferenceScriptsState,
+    ) {
+        self.reference_scripts_history.commit(block_number, reference_scripts);
+    }
+
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
@@ -539,14 +547,12 @@ impl State {
             };
 
             let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
-            current_reference_scripts_state.apply_reference_scripts_from_tx(
-                &spent_reference_scripts,
-                created_reference_scripts,
-            );
+            current_reference_scripts_state
+                .apply_reference_scripts(&spent_reference_scripts, created_reference_scripts);
         }
 
         // Commit updated reference scripts state to history
-        self.reference_scripts_history.commit(block.number, current_reference_scripts_state);
+        self.commit_reference_scripts(block.number, current_reference_scripts_state);
 
         // End the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {

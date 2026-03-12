@@ -44,6 +44,8 @@ mod fjall_immutable_utxo_store;
 use fjall_immutable_utxo_store::FjallImmutableUTXOStore;
 mod fake_immutable_utxo_store;
 use fake_immutable_utxo_store::FakeImmutableUTXOStore;
+
+use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
 mod validations;
 
@@ -341,6 +343,8 @@ impl UTXOState {
 
         // Subscribe for snapshot messages
         {
+            let state_snapshot = state.clone();
+            let mut reference_scripts = ReferenceScriptsState::default();
             let mut subscription = context.subscribe(&snapshot_topic).await?;
             let context = context.clone();
             let store = snapshot_store.clone();
@@ -378,14 +382,20 @@ impl UTXOState {
                                 info!("UTXO state received {} batches, {} total UTxOs so far", batch_count, total_utxos_received);
                             }
 
-                            for (key, value) in &utxo_state.utxos {
+                            for (key, value, reference_script) in &utxo_state.utxos {
                                 if store.add_utxo(*key, value.clone()).await.is_err() {
                                     error!("Failed to add snapshot utxo to state store");
+                                }
+
+                                if let (Some(script_ref), Some(reference_script)) = (value.script_ref.as_ref(), reference_script.as_ref()) {
+                                    reference_scripts.apply_reference_scripts(&[], &[(script_ref.script_hash, reference_script.clone())]);
                                 }
                             }
                         }
                         Message::Snapshot(SnapshotMessage::Complete) => {
                             info!("UTXO state snapshot complete: {} UTxOs in {} batches", total_utxos_received, batch_count);
+                            state_snapshot.lock().await.commit_reference_scripts(0, reference_scripts);
+
                             return;
                         }
                         _ => {}
