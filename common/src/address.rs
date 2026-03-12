@@ -711,6 +711,26 @@ impl Address {
         }
     }
 
+    pub fn to_stake_address(&self) -> Option<StakeAddress> {
+        match self {
+            Address::Shelley(shelley) => match &shelley.delegation {
+                ShelleyAddressDelegationPart::StakeKeyHash(hash) => Some(StakeAddress::new(
+                    StakeCredential::AddrKeyHash(*hash),
+                    shelley.network.clone(),
+                )),
+                ShelleyAddressDelegationPart::ScriptHash(hash) => Some(StakeAddress::new(
+                    StakeCredential::ScriptHash(*hash),
+                    shelley.network.clone(),
+                )),
+                ShelleyAddressDelegationPart::Pointer(_) | ShelleyAddressDelegationPart::None => {
+                    None
+                }
+            },
+            Address::Stake(stake) => Some(stake.clone()),
+            Address::Byron(_) | Address::None => None,
+        }
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             Address::Byron(_) => "byron",
@@ -1016,6 +1036,88 @@ mod tests {
             script_stake_address,
             "stake1uyd2hj6j4848mdrdln7x8fc6hpunw5ft6yct2rtzafzrt9qh0m28h"
         );
+    }
+
+    #[test]
+    fn address_to_stake_address_for_stake_key_delegation() {
+        let address = Address::Shelley(ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
+            delegation: ShelleyAddressDelegationPart::StakeKeyHash(test_stake_key_hash()),
+        });
+
+        assert_eq!(
+            address.to_stake_address(),
+            Some(StakeAddress::new(
+                StakeCredential::AddrKeyHash(test_stake_key_hash()),
+                NetworkId::Mainnet,
+            ))
+        );
+    }
+
+    #[test]
+    fn address_to_stake_address_for_script_delegation() {
+        let address = Address::Shelley(ShelleyAddress {
+            network: NetworkId::Testnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(test_script_hash()),
+            delegation: ShelleyAddressDelegationPart::ScriptHash(test_script_hash()),
+        });
+
+        assert_eq!(
+            address.to_stake_address(),
+            Some(StakeAddress::new(
+                StakeCredential::ScriptHash(test_script_hash()),
+                NetworkId::Testnet,
+            ))
+        );
+    }
+
+    #[test]
+    fn address_to_stake_address_for_stake_address_passthrough() {
+        let address = Address::Stake(StakeAddress::new(
+            StakeCredential::AddrKeyHash(test_stake_key_hash()),
+            NetworkId::Mainnet,
+        ));
+
+        assert_eq!(
+            address.to_stake_address(),
+            Some(StakeAddress::new(
+                StakeCredential::AddrKeyHash(test_stake_key_hash()),
+                NetworkId::Mainnet,
+            ))
+        );
+    }
+
+    #[test]
+    fn address_to_stake_address_returns_none_for_pointer_delegation() {
+        let address = Address::Shelley(ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
+            delegation: ShelleyAddressDelegationPart::Pointer(test_pointer()),
+        });
+
+        assert_eq!(address.to_stake_address(), None);
+    }
+
+    #[test]
+    fn address_to_stake_address_returns_none_for_enterprise_address() {
+        let address = Address::Shelley(ShelleyAddress {
+            network: NetworkId::Mainnet,
+            payment: ShelleyAddressPaymentPart::PaymentKeyHash(test_payment_key_hash()),
+            delegation: ShelleyAddressDelegationPart::None,
+        });
+
+        assert_eq!(address.to_stake_address(), None);
+    }
+
+    #[test]
+    fn address_to_stake_address_returns_none_for_byron_and_none() {
+        let byron = Address::Byron(ByronAddress {
+            payload: vec![1, 2, 3],
+        });
+
+        assert_eq!(byron.to_stake_address(), None);
+        assert_eq!(Address::None.to_stake_address(), None);
     }
 
     #[test]

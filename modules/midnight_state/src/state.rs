@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, protocol_params::Nonce, Address, BlockInfo, BlockNumber, Datum,
-    Epoch, ExtendedAddressDelta, ShelleyAddressDelegationPart, StakeAddress, StakeCredential,
-    UTxOIdentifier,
+    messages::AddressDeltasMessage, protocol_params::Nonce, BlockInfo, BlockNumber, Datum, Epoch,
+    ExtendedAddressDelta, UTxOIdentifier,
 };
 use imbl::HashMap;
 use tracing::warn;
@@ -186,15 +185,14 @@ impl State {
                 continue;
             }
 
-            let holder_address = match cnight_owner_address(&delta.address) {
-                Ok(owner_address) => owner_address,
-                Err(err) => {
+            let holder_address = match delta.address.to_stake_address() {
+                Some(owner_address) => owner_address,
+                None => {
                     warn!(
                         block_number = block_info.number,
                         tx_identifier = %delta.tx_identifier,
                         utxo = %created.utxo,
                         address_kind = delta.address.kind(),
-                        reason = %err,
                         "skipping cNIGHT creation with unsupported owner address"
                     );
                     continue;
@@ -379,30 +377,6 @@ impl State {
             }
         }
         (indexed_technical_committee, indexed_council)
-    }
-}
-
-fn cnight_owner_address(address: &Address) -> Result<StakeAddress> {
-    match address {
-        Address::Shelley(shelley) => match &shelley.delegation {
-            ShelleyAddressDelegationPart::StakeKeyHash(hash) => Ok(StakeAddress::new(
-                StakeCredential::AddrKeyHash(*hash),
-                shelley.network.clone(),
-            )),
-            ShelleyAddressDelegationPart::ScriptHash(hash) => Ok(StakeAddress::new(
-                StakeCredential::ScriptHash(*hash),
-                shelley.network.clone(),
-            )),
-            ShelleyAddressDelegationPart::Pointer(_) => {
-                Err(anyhow!("holder address uses pointer delegation"))
-            }
-            ShelleyAddressDelegationPart::None => {
-                Err(anyhow!("holder address has no delegation part"))
-            }
-        },
-        Address::Stake(stake) => Ok(stake.clone()),
-        Address::Byron(_) => Err(anyhow!("byron addresses are not supported")),
-        Address::None => Err(anyhow!("none addresses are not supported")),
     }
 }
 
