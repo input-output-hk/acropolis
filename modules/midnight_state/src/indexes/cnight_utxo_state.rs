@@ -114,7 +114,7 @@ impl CNightUTxOState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use acropolis_common::{Address, BlockHash, TxHash};
+    use acropolis_common::{BlockHash, NetworkId, StakeAddress, StakeCredential, TxHash};
 
     fn id(i: u8) -> UTxOIdentifier {
         UTxOIdentifier::new(TxHash::from([i; 32]), 0)
@@ -122,7 +122,10 @@ mod tests {
 
     fn creation(utxo: UTxOIdentifier, tx_index: u32) -> CNightCreation {
         CNightCreation {
-            address: Address::default(),
+            holder_address: StakeAddress::new(
+                StakeCredential::AddrKeyHash([7u8; 28].into()),
+                NetworkId::Testnet,
+            ),
             quantity: 42,
             utxo,
             block_number: 10,
