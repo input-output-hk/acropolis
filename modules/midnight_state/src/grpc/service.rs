@@ -506,6 +506,7 @@ impl MidnightState for MidnightStateService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
             .map(|b| {
                 Ok::<Block, Status>(Block {
@@ -554,6 +555,7 @@ impl MidnightState for MidnightStateService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
+        #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
             .map(|b| {
                 Ok::<Block, Status>(Block {

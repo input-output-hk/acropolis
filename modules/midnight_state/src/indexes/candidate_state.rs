@@ -1,11 +1,8 @@
-use imbl::{HashMap, HashSet, OrdMap};
+use imbl::{HashMap, OrdMap};
 
-use acropolis_common::{BlockNumber, Epoch, UTxOIdentifier};
+use acropolis_common::{BlockNumber, UTxOIdentifier};
 
-use crate::{
-    grpc::midnight_state_proto::EpochCandidate,
-    types::{Deregistration, DeregistrationEvent, Registration, RegistrationEvent},
-};
+use crate::types::{Deregistration, DeregistrationEvent, Registration, RegistrationEvent};
 
 #[derive(Clone, Default)]
 pub struct CandidateState {
@@ -15,10 +12,6 @@ pub struct CandidateState {
     deregistrations: OrdMap<BlockNumber, Vec<DeregistrationEvent>>,
     // Registration index to avoid duplicating in deregistrations
     pub registration_index: HashMap<UTxOIdentifier, RegistrationEvent>,
-    // The active candidate set
-    active_candidates: HashSet<UTxOIdentifier>,
-    // The candidate set at a given epoch
-    epoch_index: HashMap<Epoch, Vec<UTxOIdentifier>>,
 }
 
 impl CandidateState {
@@ -34,7 +27,6 @@ impl CandidateState {
                 tx_hash: registration.tx_hash,
                 output_index: registration.utxo_index,
             };
-            self.active_candidates.insert(identifier);
             identifiers.push(identifier);
             self.registration_index.insert(identifier, registration);
         }
@@ -47,9 +39,6 @@ impl CandidateState {
         block: BlockNumber,
         deregistrations: Vec<DeregistrationEvent>,
     ) {
-        for event in &deregistrations {
-            self.active_candidates.remove(&event.registration_utxo);
-        }
         self.deregistrations.insert(block, deregistrations);
     }
 
@@ -98,25 +87,6 @@ impl CandidateState {
                 })
             })
             .take(utxo_capacity)
-            .collect()
-    }
-
-    pub fn snapshot_epoch(&mut self, epoch: Epoch) {
-        self.epoch_index.insert(epoch, self.active_candidates.iter().cloned().collect());
-    }
-
-    pub fn get_epoch_candidates(&self, epoch: Epoch) -> Vec<EpochCandidate> {
-        let Some(identifiers) = self.epoch_index.get(&epoch) else {
-            return Vec::new();
-        };
-
-        identifiers
-            .iter()
-            .filter_map(|id| {
-                let registration = self.registration_index.get(id)?;
-
-                Some(EpochCandidate::from(registration))
-            })
             .collect()
     }
 }
