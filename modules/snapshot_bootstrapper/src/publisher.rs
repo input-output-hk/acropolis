@@ -2,6 +2,7 @@ use acropolis_common::configuration::SyncMode;
 use acropolis_common::messages::SPOBootstrapMessage;
 use acropolis_common::MagicNumber;
 use acropolis_common::ProtocolParamUpdate;
+use acropolis_common::ReferenceScript;
 use acropolis_common::RewardParams;
 use acropolis_common::StakeAddress;
 use acropolis_common::{commands::chain_sync::ChainSyncCommand, messages::Command};
@@ -107,7 +108,7 @@ pub struct SnapshotPublisher {
     sync_mode: SyncMode,
     metadata: Option<SnapshotMetadata>,
     utxo_count: u64,
-    utxo_batch: Vec<(UTxOIdentifier, UTXOValue)>,
+    utxo_batch: Vec<(UTxOIdentifier, UTXOValue, Option<ReferenceScript>)>,
     utxo_batches_published: u64,
     pools: SPOState,
     accounts: Vec<AccountState>,
@@ -277,7 +278,7 @@ impl UtxoCallback for SnapshotPublisher {
             info!("Processed {} UTXOs", self.utxo_count);
         }
 
-        self.utxo_batch.push((utxo.id, utxo.value));
+        self.utxo_batch.push((utxo.id, utxo.value, utxo.reference_script));
         if self.utxo_batch.len() >= UTXO_BATCH_SIZE {
             self.publish_utxo_batch();
         }

@@ -26,7 +26,7 @@ use crate::queries::{
     transactions::{TransactionsStateQuery, TransactionsStateQueryResponse},
 };
 use crate::snapshot::AccountState;
-use crate::{Pots, TxUTxODeltas, UTXOValue, UTxOIdentifier};
+use crate::{Pots, ReferenceScript, TxUTxODeltas, UTXOValue, UTxOIdentifier};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 
@@ -576,7 +576,7 @@ pub struct BootstrapPotDeltas {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UTxOPartialState {
     /// UTxOs
-    pub utxos: Vec<(UTxOIdentifier, UTXOValue)>,
+    pub utxos: Vec<(UTxOIdentifier, UTXOValue, Option<ReferenceScript>)>,
 }
 
 /// Governance bootstrap message containing all governance state from snapshot

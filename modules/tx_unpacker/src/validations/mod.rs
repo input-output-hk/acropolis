@@ -1,3 +1,4 @@
+use acropolis_codec::extract_plutus_scripts_witnesses;
 use acropolis_common::{
     protocol_params::ShelleyParams,
     validation::{Phase1ValidationError, TransactionValidationError},
@@ -184,11 +185,14 @@ fn validate_babbage_tx(
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
     let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
+    let plutus_scripts_witnesses = extract_plutus_scripts_witnesses(tx);
+
     babbage::utxow::validate(
         mtx,
         tx_hash,
         &vkey_witnesses,
         &native_scripts,
+        &plutus_scripts_witnesses,
         &metadata,
         genesis_delegs,
         shelley_params.update_quorum,
@@ -225,11 +229,14 @@ fn validate_conway_tx(
     let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
     let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
+    let plutus_scripts_witnesses = extract_plutus_scripts_witnesses(tx);
+
     conway::utxow::validate(
         mtx,
         tx_hash,
         &vkey_witnesses,
         &native_scripts,
+        &plutus_scripts_witnesses,
         &metadata,
         &shelley_params.protocol_params.protocol_version,
     )

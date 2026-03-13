@@ -5,10 +5,10 @@
 
 use std::collections::HashSet;
 
-use crate::validations::shelley;
+use crate::validations::{babbage, shelley};
 use acropolis_common::{
     protocol_params::ProtocolVersion, validation::UTxOWValidationError, DataHash, Metadata,
-    NativeScript, TxHash, VKeyWitness,
+    NativeScript, ReferenceScript, TxHash, VKeyWitness,
 };
 use pallas::{codec::utils::Nullable, ledger::primitives::conway};
 
@@ -40,6 +40,7 @@ pub fn validate(
     tx_hash: TxHash,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
+    plutus_scripts_witnesses: &[ReferenceScript],
     metadata: &Option<Metadata>,
     protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
@@ -53,8 +54,9 @@ pub fn validate(
     )?;
 
     // TODO:
-    // Add Babbage UTxOW transition here
-    // Add Alonzo UTxOW transition here
+    // Add ScriptIntegrityHash validation here
+
+    babbage::utxow::validate_plutus_scripts_witnesses(plutus_scripts_witnesses)?;
 
     Ok(())
 }
@@ -132,6 +134,7 @@ mod tests {
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
         let metadata = acropolis_codec::map_metadata(&tx.metadata());
+        let plutus_scripts_witnesses = acropolis_codec::extract_plutus_scripts_witnesses(&tx);
         let protocol_version = ctx.shelley_params.protocol_params.protocol_version;
 
         validate(
@@ -139,6 +142,7 @@ mod tests {
             TxHash::from(*tx.hash()),
             &vkey_witnesses,
             &native_scripts,
+            &plutus_scripts_witnesses,
             &metadata,
             &protocol_version,
         )

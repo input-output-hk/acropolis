@@ -46,7 +46,7 @@ pub struct Transaction {
     pub reference_inputs: Vec<UTxOIdentifier>,
     pub fee: u64,
     pub donation: Option<u64>,
-    pub reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
+    pub created_reference_scripts: Vec<(ScriptHash, ReferenceScript)>,
     // Transaction total collateral that is moved to fee pot
     // only added since Babbage era
     pub stated_total_collateral: Option<u64>,
@@ -82,7 +82,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
-            reference_scripts,
+            created_reference_scripts,
             stated_total_collateral,
             is_valid,
             certs,
@@ -105,7 +105,7 @@ impl Transaction {
             reference_inputs,
             fee,
             donation,
-            reference_scripts: None,
+            created_reference_scripts: None,
             stated_total_collateral,
             is_valid,
             withdrawals: None,
@@ -122,7 +122,7 @@ impl Transaction {
         };
 
         if do_validation {
-            utxo_deltas.reference_scripts = Some(reference_scripts);
+            utxo_deltas.created_reference_scripts = Some(created_reference_scripts);
             utxo_deltas.certs = Some(certs);
             utxo_deltas.withdrawals = Some(withdrawals);
             utxo_deltas.mint_burn_deltas = Some(mint_burn_deltas);
@@ -170,7 +170,7 @@ pub struct TxUTxODeltas {
     // State needed for validation
 
     // Reference scripts (needed for Babbage Reference script validation and Phase 2 validation)
-    pub reference_scripts: Option<Vec<(ScriptHash, ReferenceScript)>>,
+    pub created_reference_scripts: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Certificates
     // NOTE:

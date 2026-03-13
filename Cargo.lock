@@ -595,6 +595,7 @@ dependencies = [
  "hex",
  "imbl",
  "pallas",
+ "rayon",
  "serde",
  "serde_cbor",
  "serde_json",
@@ -602,6 +603,7 @@ dependencies = [
  "test-case",
  "tokio",
  "tracing",
+ "uplc-turbo",
 ]
 
 [[package]]
