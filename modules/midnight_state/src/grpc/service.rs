@@ -992,6 +992,8 @@ mod tests {
         assert_eq!(response.candidates[0].utxo_tx_hash, vec![1u8; 32]);
         assert_eq!(response.candidates[0].utxo_index, 0);
     }
+
+    #[tokio::test]
     async fn should_skip_asset_creates_with_unsupported_owner_addresses() {
         let cnight_policy = PolicyId::new([1u8; 28]);
         let cnight_asset = AssetName::new(b"cnight").unwrap();

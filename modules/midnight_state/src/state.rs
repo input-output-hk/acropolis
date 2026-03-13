@@ -14,9 +14,9 @@ use crate::{
     epoch_totals::EpochTotals,
     grpc::midnight_state_proto::EpochCandidate,
     indexes::{
-        committee_candidate_state::CommitteeCandidateState, governance_state::GovernanceState,
-        cnight_utxo_state::CNightUTxOState,
-        mapping_registration_state::MappingRegistrationState, parameters_state::ParametersState,
+        cnight_utxo_state::CNightUTxOState, committee_candidate_state::CommitteeCandidateState,
+        governance_state::GovernanceState, mapping_registration_state::MappingRegistrationState,
+        parameters_state::ParametersState,
     },
     types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
