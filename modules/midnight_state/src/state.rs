@@ -106,6 +106,9 @@ impl State {
                 &block_created_utxos,
             )?);
 
+            // TODO: Filter or annotate invalid mapping/committee registration datums so
+            // downstream gRPC consumers can skip malformed script outputs per-item instead of
+            // failing an entire response batch.
             // Collect candidate registrations and deregistrations
             self.collect_mapping_registrations(
                 delta,
