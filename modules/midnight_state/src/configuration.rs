@@ -21,6 +21,8 @@ pub struct MidnightConfig {
 
     // Candidate config
     pub mapping_validator_address: Address,
+    #[serde(default)]
+    pub committee_candidate_address: Address,
     pub auth_token_asset_name: AssetName,
     #[serde(skip)] // Derived from `mapping_validator_address`
     pub auth_token_policy_id: PolicyId,
