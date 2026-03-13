@@ -105,8 +105,9 @@ impl PeerManager {
     /// # TODO(ledger-peers): `seed_from_ledger(addresses, hot)` follows the same pattern —
     /// add a sibling method that accepts relay addresses from `SPOStateMessage` and applies
     /// the same deduplication and cap enforcement.
-    pub fn add_discovered(&mut self, addresses: Vec<String>, hot: &HashSet<String>) {
+    pub fn add_discovered(&mut self, addresses: Vec<String>, hot: &HashSet<String>) -> usize {
         let cold_cap = self.config.target_peer_count * 4;
+        let mut added = 0usize;
         for addr in addresses {
             if self.is_known(&addr, hot) {
                 continue;
@@ -114,8 +115,11 @@ impl PeerManager {
             if self.cold_peers.len() >= cold_cap {
                 self.evict_random_cold();
             }
-            self.cold_peers.insert(addr);
+            if self.cold_peers.insert(addr) {
+                added += 1;
+            }
         }
+        added
     }
 
     /// Remove and return a randomly selected cold peer address for promotion.

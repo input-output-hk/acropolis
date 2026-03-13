@@ -155,6 +155,8 @@ impl PeerNetworkInterface {
                 cfg.peer_sharing_enabled,
                 cfg.churn_interval_secs,
                 cfg.peer_sharing_timeout_secs,
+                cfg.connect_timeout_secs,
+                cfg.ipv6_enabled,
             );
 
             match sync_point {

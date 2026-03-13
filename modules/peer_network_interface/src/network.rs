@@ -94,6 +94,8 @@ pub struct NetworkManager {
     /// Addresses from the static `node_addresses` config. Configured peers are always
     /// retried on disconnect and are never blacklisted via `mark_failed`.
     configured_addrs: HashSet<String>,
+    connect_timeout: Duration,
+    ipv6_enabled: bool,
 }
 
 impl NetworkManager {
@@ -110,6 +112,8 @@ impl NetworkManager {
         peer_sharing_enabled: bool,
         churn_interval_secs: u64,
         peer_sharing_timeout_secs: u64,
+        connect_timeout_secs: u64,
+        ipv6_enabled: bool,
     ) -> Self {
         let peer_manager = if peer_sharing_enabled {
             Some(PeerManager::new(PeerManagerConfig {
@@ -140,6 +144,8 @@ impl NetworkManager {
             min_hot_peers,
             cold_origin: HashSet::new(),
             configured_addrs,
+            connect_timeout: Duration::from_secs(connect_timeout_secs),
+            ipv6_enabled,
         };
 
         if peer_sharing_enabled {
@@ -217,16 +223,17 @@ impl NetworkManager {
                 let hot: HashSet<String> =
                     self.peers.values().map(|p| p.conn.address.clone()).collect();
                 if let Some(ref mut pm) = self.peer_manager {
-                    let count = addresses.len();
+                    let received = addresses.len();
                     let queried_peer = self
                         .peers
                         .get(&from_peer)
                         .map(|p| p.conn.address.as_str())
                         .unwrap_or("unknown");
-                    pm.add_discovered(addresses, &hot);
+                    let added = pm.add_discovered(addresses, &hot);
                     info!(
                         queried_peer,
-                        discovered = count,
+                        received,
+                        added,
                         cold_count = pm.cold_count(),
                         "peer-sharing discovery batch complete"
                     );
@@ -329,6 +336,7 @@ impl NetworkManager {
         let amount = pm.config().target_peer_count.min(255) as u8;
         let timeout = Duration::from_secs(pm.config().peer_sharing_timeout_secs);
         let sender = self.events_sender.clone();
+        let ipv6 = self.ipv6_enabled;
 
         info!(
             peer = %address,
@@ -339,7 +347,7 @@ impl NetworkManager {
         );
 
         tokio::spawn(async move {
-            match request_peers(&address, magic, amount, timeout).await {
+            match request_peers(&address, magic, amount, timeout, ipv6).await {
                 Ok(addrs) => {
                     info!(
                         peer = %address,
@@ -448,7 +456,13 @@ impl NetworkManager {
             sink: self.events_sender.clone(),
             id,
         };
-        let conn = PeerConnection::new(address, self.network_magic, sender, delay);
+        let conn = PeerConnection::new(
+            address,
+            self.network_magic,
+            sender,
+            delay,
+            self.connect_timeout,
+        );
         let peer = PeerData::new(conn);
         let points = self.flow_handler.handle_new_connection(id, self.sync_point.as_ref());
         peer.find_intersect(points);
@@ -545,7 +559,10 @@ impl NetworkManager {
             // Ghost disconnect: peer was already removed (e.g. churn dropped the PeerData,
             // which caused the worker to exit and emit a Disconnected event).  Safe to
             // ignore — flow_handler was already called in on_churn.
-            debug!(peer_id = id.0, "ignoring ghost disconnect for already-removed peer");
+            debug!(
+                peer_id = id.0,
+                "ignoring ghost disconnect for already-removed peer"
+            );
             return;
         };
         warn!(address = %peer.conn.address, "disconnected from peer");
@@ -601,7 +618,8 @@ impl NetworkManager {
         let needs_promotion = self.peers.len() < self.min_hot_peers;
         let promoted = needs_promotion && self.try_promote_cold_peer();
         if promoted {
-            let hot: HashSet<String> = self.peers.values().map(|p| p.conn.address.clone()).collect();
+            let hot: HashSet<String> =
+                self.peers.values().map(|p| p.conn.address.clone()).collect();
             if let Some(ref mut pm) = self.peer_manager {
                 pm.demote_to_cold(address, &hot);
             }
@@ -746,6 +764,8 @@ mod tests {
             peer_sharing_enabled: false,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -769,6 +789,8 @@ mod tests {
             false,
             600,
             10,
+            15,
+            false,
         )
     }
 
@@ -783,6 +805,7 @@ mod tests {
             0,
             sender,
             Duration::from_secs(3600),
+            Duration::from_secs(15),
         );
         manager.peers.insert(peer, PeerData::new(conn));
     }
@@ -823,6 +846,8 @@ mod tests {
             peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -846,6 +871,8 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
         );
 
         // Seed a cold peer manually
@@ -874,7 +901,11 @@ mod tests {
             pm.contains_cold("hot.peer.example.com:3001"),
             "disconnected hot peer should be returned to cold to stay in rotation"
         );
-        assert_eq!(pm.cold_count(), 1, "net cold count: promoted one, returned one");
+        assert_eq!(
+            pm.cold_count(),
+            1,
+            "net cold count: promoted one, returned one"
+        );
     }
 
     fn add_test_peer_with_address(manager: &mut NetworkManager, peer: PeerId, address: &str) {
@@ -882,7 +913,13 @@ mod tests {
             sink: manager.events_sender.clone(),
             id: peer,
         };
-        let conn = PeerConnection::new(address.to_string(), 0, sender, Duration::from_secs(3600));
+        let conn = PeerConnection::new(
+            address.to_string(),
+            0,
+            sender,
+            Duration::from_secs(3600),
+            Duration::from_secs(15),
+        );
         manager.peers.insert(peer, PeerData::new(conn));
     }
 
@@ -908,6 +945,8 @@ mod tests {
             peer_sharing_enabled: false, // disabled
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -931,6 +970,8 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
         );
 
         assert!(
@@ -966,6 +1007,8 @@ mod tests {
             peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -989,6 +1032,8 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
         );
 
         let addresses = vec![
@@ -1033,6 +1078,8 @@ mod tests {
             peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1056,6 +1103,8 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
         );
 
         // Add 4 hot peers
@@ -1088,6 +1137,8 @@ mod tests {
             peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            connect_timeout_secs: 15,
+            ipv6_enabled: false,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1111,6 +1162,8 @@ mod tests {
             cfg.peer_sharing_enabled,
             cfg.churn_interval_secs,
             cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
         );
 
         // Add exactly min_hot_peers = 3 peers

@@ -42,13 +42,17 @@ pub enum PeerSharingError {
 ///
 /// Returns `Some("ip:port")` for publicly routable addresses, `None` for rejected ones.
 /// Rejected: loopback, unspecified, link-local, RFC1918 private, port 0.
+/// When `ipv6_enabled` is false, pure IPv6 addresses are also rejected.
 /// IPv4-mapped IPv6 (`::ffff:x.x.x.x`) is normalised to IPv4 form before dedup.
-pub fn validate_and_normalise(addr_str: &str, port: u16) -> Option<String> {
+pub fn validate_and_normalise(addr_str: &str, port: u16, ipv6_enabled: bool) -> Option<String> {
     if port == 0 {
         return None;
     }
     let ip = IpAddr::from_str(addr_str).ok()?;
     let ip = normalise_ip(ip);
+    if !ipv6_enabled && ip.is_ipv6() {
+        return None;
+    }
     if is_rejected(&ip) {
         return None;
     }
@@ -115,7 +119,11 @@ fn encode_done() -> Vec<u8> {
 ///
 /// CBOR format: `[1, [[addr_type, ip_bytes, port], ...]]`
 /// Extra entries beyond `limit` are skipped without allocation (FR-014).
-fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharingError> {
+fn decode_response(
+    bytes: &[u8],
+    limit: usize,
+    ipv6_enabled: bool,
+) -> Result<Vec<String>, PeerSharingError> {
     use minicbor::Decoder;
 
     let mut dec = Decoder::new(bytes);
@@ -191,7 +199,7 @@ fn decode_response(bytes: &[u8], limit: usize) -> Result<Vec<String>, PeerSharin
             continue;
         }
 
-        if let Some(normalised) = validate_and_normalise(&addr_str, port) {
+        if let Some(normalised) = validate_and_normalise(&addr_str, port, ipv6_enabled) {
             results.push(normalised);
         }
     }
@@ -210,8 +218,14 @@ pub async fn request_peers(
     magic: u32,
     amount: u8,
     timeout: Duration,
+    ipv6_enabled: bool,
 ) -> Result<Vec<String>, PeerSharingError> {
-    match tokio::time::timeout(timeout, request_peers_inner(address, magic, amount)).await {
+    match tokio::time::timeout(
+        timeout,
+        request_peers_inner(address, magic, amount, ipv6_enabled),
+    )
+    .await
+    {
         Ok(result) => result,
         Err(_) => {
             warn!(peer = %address, "peer-sharing exchange timed out");
@@ -224,6 +238,7 @@ async fn request_peers_inner(
     address: &str,
     magic: u32,
     amount: u8,
+    ipv6_enabled: bool,
 ) -> Result<Vec<String>, PeerSharingError> {
     // Step 1: TCP connect
     let bearer = Bearer::connect_tcp(address)
@@ -273,7 +288,7 @@ async fn request_peers_inner(
         buffer.extend_from_slice(&chunk);
 
         // Try decoding — succeed on valid CBOR, continue if incomplete
-        match decode_response(&buffer, amount as usize) {
+        match decode_response(&buffer, amount as usize, ipv6_enabled) {
             Ok(addrs) => {
                 // Step 6: Send MsgDone (best-effort)
                 let _ = ps_channel.enqueue_chunk(encode_done()).await;

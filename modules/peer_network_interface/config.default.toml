@@ -38,3 +38,7 @@ peer-sharing-enabled = true
 churn-interval-secs = 600
 # Timeout in seconds for a full peer-sharing exchange
 peer-sharing-timeout-secs = 10
+# Timeout in seconds for TCP connect to a peer
+connect-timeout-secs = 15
+# Accept IPv6 peer addresses from peer-sharing (set true on dual-stack hosts)
+ipv6-enabled = false
