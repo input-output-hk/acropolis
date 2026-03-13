@@ -16,7 +16,7 @@ use crate::{
     indexes::{
         bridge_state::BridgeState, cnight_utxo_state::CNightUTxOState,
         committee_candidate_state::CommitteeCandidateState, governance_state::GovernanceState,
-        mapping_candidate_state::MappingCandidateState, parameters_state::ParametersState,
+        mapping_registration_state::MappingRegistrationState, parameters_state::ParametersState,
     },
     types::{BridgeCreation, CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
@@ -29,7 +29,7 @@ pub struct State {
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
     // Mapping-validator registrations and deregistrations consumed by cNIGHT observation.
-    pub mapping_candidates: MappingCandidateState,
+    pub mapping_registrations: MappingRegistrationState,
     // Committee candidate set snapshotted by epoch for authority selection.
     committee_candidates: CommitteeCandidateState,
     // Bridge UTxOs indexed by block
@@ -86,9 +86,9 @@ impl State {
         let mut bridge_creations = Vec::new();
         let mut block_created_bridge_utxos = StdHashMap::new();
 
-        let mut candidate_registrations = Vec::new();
-        let mut block_created_registrations = HashSet::new();
-        let mut candidate_deregistrations = Vec::new();
+        let mut mapping_registrations = Vec::new();
+        let mut block_created_mapping_registrations = HashSet::new();
+        let mut mapping_deregistrations = Vec::new();
         let mut committee_candidate_registrations = Vec::new();
         let mut block_created_committee_registrations = HashSet::new();
         let mut committee_candidate_deregistrations = Vec::new();
@@ -119,16 +119,16 @@ impl State {
             )?;
 
             // Collect candidate registrations and deregistrations
-            self.collect_candidate_registrations(
+            self.collect_mapping_registrations(
                 delta,
                 block_info,
-                &mut candidate_registrations,
-                &mut block_created_registrations,
+                &mut mapping_registrations,
+                &mut block_created_mapping_registrations,
             )?;
-            candidate_deregistrations.extend(self.collect_candidate_deregistrations(
+            mapping_deregistrations.extend(self.collect_mapping_deregistrations(
                 delta,
                 block_info,
-                &block_created_registrations,
+                &block_created_mapping_registrations,
             )?);
             self.collect_committee_candidate_registrations(
                 delta,
@@ -167,16 +167,14 @@ impl State {
         }
 
         // Add registered and deregistered candidates to state
-        self.epoch_totals.add_indexed_candidates(
-            candidate_registrations.len(),
-            candidate_deregistrations.len(),
-        );
-        if !candidate_registrations.is_empty() {
-            self.mapping_candidates.register_candidates(block_info.number, candidate_registrations);
+        self.epoch_totals
+            .add_indexed_candidates(mapping_registrations.len(), mapping_deregistrations.len());
+        if !mapping_registrations.is_empty() {
+            self.mapping_registrations.add_registrations(block_info.number, mapping_registrations);
         }
-        if !candidate_deregistrations.is_empty() {
-            self.mapping_candidates
-                .deregister_candidates(block_info.number, candidate_deregistrations);
+        if !mapping_deregistrations.is_empty() {
+            self.mapping_registrations
+                .add_deregistrations(block_info.number, mapping_deregistrations);
         }
         if !committee_candidate_registrations.is_empty() {
             self.committee_candidates.register_candidates(committee_candidate_registrations);
@@ -346,7 +344,7 @@ impl State {
         Ok(())
     }
 
-    fn collect_candidate_registrations(
+    fn collect_mapping_registrations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
@@ -391,7 +389,7 @@ impl State {
         Ok(())
     }
 
-    fn collect_candidate_deregistrations(
+    fn collect_mapping_deregistrations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
@@ -404,7 +402,7 @@ impl State {
         }
 
         for spent in &delta.spent_utxos {
-            if self.mapping_candidates.registration_index.contains_key(&spent.utxo)
+            if self.mapping_registrations.registration_index.contains_key(&spent.utxo)
                 || block_created_registrations.contains(&spent.utxo)
             {
                 deregistrations.push(DeregistrationEvent {
@@ -935,7 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn should_collect_candidate_registrations_and_deregistrations_when_mapping_events_present() {
+    fn should_collect_mapping_registrations_and_deregistrations_when_mapping_events_present() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -976,7 +974,7 @@ mod tests {
         let mut registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         state
-            .collect_candidate_registrations(
+            .collect_mapping_registrations(
                 &registration_delta,
                 &block_info,
                 &mut registrations,
@@ -985,9 +983,9 @@ mod tests {
             .unwrap();
         assert_eq!(registrations.len(), 1);
 
-        state.mapping_candidates.register_candidates(block_info.number, registrations);
+        state.mapping_registrations.add_registrations(block_info.number, registrations);
 
-        let indexed = state.mapping_candidates.get_registrations(block_info.number, 0, 50);
+        let indexed = state.mapping_registrations.get_registrations(block_info.number, 0, 50);
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
@@ -1017,13 +1015,13 @@ mod tests {
         };
 
         let deregistrations = state
-            .collect_candidate_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
+            .collect_mapping_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
             .unwrap();
         assert_eq!(deregistrations.len(), 1);
 
-        state.mapping_candidates.deregister_candidates(block_info.number, deregistrations);
+        state.mapping_registrations.add_deregistrations(block_info.number, deregistrations);
 
-        let indexed = state.mapping_candidates.get_deregistrations(block_info.number, 0, 50);
+        let indexed = state.mapping_registrations.get_deregistrations(block_info.number, 0, 50);
 
         // Only 1 deregistration indexed
         assert_eq!(indexed.len(), 1);
@@ -1098,7 +1096,7 @@ mod tests {
         );
         assert_eq!(epoch_candidates[0].full_datum, vec![0xCA]);
 
-        let registrations = state.mapping_candidates.get_registrations(block_info.number, 0, 50);
+        let registrations = state.mapping_registrations.get_registrations(block_info.number, 0, 50);
         assert_eq!(registrations.len(), 1);
         assert_eq!(registrations[0].tx_hash, mapping_utxo.tx_hash);
     }

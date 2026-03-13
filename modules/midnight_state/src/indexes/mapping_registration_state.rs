@@ -5,7 +5,7 @@ use acropolis_common::{BlockNumber, UTxOIdentifier};
 use crate::types::{Deregistration, DeregistrationEvent, Registration, RegistrationEvent};
 
 #[derive(Clone, Default)]
-pub struct MappingCandidateState {
+pub struct MappingRegistrationState {
     // Mapping registrations by block enabling range lookups.
     registrations: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
     // Mapping deregistrations by block enabling range lookups.
@@ -14,13 +14,9 @@ pub struct MappingCandidateState {
     pub registration_index: HashMap<UTxOIdentifier, RegistrationEvent>,
 }
 
-impl MappingCandidateState {
+impl MappingRegistrationState {
     /// Handle all mapping registrations for a block.
-    pub fn register_candidates(
-        &mut self,
-        block: BlockNumber,
-        registrations: Vec<RegistrationEvent>,
-    ) {
+    pub fn add_registrations(&mut self, block: BlockNumber, registrations: Vec<RegistrationEvent>) {
         let mut identifiers = Vec::new();
         for registration in registrations {
             let identifier = UTxOIdentifier {
@@ -34,7 +30,7 @@ impl MappingCandidateState {
     }
 
     /// Handle all mapping deregistrations for a block.
-    pub fn deregister_candidates(
+    pub fn add_deregistrations(
         &mut self,
         block: BlockNumber,
         deregistrations: Vec<DeregistrationEvent>,
@@ -128,7 +124,7 @@ mod tests {
 
     #[test]
     fn registrations_returns_entries_at_or_after_start_tx_index() {
-        let mut state = MappingCandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);
@@ -149,7 +145,7 @@ mod tests {
 
     #[test]
     fn registrations_limits_to_capacity() {
-        let mut state = MappingCandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let ids = [id(1), id(2), id(3), id(4)];
 
@@ -166,7 +162,7 @@ mod tests {
 
     #[test]
     fn deregistrations_returns_entries_at_or_after_start_tx_index() {
-        let mut state = MappingCandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);
@@ -194,7 +190,7 @@ mod tests {
 
     #[test]
     fn deregistrations_limits_to_capacity() {
-        let mut state = MappingCandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);

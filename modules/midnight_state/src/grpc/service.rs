@@ -219,7 +219,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.mapping_candidates.get_registrations(
+            state.mapping_registrations.get_registrations(
                 req.start_block.into(),
                 req.start_tx_index,
                 utxo_capacity,
@@ -251,7 +251,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.mapping_candidates.get_deregistrations(
+            state.mapping_registrations.get_deregistrations(
                 req.start_block.into(),
                 req.start_tx_index,
                 utxo_capacity,
@@ -315,7 +315,7 @@ impl MidnightState for MidnightStateService {
 
             events.extend(
                 state
-                    .mapping_candidates
+                    .mapping_registrations
                     .get_registrations(start_block.into(), start_tx_index, event_capacity)
                     .into_iter()
                     .map(|e| UtxoEvent {
@@ -325,7 +325,7 @@ impl MidnightState for MidnightStateService {
 
             events.extend(
                 state
-                    .mapping_candidates
+                    .mapping_registrations
                     .get_deregistrations(start_block.into(), start_tx_index, event_capacity)
                     .into_iter()
                     .map(|e| UtxoEvent {
@@ -724,8 +724,8 @@ mod tests {
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
             bridge_checkpoint, bridge_utxos_request, utxo_event, AriadneParametersRequest,
-            AssetCreatesRequest, AssetSpendsRequest, BridgeUtxosRequest,
-            EpochCandidatesRequest, UtxoEventsRequest, UtxoId,
+            AssetCreatesRequest, AssetSpendsRequest, BridgeUtxosRequest, EpochCandidatesRequest,
+            UtxoEventsRequest, UtxoId,
         },
         state::State,
     };
@@ -763,10 +763,7 @@ mod tests {
             Ok(Arc::new(response))
         }
 
-        async fn subscribe(
-            &self,
-            _topic: &str,
-        ) -> anyhow::Result<Box<dyn Subscription<Message>>> {
+        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<Message>>> {
             Err(anyhow::anyhow!("subscriptions not supported in tests"))
         }
 
