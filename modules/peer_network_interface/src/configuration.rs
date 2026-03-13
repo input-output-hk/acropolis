@@ -28,6 +28,20 @@ pub struct InterfaceConfig {
     pub consensus_topic: String,
     #[serde(default = "default_block_wanted_topic")]
     pub block_wanted_topic: String,
+    #[serde(default = "default_target_peer_count")]
+    pub target_peer_count: usize,
+    #[serde(default = "default_min_hot_peers")]
+    pub min_hot_peers: usize,
+    #[serde(default = "default_peer_sharing_enabled")]
+    pub peer_sharing_enabled: bool,
+    #[serde(default = "default_churn_interval_secs")]
+    pub churn_interval_secs: u64,
+    #[serde(default = "default_peer_sharing_timeout_secs")]
+    pub peer_sharing_timeout_secs: u64,
+    #[serde(default = "default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    #[serde(default = "default_ipv6_enabled")]
+    pub ipv6_enabled: bool,
 }
 
 fn default_consensus_topic() -> String {
@@ -36,6 +50,34 @@ fn default_consensus_topic() -> String {
 
 fn default_block_wanted_topic() -> String {
     "cardano.consensus.wants".to_string()
+}
+
+fn default_target_peer_count() -> usize {
+    15
+}
+
+fn default_min_hot_peers() -> usize {
+    3
+}
+
+fn default_peer_sharing_enabled() -> bool {
+    true
+}
+
+fn default_churn_interval_secs() -> u64 {
+    600
+}
+
+fn default_peer_sharing_timeout_secs() -> u64 {
+    10
+}
+
+fn default_connect_timeout_secs() -> u64 {
+    15
+}
+
+fn default_ipv6_enabled() -> bool {
+    false
 }
 
 impl InterfaceConfig {
