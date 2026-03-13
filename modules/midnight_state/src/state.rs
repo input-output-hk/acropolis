@@ -51,7 +51,6 @@ impl State {
         if let Some(nonce) = nonce_opt {
             self.nonces.insert(block_info.epoch, nonce);
         }
-        self.candidates.snapshot_epoch(block_info.epoch);
         self.epoch_totals.summarise_completed_epoch(block_info);
     }
 
@@ -63,8 +62,9 @@ impl State {
         self.nonces.get(&epoch).and_then(|n| n.hash.map(|h| h.to_vec()))
     }
 
-    pub fn get_epoch_candidates(&self, epoch: Epoch) -> Vec<EpochCandidate> {
-        self.candidates.get_epoch_candidates(epoch)
+    pub fn get_epoch_candidates(&self, _epoch: Epoch) -> Vec<EpochCandidate> {
+        // TODO: Index candidate UTxOs from `committee_candidate_address`
+        Vec::new()
     }
 
     pub fn handle_address_deltas(
