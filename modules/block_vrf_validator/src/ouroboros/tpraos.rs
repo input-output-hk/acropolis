@@ -18,6 +18,7 @@ use pallas::ledger::{primitives::VrfCert, traverse::MultiEraHeader};
 use std::collections::HashMap;
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::result_large_err)]
 pub fn validate_vrf_tpraos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
