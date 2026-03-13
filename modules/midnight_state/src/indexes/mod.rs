@@ -1,3 +1,4 @@
+pub mod bridge_state;
 pub mod candidate_state;
 pub mod cnight_utxo_state;
 pub mod governance_state;
