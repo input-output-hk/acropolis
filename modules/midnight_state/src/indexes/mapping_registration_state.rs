@@ -5,22 +5,18 @@ use acropolis_common::{BlockNumber, UTxOIdentifier};
 use crate::types::{Deregistration, DeregistrationEvent, Registration, RegistrationEvent};
 
 #[derive(Clone, Default)]
-pub struct CandidateState {
-    // Candidate registrations by block enabling range lookups
+pub struct MappingRegistrationState {
+    // Mapping registrations by block enabling range lookups.
     registrations: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
-    // Candidate deregistrations by block enabling range lookups
+    // Mapping deregistrations by block enabling range lookups.
     deregistrations: OrdMap<BlockNumber, Vec<DeregistrationEvent>>,
-    // Registration index to avoid duplicating in deregistrations
+    // Registration index to avoid duplicating registration data in deregistrations.
     pub registration_index: HashMap<UTxOIdentifier, RegistrationEvent>,
 }
 
-impl CandidateState {
-    /// Handle all candidate registrations for a block
-    pub fn register_candidates(
-        &mut self,
-        block: BlockNumber,
-        registrations: Vec<RegistrationEvent>,
-    ) {
+impl MappingRegistrationState {
+    /// Handle all mapping registrations for a block.
+    pub fn add_registrations(&mut self, block: BlockNumber, registrations: Vec<RegistrationEvent>) {
         let mut identifiers = Vec::new();
         for registration in registrations {
             let identifier = UTxOIdentifier {
@@ -33,8 +29,8 @@ impl CandidateState {
         self.registrations.insert(block, identifiers);
     }
 
-    /// Handle all candidate deregistrations for a block
-    pub fn deregister_candidates(
+    /// Handle all mapping deregistrations for a block.
+    pub fn add_deregistrations(
         &mut self,
         block: BlockNumber,
         deregistrations: Vec<DeregistrationEvent>,
@@ -42,7 +38,7 @@ impl CandidateState {
         self.deregistrations.insert(block, deregistrations);
     }
 
-    /// Get the candidate registrations within a specified block range
+    /// Get the mapping registrations within a specified block range.
     pub fn get_registrations(
         &self,
         start: BlockNumber,
@@ -66,7 +62,7 @@ impl CandidateState {
             .collect()
     }
 
-    /// Get the candidate deregistrations within a specified block range
+    /// Get the mapping deregistrations within a specified block range.
     pub fn get_deregistrations(
         &self,
         start: BlockNumber,
@@ -128,7 +124,7 @@ mod tests {
 
     #[test]
     fn registrations_returns_entries_at_or_after_start_tx_index() {
-        let mut state = CandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);
@@ -149,7 +145,7 @@ mod tests {
 
     #[test]
     fn registrations_limits_to_capacity() {
-        let mut state = CandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let ids = [id(1), id(2), id(3), id(4)];
 
@@ -166,7 +162,7 @@ mod tests {
 
     #[test]
     fn deregistrations_returns_entries_at_or_after_start_tx_index() {
-        let mut state = CandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);
@@ -194,7 +190,7 @@ mod tests {
 
     #[test]
     fn deregistrations_limits_to_capacity() {
-        let mut state = CandidateState::default();
+        let mut state = MappingRegistrationState::default();
 
         let id0 = id(0);
         let id1 = id(1);
