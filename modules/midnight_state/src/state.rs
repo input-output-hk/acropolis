@@ -14,8 +14,10 @@ use crate::{
     epoch_totals::EpochTotals,
     grpc::midnight_state_proto::EpochCandidate,
     indexes::{
-        candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
-        governance_state::GovernanceState, parameters_state::ParametersState,
+        committee_candidate_state::CommitteeCandidateState, governance_state::GovernanceState,
+        mapping_candidate_state::MappingCandidateState, parameters_state::ParametersState,
+        cnight_utxo_state::CNightUTxOState, governance_state::GovernanceState,
+        parameters_state::ParametersState,
     },
     types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
@@ -27,10 +29,10 @@ pub struct State {
 
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
-    // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    pub mapping_candidates: CandidateState,
-    // Committee candidate set by epoch for authority selection
-    committee_candidates: CandidateState,
+    // Mapping-validator registrations and deregistrations consumed by cNIGHT observation.
+    pub mapping_candidates: MappingCandidateState,
+    // Committee candidate set snapshotted by epoch for authority selection.
+    committee_candidates: CommitteeCandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
@@ -53,7 +55,6 @@ impl State {
         if let Some(nonce) = nonce_opt {
             self.nonces.insert(block_info.epoch, nonce);
         }
-        self.mapping_candidates.snapshot_epoch(block_info.epoch);
         self.committee_candidates.snapshot_epoch(block_info.epoch);
         self.epoch_totals.summarise_completed_epoch(block_info);
     }
@@ -162,12 +163,10 @@ impl State {
                 .deregister_candidates(block_info.number, candidate_deregistrations);
         }
         if !committee_candidate_registrations.is_empty() {
-            self.committee_candidates
-                .register_candidates(block_info.number, committee_candidate_registrations);
+            self.committee_candidates.register_candidates(committee_candidate_registrations);
         }
         if !committee_candidate_deregistrations.is_empty() {
-            self.committee_candidates
-                .deregister_candidates(block_info.number, committee_candidate_deregistrations);
+            self.committee_candidates.deregister_candidates(committee_candidate_deregistrations);
         }
 
         self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
