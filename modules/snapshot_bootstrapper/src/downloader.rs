@@ -22,6 +22,9 @@ pub enum DownloadError {
     #[error("Download failed from {0}: HTTP status {1}")]
     InvalidStatusCode(String, reqwest::StatusCode),
 
+    #[error("UTxO sidecar URL is missing for {0}")]
+    MissingUtxoSidecarUrl(PathBuf),
+
     #[error("Cannot create directory {0}: {1}")]
     CreateDirectory(PathBuf, std::io::Error),
 
@@ -54,9 +57,18 @@ impl SnapshotDownloader {
     /// Downloads the snapshot file specified by the metadata.
     /// Returns the path to the downloaded file.
     pub async fn download(&self, snapshot: &Snapshot) -> Result<PathBuf, DownloadError> {
-        let file_path = snapshot.cbor_path(&self.network_dir);
-        self.download_from_url(&snapshot.url, &file_path).await?;
-        Ok(file_path)
+        let snapshot_path = snapshot.cbor_path(&self.network_dir);
+        self.download_from_url(&snapshot.url, &snapshot_path).await?;
+
+        let utxo_path = snapshot.utxos_cbor_path(&self.network_dir);
+        if !utxo_path.exists() {
+            let utxo_url = snapshot
+                .utxo_download_url()
+                .ok_or_else(|| DownloadError::MissingUtxoSidecarUrl(utxo_path.clone()))?;
+            self.download_from_url(&utxo_url, &utxo_path).await?;
+        }
+
+        Ok(snapshot_path)
     }
 
     /// Downloads a gzip-compressed snapshot from the given URL, decompresses it on-the-fly,
@@ -159,6 +171,16 @@ mod tests {
             epoch: 509,
             point: TEST_POINT,
             url,
+            utxo_url: None,
+        }
+    }
+
+    fn test_snapshot_with_utxo_url(url: String, utxo_url: String) -> Snapshot {
+        Snapshot {
+            epoch: 509,
+            point: TEST_POINT,
+            url,
+            utxo_url: Some(utxo_url),
         }
     }
 
@@ -169,30 +191,49 @@ mod tests {
         let snapshot = test_snapshot("https://example.com/snapshot.cbor.gz".to_string());
 
         // Create file at the exact path the downloader will check
-        let expected_path = snapshot.cbor_path(network_dir);
-        std::fs::write(&expected_path, b"existing data").unwrap();
+        let expected_snapshot_path = snapshot.cbor_path(network_dir);
+        let expected_utxo_path = snapshot.utxos_cbor_path(network_dir);
+        std::fs::write(&expected_snapshot_path, b"existing data").unwrap();
+        std::fs::write(&expected_utxo_path, b"existing utxo data").unwrap();
 
         let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
-        assert_eq!(std::fs::read(&expected_path).unwrap(), b"existing data");
+        assert_eq!(
+            std::fs::read(&expected_snapshot_path).unwrap(),
+            b"existing data"
+        );
+        assert_eq!(
+            std::fs::read(&expected_utxo_path).unwrap(),
+            b"existing utxo data"
+        );
     }
 
     #[tokio::test]
     async fn test_downloader_downloads_and_decompresses() {
         let mock_server = MockServer::start().await;
-        let compressed = gzip_compress(b"snapshot content");
+        let snapshot_compressed = gzip_compress(b"snapshot content");
+        let utxo_compressed = gzip_compress(b"utxo content");
 
         Mock::given(method("GET"))
-            .and(path("/snapshot.cbor.gz"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .and(path("/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(snapshot_compressed))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/utxos.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(utxo_compressed))
             .mount(&mock_server)
             .await;
 
         let temp_dir = TempDir::new().unwrap();
         let network_dir = temp_dir.path();
-        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
+        let snapshot = test_snapshot(format!(
+            "{}/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz",
+            mock_server.uri()
+        ));
 
         let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
@@ -203,6 +244,10 @@ mod tests {
         assert_eq!(
             std::fs::read(&downloaded_path).unwrap(),
             b"snapshot content"
+        );
+        assert_eq!(
+            std::fs::read(snapshot.utxos_cbor_path(network_dir)).unwrap(),
+            b"utxo content"
         );
     }
 
@@ -228,28 +273,40 @@ mod tests {
             Err(DownloadError::InvalidStatusCode(_, _))
         ));
         assert!(!snapshot.cbor_path(network_dir).exists());
+        assert!(!snapshot.utxos_cbor_path(network_dir).exists());
     }
 
     #[tokio::test]
     async fn test_downloader_creates_parent_directories() {
         let mock_server = MockServer::start().await;
-        let compressed = gzip_compress(b"data");
+        let snapshot_compressed = gzip_compress(b"data");
+        let utxo_compressed = gzip_compress(b"utxos");
 
         Mock::given(method("GET"))
-            .and(path("/snapshot.cbor.gz"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .and(path("/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(snapshot_compressed))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/utxos.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(utxo_compressed))
             .mount(&mock_server)
             .await;
 
         let temp_dir = TempDir::new().unwrap();
         let network_dir = temp_dir.path().join("nested").join("dir");
-        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
+        let snapshot = test_snapshot(format!(
+            "{}/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz",
+            mock_server.uri()
+        ));
 
         let downloader = SnapshotDownloader::new(&network_dir, &default_config()).unwrap();
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
         assert!(snapshot.cbor_path(&network_dir).exists());
+        assert!(snapshot.utxos_cbor_path(&network_dir).exists());
     }
 
     #[tokio::test]
@@ -278,13 +335,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_downloader_with_custom_config() {
+    async fn test_downloader_requires_utxo_url_when_sidecar_is_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let network_dir = temp_dir.path();
+        let snapshot = test_snapshot("".to_string());
+
+        std::fs::write(snapshot.cbor_path(network_dir), b"existing snapshot").unwrap();
+
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
+        let result = downloader.download(&snapshot).await;
+
+        assert!(matches!(
+            result,
+            Err(DownloadError::MissingUtxoSidecarUrl(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_downloader_uses_explicit_utxo_url() {
         let mock_server = MockServer::start().await;
-        let compressed = gzip_compress(b"data");
+        let snapshot_compressed = gzip_compress(b"snapshot content");
+        let utxo_compressed = gzip_compress(b"utxo content");
 
         Mock::given(method("GET"))
             .and(path("/snapshot.cbor.gz"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(compressed))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(snapshot_compressed))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/custom-utxos.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(utxo_compressed))
+            .mount(&mock_server)
+            .await;
+
+        let temp_dir = TempDir::new().unwrap();
+        let network_dir = temp_dir.path();
+        let snapshot = test_snapshot_with_utxo_url(
+            format!("{}/snapshot.cbor.gz", mock_server.uri()),
+            format!("{}/custom-utxos.cbor.gz", mock_server.uri()),
+        );
+
+        let downloader = SnapshotDownloader::new(network_dir, &default_config()).unwrap();
+        let result = downloader.download(&snapshot).await;
+
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::read(snapshot.utxos_cbor_path(network_dir)).unwrap(),
+            b"utxo content"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_downloader_with_custom_config() {
+        let mock_server = MockServer::start().await;
+        let snapshot_compressed = gzip_compress(b"data");
+        let utxo_compressed = gzip_compress(b"utxos");
+
+        Mock::given(method("GET"))
+            .and(path("/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(snapshot_compressed))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/utxos.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(utxo_compressed))
             .mount(&mock_server)
             .await;
 
@@ -297,7 +413,10 @@ mod tests {
         };
 
         let downloader = SnapshotDownloader::new(network_dir, &config).unwrap();
-        let snapshot = test_snapshot(format!("{}/snapshot.cbor.gz", mock_server.uri()));
+        let snapshot = test_snapshot(format!(
+            "{}/nes.134956789.3333333333333333333333333333333333333333333333333333333333333333.cbor.gz",
+            mock_server.uri()
+        ));
         let result = downloader.download(&snapshot).await;
 
         assert!(result.is_ok());
