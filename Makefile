@@ -36,6 +36,7 @@ help:
 	@echo "  run-bootstrap-preview    Run the omnibus (preview) with bootstrap config"
 	@echo "  run-midnight-mainnet     Run the midnight indexer (mainnet)"
 	@echo "  run-midnight-preview     Run the midnight indexer (preview)"
+	@echo "  run-midnight-guardnet    Run the midnight indexer (guardnet)"
 	@echo "  test                     Run all tests"
 	@echo "  fmt                      Run cargo fmt"
 	@echo "  clippy                   Run cargo clippy -D warnings"
@@ -77,6 +78,9 @@ run-midnight-mainnet:
 
 run-midnight-preview:
 	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.preview.toml
+
+run-midnight-guardnet:
+	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.guardnet.toml
 	
 fmt:
 	$(CARGO) fmt --all
