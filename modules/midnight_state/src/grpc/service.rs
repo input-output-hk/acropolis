@@ -139,7 +139,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_registrations(
+            state.mapping_registrations.get_registrations(
                 req.start_block.into(),
                 req.start_tx_index,
                 utxo_capacity,
@@ -171,7 +171,7 @@ impl MidnightState for MidnightStateService {
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.candidates.get_deregistrations(
+            state.mapping_registrations.get_deregistrations(
                 req.start_block.into(),
                 req.start_tx_index,
                 utxo_capacity,
@@ -235,7 +235,7 @@ impl MidnightState for MidnightStateService {
 
             events.extend(
                 state
-                    .candidates
+                    .mapping_registrations
                     .get_registrations(start_block.into(), start_tx_index, event_capacity)
                     .into_iter()
                     .map(|e| UtxoEvent {
@@ -245,7 +245,7 @@ impl MidnightState for MidnightStateService {
 
             events.extend(
                 state
-                    .candidates
+                    .mapping_registrations
                     .get_deregistrations(start_block.into(), start_tx_index, event_capacity)
                     .into_iter()
                     .map(|e| UtxoEvent {
@@ -629,14 +629,15 @@ mod tests {
     use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use acropolis_common::{
-        messages::AddressDeltasMessage,
+        messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
+        queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress,
         ShelleyAddressDelegationPart, ShelleyAddressPaymentPart, SpentUTxOExtended, StakeAddress,
         StakeCredential, TxHash, TxIdentifier, UTxOIdentifier, ValueMap,
     };
-    use caryatid_sdk::{async_trait, Context, MessageBounds, MessageBus, Subscription};
+    use caryatid_sdk::{async_trait, Context, MessageBus, Subscription};
     use config::Config;
     use tokio::sync::Mutex;
     use tonic::{Code, Request};
@@ -645,7 +646,7 @@ mod tests {
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
             utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
-            UtxoEventsRequest,
+            EpochCandidatesRequest, UtxoEventsRequest,
         },
         state::State,
     };
@@ -655,8 +656,8 @@ mod tests {
     pub struct DummyBus;
 
     #[async_trait]
-    impl<M: MessageBounds> MessageBus<M> for DummyBus {
-        async fn publish(&self, _topic: &str, _message: Arc<M>) -> anyhow::Result<()> {
+    impl MessageBus<Message> for DummyBus {
+        async fn publish(&self, _topic: &str, _message: Arc<Message>) -> anyhow::Result<()> {
             Ok(())
         }
 
@@ -664,7 +665,26 @@ mod tests {
             Duration::from_secs(1)
         }
 
-        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<M>>> {
+        async fn request(
+            &self,
+            _topic: &str,
+            message: Arc<Message>,
+        ) -> anyhow::Result<Arc<Message>> {
+            let message = Arc::try_unwrap(message).unwrap_or_else(|arc| (*arc).clone());
+
+            let response = match message {
+                Message::StateQuery(StateQuery::SPDD(SPDDStateQuery::GetEpochSPDD { .. })) => {
+                    Message::StateQueryResponse(StateQueryResponse::SPDD(
+                        SPDDStateQueryResponse::EpochSPDD(Vec::new()),
+                    ))
+                }
+                _ => return Err(anyhow::anyhow!("unsupported request in tests")),
+            };
+
+            Ok(Arc::new(response))
+        }
+
+        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<Message>>> {
             Err(anyhow::anyhow!("subscriptions not supported in tests"))
         }
 
@@ -734,6 +754,14 @@ mod tests {
         Address::Shelley(ShelleyAddress {
             network: NetworkId::Testnet,
             payment: ShelleyAddressPaymentPart::ScriptHash(key_hash(4)),
+            delegation: ShelleyAddressDelegationPart::None,
+        })
+    }
+
+    fn committee_candidate_address() -> Address {
+        Address::Shelley(ShelleyAddress {
+            network: NetworkId::Testnet,
+            payment: ShelleyAddressPaymentPart::ScriptHash(key_hash(5)),
             delegation: ShelleyAddressDelegationPart::None,
         })
     }
@@ -907,6 +935,64 @@ mod tests {
 
         let err = result.expect_err("hash datum should be rejected");
         assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn should_return_epoch_candidates_from_committee_candidate_address() {
+        let committee_address = committee_candidate_address();
+        let mapping_address = mapping_validator_address();
+        let auth_policy = PolicyId::new([9u8; 28]);
+        let auth_asset = AssetName::new(b"auth").unwrap();
+        let block = test_block_info(3, 7);
+        let mut state = State::new(MidnightConfig {
+            committee_candidate_address: committee_address.clone(),
+            mapping_validator_address: mapping_address.clone(),
+            auth_token_policy_id: auth_policy,
+            auth_token_asset_name: auth_asset,
+            ..Default::default()
+        });
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    ExtendedAddressDelta {
+                        address: committee_address,
+                        tx_identifier: TxIdentifier::new(block.number as u32, 1),
+                        spent_utxos: vec![],
+                        created_utxos: vec![CreatedUTxOExtended {
+                            utxo: UTxOIdentifier::new(TxHash::new([1u8; 32]), 0),
+                            value: ValueMap::default(),
+                            datum: Some(Datum::Inline(vec![0xCA, 0xFE])),
+                        }],
+                        sent: ValueMap::default(),
+                        received: ValueMap::default(),
+                    },
+                    candidate_registration_delta(
+                        mapping_address,
+                        auth_policy,
+                        auth_asset,
+                        TxHash::new([2u8; 32]),
+                        1,
+                        2,
+                        block.number,
+                    ),
+                ]),
+            )
+            .expect("address delta handling should succeed");
+        state.handle_new_epoch(&block, None);
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_epoch_candidates(Request::new(EpochCandidatesRequest { epoch: block.epoch }))
+            .await
+            .expect("epoch candidates should be returned")
+            .into_inner();
+
+        assert_eq!(response.candidates.len(), 1);
+        assert_eq!(response.candidates[0].full_datum, vec![0xCA, 0xFE]);
+        assert_eq!(response.candidates[0].utxo_tx_hash, vec![1u8; 32]);
+        assert_eq!(response.candidates[0].utxo_index, 0);
     }
 
     #[tokio::test]
