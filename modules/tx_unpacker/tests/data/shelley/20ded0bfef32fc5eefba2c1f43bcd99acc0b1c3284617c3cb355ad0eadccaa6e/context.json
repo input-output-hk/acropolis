@@ -6,7 +6,11 @@
         "protocolVersion": {
           "minor": 0,
           "major": 2
-        }
+        },
+        "maxTxSize": 16384,
+        "minUTxOValue": 1000000,
+        "minFeeA": 44,
+        "minFeeB": 155381
       },
       "updateQuorum": 5,
       "genDelegs": {

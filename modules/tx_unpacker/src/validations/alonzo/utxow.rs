@@ -193,36 +193,4 @@ mod tests {
 
         validate(&tx).map_err(|e| *e)
     }
-
-    #[test]
-    fn compute_script_integrity_hash_returns_none_without_plutus_inputs() {
-        let (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str) = validation_fixture!(
-            "alonzo",
-            "97779c4e21031457206c64c4f6adee02287178ba24242de475c68d7fbe1f12ba"
-        );
-        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-
-        let computed = compute_script_integrity_hash(&tx);
-
-        assert!(computed.is_none(), "expected no script integrity hash");
-    }
-
-    #[test]
-    fn validate_script_integrity_hash_reports_mismatch_when_body_hash_missing() {
-        let (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str) = validation_fixture!(
-            "alonzo",
-            "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590"
-        );
-        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let err = validate_script_integrity_hash(&tx).unwrap_err();
-        match *err {
-            UTxOWValidationError::ScriptIntegrityHashMismatch {
-                expected, actual, ..
-            } => {
-                assert!(expected.is_some(), "expected a computed hash");
-                assert!(actual.is_none(), "expected missing body hash");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
 }

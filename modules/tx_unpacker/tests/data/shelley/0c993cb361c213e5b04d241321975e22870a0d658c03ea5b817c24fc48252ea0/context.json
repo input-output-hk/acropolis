@@ -6,7 +6,8 @@
         "protocolVersion": {
           "minor": 0,
           "major": 2
-        }
+        },
+        "maxTxSize": 16384
       },
       "updateQuorum": 5,
       "genDelegs": {
