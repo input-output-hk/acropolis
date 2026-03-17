@@ -35,6 +35,18 @@ impl ProtocolParams {
     pub fn major_protocol_version(&self) -> Option<u64> {
         self.shelley.as_ref().map(|s| s.protocol_params.protocol_version.major)
     }
+
+    pub fn protocol_version(&self) -> Option<ProtocolVersion> {
+        self.shelley.as_ref().map(|s| s.protocol_params.protocol_version.clone())
+    }
+
+    pub fn min_utxo_value(&self) -> Option<u64> {
+        self.shelley.as_ref().map(|s| s.protocol_params.min_utxo_value)
+    }
+
+    pub fn lovelace_per_utxo_word(&self) -> Option<u64> {
+        self.alonzo.as_ref().map(|a| a.lovelace_per_utxo_word)
+    }
 }
 
 //

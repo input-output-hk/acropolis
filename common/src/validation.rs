@@ -10,8 +10,8 @@ use crate::{
     rational_number::RationalNumber,
     Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
     KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
-    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValueMap, Voter,
-    VrfKeyHash,
+    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValidityInterval,
+    ValueMap, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -175,6 +175,10 @@ pub enum Phase1ValidationError {
     /// **Cause:** UTxOW rules failure
     #[error("UTxOWValidationError: {0}")]
     UTxOWValidationError(#[from] UTxOWValidationError),
+
+    /// **Cause:** Other Phase 1 Validation Errors
+    #[error("Other Phase 1 Validation Error: {0}")]
+    Other(String),
 }
 
 /// UTxO Rules Failure
@@ -247,9 +251,28 @@ pub enum UTxOValidationError {
         required_lovelace: Lovelace,
     },
 
+    /// **Cause:** Transaction validity interval is not valid
+    #[error("Transaction validity interval is not valid: current_slot={current_slot}, validity_interval={validity_interval:?}")]
+    OutsideValidityIntervalUTxO {
+        current_slot: Slot,
+        validity_interval: ValidityInterval,
+    },
+
+    /// **Cause:** Transaction output's value size is too big
+    #[error("Output too big UTxO: output_index={output_index}, value_size={value_size}, max_value_size={max_value_size}")]
+    OutputTooBigUTxO {
+        output_index: usize,
+        value_size: u64,
+        max_value_size: u64,
+    },
+
     /// **Cause:** Malformed UTxO
     #[error("Malformed UTxO: era={era}, reason={reason}")]
     MalformedUTxO { era: Era, reason: String },
+
+    /// **Cause:** Other UTxO Validation Errors
+    #[error("Other UTxO Validation Error: {0}")]
+    Other(String),
 }
 
 /// UTxOW Rules Failure
@@ -385,6 +408,10 @@ pub enum UTxOWValidationError {
         script_hash: ScriptHash,
         reason: String,
     },
+
+    /// **Cause:** Other UTxOW Validation Errors
+    #[error("Other UTxOW Validation Error: {0}")]
+    Other(String),
 }
 
 /// Reference

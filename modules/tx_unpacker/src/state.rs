@@ -49,8 +49,8 @@ impl State {
     ) -> Result<(), Box<TransactionValidationError>> {
         validations::validate_tx(
             raw_tx,
+            &self.protocol_params,
             genesis_delegs,
-            &self.protocol_params.shelley,
             block_info.slot,
             block_info.era,
         )

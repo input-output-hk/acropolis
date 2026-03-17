@@ -5,16 +5,13 @@
 
 use std::collections::HashMap;
 
-use crate::validations::shelley;
 use acropolis_common::{
-    crypto::keyhash_256, hash::Hash, protocol_params::ProtocolVersion,
-    validation::UTxOWValidationError, GenesisDelegates, Metadata, NativeScript,
-    ScriptIntegrityHash, TxHash, VKeyWitness,
+    crypto::keyhash_256, hash::Hash, validation::UTxOWValidationError, ScriptIntegrityHash,
 };
 use anyhow::Result;
 use pallas::{
     codec::{minicbor, utils::AnyCbor},
-    ledger::primitives::alonzo,
+    ledger::traverse::MultiEraTx,
 };
 use tracing::error;
 
@@ -44,7 +41,13 @@ fn extract_raw_witness_script_data(
 /// redeemers ++ (if plutus data non-empty then plutus data else []) ++ lang_views.
 /// Uses the original CBOR bytes from the witness set so indefinite-length encodings
 /// (e.g. 9f...ff) are preserved and the hash matches on-chain.
-fn compute_script_integrity_hash(mtx: &alonzo::MintedTx) -> Option<ScriptIntegrityHash> {
+fn compute_script_integrity_hash(tx: &MultiEraTx) -> Option<ScriptIntegrityHash> {
+    let mtx = match tx {
+        MultiEraTx::AlonzoCompatible(tx, _) => tx,
+        // TODO:
+        // Check Babbage and Conway eras
+        _ => return None,
+    };
     let raw_witness_set = mtx.transaction_witness_set.raw_cbor();
     let (plutus_data_raw, redeemer_raw) = match extract_raw_witness_script_data(raw_witness_set) {
         Ok(x) => x,
@@ -102,12 +105,17 @@ fn plutus_language_views_cbor() -> Vec<u8> {
 
 /// Validate Script Integrity Hash
 /// Reference: https://github.com/IntersectMBO/cardano-ledgeFr/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxow.hs#L289
-pub fn validate_script_integrity_hash(
-    mtx: &alonzo::MintedTx,
-) -> Result<(), Box<UTxOWValidationError>> {
-    let script_data_hash =
-        mtx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x));
-    let computed_hash = compute_script_integrity_hash(mtx);
+/// TODO:
+/// We skipped the script integrity hash validation
+/// for Babbage and Conway eras
+pub fn validate_script_integrity_hash(tx: &MultiEraTx) -> Result<(), Box<UTxOWValidationError>> {
+    let script_data_hash = match tx {
+        MultiEraTx::AlonzoCompatible(tx, _) => {
+            tx.transaction_body.script_data_hash.as_ref().map(|x| Hash::<32>::from(**x))
+        }
+        _ => None,
+    };
+    let computed_hash = compute_script_integrity_hash(tx);
 
     if script_data_hash.eq(&computed_hash) {
         Ok(())
@@ -126,29 +134,8 @@ pub fn validate_script_integrity_hash(
 /// Since Alonzo introduces **Plutus Scripts** (phase 2), this requires new UTxOW validation rules.
 ///
 /// 1. ScriptIntegrityHashMismatch
-#[allow(clippy::too_many_arguments)]
-pub fn validate(
-    mtx: &alonzo::MintedTx,
-    tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
-    native_scripts: &[NativeScript],
-    metadata: &Option<Metadata>,
-    genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
-    protocol_version: &ProtocolVersion,
-) -> Result<(), Box<UTxOWValidationError>> {
-    shelley::utxow::validate(
-        mtx,
-        tx_hash,
-        vkey_witnesses,
-        native_scripts,
-        metadata,
-        genesis_delegs,
-        update_quorum,
-        protocol_version,
-    )?;
-
-    validate_script_integrity_hash(mtx)?;
+pub fn validate(tx: &MultiEraTx) -> Result<(), Box<UTxOWValidationError>> {
+    validate_script_integrity_hash(tx)?;
 
     Ok(())
 }
@@ -160,7 +147,6 @@ mod tests {
         test_utils::{to_pallas_era, TestContext},
         validation_fixture,
     };
-    use pallas::codec::minicbor;
     use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
@@ -201,25 +187,11 @@ mod tests {
     )]
     #[allow(clippy::result_large_err)]
     fn alonzo_utxow_test(
-        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let mtx = tx.as_alonzo().unwrap();
-        let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
-        let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
-        let metadata = acropolis_codec::map_metadata(&tx.metadata());
 
-        validate(
-            mtx,
-            TxHash::from(*tx.hash()),
-            &vkey_witnesses,
-            &native_scripts,
-            &metadata,
-            &ctx.shelley_params.gen_delegs,
-            ctx.shelley_params.update_quorum,
-            &ctx.shelley_params.protocol_params.protocol_version,
-        )
-        .map_err(|e| *e)
+        validate(&tx).map_err(|e| *e)
     }
 
     #[test]
@@ -229,26 +201,20 @@ mod tests {
             "97779c4e21031457206c64c4f6adee02287178ba24242de475c68d7fbe1f12ba"
         );
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let mtx = tx.as_alonzo().unwrap();
 
-        let computed = compute_script_integrity_hash(mtx);
+        let computed = compute_script_integrity_hash(&tx);
 
         assert!(computed.is_none(), "expected no script integrity hash");
     }
 
     #[test]
     fn validate_script_integrity_hash_reports_mismatch_when_body_hash_missing() {
-        let (_ctx, raw_tx, _era): (TestContext, Vec<u8>, &str) = validation_fixture!(
+        let (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str) = validation_fixture!(
             "alonzo",
             "de5a43595e3257b9cccb90a396c455a0ed3895a7d859fb507b85363ee4638590"
         );
-        let tx: alonzo::Tx = minicbor::decode(&raw_tx).unwrap();
-        let mut tx = tx;
-        tx.transaction_body.script_data_hash = None;
-        let mutated_tx = minicbor::to_vec(tx).unwrap();
-        let mtx: alonzo::MintedTx = minicbor::decode(&mutated_tx).unwrap();
-
-        let err = validate_script_integrity_hash(&mtx).unwrap_err();
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
+        let err = validate_script_integrity_hash(&tx).unwrap_err();
         match *err {
             UTxOWValidationError::ScriptIntegrityHashMismatch {
                 expected, actual, ..

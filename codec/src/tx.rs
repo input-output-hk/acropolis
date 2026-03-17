@@ -178,6 +178,10 @@ pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     scripts_provided
 }
 
+pub fn map_validity_interval(tx: &MultiEraTx) -> ValidityInterval {
+    ValidityInterval::new(tx.validity_start(), tx.ttl())
+}
+
 /// Map a Pallas Transaction
 /// NOTE:
 /// This function sorts
@@ -205,6 +209,7 @@ pub fn map_transaction(
 
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
+    let validity_interval = map_validity_interval(tx);
     let mut mint_burn_deltas = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
     let mut voting_procedures = None;
@@ -337,6 +342,7 @@ pub fn map_transaction(
         is_valid,
         certs,
         withdrawals,
+        validity_interval,
         required_signers,
         mint_burn_deltas,
         proposal_update: alonzo_babbage_update_proposal,

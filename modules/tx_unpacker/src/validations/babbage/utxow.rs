@@ -3,129 +3,19 @@
 //!
 //! NOTE: Babbage UTxOW re-uses Alonzo UTxOW rules, but introduces several new validation rules.
 
-use std::collections::HashSet;
-
-use crate::validations::shelley;
-use acropolis_common::{
-    protocol_params::ProtocolVersion, validation::UTxOWValidationError, DataHash, GenesisDelegates,
-    Metadata, NativeScript, ReferenceScript, TxHash, VKeyWitness,
-};
-use pallas::{codec::utils::Nullable, ledger::primitives::babbage};
+use acropolis_common::{validation::UTxOWValidationError, ReferenceScript};
 use rayon::prelude::*;
 use uplc_turbo::{arena::Arena, binder::DeBruijn, flat, program::Program};
-
-fn get_aux_data_hash(
-    mtx: &babbage::MintedTx,
-) -> Result<Option<DataHash>, Box<UTxOWValidationError>> {
-    let aux_data_hash = match mtx.transaction_body.auxiliary_data_hash.as_ref() {
-        Some(x) => Some(DataHash::try_from(x.to_vec()).map_err(|_| {
-            Box::new(UTxOWValidationError::InvalidMetadataHash {
-                reason: "invalid metadata hash".to_string(),
-            })
-        })?),
-        None => None,
-    };
-    Ok(aux_data_hash)
-}
-
-fn get_aux_data(mtx: &babbage::MintedTx) -> Option<Vec<u8>> {
-    match &mtx.auxiliary_data {
-        Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
-        _ => None,
-    }
-}
 
 /// NEW Babbage Validation Rules
 /// Since Babbage introduces **reference scripts** and **inline datums**, this requires new UTxOW validation rules.
 ///
 /// 1. MalformedScriptWitnesses
-/// 2. MalformedReferenceScripts
 #[allow(clippy::too_many_arguments)]
 pub fn validate(
-    mtx: &babbage::MintedTx,
-    tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
-    native_scripts: &[NativeScript],
     plutus_scripts_witnesses: &[ReferenceScript],
-    metadata: &Option<Metadata>,
-    genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
-    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    shelley_wrapper(
-        mtx,
-        tx_hash,
-        vkey_witnesses,
-        native_scripts,
-        metadata,
-        genesis_delegs,
-        update_quorum,
-        protocol_version,
-    )?;
-
-    // TODO:
-    // Add ScriptIntegrityHash validation here
-
     validate_plutus_scripts_witnesses(plutus_scripts_witnesses)?;
-
-    Ok(())
-}
-
-fn has_mir_certificate(mtx: &babbage::MintedTx) -> bool {
-    mtx.transaction_body
-        .certificates
-        .as_ref()
-        .map(|certs| {
-            certs
-                .iter()
-                .any(|cert| matches!(cert, babbage::Certificate::MoveInstantaneousRewardsCert(_)))
-        })
-        .unwrap_or(false)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn shelley_wrapper(
-    mtx: &babbage::MintedTx,
-    tx_hash: TxHash,
-    vkey_witnesses: &[VKeyWitness],
-    native_scripts: &[NativeScript],
-    metadata: &Option<Metadata>,
-    genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
-    protocol_version: &ProtocolVersion,
-) -> Result<(), Box<UTxOWValidationError>> {
-    let transaction_body = &mtx.transaction_body;
-
-    // Extract vkey hashes from vkey_witnesses
-    let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
-
-    // validate native scripts
-    shelley::utxow::validate_native_scripts(
-        native_scripts,
-        &vkey_hashes_provided,
-        transaction_body.validity_interval_start,
-        transaction_body.ttl,
-    )?;
-
-    // validate vkey witnesses signatures
-    shelley::utxow::validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
-
-    // validate metadata
-    shelley::utxow::validate_metadata(
-        get_aux_data_hash(mtx)?,
-        get_aux_data(mtx),
-        metadata,
-        protocol_version,
-    )?;
-
-    // validate mir certificate genesis sig
-    if has_mir_certificate(mtx) {
-        shelley::utxow::validate_mir_genesis_sigs(
-            &vkey_hashes_provided,
-            genesis_delegs,
-            update_quorum,
-        )?;
-    }
 
     Ok(())
 }
@@ -188,26 +78,11 @@ mod tests {
     )]
     #[allow(clippy::result_large_err)]
     fn babbage_utxow_test(
-        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+        (_ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let mtx = tx.as_babbage().unwrap();
-        let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
-        let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
-        let metadata = acropolis_codec::map_metadata(&tx.metadata());
         let plutus_scripts_witnesses = acropolis_codec::extract_plutus_scripts_witnesses(&tx);
 
-        validate(
-            mtx,
-            TxHash::from(*tx.hash()),
-            &vkey_witnesses,
-            &native_scripts,
-            &plutus_scripts_witnesses,
-            &metadata,
-            &ctx.shelley_params.gen_delegs,
-            ctx.shelley_params.update_quorum,
-            &ctx.shelley_params.protocol_params.protocol_version,
-        )
-        .map_err(|e| *e)
+        validate(&plutus_scripts_witnesses).map_err(|e| *e)
     }
 }

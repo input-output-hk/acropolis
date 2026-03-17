@@ -2,58 +2,39 @@
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, validation::UTxOValidationError, Address, Lovelace, NetworkId,
+    protocol_params::ProtocolParams, validation::UTxOValidationError, Address, Era, NetworkId,
+    StakeAddress,
 };
 use anyhow::Result;
-use pallas::{
-    codec as pallas_codec,
-    ledger::{addresses::Address as PallasAddress, primitives::alonzo},
-};
+use pallas::ledger::traverse::{MultiEraInput, MultiEraOutput, MultiEraTx};
 
-fn get_lovelace_from_alonzo_value(val: &alonzo::Value) -> Lovelace {
-    match val {
-        alonzo::Value::Coin(res) => *res,
-        alonzo::Value::Multiasset(res, _) => *res,
-    }
-}
-
-fn get_value_size_in_bytes(val: &alonzo::Value) -> u64 {
-    let mut buf = Vec::new();
-    let _ = pallas_codec::minicbor::encode(val, &mut buf);
-    (buf.len() as u64).div_ceil(8)
-}
-
-/// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/mary/impl/src/Cardano/Ledger/Mary/TxOut.hs#L52
-fn compute_min_lovelace(value: &alonzo::Value, shelley_params: &ShelleyParams) -> Lovelace {
-    match value {
-        alonzo::Value::Coin(_) => shelley_params.protocol_params.min_utxo_value,
-        alonzo::Value::Multiasset(lovelace, _) => {
-            let utxo_entry_size = 27 + get_value_size_in_bytes(value);
-            let coins_per_utxo_word = shelley_params.protocol_params.min_utxo_value / 27;
-            (*lovelace).max(coins_per_utxo_word * utxo_entry_size)
-        }
-    }
-}
+use crate::validations::utils;
 
 pub type UTxOValidationResult = Result<(), Box<UTxOValidationError>>;
 
-pub fn validate(mtx: &alonzo::MintedTx, shelley_params: &ShelleyParams) -> UTxOValidationResult {
+pub fn validate(
+    tx: &MultiEraTx,
+    protocol_params: &ProtocolParams,
+    era: Era,
+) -> UTxOValidationResult {
+    let shelley_params = protocol_params.shelley.as_ref().ok_or_else(|| {
+        Box::new(UTxOValidationError::Other(
+            "Shelley params are not set".to_string(),
+        ))
+    })?;
     let network_id = shelley_params.network_id.clone();
-    let transaction_body = &mtx.transaction_body;
 
-    validate_input_set_empty_utxo(transaction_body)?;
-    validate_output_network(transaction_body, network_id.clone())?;
-    validate_withdrawal_network(transaction_body, network_id.clone())?;
-    validate_output_too_small_utxo(transaction_body, shelley_params)?;
+    validate_input_set_empty_utxo(&tx.inputs_sorted_set())?;
+    validate_output_network(&tx.produces(), network_id.clone())?;
+    validate_withdrawal_network(&tx.withdrawals_sorted_set(), network_id.clone())?;
+    validate_output_too_small_utxo(&tx.outputs(), &tx.collateral_return(), protocol_params, era)?;
     Ok(())
 }
 
 /// Validate every transaction must consume at least one UTxO
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L435
-pub fn validate_input_set_empty_utxo(
-    transaction_body: &alonzo::TransactionBody,
-) -> UTxOValidationResult {
-    if transaction_body.inputs.is_empty() {
+pub fn validate_input_set_empty_utxo(inputs: &[MultiEraInput]) -> UTxOValidationResult {
+    if inputs.is_empty() {
         Err(Box::new(UTxOValidationError::InputSetEmptyUTxO))
     } else {
         Ok(())
@@ -63,21 +44,21 @@ pub fn validate_input_set_empty_utxo(
 /// Validate every output address match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L481
 pub fn validate_output_network(
-    transaction_body: &alonzo::TransactionBody,
+    outputs: &[(usize, MultiEraOutput)],
     network_id: NetworkId,
 ) -> UTxOValidationResult {
-    for (index, output) in transaction_body.outputs.iter().enumerate() {
-        let pallas_address = PallasAddress::from_bytes(output.address.as_ref()).map_err(|_| {
+    for (index, output) in outputs.iter() {
+        let pallas_address = output.address().map_err(|_| {
             Box::new(UTxOValidationError::MalformedOutput {
-                output_index: index,
-                reason: "Malformed address at output".to_string(),
+                output_index: *index,
+                reason: "Malformed address".to_string(),
             })
         })?;
 
-        let address = acropolis_codec::map_address(&pallas_address).map_err(|e| {
+        let address = acropolis_codec::map_address(&pallas_address).map_err(|_| {
             Box::new(UTxOValidationError::MalformedOutput {
-                output_index: index,
-                reason: format!("Invalid address at output {index}: {}", e),
+                output_index: *index,
+                reason: "Invalid address".to_string(),
             })
         })?;
 
@@ -88,8 +69,8 @@ pub fn validate_output_network(
             Address::Shelley(shelley_address) => shelley_address.network == network_id,
             _ => {
                 return Err(Box::new(UTxOValidationError::MalformedOutput {
-                    output_index: index,
-                    reason: "Not a Shelley Address at output".to_string(),
+                    output_index: *index,
+                    reason: "Not a Shelley Address".to_string(),
                 }))
             }
         };
@@ -97,7 +78,7 @@ pub fn validate_output_network(
             return Err(Box::new(UTxOValidationError::WrongNetwork {
                 expected: network_id,
                 wrong_address: address,
-                output_index: index,
+                output_index: *index,
             }));
         }
     }
@@ -108,37 +89,16 @@ pub fn validate_output_network(
 /// Validate every withdrawal account addresses match the network
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L497
 pub fn validate_withdrawal_network(
-    transaction_body: &alonzo::TransactionBody,
+    withdrawals: &[(&[u8], u64)],
     network_id: NetworkId,
 ) -> UTxOValidationResult {
-    let Some(withdrawals) = transaction_body.withdrawals.as_ref() else {
-        return Ok(());
-    };
-    for (index, (stake_address_bytes, _)) in withdrawals.iter().enumerate() {
-        let pallas_reward_adddess =
-            PallasAddress::from_bytes(stake_address_bytes).map_err(|_| {
-                Box::new(UTxOValidationError::MalformedWithdrawal {
-                    withdrawal_index: index,
-                    reason: "Malformed reward address at withdrawal".to_string(),
-                })
-            })?;
-
-        let stake_address = acropolis_codec::map_address(&pallas_reward_adddess).map_err(|e| {
+    for (index, (stake_address_bytes, _amount)) in withdrawals.iter().enumerate() {
+        let stake_address = StakeAddress::from_binary(stake_address_bytes).map_err(|e| {
             Box::new(UTxOValidationError::MalformedWithdrawal {
                 withdrawal_index: index,
-                reason: format!("Invalid reward address at withdrawal: {e}"),
+                reason: format!("Invalid stake address: {e}"),
             })
         })?;
-
-        let stake_address = match stake_address {
-            Address::Stake(stake_address) => stake_address,
-            _ => {
-                return Err(Box::new(UTxOValidationError::MalformedWithdrawal {
-                    withdrawal_index: index,
-                    reason: "Not a Stake Address at withdrawal".to_string(),
-                }));
-            }
-        };
 
         if stake_address.network != network_id {
             return Err(Box::new(UTxOValidationError::WrongNetworkWithdrawal {
@@ -155,12 +115,15 @@ pub fn validate_withdrawal_network(
 /// Validate every output has minimum required lovelace
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L531
 pub fn validate_output_too_small_utxo(
-    transaction_body: &alonzo::TransactionBody,
-    shelley_params: &ShelleyParams,
+    outputs: &[MultiEraOutput],
+    collateral_return: &Option<MultiEraOutput>,
+    protocol_params: &ProtocolParams,
+    era: Era,
 ) -> UTxOValidationResult {
-    for (index, output) in transaction_body.outputs.iter().enumerate() {
-        let lovelace = get_lovelace_from_alonzo_value(&output.amount);
-        let required_lovelace = compute_min_lovelace(&output.amount, shelley_params);
+    let validate_output = |index: usize, output: &MultiEraOutput| {
+        let lovelace = output.value().coin();
+        let required_lovelace = utils::compute_min_lovelace(output, protocol_params, era)
+            .map_err(|e| Box::new(UTxOValidationError::Other(e.to_string())))?;
         if lovelace < required_lovelace {
             return Err(Box::new(UTxOValidationError::OutputTooSmallUTxO {
                 output_index: index,
@@ -168,6 +131,16 @@ pub fn validate_output_too_small_utxo(
                 required_lovelace,
             }));
         }
+        Ok(())
+    };
+
+    for (index, output) in outputs.iter().enumerate() {
+        validate_output(index, output)?;
+    }
+    if let Some(collateral_return) = collateral_return {
+        // NOTE:
+        // Use collateral return index as 0
+        validate_output(0, collateral_return)?;
     }
     Ok(())
 }
@@ -176,7 +149,7 @@ pub fn validate_output_too_small_utxo(
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{to_pallas_era, TestContext},
+        test_utils::{to_era, to_pallas_era, TestContext},
         validation_fixture,
     };
     use acropolis_common::{ShelleyAddress, StakeAddress};
@@ -246,7 +219,6 @@ mod tests {
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let mtx = tx.as_alonzo().unwrap();
-        validate(mtx, &ctx.shelley_params).map_err(|e| *e)
+        validate(&tx, &ctx.protocol_params, to_era(era)).map_err(|e| *e)
     }
 }
