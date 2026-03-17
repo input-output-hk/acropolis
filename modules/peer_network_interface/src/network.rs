@@ -241,6 +241,12 @@ impl NetworkManager {
                         "peer-sharing discovery batch complete"
                     );
                 }
+                // Promote cold peers to fill up to min_hot_peers.
+                while self.peers.len() < self.min_hot_peers {
+                    if !self.try_promote_cold_peer() {
+                        break;
+                    }
+                }
             }
             NetworkEvent::PeerUpdate { peer, event } => {
                 self.handle_peer_update(peer, event);
@@ -1163,10 +1169,15 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(
+            manager.peers.len(),
+            3,
+            "discovered peers must be promoted to hot when below min_hot_peers"
+        );
         let cold = manager.peer_manager.as_ref().map(|pm| pm.cold_count()).unwrap_or(0);
         assert_eq!(
-            cold, 3,
-            "PeersDiscovered must add valid addresses to cold set"
+            cold, 0,
+            "all discovered peers should have been promoted out of cold"
         );
     }
 
