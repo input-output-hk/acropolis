@@ -15,6 +15,7 @@ use anyhow::Result;
 use pallas::ledger::{primitives::VrfCert, traverse::MultiEraHeader};
 use std::collections::HashMap;
 
+#[allow(clippy::result_large_err)]
 pub fn validate_vrf_praos<'a>(
     block_info: &'a BlockInfo,
     header: &'a MultiEraHeader,
