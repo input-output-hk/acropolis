@@ -85,6 +85,7 @@ fn conway_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * (get_conway_value_size_in_words(output) + 160))
 }
 
+#[allow(dead_code)]
 pub fn get_value_size_in_words(output: &MultiEraOutput) -> u64 {
     match output {
         MultiEraOutput::AlonzoCompatible(output, _) => {
