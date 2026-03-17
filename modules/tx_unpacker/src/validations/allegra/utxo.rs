@@ -36,7 +36,7 @@ pub fn validate_output_too_big_utxo(
     })?;
 
     let validate_output = |index: usize, output: &MultiEraOutput| {
-        let value_size = utils::get_value_size(output);
+        let value_size = utils::get_value_size_in_words(output);
         if value_size > alonzo_params.max_value_size as u64 {
             return Err(Box::new(UTxOValidationError::OutputTooBigUTxO {
                 output_index: index,

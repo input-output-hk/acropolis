@@ -6,13 +6,7 @@ use pallas::codec::utils::Nullable;
 use pallas::ledger::primitives::{alonzo, babbage, conway};
 use pallas::ledger::traverse::{MultiEraOutput, MultiEraTx};
 
-fn get_alonzo_value_size_in_bytes(val: &alonzo::Value) -> u64 {
-    let mut buf = Vec::new();
-    let _ = pallas_codec::minicbor::encode(val, &mut buf);
-    (buf.len() as u64).div_ceil(8)
-}
-
-fn get_conway_value_size_in_bytes(val: &conway::Value) -> u64 {
+fn get_alonzo_value_size_in_words(val: &alonzo::Value) -> u64 {
     let mut buf = Vec::new();
     let _ = pallas_codec::minicbor::encode(val, &mut buf);
     (buf.len() as u64).div_ceil(8)
@@ -27,7 +21,7 @@ fn shelley_ma_compute_min_lovelace(
     match &output.amount {
         alonzo::Value::Coin(_) => Ok(min_utxo_value),
         alonzo::Value::Multiasset(lovelace, _) => {
-            let utxo_entry_size = 27 + get_alonzo_value_size_in_bytes(&output.amount);
+            let utxo_entry_size = 27 + get_alonzo_value_size_in_words(&output.amount);
             let coins_per_utxo_word = min_utxo_value / 27;
             Ok((*lovelace).max(coins_per_utxo_word * utxo_entry_size))
         }
@@ -41,7 +35,7 @@ fn alonzo_compute_min_lovelace(
     let lovelace_per_utxo_word = protocol_params
         .lovelace_per_utxo_word()
         .ok_or_else(|| anyhow!("Lovelace per utxo word are not set"))?;
-    let output_entry_size: u64 = get_alonzo_value_size_in_bytes(&output.amount)
+    let output_entry_size: u64 = get_alonzo_value_size_in_words(&output.amount)
         + match output.datum_hash {
             Some(_) => 37, // utxoEntrySizeWithoutVal (27) + dataHashSize (10)
             None => 27,    // utxoEntrySizeWithoutVal
@@ -49,12 +43,12 @@ fn alonzo_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * output_entry_size)
 }
 
-fn get_babbage_value_size(output: &babbage::MintedTransactionOutput) -> u64 {
+fn get_babbage_value_size_in_words(output: &babbage::MintedTransactionOutput) -> u64 {
     let value = match output {
         babbage::MintedTransactionOutput::Legacy(output) => &output.amount,
         babbage::MintedTransactionOutput::PostAlonzo(output) => &output.value,
     };
-    get_alonzo_value_size_in_bytes(value)
+    get_alonzo_value_size_in_words(value)
 }
 
 fn babbage_compute_min_lovelace(
@@ -65,16 +59,18 @@ fn babbage_compute_min_lovelace(
         .lovelace_per_utxo_word()
         .ok_or_else(|| anyhow!("Lovelace per utxo word are not set"))?;
 
-    Ok(lovelace_per_utxo_word * (get_babbage_value_size(output) + 160))
+    Ok(lovelace_per_utxo_word * (get_babbage_value_size_in_words(output) + 160))
 }
 
-fn get_conway_value_size(output: &conway::MintedTransactionOutput) -> u64 {
+fn get_conway_value_size_in_words(output: &conway::MintedTransactionOutput) -> u64 {
     match output {
         conway::MintedTransactionOutput::Legacy(output) => {
-            get_alonzo_value_size_in_bytes(&output.amount)
+            get_alonzo_value_size_in_words(&output.amount)
         }
         conway::MintedTransactionOutput::PostAlonzo(output) => {
-            get_conway_value_size_in_bytes(&output.value)
+            let mut buf = Vec::new();
+            let _ = pallas_codec::minicbor::encode(&output.value, &mut buf);
+            (buf.len() as u64).div_ceil(8)
         }
     }
 }
@@ -86,16 +82,16 @@ fn conway_compute_min_lovelace(
     let lovelace_per_utxo_word = protocol_params
         .lovelace_per_utxo_word()
         .ok_or_else(|| anyhow!("Lovelace per utxo word are not set"))?;
-    Ok(lovelace_per_utxo_word * (get_conway_value_size(output) + 160))
+    Ok(lovelace_per_utxo_word * (get_conway_value_size_in_words(output) + 160))
 }
 
-pub fn get_value_size(output: &MultiEraOutput) -> u64 {
+pub fn get_value_size_in_words(output: &MultiEraOutput) -> u64 {
     match output {
         MultiEraOutput::AlonzoCompatible(output, _) => {
-            get_alonzo_value_size_in_bytes(&output.amount)
+            get_alonzo_value_size_in_words(&output.amount)
         }
-        MultiEraOutput::Babbage(output) => get_babbage_value_size(output),
-        MultiEraOutput::Conway(output) => get_conway_value_size(output),
+        MultiEraOutput::Babbage(output) => get_babbage_value_size_in_words(output),
+        MultiEraOutput::Conway(output) => get_conway_value_size_in_words(output),
         _ => 0,
     }
 }
