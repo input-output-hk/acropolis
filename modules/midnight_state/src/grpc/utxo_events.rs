@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use crate::grpc::midnight_state_proto::{utxo_event, UtxoEvent};
 
 impl UtxoEvent {
-    fn position(&self) -> (u64, u32) {
+    pub(crate) fn position(&self) -> (u64, u32) {
         match self.kind.as_ref() {
             Some(utxo_event::Kind::AssetCreate(e)) => (e.block_number, e.tx_index),
             Some(utxo_event::Kind::AssetSpend(e)) => (e.block_number, e.tx_index),
@@ -12,11 +12,33 @@ impl UtxoEvent {
             None => (0, 0),
         }
     }
+
+    fn kind_order(&self) -> u8 {
+        match self.kind.as_ref() {
+            Some(utxo_event::Kind::AssetCreate(_)) | Some(utxo_event::Kind::Registration(_)) => 0,
+            Some(utxo_event::Kind::AssetSpend(_))
+            | Some(utxo_event::Kind::Deregistration(_))
+            | None => 1,
+        }
+    }
+
+    fn utxo_id(&self) -> (Vec<u8>, u32) {
+        match self.kind.as_ref() {
+            Some(utxo_event::Kind::AssetCreate(e)) => (e.tx_hash.clone(), e.output_index),
+            Some(utxo_event::Kind::AssetSpend(e)) => (e.utxo_tx_hash.clone(), e.utxo_index),
+            Some(utxo_event::Kind::Registration(e)) => (e.tx_hash.clone(), e.output_index),
+            Some(utxo_event::Kind::Deregistration(e)) => (e.utxo_tx_hash.clone(), e.utxo_index),
+            None => (Vec::new(), 0),
+        }
+    }
 }
 
 impl Ord for UtxoEvent {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.position().cmp(&other.position())
+        self.position()
+            .cmp(&other.position())
+            .then_with(|| self.kind_order().cmp(&other.kind_order()))
+            .then_with(|| self.utxo_id().cmp(&other.utxo_id()))
     }
 }
 
@@ -56,7 +78,7 @@ pub fn truncate_by_tx_capacity(mut events: Vec<UtxoEvent>, tx_capacity: usize) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grpc::midnight_state_proto::AssetCreate;
+    use crate::grpc::midnight_state_proto::{utxo_event, AssetCreate, AssetSpend, UtxoEvent};
 
     fn create_event(block: u32, tx: u32) -> UtxoEvent {
         UtxoEvent {
@@ -87,6 +109,65 @@ mod tests {
         let positions: Vec<(u64, u32)> = events.iter().map(|e| e.position()).collect();
 
         assert_eq!(positions, vec![(1, 3), (1, 4), (1, 5), (2, 0)]);
+    }
+
+    #[test]
+    fn sort_orders_within_transaction_by_create_then_utxo_id() {
+        let mut events = vec![
+            UtxoEvent {
+                kind: Some(utxo_event::Kind::AssetSpend(AssetSpend {
+                    address: vec![],
+                    quantity: 0,
+                    spending_tx_hash: vec![9; 32],
+                    block_number: 1,
+                    block_hash: vec![],
+                    tx_index: 0,
+                    utxo_tx_hash: vec![2; 32],
+                    utxo_index: 0,
+                    block_timestamp_unix: 0,
+                })),
+            },
+            UtxoEvent {
+                kind: Some(utxo_event::Kind::AssetCreate(AssetCreate {
+                    address: vec![],
+                    quantity: 0,
+                    tx_hash: vec![1; 32],
+                    output_index: 2,
+                    block_number: 1,
+                    block_hash: vec![],
+                    tx_index: 0,
+                    block_timestamp_unix: 0,
+                })),
+            },
+            UtxoEvent {
+                kind: Some(utxo_event::Kind::AssetCreate(AssetCreate {
+                    address: vec![],
+                    quantity: 0,
+                    tx_hash: vec![1; 32],
+                    output_index: 0,
+                    block_number: 1,
+                    block_hash: vec![],
+                    tx_index: 0,
+                    block_timestamp_unix: 0,
+                })),
+            },
+        ];
+
+        events.sort();
+
+        let kinds_and_indexes: Vec<(&'static str, u32)> = events
+            .iter()
+            .map(|event| match event.kind.as_ref() {
+                Some(utxo_event::Kind::AssetCreate(e)) => ("create", e.output_index),
+                Some(utxo_event::Kind::AssetSpend(e)) => ("spend", e.utxo_index),
+                _ => ("other", 0),
+            })
+            .collect();
+
+        assert_eq!(
+            kinds_and_indexes,
+            vec![("create", 0), ("create", 2), ("spend", 0)]
+        );
     }
 
     #[test]
