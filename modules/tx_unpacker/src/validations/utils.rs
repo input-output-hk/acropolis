@@ -6,10 +6,14 @@ use pallas::codec::utils::Nullable;
 use pallas::ledger::primitives::{alonzo, babbage, conway};
 use pallas::ledger::traverse::{MultiEraOutput, MultiEraTx};
 
-fn get_alonzo_value_size_in_words(val: &alonzo::Value) -> u64 {
+fn get_alonzo_value_size_in_bytes(val: &alonzo::Value) -> u64 {
     let mut buf = Vec::new();
     let _ = pallas_codec::minicbor::encode(val, &mut buf);
-    (buf.len() as u64).div_ceil(8)
+    buf.len() as u64
+}
+
+fn get_alonzo_value_size_in_words(val: &alonzo::Value) -> u64 {
+    get_alonzo_value_size_in_bytes(val).div_ceil(8)
 }
 
 fn shelley_ma_compute_min_lovelace(
@@ -43,12 +47,16 @@ fn alonzo_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * output_entry_size)
 }
 
-fn get_babbage_value_size_in_words(output: &babbage::MintedTransactionOutput) -> u64 {
+fn get_babbage_value_size_in_bytes(output: &babbage::MintedTransactionOutput) -> u64 {
     let value = match output {
         babbage::MintedTransactionOutput::Legacy(output) => &output.amount,
         babbage::MintedTransactionOutput::PostAlonzo(output) => &output.value,
     };
-    get_alonzo_value_size_in_words(value)
+    get_alonzo_value_size_in_bytes(value)
+}
+
+fn get_babbage_value_size_in_words(output: &babbage::MintedTransactionOutput) -> u64 {
+    get_babbage_value_size_in_bytes(output).div_ceil(8)
 }
 
 fn babbage_compute_min_lovelace(
@@ -62,17 +70,21 @@ fn babbage_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * (get_babbage_value_size_in_words(output) + 160))
 }
 
-fn get_conway_value_size_in_words(output: &conway::MintedTransactionOutput) -> u64 {
+fn get_conway_value_size_in_bytes(output: &conway::MintedTransactionOutput) -> u64 {
     match output {
         conway::MintedTransactionOutput::Legacy(output) => {
-            get_alonzo_value_size_in_words(&output.amount)
+            get_alonzo_value_size_in_bytes(&output.amount)
         }
         conway::MintedTransactionOutput::PostAlonzo(output) => {
             let mut buf = Vec::new();
             let _ = pallas_codec::minicbor::encode(&output.value, &mut buf);
-            (buf.len() as u64).div_ceil(8)
+            buf.len() as u64
         }
     }
+}
+
+fn get_conway_value_size_in_words(output: &conway::MintedTransactionOutput) -> u64 {
+    get_conway_value_size_in_bytes(output).div_ceil(8)
 }
 
 fn conway_compute_min_lovelace(
@@ -85,6 +97,18 @@ fn conway_compute_min_lovelace(
     Ok(lovelace_per_utxo_word * (get_conway_value_size_in_words(output) + 160))
 }
 
+pub fn get_value_size_in_bytes(output: &MultiEraOutput) -> u64 {
+    match output {
+        MultiEraOutput::AlonzoCompatible(output, _) => {
+            get_alonzo_value_size_in_bytes(&output.amount)
+        }
+        MultiEraOutput::Babbage(output) => get_babbage_value_size_in_bytes(output),
+        MultiEraOutput::Conway(output) => get_conway_value_size_in_bytes(output),
+        _ => 0,
+    }
+}
+
+#[allow(dead_code)]
 pub fn get_value_size_in_words(output: &MultiEraOutput) -> u64 {
     match output {
         MultiEraOutput::AlonzoCompatible(output, _) => {

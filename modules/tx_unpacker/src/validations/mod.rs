@@ -65,7 +65,7 @@ pub fn validate_tx(
 
     if era >= Era::Allegra {
         let validity_interval = acropolis_codec::map_validity_interval(&tx);
-        allegra::utxo::validate(&tx, &validity_interval, protocol_params, current_slot)
+        allegra::utxo::validate(&tx, &validity_interval, protocol_params, current_slot, era)
             .map_err(|e| Box::new(Phase1ValidationError::from(*e).into()))?;
     }
 
