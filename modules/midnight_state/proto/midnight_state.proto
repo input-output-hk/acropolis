@@ -210,7 +210,6 @@ message Block {
 }
 message LatestStableBlockRequest {
   uint32 offset = 1;
-  optional uint64 reference_timestamp_unix_millis = 2;
 }
 message LatestStableBlockResponse {
   optional Block block = 1;
@@ -225,7 +224,6 @@ message LatestBlockResponse {
 message StableBlockRequest {
   bytes block_hash = 1;
   uint32 offset = 2;
-  optional uint64 reference_timestamp_unix_millis = 3;
 }
 message StableBlockResponse {
   optional Block block = 1;

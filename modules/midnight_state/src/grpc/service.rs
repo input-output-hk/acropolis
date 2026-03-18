@@ -21,16 +21,11 @@ use crate::{
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
-    protocol_params::ShelleyParams,
     queries::{
         blocks::{
-            BlockInfo, BlockKey, BlocksStateQuery, BlocksStateQueryResponse,
-            DEFAULT_BLOCKS_QUERY_TOPIC,
+            BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         errors::QueryError,
-        parameters::{
-            ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
-        },
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
@@ -42,7 +37,6 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
-const BLOCK_SEARCH_BATCH_SIZE: u64 = 1024;
 
 #[derive(Clone)]
 pub struct MidnightStateService {
@@ -504,16 +498,6 @@ impl MidnightState for MidnightStateService {
         let block_info_opt =
             query_stable_block_by_hash(&self.context, block_hash, req.offset).await?;
 
-        let block_info_opt = if let Some(reference_timestamp) = req.reference_timestamp_unix_millis
-        {
-            let shelley_params = query_latest_shelley_params(&self.context).await?;
-            let (min_allowed, max_allowed) =
-                stable_block_time_bounds(reference_timestamp, &shelley_params)?;
-            block_info_opt.filter(|block| is_block_time_valid(block, min_allowed, max_allowed))
-        } else {
-            block_info_opt
-        };
-
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
             .map(|b| {
@@ -539,32 +523,7 @@ impl MidnightState for MidnightStateService {
         self.stats.latest_stable_block.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
-        let block_info_opt = if let Some(reference_timestamp) = req.reference_timestamp_unix_millis
-        {
-            let shelley_params = query_latest_shelley_params(&self.context).await?;
-            let (min_allowed, max_allowed) =
-                stable_block_time_bounds(reference_timestamp, &shelley_params)?;
-            let Some(block_info) = query_block_by_tip_offset(&self.context, req.offset).await?
-            else {
-                return Ok(Response::new(LatestStableBlockResponse { block: None }));
-            };
-
-            if is_block_time_valid(&block_info, min_allowed, max_allowed) {
-                Some(block_info)
-            } else if is_block_before_min_time(&block_info, min_allowed) {
-                None
-            } else {
-                find_latest_block_in_time_window(
-                    &self.context,
-                    block_info.number,
-                    min_allowed,
-                    max_allowed,
-                )
-                .await?
-            }
-        } else {
-            query_block_by_tip_offset(&self.context, req.offset).await?
-        };
+        let block_info_opt = query_block_by_tip_offset(&self.context, req.offset).await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -718,145 +677,6 @@ async fn query_block_by_hash_info(
     )
     .await
     .map_err(|e| Status::internal(e.to_string()))
-}
-
-async fn query_previous_blocks(
-    context: &Arc<Context<Message>>,
-    block_number: u64,
-    limit: u64,
-) -> Result<Vec<BlockInfo>, Status> {
-    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetPreviousBlocks {
-            block_key: BlockKey::Number(block_number),
-            limit,
-            skip: 0,
-        },
-    )));
-
-    let response = query_state(
-        context,
-        DEFAULT_BLOCKS_QUERY_TOPIC.1,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::PreviousBlocks(blocks),
-            )) => Ok(blocks),
-            Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving previous blocks",
-            )),
-        },
-    )
-    .await
-    .map_err(|e| Status::internal(e.to_string()))?;
-
-    Ok(response.blocks)
-}
-
-async fn query_latest_shelley_params(
-    context: &Arc<Context<Message>>,
-) -> Result<ShelleyParams, Status> {
-    let msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestEpochParameters,
-    )));
-
-    let protocol_params =
-        query_state(
-            context,
-            DEFAULT_PARAMETERS_QUERY_TOPIC.1,
-            msg,
-            |message| match message {
-                Message::StateQueryResponse(StateQueryResponse::Parameters(
-                    ParametersStateQueryResponse::LatestEpochParameters(params),
-                )) => Ok(params),
-                Message::StateQueryResponse(StateQueryResponse::Parameters(
-                    ParametersStateQueryResponse::Error(e),
-                )) => Err(e),
-                _ => Err(QueryError::internal_error(
-                    "Unexpected message type while retrieving latest protocol parameters",
-                )),
-            },
-        )
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-    protocol_params
-        .shelley
-        .ok_or_else(|| Status::internal("latest protocol parameters missing shelley params"))
-}
-
-#[allow(clippy::result_large_err)]
-fn stable_block_time_bounds(
-    reference_timestamp_unix_millis: u64,
-    shelley_params: &ShelleyParams,
-) -> Result<(u64, u64), Status> {
-    let k = u128::from(shelley_params.security_param);
-    let slot_length_millis = u128::from(shelley_params.slot_length) * 1000;
-    let asc_numerator = u128::from(*shelley_params.active_slots_coeff.numer());
-    let asc_denominator = u128::from(*shelley_params.active_slots_coeff.denom());
-
-    if asc_numerator == 0 {
-        return Err(Status::internal(
-            "active slots coefficient numerator is zero",
-        ));
-    }
-
-    let min_boundary_millis =
-        (slot_length_millis * k * asc_denominator + (asc_numerator / 2)) / asc_numerator;
-    let max_boundary_millis = min_boundary_millis.saturating_mul(3);
-
-    let min_boundary_millis = u64::try_from(min_boundary_millis)
-        .map_err(|_| Status::internal("minimum stability boundary overflow"))?;
-    let max_boundary_millis = u64::try_from(max_boundary_millis)
-        .map_err(|_| Status::internal("maximum stability boundary overflow"))?;
-
-    Ok((
-        reference_timestamp_unix_millis.saturating_sub(max_boundary_millis),
-        reference_timestamp_unix_millis.saturating_sub(min_boundary_millis),
-    ))
-}
-
-fn is_block_time_valid(
-    block: &BlockInfo,
-    min_allowed_unix_millis: u64,
-    max_allowed_unix_millis: u64,
-) -> bool {
-    let block_timestamp_unix_millis = block.timestamp.saturating_mul(1000);
-    min_allowed_unix_millis <= block_timestamp_unix_millis
-        && block_timestamp_unix_millis <= max_allowed_unix_millis
-}
-
-fn is_block_before_min_time(block: &BlockInfo, min_allowed_unix_millis: u64) -> bool {
-    block.timestamp.saturating_mul(1000) < min_allowed_unix_millis
-}
-
-async fn find_latest_block_in_time_window(
-    context: &Arc<Context<Message>>,
-    before_block_number: u64,
-    min_allowed_unix_millis: u64,
-    max_allowed_unix_millis: u64,
-) -> Result<Option<BlockInfo>, Status> {
-    let mut cursor = before_block_number;
-
-    loop {
-        let blocks = query_previous_blocks(context, cursor, BLOCK_SEARCH_BATCH_SIZE).await?;
-        let Some(oldest_block_number) = blocks.first().map(|block| block.number) else {
-            return Ok(None);
-        };
-
-        for block in blocks.iter().rev() {
-            if is_block_before_min_time(block, min_allowed_unix_millis) {
-                return Ok(None);
-            }
-            if is_block_time_valid(block, min_allowed_unix_millis, max_allowed_unix_millis) {
-                return Ok(Some(block.clone()));
-            }
-        }
-
-        cursor = oldest_block_number;
-    }
 }
 
 #[cfg(test)]
