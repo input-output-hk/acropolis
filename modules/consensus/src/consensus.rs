@@ -729,8 +729,7 @@ impl ConsensusRuntime {
                 }
                 ObserverEvent::Rollback { to_block_number } => {
                     let point = self.find_point_at_number(to_block_number);
-                    let block_info =
-                        self.find_block_info_at_number(to_block_number, BlockStatus::RolledBack);
+                    let block_info = self.find_block_info_at_number(to_block_number);
                     let msg = Arc::new(Message::Cardano((
                         block_info,
                         CardanoMessage::StateTransition(StateTransitionMessage::Rollback(point)),
@@ -839,33 +838,28 @@ impl ConsensusRuntime {
     }
 
     /// Find or construct a BlockInfo for a block at a given number.
-    fn find_block_info_at_number(&self, number: u64, status: BlockStatus) -> BlockInfo {
+    fn find_block_info_at_number(&self, number: u64) -> BlockInfo {
         let mut current = self.tree.favoured_tip();
         while let Some(h) = current {
             if let Some(b) = self.tree.get_block(&h) {
                 if b.number == number {
                     if let Some((info, _)) = self.block_data.get(&h) {
-                        return info.with_status(status);
+                        return info.with_status(BlockStatus::RolledBack);
                     }
-                    return Self::default_block_info(b.number, b.slot, b.hash, status);
+                    return Self::default_rollback_block_info(b.number, b.slot, b.hash);
                 }
                 current = b.parent;
             } else {
                 break;
             }
         }
-        Self::default_block_info(number, 0, BlockHash::default(), status)
+        Self::default_rollback_block_info(number, 0, BlockHash::default())
     }
 
     /// Construct a default BlockInfo with minimal fields populated.
-    fn default_block_info(
-        number: u64,
-        slot: u64,
-        hash: BlockHash,
-        status: BlockStatus,
-    ) -> BlockInfo {
+    fn default_rollback_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
         BlockInfo {
-            status,
+            status: BlockStatus::RolledBack,
             intent: BlockIntent::Apply,
             slot,
             number,
