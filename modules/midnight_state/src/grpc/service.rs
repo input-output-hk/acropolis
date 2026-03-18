@@ -52,7 +52,7 @@ impl MidnightStateService {
         }
     }
 
-    pub fn stats(&self) -> RequestStatsSnapshot {
+    pub fn stats(&self) -> Option<RequestStatsSnapshot> {
         self.stats.snapshot()
     }
 }
