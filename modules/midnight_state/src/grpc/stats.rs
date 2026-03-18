@@ -1,6 +1,9 @@
 use std::{
     fmt,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
 };
 
 #[derive(Default)]
@@ -15,9 +18,11 @@ pub struct RequestStats {
     pub latest_stable_block: AtomicU64,
     pub stable_block_by_hash: AtomicU64,
     pub latest_block: AtomicU64,
+
+    last_snapshot: Mutex<Option<RequestStatsSnapshot>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RequestStatsSnapshot {
     pub utxo_events: u64,
     pub council_datum: u64,
@@ -53,8 +58,8 @@ impl fmt::Display for RequestStatsSnapshot {
 }
 
 impl RequestStats {
-    pub fn snapshot(&self) -> RequestStatsSnapshot {
-        RequestStatsSnapshot {
+    pub fn snapshot(&self) -> Option<RequestStatsSnapshot> {
+        let current = RequestStatsSnapshot {
             utxo_events: self.utxo_events.load(Ordering::Relaxed),
             council_datum: self.council_datum.load(Ordering::Relaxed),
             technical_committee_datum: self.technical_committee_datum.load(Ordering::Relaxed),
@@ -65,6 +70,18 @@ impl RequestStats {
             latest_stable_block: self.latest_stable_block.load(Ordering::Relaxed),
             stable_block_by_hash: self.stable_block_by_hash.load(Ordering::Relaxed),
             latest_block: self.latest_block.load(Ordering::Relaxed),
+        };
+
+        let mut last = match self.last_snapshot.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        if last.as_ref() == Some(&current) {
+            return None;
         }
+
+        *last = Some(current.clone());
+        Some(current)
     }
 }

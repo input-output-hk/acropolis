@@ -30,8 +30,9 @@ pub async fn run(
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(60)).await;
-            let stats = stats_service.stats();
-            tracing::info!("gRPC request stats: {}", stats);
+            if let Some(stats) = stats_service.stats() {
+                tracing::info!("gRPC request stats: {}", stats);
+            }
         }
     });
 
