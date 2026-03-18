@@ -842,22 +842,22 @@ impl ConsensusRuntime {
             if let Some(b) = self.tree.get_block(&h) {
                 if b.number == number {
                     if let Some((info, _)) = self.block_data.get(&h) {
-                        return info.clone();
+                        return info.with_status(BlockStatus::RolledBack);
                     }
-                    return Self::default_block_info(b.number, b.slot, b.hash);
+                    return Self::default_rollback_block_info(b.number, b.slot, b.hash);
                 }
                 current = b.parent;
             } else {
                 break;
             }
         }
-        Self::default_block_info(number, 0, BlockHash::default())
+        Self::default_rollback_block_info(number, 0, BlockHash::default())
     }
 
     /// Construct a default BlockInfo with minimal fields populated.
-    fn default_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
+    fn default_rollback_block_info(number: u64, slot: u64, hash: BlockHash) -> BlockInfo {
         BlockInfo {
-            status: BlockStatus::Volatile,
+            status: BlockStatus::RolledBack,
             intent: BlockIntent::Apply,
             slot,
             number,
