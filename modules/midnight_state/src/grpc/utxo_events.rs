@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn sort_orders_within_transaction_by_create_then_utxo_id() {
-        let mut events = vec![
+        let mut events = [
             UtxoEvent {
                 kind: Some(utxo_event::Kind::AssetSpend(AssetSpend {
                     address: vec![],
