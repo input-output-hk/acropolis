@@ -20,7 +20,7 @@ impl From<AssetCreateInternal> for AssetCreateProto {
             block_number: c.block_number,
             block_hash: c.block_hash.to_vec(),
             tx_index: c.tx_index_in_block,
-            block_timestamp_unix: c.block_timestamp,
+            block_timestamp_unix_millis: c.block_timestamp.saturating_mul(1000),
         }
     }
 }
@@ -36,7 +36,7 @@ impl From<AssetSpendInternal> for AssetSpendProto {
             tx_index: c.tx_index_in_block,
             utxo_tx_hash: c.utxo_tx_hash.to_vec(),
             utxo_index: c.utxo_index.into(),
-            block_timestamp_unix: c.block_timestamp,
+            block_timestamp_unix_millis: c.block_timestamp.saturating_mul(1000),
         }
     }
 }
@@ -52,7 +52,7 @@ impl From<RegistrationInternal> for RegistrationProto {
             block_number: c.block_number,
             block_hash: c.block_hash.to_vec(),
             tx_index: c.tx_index_in_block,
-            block_timestamp_unix: c.block_timestamp,
+            block_timestamp_unix_millis: c.block_timestamp.saturating_mul(1000),
         }
     }
 }
@@ -69,7 +69,7 @@ impl From<DeregistrationInternal> for DeregistrationProto {
             tx_index: c.tx_index_in_block,
             utxo_tx_hash: c.utxo_tx_hash.to_vec(),
             utxo_index: c.utxo_index.into(),
-            block_timestamp_unix: c.block_timestamp,
+            block_timestamp_unix_millis: c.block_timestamp.saturating_mul(1000),
         }
     }
 }

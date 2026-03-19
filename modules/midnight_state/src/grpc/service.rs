@@ -6,26 +6,31 @@ use crate::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
             AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
-            BlockByHashResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
-            EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
-            LatestStableBlockRequest, LatestStableBlockResponse, RegistrationsRequest,
-            RegistrationsResponse, StableBlockRequest, StableBlockResponse, StakePoolEntry,
-            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
-            UtxoEventsRequest, UtxoEventsResponse,
+            BlockByHashResponse, CardanoPosition, CouncilDatumRequest, CouncilDatumResponse,
+            DeregistrationsRequest, DeregistrationsResponse, EpochCandidatesRequest,
+            EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse, LatestBlockRequest,
+            LatestBlockResponse, LatestStableBlockRequest, LatestStableBlockResponse,
+            RegistrationsRequest, RegistrationsResponse, StableBlockRequest, StableBlockResponse,
+            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
         },
         stats::{RequestStats, RequestStatsSnapshot},
-        utxo_events::truncate_by_tx_capacity,
+        utxo_events::truncate_by_legacy_tx_capacity,
     },
     state::State,
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
+    protocol_params::ProtocolParams,
     queries::{
         blocks::{
-            BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC,
+            BlockInfo, BlockKey, BlocksStateQuery, BlocksStateQueryResponse,
+            DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         errors::QueryError,
+        parameters::{
+            ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
+        },
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
@@ -37,6 +42,7 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
+const STABLE_BLOCK_LOOKBACK_BATCH_SIZE: u64 = 1024;
 
 #[derive(Clone)]
 pub struct MidnightStateService {
@@ -259,22 +265,47 @@ impl MidnightState for MidnightStateService {
         };
 
         let mut events = events;
+        let mut end_block = None;
 
         if let Some(end_block_hash) = req.end_block_hash {
             let end_block_hash = BlockHash::try_from(end_block_hash)
                 .map_err(|_| Status::invalid_argument("invalid end block hash"))?;
-            let end_block = query_block_by_hash_info(&self.context, end_block_hash).await?;
-            let end_position = (end_block.number, end_block.tx_count as u32);
+            let queried_end_block = query_block_by_hash_info(&self.context, end_block_hash).await?;
+            let end_position = (queried_end_block.number, queried_end_block.tx_count as u32);
             events.retain(|event| {
                 let position = event.position();
                 position.0 < end_position.0
                     || (position.0 == end_position.0 && position.1 < end_position.1)
             });
+            end_block = Some(queried_end_block);
         }
 
-        let events = truncate_by_tx_capacity(events, tx_capacity);
+        let truncated = truncate_by_legacy_tx_capacity(events, tx_capacity);
+        let next_position = if truncated.num_txs < tx_capacity {
+            if let Some(block) = end_block {
+                Some(CardanoPosition {
+                    block_hash: block.hash.to_vec(),
+                    block_number: u32::try_from(block.number)
+                        .map_err(|_| Status::internal("block number exceeds u32"))?,
+                    tx_index: u32::try_from(block.tx_count)
+                        .map_err(|_| Status::internal("tx count exceeds u32"))?
+                        .saturating_add(1),
+                    block_timestamp_unix_millis: i64::try_from(
+                        block.timestamp.saturating_mul(1000),
+                    )
+                    .map_err(|_| Status::internal("block timestamp exceeds i64"))?,
+                })
+            } else {
+                None
+            }
+        } else {
+            truncated.events.last().map(UtxoEvent::incremented_position)
+        };
 
-        Ok(Response::new(UtxoEventsResponse { events }))
+        Ok(Response::new(UtxoEventsResponse {
+            events: truncated.events,
+            next_position,
+        }))
     }
 
     async fn get_technical_committee_datum(
@@ -492,11 +523,22 @@ impl MidnightState for MidnightStateService {
     ) -> Result<Response<StableBlockResponse>, Status> {
         self.stats.stable_block_by_hash.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
+        let as_of_timestamp_unix_millis = req.as_of_timestamp_unix_millis;
+        if as_of_timestamp_unix_millis == 0 {
+            return Err(Status::invalid_argument(
+                "as_of_timestamp_unix_millis must be set",
+            ));
+        }
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
 
-        let block_info_opt =
-            query_stable_block_by_hash(&self.context, block_hash, req.offset).await?;
+        let block_info_opt = query_stable_block_by_hash_as_of(
+            &self.context,
+            block_hash,
+            req.stability_offset,
+            as_of_timestamp_unix_millis,
+        )
+        .await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -522,8 +564,19 @@ impl MidnightState for MidnightStateService {
     ) -> Result<Response<LatestStableBlockResponse>, Status> {
         self.stats.latest_stable_block.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
+        let as_of_timestamp_unix_millis = req.as_of_timestamp_unix_millis;
+        if as_of_timestamp_unix_millis == 0 {
+            return Err(Status::invalid_argument(
+                "as_of_timestamp_unix_millis must be set",
+            ));
+        }
 
-        let block_info_opt = query_block_by_tip_offset(&self.context, req.offset).await?;
+        let block_info_opt = query_latest_stable_block_as_of(
+            &self.context,
+            req.stability_offset,
+            as_of_timestamp_unix_millis,
+        )
+        .await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -622,13 +675,44 @@ async fn query_block_by_tip_offset(
     .map_err(|e| Status::internal(e.to_string()))
 }
 
-async fn query_stable_block_by_hash(
+async fn query_latest_protocol_params(
     context: &Arc<Context<Message>>,
-    block_hash: BlockHash,
-    offset: u32,
-) -> Result<Option<BlockInfo>, Status> {
+) -> Result<ProtocolParams, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
+        ParametersStateQuery::GetLatestEpochParameters,
+    )));
+
+    query_state(
+        context,
+        DEFAULT_PARAMETERS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::LatestEpochParameters(protocol_params),
+            )) => Ok(protocol_params),
+            Message::StateQueryResponse(StateQueryResponse::Parameters(
+                ParametersStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving protocol parameters",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn query_previous_blocks(
+    context: &Arc<Context<Message>>,
+    block_number: u64,
+    limit: u64,
+) -> Result<Vec<BlockInfo>, Status> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetStableBlockByHash { block_hash, offset },
+        BlocksStateQuery::GetPreviousBlocks {
+            block_key: BlockKey::Number(block_number),
+            limit,
+            skip: 0,
+        },
     )));
 
     query_state(
@@ -637,13 +721,13 @@ async fn query_stable_block_by_hash(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::StableBlockByHash(block_info),
-            )) => Ok(block_info),
+                BlocksStateQueryResponse::PreviousBlocks(previous_blocks),
+            )) => Ok(previous_blocks.blocks),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving block info",
+                "Unexpected message type while retrieving previous blocks",
             )),
         },
     )
@@ -679,13 +763,181 @@ async fn query_block_by_hash_info(
     .map_err(|e| Status::internal(e.to_string()))
 }
 
+async fn query_block_by_hash_info_opt(
+    context: &Arc<Context<Message>>,
+    block_hash: BlockHash,
+) -> Result<Option<BlockInfo>, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockByHash { block_hash },
+    )));
+
+    query_state(
+        context,
+        DEFAULT_BLOCKS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockByHash(block_info),
+            )) => Ok(Some(block_info)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving block info",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn query_latest_stable_block_as_of(
+    context: &Arc<Context<Message>>,
+    stability_offset: u32,
+    as_of_timestamp_unix_millis: u64,
+) -> Result<Option<BlockInfo>, Status> {
+    let Some(stable_boundary) = query_block_by_tip_offset(context, stability_offset).await? else {
+        return Ok(None);
+    };
+
+    let protocol_params = query_latest_protocol_params(context).await?;
+    let window = stable_block_window(&protocol_params, as_of_timestamp_unix_millis)?;
+
+    if is_block_within_stable_window(&stable_boundary, &window) {
+        return Ok(Some(stable_boundary));
+    }
+
+    if is_block_older_than_stable_window(&stable_boundary, &window) {
+        return Ok(None);
+    }
+
+    let mut anchor_block_number = stable_boundary.number;
+    loop {
+        let previous_blocks = query_previous_blocks(
+            context,
+            anchor_block_number,
+            STABLE_BLOCK_LOOKBACK_BATCH_SIZE,
+        )
+        .await?;
+
+        if previous_blocks.is_empty() {
+            return Ok(None);
+        }
+
+        for block in previous_blocks.iter().rev() {
+            if is_block_within_stable_window(block, &window) {
+                return Ok(Some(block.clone()));
+            }
+            if is_block_older_than_stable_window(block, &window) {
+                return Ok(None);
+            }
+        }
+
+        anchor_block_number = previous_blocks[0].number;
+    }
+}
+
+async fn query_stable_block_by_hash_as_of(
+    context: &Arc<Context<Message>>,
+    block_hash: BlockHash,
+    stability_offset: u32,
+    as_of_timestamp_unix_millis: u64,
+) -> Result<Option<BlockInfo>, Status> {
+    let Some(block_info) = query_block_by_hash_info_opt(context, block_hash).await? else {
+        return Ok(None);
+    };
+    let Some(stable_boundary) = query_block_by_tip_offset(context, stability_offset).await? else {
+        return Ok(None);
+    };
+    if block_info.number > stable_boundary.number {
+        return Ok(None);
+    }
+
+    let protocol_params = query_latest_protocol_params(context).await?;
+    let window = stable_block_window(&protocol_params, as_of_timestamp_unix_millis)?;
+
+    Ok(is_block_within_stable_window(&block_info, &window).then_some(block_info))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StableBlockWindow {
+    min_block_timestamp_unix_millis: u64,
+    max_block_timestamp_unix_millis: u64,
+}
+
+#[allow(clippy::result_large_err)]
+fn stable_block_window(
+    protocol_params: &ProtocolParams,
+    as_of_timestamp_unix_millis: u64,
+) -> Result<StableBlockWindow, Status> {
+    let shelley = protocol_params.shelley.as_ref().ok_or_else(|| {
+        Status::failed_precondition("latest protocol parameters do not include shelley params")
+    })?;
+
+    let active_slots_coeff_numerator = u128::from(*shelley.active_slots_coeff.numer());
+    let active_slots_coeff_denominator = u128::from(*shelley.active_slots_coeff.denom());
+    if active_slots_coeff_numerator == 0 {
+        return Err(Status::failed_precondition(
+            "active_slots_coeff numerator must be non-zero",
+        ));
+    }
+
+    let slot_duration_millis = u128::from(shelley.slot_length).saturating_mul(1000);
+    let min_block_age_millis = rounded_div_u128_to_u64(
+        slot_duration_millis
+            .saturating_mul(u128::from(shelley.security_param))
+            .saturating_mul(active_slots_coeff_denominator),
+        active_slots_coeff_numerator,
+    )?;
+    let max_block_age_millis = min_block_age_millis.saturating_mul(3);
+
+    Ok(StableBlockWindow {
+        min_block_timestamp_unix_millis: as_of_timestamp_unix_millis
+            .saturating_sub(max_block_age_millis),
+        max_block_timestamp_unix_millis: as_of_timestamp_unix_millis
+            .saturating_sub(min_block_age_millis),
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn rounded_div_u128_to_u64(numerator: u128, denominator: u128) -> Result<u64, Status> {
+    if denominator == 0 {
+        return Err(Status::failed_precondition(
+            "stability window denominator must be non-zero",
+        ));
+    }
+
+    let rounded = numerator
+        .saturating_add(denominator / 2)
+        .checked_div(denominator)
+        .ok_or_else(|| Status::internal("failed to calculate rounded stability window"))?;
+
+    u64::try_from(rounded).map_err(|_| Status::internal("stability window overflow"))
+}
+
+fn is_block_within_stable_window(block: &BlockInfo, window: &StableBlockWindow) -> bool {
+    let block_timestamp_unix_millis = block.timestamp.saturating_mul(1000);
+    window.min_block_timestamp_unix_millis <= block_timestamp_unix_millis
+        && block_timestamp_unix_millis <= window.max_block_timestamp_unix_millis
+}
+
+fn is_block_older_than_stable_window(block: &BlockInfo, window: &StableBlockWindow) -> bool {
+    block.timestamp.saturating_mul(1000) < window.min_block_timestamp_unix_millis
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use acropolis_common::{
         messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
+        protocol_params::{ProtocolParams, ShelleyParams},
+        queries::blocks::BlockInfo as QueryBlockInfo,
         queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
+        rational_number::RationalNumber,
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress,
@@ -1261,5 +1513,76 @@ mod tests {
         assert!(asset_creates.next().is_none());
         assert_eq!(asset_create.address, expected_owner_address());
         assert_eq!(registrations, 1);
+    }
+
+    fn query_block_info(number: u64, timestamp: u64) -> QueryBlockInfo {
+        QueryBlockInfo {
+            timestamp,
+            number,
+            hash: BlockHash::default(),
+            slot: number,
+            epoch: 0,
+            epoch_slot: number,
+            issuer: None,
+            size: 0,
+            tx_count: 0,
+            output: None,
+            fees: None,
+            block_vrf: None,
+            op_cert: None,
+            op_cert_counter: None,
+            previous_block: None,
+            next_block: None,
+            confirmations: 0,
+        }
+    }
+
+    #[test]
+    fn stable_block_window_should_match_partner_chain_formula() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 432,
+                active_slots_coeff: RationalNumber::new(1, 20),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let window =
+            super::stable_block_window(&protocol_params, 1_773_727_092_000).expect("window");
+
+        assert_eq!(
+            window,
+            super::StableBlockWindow {
+                min_block_timestamp_unix_millis: 1_773_701_172_000,
+                max_block_timestamp_unix_millis: 1_773_718_452_000,
+            }
+        );
+    }
+
+    #[test]
+    fn stable_block_window_predicates_should_match_expected_bounds() {
+        let window = super::StableBlockWindow {
+            min_block_timestamp_unix_millis: 1_000,
+            max_block_timestamp_unix_millis: 2_000,
+        };
+
+        assert!(super::is_block_within_stable_window(
+            &query_block_info(10, 1),
+            &window
+        ));
+        assert!(super::is_block_within_stable_window(
+            &query_block_info(11, 2),
+            &window
+        ));
+        assert!(!super::is_block_within_stable_window(
+            &query_block_info(12, 3),
+            &window
+        ));
+        assert!(super::is_block_older_than_stable_window(
+            &query_block_info(9, 0),
+            &window
+        ));
     }
 }

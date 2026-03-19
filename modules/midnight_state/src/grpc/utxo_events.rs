@@ -1,6 +1,11 @@
 use std::cmp::Ordering;
 
-use crate::grpc::midnight_state_proto::{utxo_event, UtxoEvent};
+use crate::grpc::midnight_state_proto::{utxo_event, CardanoPosition, UtxoEvent};
+
+pub struct TruncatedUtxoEvents {
+    pub events: Vec<UtxoEvent>,
+    pub num_txs: usize,
+}
 
 impl UtxoEvent {
     pub(crate) fn position(&self) -> (u64, u32) {
@@ -31,6 +36,37 @@ impl UtxoEvent {
             None => (Vec::new(), 0),
         }
     }
+
+    fn block_hash(&self) -> Vec<u8> {
+        match self.kind.as_ref() {
+            Some(utxo_event::Kind::AssetCreate(e)) => e.block_hash.clone(),
+            Some(utxo_event::Kind::AssetSpend(e)) => e.block_hash.clone(),
+            Some(utxo_event::Kind::Registration(e)) => e.block_hash.clone(),
+            Some(utxo_event::Kind::Deregistration(e)) => e.block_hash.clone(),
+            None => Vec::new(),
+        }
+    }
+
+    fn block_timestamp_unix_millis(&self) -> i64 {
+        match self.kind.as_ref() {
+            Some(utxo_event::Kind::AssetCreate(e)) => e.block_timestamp_unix_millis,
+            Some(utxo_event::Kind::AssetSpend(e)) => e.block_timestamp_unix_millis,
+            Some(utxo_event::Kind::Registration(e)) => e.block_timestamp_unix_millis,
+            Some(utxo_event::Kind::Deregistration(e)) => e.block_timestamp_unix_millis,
+            None => 0,
+        }
+    }
+
+    pub(crate) fn incremented_position(&self) -> CardanoPosition {
+        let (block_number, tx_index) = self.position();
+
+        CardanoPosition {
+            block_hash: self.block_hash(),
+            block_number: block_number as u32,
+            tx_index: tx_index.saturating_add(1),
+            block_timestamp_unix_millis: self.block_timestamp_unix_millis(),
+        }
+    }
 }
 
 impl Ord for UtxoEvent {
@@ -50,7 +86,10 @@ impl PartialOrd for UtxoEvent {
 
 impl Eq for UtxoEvent {}
 
-pub fn truncate_by_tx_capacity(mut events: Vec<UtxoEvent>, tx_capacity: usize) -> Vec<UtxoEvent> {
+pub fn truncate_by_legacy_tx_capacity(
+    mut events: Vec<UtxoEvent>,
+    tx_capacity: usize,
+) -> TruncatedUtxoEvents {
     events.sort();
 
     let mut truncated = Vec::with_capacity(events.len());
@@ -65,14 +104,17 @@ pub fn truncate_by_tx_capacity(mut events: Vec<UtxoEvent>, tx_capacity: usize) -
             cur_tx = Some(pos);
         }
 
-        if num_txs > tx_capacity {
+        if num_txs == tx_capacity {
             break;
         }
 
         truncated.push(e);
     }
 
-    truncated
+    TruncatedUtxoEvents {
+        events: truncated,
+        num_txs,
+    }
 }
 
 #[cfg(test)]
@@ -90,7 +132,7 @@ mod tests {
                 block_number: block as u64,
                 block_hash: vec![],
                 tx_index: tx,
-                block_timestamp_unix: 0,
+                block_timestamp_unix_millis: 0,
             })),
         }
     }
@@ -124,7 +166,7 @@ mod tests {
                     tx_index: 0,
                     utxo_tx_hash: vec![2; 32],
                     utxo_index: 0,
-                    block_timestamp_unix: 0,
+                    block_timestamp_unix_millis: 0,
                 })),
             },
             UtxoEvent {
@@ -136,7 +178,7 @@ mod tests {
                     block_number: 1,
                     block_hash: vec![],
                     tx_index: 0,
-                    block_timestamp_unix: 0,
+                    block_timestamp_unix_millis: 0,
                 })),
             },
             UtxoEvent {
@@ -148,7 +190,7 @@ mod tests {
                     block_number: 1,
                     block_hash: vec![],
                     tx_index: 0,
-                    block_timestamp_unix: 0,
+                    block_timestamp_unix_millis: 0,
                 })),
             },
         ];
@@ -171,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn truncate_respects_transaction_capacity() {
+    fn truncate_uses_legacy_transaction_capacity_semantics() {
         let events = vec![
             create_event(1, 0),
             create_event(1, 0), // same tx
@@ -180,11 +222,12 @@ mod tests {
             create_event(1, 2),
         ];
 
-        let truncated = truncate_by_tx_capacity(events, 2);
+        let truncated = truncate_by_legacy_tx_capacity(events, 2);
 
-        let positions: Vec<(u64, u32)> = truncated.iter().map(|e| e.position()).collect();
+        let positions: Vec<(u64, u32)> = truncated.events.iter().map(|e| e.position()).collect();
 
-        assert_eq!(positions, vec![(1, 0), (1, 0), (1, 1), (1, 1)]);
+        assert_eq!(positions, vec![(1, 0), (1, 0)]);
+        assert_eq!(truncated.num_txs, 2);
     }
 
     #[test]
@@ -197,10 +240,11 @@ mod tests {
             create_event(1, 2),
         ];
 
-        let truncated = truncate_by_tx_capacity(events, 1);
+        let truncated = truncate_by_legacy_tx_capacity(events, 1);
 
-        let positions: Vec<(u64, u32)> = truncated.iter().map(|e| e.position()).collect();
+        let positions: Vec<(u64, u32)> = truncated.events.iter().map(|e| e.position()).collect();
 
-        assert_eq!(positions, vec![(1, 0), (1, 0)]);
+        assert!(positions.is_empty());
+        assert_eq!(truncated.num_txs, 1);
     }
 }
