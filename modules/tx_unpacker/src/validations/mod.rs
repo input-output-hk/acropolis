@@ -5,6 +5,7 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
+mod allegra;
 mod alonzo;
 mod babbage;
 pub mod phase2;
@@ -60,6 +61,12 @@ pub fn validate_tx(
             genesis_delegs,
         )
         .map_err(|e| Box::new(Phase1ValidationError::from(*e).into()))?;
+    }
+
+    if era >= Era::Allegra {
+        let validity_interval = acropolis_codec::map_validity_interval(&tx);
+        allegra::utxo::validate(&tx, &validity_interval, protocol_params, current_slot, era)
+            .map_err(|e| Box::new(Phase1ValidationError::from(*e).into()))?;
     }
 
     if era >= Era::Alonzo {

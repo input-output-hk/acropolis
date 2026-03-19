@@ -47,6 +47,10 @@ impl ProtocolParams {
     pub fn lovelace_per_utxo_word(&self) -> Option<u64> {
         self.alonzo.as_ref().map(|a| a.lovelace_per_utxo_word)
     }
+
+    pub fn max_value_size(&self) -> Option<u64> {
+        self.alonzo.as_ref().map(|a| a.max_value_size as u64)
+    }
 }
 
 //
