@@ -200,8 +200,10 @@ impl MidnightState for MidnightStateService {
         self.stats.utxo_events.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
-        let start_block = req.start_block;
-        let start_tx_index = req.start_tx_index;
+        let start_position =
+            req.start_position.ok_or_else(|| Status::invalid_argument("missing start_position"))?;
+        let start_block = start_position.block_number;
+        let start_tx_index = start_position.tx_index;
 
         let tx_capacity = usize::try_from(req.tx_capacity)
             .map_err(|_| Status::invalid_argument("tx_capacity too large"))?;
@@ -289,11 +291,14 @@ impl MidnightState for MidnightStateService {
                 .map_err(|_| Status::internal("block timestamp exceeds i64"))?,
             }
         } else {
-            truncated
-                .events
-                .last()
-                .map(UtxoEvent::incremented_position)
-                .ok_or_else(|| Status::internal("missing final event for next_position"))?
+            truncated.events.last().map_or_else(
+                || {
+                    let mut next_position = start_position.clone();
+                    next_position.tx_index = next_position.tx_index.saturating_add(1);
+                    next_position
+                },
+                UtxoEvent::incremented_position,
+            )
         };
 
         Ok(Response::new(UtxoEventsResponse {
@@ -949,7 +954,7 @@ mod tests {
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
             utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
-            EpochCandidatesRequest, UtxoEventsRequest,
+            CardanoPosition, EpochCandidatesRequest, UtxoEventsRequest,
         },
         state::State,
     };
@@ -1495,6 +1500,12 @@ mod tests {
                 start_tx_index: 0,
                 tx_capacity: 10,
                 end_block_hash: [9u8; 32].to_vec(),
+                start_position: Some(CardanoPosition {
+                    block_hash: vec![0u8; 32],
+                    block_number: 0,
+                    tx_index: 0,
+                    block_timestamp_unix_millis: 0,
+                }),
             }))
             .await
             .expect("utxo events should be returned")
@@ -1523,6 +1534,68 @@ mod tests {
         assert!(asset_creates.next().is_none());
         assert_eq!(asset_create.address, expected_owner_address());
         assert_eq!(registrations, 1);
+    }
+
+    #[tokio::test]
+    async fn should_return_incremented_start_position_for_empty_legacy_truncation() {
+        let auth_policy = PolicyId::new([9u8; 28]);
+        let auth_asset = AssetName::new(b"auth").unwrap();
+        let mapping_address = mapping_validator_address();
+        let mut block = test_block_info(100, 0);
+        block.hash = [9u8; 32].into();
+        block.timestamp = 10;
+        let mut state = State::new(MidnightConfig {
+            mapping_validator_address: mapping_address.clone(),
+            auth_token_policy_id: auth_policy,
+            auth_token_asset_name: auth_asset,
+            ..Default::default()
+        });
+        let start_position = CardanoPosition {
+            block_hash: vec![7u8; 32],
+            block_number: 55,
+            tx_index: 0,
+            block_timestamp_unix_millis: 12_345,
+        };
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![candidate_registration_delta(
+                    mapping_address,
+                    auth_policy,
+                    auth_asset,
+                    TxHash::new([3u8; 32]),
+                    0,
+                    0,
+                    block.number,
+                )]),
+            )
+            .expect("address delta handling should succeed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_utxo_events(Request::new(UtxoEventsRequest {
+                start_block: 0,
+                start_tx_index: 0,
+                tx_capacity: 1,
+                end_block_hash: [9u8; 32].to_vec(),
+                start_position: Some(start_position.clone()),
+            }))
+            .await
+            .expect("utxo events should be returned")
+            .into_inner();
+
+        assert!(response.events.is_empty());
+        let next_position = response
+            .next_position
+            .expect("next position should be returned from start_position fallback");
+        assert_eq!(next_position.block_hash, start_position.block_hash);
+        assert_eq!(next_position.block_number, start_position.block_number);
+        assert_eq!(next_position.tx_index, start_position.tx_index + 1);
+        assert_eq!(
+            next_position.block_timestamp_unix_millis,
+            start_position.block_timestamp_unix_millis
+        );
     }
 
     fn query_block_info(number: u64, timestamp: u64) -> QueryBlockInfo {
