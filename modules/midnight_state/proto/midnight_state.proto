@@ -176,7 +176,7 @@ message UtxoEventsRequest {
   uint32 start_block = 1;
   uint32 start_tx_index = 2;
   uint32 tx_capacity = 3;
-  optional bytes end_block_hash = 4;
+  bytes end_block_hash = 4;
 }
 message UtxoEvent {
   oneof kind {
@@ -194,7 +194,7 @@ message CardanoPosition {
 }
 message UtxoEventsResponse {
   repeated UtxoEvent events = 1;
-  optional CardanoPosition next_position = 2;
+  CardanoPosition next_position = 2;
 }
 
 message BlockByHashRequest {

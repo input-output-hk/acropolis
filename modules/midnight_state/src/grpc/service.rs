@@ -212,7 +212,7 @@ impl MidnightState for MidnightStateService {
 
         let event_capacity = tx_capacity.saturating_mul(MAX_EVENTS_PER_TX);
 
-        let events = {
+        let mut events = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
@@ -264,47 +264,41 @@ impl MidnightState for MidnightStateService {
             events
         };
 
-        let mut events = events;
-        let mut end_block = None;
-
-        if let Some(end_block_hash) = req.end_block_hash {
-            let end_block_hash = BlockHash::try_from(end_block_hash)
-                .map_err(|_| Status::invalid_argument("invalid end block hash"))?;
-            let queried_end_block = query_block_by_hash_info(&self.context, end_block_hash).await?;
-            let end_position = (queried_end_block.number, queried_end_block.tx_count as u32);
-            events.retain(|event| {
-                let position = event.position();
-                position.0 < end_position.0
-                    || (position.0 == end_position.0 && position.1 < end_position.1)
-            });
-            end_block = Some(queried_end_block);
-        }
+        let end_block_hash = BlockHash::try_from(req.end_block_hash)
+            .map_err(|_| Status::invalid_argument("invalid end block hash"))?;
+        let end_block = query_block_by_hash_info(&self.context, end_block_hash).await?;
+        let end_position = (end_block.number, end_block.tx_count as u32);
+        events.retain(|event| {
+            let position = event.position();
+            position.0 < end_position.0
+                || (position.0 == end_position.0 && position.1 < end_position.1)
+        });
 
         let truncated = truncate_by_legacy_tx_capacity(events, tx_capacity);
         let next_position = if truncated.num_txs < tx_capacity {
-            if let Some(block) = end_block {
-                Some(CardanoPosition {
-                    block_hash: block.hash.to_vec(),
-                    block_number: u32::try_from(block.number)
-                        .map_err(|_| Status::internal("block number exceeds u32"))?,
-                    tx_index: u32::try_from(block.tx_count)
-                        .map_err(|_| Status::internal("tx count exceeds u32"))?
-                        .saturating_add(1),
-                    block_timestamp_unix_millis: i64::try_from(
-                        block.timestamp.saturating_mul(1000),
-                    )
-                    .map_err(|_| Status::internal("block timestamp exceeds i64"))?,
-                })
-            } else {
-                None
+            CardanoPosition {
+                block_hash: end_block.hash.to_vec(),
+                block_number: u32::try_from(end_block.number)
+                    .map_err(|_| Status::internal("block number exceeds u32"))?,
+                tx_index: u32::try_from(end_block.tx_count)
+                    .map_err(|_| Status::internal("tx count exceeds u32"))?
+                    .saturating_add(1),
+                block_timestamp_unix_millis: i64::try_from(
+                    end_block.timestamp.saturating_mul(1000),
+                )
+                .map_err(|_| Status::internal("block timestamp exceeds i64"))?,
             }
         } else {
-            truncated.events.last().map(UtxoEvent::incremented_position)
+            truncated
+                .events
+                .last()
+                .map(UtxoEvent::incremented_position)
+                .ok_or_else(|| Status::internal("missing final event for next_position"))?
         };
 
         Ok(Response::new(UtxoEventsResponse {
             events: truncated.events,
-            next_position,
+            next_position: Some(next_position),
         }))
     }
 
@@ -935,7 +929,9 @@ mod tests {
     use acropolis_common::{
         messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
         protocol_params::{ProtocolParams, ShelleyParams},
-        queries::blocks::BlockInfo as QueryBlockInfo,
+        queries::blocks::{
+            BlockInfo as QueryBlockInfo, BlocksStateQuery, BlocksStateQueryResponse,
+        },
         queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         rational_number::RationalNumber,
         state_history::{StateHistory, StateHistoryStore},
@@ -985,6 +981,13 @@ mod tests {
                         SPDDStateQueryResponse::EpochSPDD(Vec::new()),
                     ))
                 }
+                Message::StateQuery(StateQuery::Blocks(BlocksStateQuery::GetBlockByHash {
+                    block_hash,
+                })) => Message::StateQueryResponse(StateQueryResponse::Blocks(
+                    BlocksStateQueryResponse::BlockByHash(query_block_info_with_hash(
+                        100, 10, 5, block_hash,
+                    )),
+                )),
                 _ => return Err(anyhow::anyhow!("unsupported request in tests")),
             };
 
@@ -1491,13 +1494,20 @@ mod tests {
                 start_block: 0,
                 start_tx_index: 0,
                 tx_capacity: 10,
-                end_block_hash: None,
+                end_block_hash: [9u8; 32].to_vec(),
             }))
             .await
             .expect("utxo events should be returned")
             .into_inner();
 
         assert_eq!(response.events.len(), 2);
+        let next_position = response
+            .next_position
+            .expect("next position should always be returned when end_block_hash is supplied");
+        assert_eq!(next_position.block_hash, vec![9u8; 32]);
+        assert_eq!(next_position.block_number, 100);
+        assert_eq!(next_position.tx_index, 6);
+        assert_eq!(next_position.block_timestamp_unix_millis, 10_000);
 
         let mut asset_creates = response.events.iter().filter_map(|event| match &event.kind {
             Some(utxo_event::Kind::AssetCreate(create)) => Some(create),
@@ -1534,6 +1544,19 @@ mod tests {
             previous_block: None,
             next_block: None,
             confirmations: 0,
+        }
+    }
+
+    fn query_block_info_with_hash(
+        number: u64,
+        timestamp: u64,
+        tx_count: u64,
+        hash: BlockHash,
+    ) -> QueryBlockInfo {
+        QueryBlockInfo {
+            hash,
+            tx_count,
+            ..query_block_info(number, timestamp)
         }
     }
 

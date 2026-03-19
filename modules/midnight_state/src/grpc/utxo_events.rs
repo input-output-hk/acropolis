@@ -19,6 +19,8 @@ impl UtxoEvent {
     }
 
     fn kind_order(&self) -> u8 {
+        // Match the downstream cNIGHT equality contract: creations/registrations sort before
+        // spends/deregistrations within the same transaction.
         match self.kind.as_ref() {
             Some(utxo_event::Kind::AssetCreate(_)) | Some(utxo_event::Kind::Registration(_)) => 0,
             Some(utxo_event::Kind::AssetSpend(_))
@@ -58,6 +60,8 @@ impl UtxoEvent {
     }
 
     pub(crate) fn incremented_position(&self) -> CardanoPosition {
+        // The endpoint owns the legacy truncation contract, so it also owns the matching
+        // next-position calculation.
         let (block_number, tx_index) = self.position();
 
         CardanoPosition {
