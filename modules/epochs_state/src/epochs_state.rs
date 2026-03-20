@@ -17,7 +17,7 @@ use acropolis_common::{
         errors::QueryError,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -151,7 +151,12 @@ impl EpochsState {
         validation_topic: String,
         is_snapshot_mode: bool,
     ) -> Result<()> {
-        let (_, genesis) = bootstrap_reader.read_skip_rollbacks().await?;
+        let genesis = match bootstrap_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal((_, genesis)) => genesis,
+            RollbackWrapper::Rollback(_) => {
+                panic!("Unexpected rollback while reading genesis");
+            }
+        };
 
         // Wait for the snapshot bootstrap (if available)
         Self::wait_for_bootstrap(history.clone(), snapshot_subscription, &genesis.values).await?;
@@ -162,11 +167,25 @@ impl EpochsState {
         // Without consuming them here, they desync the readers in the main loop
         // (epoch N boundary reads epoch N-1 params instead of epoch N params).
         if !is_snapshot_mode {
-            let (_, initial_params) = params_reader.read_skip_rollbacks().await?;
-            let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
+            let initial_params = match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, params)) => params,
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            };
+
+            let mut history_guard = history.lock().await;
+            let mut state = history_guard.get_or_init_with(|| State::new(&genesis.values));
+
             state.handle_protocol_parameters(&initial_params);
-            history.lock().await.commit(0, state);
-            let _ = txs_reader.read_skip_rollbacks().await?;
+            history_guard.commit(0, state);
+
+            match txs_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading txs");
+                }
+            }
         }
 
         loop {
@@ -175,7 +194,7 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            match ctx.consume_sync(block_reader.read_with_rollbacks().await)? {
+            match ctx.consume_sync("proposed block", block_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, blk_msg)) => {
                     if blk_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_info.number);
@@ -183,10 +202,14 @@ impl EpochsState {
                     let is_new_epoch = blk_info.new_epoch && blk_info.epoch > 0;
 
                     if is_new_epoch {
-                        if let Some((_, params)) = ctx
-                            .consume("protocol params", params_reader.read_skip_rollbacks().await)
-                        {
-                            state.handle_protocol_parameters(&params);
+                        match ctx.consume_sync(
+                            "protocol params",
+                            params_reader.read_with_rollbacks().await,
+                        )? {
+                            RollbackWrapper::Normal((_, params)) => {
+                                state.handle_protocol_parameters(&params);
+                            }
+                            RollbackWrapper::Rollback(_) => {}
                         }
 
                         let ea = state.end_epoch(&blk_info);
@@ -245,11 +268,12 @@ impl EpochsState {
             }
 
             // Handle block txs second so new epoch's state don't get counted in the last one
-            if let Some((blk_info, msg)) =
-                ctx.consume("block_txs", txs_reader.read_skip_rollbacks().await)
-            {
-                let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
-                span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
+            match ctx.consume_sync("block_txs", txs_reader.read_with_rollbacks().await)? {
+                RollbackWrapper::Normal((blk_info, msg)) => {
+                    let span = info_span!("epochs_state.handle_block_txs", block = blk_info.number);
+                    span.in_scope(|| state.handle_block_txs(&blk_info, &msg));
+                }
+                RollbackWrapper::Rollback(_) => {}
             }
 
             // Commit the new state

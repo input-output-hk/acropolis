@@ -9,7 +9,7 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -101,7 +101,6 @@ impl MidnightState {
                             RollbackWrapper::Normal((_, nonce)) => (nonce.as_ref().clone(), false),
                             RollbackWrapper::Rollback(_) => (None, true),
                         };
-
                         if !is_rollback {
                             state.handle_new_epoch(blk_info.as_ref(), nonce);
                         }
