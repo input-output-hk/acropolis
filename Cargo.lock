@@ -273,7 +273,6 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "serde_json",
- "tokio",
  "tracing",
 ]
 
