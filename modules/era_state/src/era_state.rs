@@ -125,7 +125,6 @@ impl EraState {
 
                 era_history.system_start =
                     SystemTime::UNIX_EPOCH + Duration::from_secs(system_start);
-                println!("era_history: {:?}", era_history);
                 let message = Message::Cardano((
                     block_info,
                     CardanoMessage::EraHistory(EraHistoryMessage { era_history }),
