@@ -25,14 +25,25 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-    pub fn new(address: String, magic: u32, sender: PeerMessageSender, delay: Duration) -> Self {
+    pub fn new(
+        address: String,
+        magic: u32,
+        sender: PeerMessageSender,
+        delay: Duration,
+        connect_timeout: Duration,
+    ) -> Self {
         let worker = PeerConnectionWorker {
             address: address.clone(),
             magic,
             sender,
+            connect_timeout,
         };
         let (chainsync_tx, chainsync_rx) = mpsc::unbounded_channel();
         let (blockfetch_tx, blockfetch_rx) = mpsc::unbounded_channel();
+        // TODO(warm-peers): When the warm tier is added, split this spawn into two phases:
+        // Phase 1 (cold→warm): TCP connect only + version check (no ChainSync/BlockFetch).
+        // Phase 2 (warm→hot): Start ChainSync and BlockFetch after latency validation.
+        // `PeerConnectionWorker::run` would become `run_warm_probe` + `run_hot_protocols`.
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             worker.run(chainsync_rx, blockfetch_rx).await;
@@ -96,6 +107,7 @@ struct PeerConnectionWorker {
     address: String,
     magic: u32,
     sender: PeerMessageSender,
+    connect_timeout: Duration,
 }
 
 impl PeerConnectionWorker {
@@ -115,7 +127,13 @@ impl PeerConnectionWorker {
         chainsync: mpsc::UnboundedReceiver<ChainsyncCommand>,
         blockfetch: mpsc::UnboundedReceiver<BlockfetchCommand>,
     ) -> Result<()> {
-        let client = PeerClient::connect(self.address.clone(), self.magic.into()).await?;
+        let timeout_dur = self.connect_timeout;
+        let client = tokio::time::timeout(
+            timeout_dur,
+            PeerClient::connect(self.address.clone(), self.magic.into()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("connect timeout after {}s", timeout_dur.as_secs()))??;
         select! {
             res = self.run_chainsync(client.chainsync, chainsync) => res,
             res = self.run_blockfetch(client.blockfetch, blockfetch) => res,

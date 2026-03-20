@@ -4,7 +4,11 @@ mod block_flow_consensus_scenarios_tests;
 mod chain_state;
 mod configuration;
 mod connection;
-mod network;
+pub(crate) mod network;
+pub mod peer_manager;
+pub mod peer_sharing;
+
+pub use network::PeerId;
 
 use acropolis_common::{
     BlockInfo, BlockIntent, BlockStatus, Era,
@@ -146,6 +150,14 @@ impl PeerNetworkInterface {
                 events_sender,
                 sink,
                 flow_handler,
+                cfg.target_peer_count,
+                cfg.min_hot_peers,
+                cfg.peer_sharing_enabled,
+                cfg.churn_interval_secs,
+                cfg.peer_sharing_timeout_secs,
+                cfg.connect_timeout_secs,
+                cfg.ipv6_enabled,
+                cfg.allow_non_public_peer_addrs,
             );
 
             match sync_point {

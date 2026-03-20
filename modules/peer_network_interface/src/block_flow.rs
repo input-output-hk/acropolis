@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 
 use acropolis_common::BlockHash;
@@ -6,6 +6,7 @@ use acropolis_common::messages::{
     BlockOfferedMessage, BlockRejectedMessage, BlockRescindedMessage, BlockWantedMessage,
     ConsensusMessage, Message,
 };
+use acropolis_common::params::SECURITY_PARAMETER_K;
 use anyhow::Result;
 use caryatid_sdk::{Context, Subscription};
 use pallas::network::miniprotocols::Point;
@@ -13,7 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::BlockSink;
-use crate::chain_state::{ChainEvent, ChainState};
+use crate::chain_state::{ChainEvent, ChainState, SpecificPoint, choose_intersect_points};
 use crate::configuration::InterfaceConfig;
 use crate::connection::Header;
 use crate::network::{NetworkEvent, PeerId};
@@ -170,9 +171,7 @@ impl BlockFlowHandler {
 
     /// Handle a new peer connection.
     /// Returns the points to use for find_intersect, if any.
-    /// In Direct mode, uses chain state points (or falls back to sync_point),
-    /// and sets preferred upstream if none is set.
-    /// In Consensus mode, just uses sync_point.
+    /// Uses chain state points (or falls back to sync_point).
     pub fn handle_new_connection(
         &mut self,
         peer: PeerId,
@@ -188,7 +187,12 @@ impl BlockFlowHandler {
                     return points;
                 }
             }
-            BlockFlowHandler::Consensus(_) => {}
+            BlockFlowHandler::Consensus(state) => {
+                let points = state.choose_points_for_find_intersect();
+                if !points.is_empty() {
+                    return points;
+                }
+            }
         }
         sync_point.map(|p| vec![p.clone()]).unwrap_or_default()
     }
@@ -502,6 +506,7 @@ pub struct ConsensusFlowState {
     blocks_offered_count: u64,
     blocks_published_count: u64,
     headers: HashMap<(u64, BlockHash), Header>,
+    published_points: VecDeque<SpecificPoint>,
 }
 
 impl ConsensusFlowState {
@@ -513,7 +518,12 @@ impl ConsensusFlowState {
             blocks_offered_count: 0,
             blocks_published_count: 0,
             headers: HashMap::new(),
+            published_points: VecDeque::new(),
         }
+    }
+
+    pub(crate) fn choose_points_for_find_intersect(&self) -> Vec<Point> {
+        choose_intersect_points(&self.published_points)
     }
 
     fn handle_roll_forward(&mut self, peer: PeerId, header: &Header) {
@@ -582,6 +592,13 @@ impl ConsensusFlowState {
                 }
                 ConsensusBlockEvent::Fetched { header, body } => {
                     block_sink.announce_roll_forward(&header, &body, None).await?;
+                    self.published_points.push_back(SpecificPoint {
+                        slot: header.slot,
+                        hash: header.hash,
+                    });
+                    while self.published_points.len() > SECURITY_PARAMETER_K as usize {
+                        self.published_points.pop_front();
+                    }
                     *published_blocks += 1;
                     self.blocks_published_count += 1;
                     if self.blocks_published_count.is_multiple_of(100) {
@@ -613,6 +630,7 @@ impl ConsensusFlowState {
     fn handle_sync_reset(&mut self) {
         self.tracker.reset();
         self.headers.clear();
+        self.published_points.clear();
     }
 }
 
@@ -1099,5 +1117,134 @@ mod tests {
             re_offers, 0,
             "lagging peer should produce zero re-offers for already-fetched blocks"
         );
+    }
+
+    // Consensus mode intersection point tests
+
+    fn make_test_consensus_state() -> ConsensusFlowState {
+        use caryatid_sdk::mock_bus::MockBus;
+        use tokio::sync::watch;
+
+        let config = Arc::new(config::Config::builder().build().unwrap());
+        let bus = Arc::new(MockBus::<Message>::new(&config));
+        let (_tx, rx) = watch::channel(true);
+        let context = Arc::new(Context::new(config, bus, rx));
+        ConsensusFlowState::new(context, "cardano.consensus.offers".to_string())
+    }
+
+    fn hash_for_slot(slot: u64) -> BlockHash {
+        use pallas::crypto::hash::Hasher;
+        BlockHash::new(*Hasher::<256>::hash(&slot.to_be_bytes()))
+    }
+
+    #[test]
+    fn consensus_choose_points_empty_when_no_published() {
+        let state = make_test_consensus_state();
+        assert!(state.choose_points_for_find_intersect().is_empty());
+    }
+
+    #[test]
+    fn consensus_choose_points_returns_recent_published() {
+        let mut state = make_test_consensus_state();
+
+        for slot in 1..=10u64 {
+            state.published_points.push_back(SpecificPoint {
+                slot,
+                hash: hash_for_slot(slot),
+            });
+        }
+
+        let points = state.choose_points_for_find_intersect();
+        assert!(!points.is_empty());
+
+        // Most recent 5 should come first
+        if let Point::Specific(slot, _) = &points[0] {
+            assert_eq!(*slot, 10);
+        } else {
+            panic!("expected Specific point");
+        }
+        if let Point::Specific(slot, _) = &points[4] {
+            assert_eq!(*slot, 6);
+        } else {
+            panic!("expected Specific point");
+        }
+    }
+
+    #[test]
+    fn consensus_published_points_capped_at_k() {
+        let mut state = make_test_consensus_state();
+
+        for slot in 1..=(SECURITY_PARAMETER_K + 100) {
+            state.published_points.push_back(SpecificPoint {
+                slot,
+                hash: hash_for_slot(slot),
+            });
+            while state.published_points.len() > SECURITY_PARAMETER_K as usize {
+                state.published_points.pop_front();
+            }
+        }
+
+        assert_eq!(state.published_points.len(), SECURITY_PARAMETER_K as usize);
+        assert_eq!(state.published_points.front().unwrap().slot, 101);
+    }
+
+    #[test]
+    fn consensus_reset_clears_published_points() {
+        let mut state = make_test_consensus_state();
+
+        for slot in 1..=20u64 {
+            state.published_points.push_back(SpecificPoint {
+                slot,
+                hash: hash_for_slot(slot),
+            });
+        }
+        assert!(!state.published_points.is_empty());
+
+        state.handle_sync_reset();
+
+        assert!(state.published_points.is_empty());
+        assert!(state.choose_points_for_find_intersect().is_empty());
+    }
+
+    #[test]
+    fn consensus_handle_new_connection_uses_published_points() {
+        use caryatid_sdk::mock_bus::MockBus;
+        use tokio::sync::watch;
+
+        let config = Arc::new(config::Config::builder().build().unwrap());
+        let bus = Arc::new(MockBus::<Message>::new(&config));
+        let (_tx, rx) = watch::channel(true);
+        let context = Arc::new(Context::new(config, bus, rx));
+
+        let mut state = ConsensusFlowState::new(context, "test.topic".to_string());
+        for slot in 100..=120u64 {
+            state.published_points.push_back(SpecificPoint {
+                slot,
+                hash: hash_for_slot(slot),
+            });
+        }
+
+        let mut handler = BlockFlowHandler::Consensus(state);
+        let stale_point = Point::Specific(1, vec![0; 32]);
+        let points = handler.handle_new_connection(PEER_1, Some(&stale_point));
+
+        // Should use published_points, not the stale sync_point
+        assert!(!points.is_empty());
+        if let Point::Specific(slot, _) = &points[0] {
+            assert_eq!(*slot, 120, "most recent published point should be first");
+        } else {
+            panic!("expected Specific point");
+        }
+    }
+
+    #[test]
+    fn consensus_handle_new_connection_falls_back_to_sync_point_when_empty() {
+        let state = make_test_consensus_state();
+        let mut handler = BlockFlowHandler::Consensus(state);
+        let sync_point = Point::Specific(42, vec![0xAA; 32]);
+        let points = handler.handle_new_connection(PEER_1, Some(&sync_point));
+
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0], sync_point);
     }
 }

@@ -100,6 +100,9 @@ A node should not remain permanently connected to the same set of hot peers inde
   - `debug`: V11 handshake failure on a hot peer selected for peer-sharing (peer does not support V11+), including peer address
 - **FR-013**: The system MUST validate all peer addresses received via peer-sharing before adding them to the cold peer set. The following MUST be rejected: loopback addresses (127.0.0.0/8, ::1), unspecified addresses (0.0.0.0, ::), link-local addresses (169.254.0.0/16, fe80::/10), private RFC1918 addresses (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), and port 0. IPv4-mapped IPv6 addresses MUST be normalised to IPv4 form before deduplication.
 - **FR-014**: The system MUST limit the number of addresses accepted from a single peer-sharing response to the `amount` value sent in the corresponding `MsgShareRequest`. Entries beyond this limit MUST be discarded without decoding or allocating memory for them. This bound prevents memory amplification from malicious peers that ignore the requested amount and return an unbounded response. The `amount` requested per exchange is `target-peer-count` (default 15, u8 capped at 255).
+- **FR-015**: On startup, the system MUST attempt to establish outbound connections to up to `min-hot-peers` peers concurrently from the `node-addresses` list, such that normal operation begins with multiple active hot peers rather than a single sequential connection. *(Intersect AC: "construct connections with multiple peers")*
+- **FR-016**: On process shutdown, the system MUST close all active hot peer connections. Connection teardown is best-effort — the system must not block indefinitely waiting for remote peers to acknowledge the close. *(Intersect AC: "tear down connections with multiple peers")*
+- **FR-017**: When a peer-sharing exchange targets a hot peer that does not support the V11+ handshake (i.e. the peer negotiates a version below V11), the system MUST skip that peer gracefully, log a `debug`-level message, and attempt the next cooldown-eligible hot peer on the following discovery tick. No error is raised and block synchronisation is not disrupted.
 
 ### Key Entities
 
@@ -117,6 +120,19 @@ A node should not remain permanently connected to the same set of hot peers inde
 - **SC-003**: Over a 1-hour run with churn enabled, at least one hot peer replacement occurs per `churn-interval-secs` when cold peers are available.
 - **SC-004**: Enabling P2P discovery produces no regression in block synchronisation throughput compared to the static peer configuration baseline.
 - **SC-005**: When `peer-sharing-enabled = false`, node behaviour is identical to the pre-feature baseline with zero observable difference for operators who opt out.
+- **SC-006**: A node running against preprod or mainnet maintains at least `min-hot-peers` active connections continuously during normal operation, recovering automatically within 60 seconds whenever the count drops below the minimum. *(Intersect AC: "maintain connections with multiple peers")*
+
+## Intersect Milestone Traceability
+
+Acceptance criteria from the Intersect milestone form: *"Able to construct, maintain and tear down connections with multiple peers"*
+
+| Intersect AC | Requirement(s) | Success Criteria |
+|---|---|---|
+| Construct connections with multiple peers | FR-002, FR-003, FR-015 | SC-001 |
+| Maintain connections with multiple peers | FR-003, FR-006, FR-007, FR-008 | SC-004, SC-006 |
+| Tear down connections with multiple peers | FR-006, FR-016 | SC-003 |
+
+> **Note on SC-002 achievability**: SC-002 requires 10 known addresses within 10 minutes starting from 3 configured peers. With `target-peer-count = 15`, each peer-sharing exchange requests up to 15 addresses. At t=0 all 3 hot peers are cooldown-eligible; a single round of 3 exchanges can return up to 45 addresses. SC-002 is therefore achievable within the first discovery tick on a live network where peers return non-empty responses.
 
 ## Clarifications
 
