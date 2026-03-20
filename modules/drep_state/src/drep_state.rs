@@ -171,7 +171,9 @@ impl DRepState {
                     state.update_protocol_params(&initial_params.params)?;
                     history.lock().await.commit(0, state);
                 }
-                RollbackWrapper::Rollback(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading bootstrap message");
+                }
             }
         }
 

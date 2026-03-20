@@ -248,8 +248,9 @@ impl ValidationContext {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
                 if let Some(blk_info) = self.current_block.clone() {
                     self.check_sync(handler, &blk_info);
+                } else {
+                    self.current_block = Some(blk.clone());
                 }
-                self.current_block = Some(blk.clone());
             }
             Ok(RollbackWrapper::Rollback(_)) => {
                 self.current_block = None;
