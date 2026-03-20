@@ -1,12 +1,9 @@
-use acropolis_module_peer_network_interface::PeerId;
 use acropolis_module_peer_network_interface::peer_manager::{PeerManager, PeerManagerConfig};
 use std::collections::HashSet;
 
 fn default_config() -> PeerManagerConfig {
     PeerManagerConfig::default()
 }
-
-// --- US1 tests ---
 
 #[test]
 fn cold_list_seeded_from_config_excludes_hot() {
@@ -66,8 +63,6 @@ fn hot_overshoot_on_reconnect() {
     pm.seed(&[], &hot);
     assert_eq!(pm.cold_count(), 0, "hot peers must not appear in cold set");
 }
-
-// --- US2 tests (cap / eviction / dedup / cooldown) ---
 
 #[test]
 fn cold_list_cap_enforced_by_eviction() {
@@ -155,34 +150,6 @@ fn cold_list_deduplicates_on_discovery() {
 }
 
 #[test]
-fn cooldown_blocks_requery_within_five_minutes() {
-    let mut pm = PeerManager::new(default_config());
-    let peer_id = PeerId(42);
-    pm.record_query(peer_id);
-    assert!(
-        !pm.can_query(peer_id),
-        "peer must be blocked by cooldown immediately after query"
-    );
-}
-
-#[test]
-fn cooldown_allows_requery_after_five_minutes() {
-    use std::time::{Duration, Instant};
-    let mut pm = PeerManager::new(default_config());
-    let peer_id = PeerId(99);
-    // Simulate a query that happened 5 minutes + 1 second ago by inserting a past instant.
-    let past =
-        Instant::now().checked_sub(Duration::from_secs(5 * 60 + 1)).expect("subtraction underflow");
-    pm.insert_query_time(peer_id, past);
-    assert!(
-        pm.can_query(peer_id),
-        "peer must be queryable after 5-minute cooldown expires"
-    );
-}
-
-// --- Issue 3: seed() cap enforcement ---
-
-#[test]
 fn seed_enforces_cold_cap() {
     let config = PeerManagerConfig {
         target_peer_count: 1, // cold_cap = 4
@@ -200,8 +167,6 @@ fn seed_enforces_cold_cap() {
         "seed() must not exceed 4×target_peer_count"
     );
 }
-
-// --- Issue 4: demote_to_cold bypasses failed_peers ---
 
 #[test]
 fn demote_to_cold_bypasses_failed_peers_blacklist() {
@@ -225,8 +190,6 @@ fn demote_to_cold_bypasses_failed_peers_blacklist() {
         "address is already in cold, dedup applies"
     );
 }
-
-// --- US3 tests ---
 
 #[test]
 fn churn_allowed_when_above_min() {

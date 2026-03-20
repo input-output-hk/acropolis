@@ -522,7 +522,7 @@ impl ConsensusFlowState {
         }
     }
 
-    pub(crate) fn choose_points_for_find_intersect(&self) -> Vec<Point> {
+    fn choose_points_for_find_intersect(&self) -> Vec<Point> {
         choose_intersect_points(&self.published_points)
     }
 

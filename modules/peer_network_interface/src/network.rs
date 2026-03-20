@@ -77,26 +77,18 @@ pub struct NetworkManager {
     pending_wanted: BTreeMap<(u64, BlockHash), ()>,
     sync_point: Option<Point>,
     flow_handler: BlockFlowHandler,
-    /// Cold peer set and discovery rate-limiting. `None` when `peer_sharing_enabled = false`.
-    ///
-    /// # TODO(warm-peers): Add `warm_peers: Option<WarmPeerManager>` here for the warm tier
-    /// when the warm/hot promotion split is implemented. The warm manager would handle
-    /// cold→warm promotion and warm→hot elevation independently from this hot peer set.
-    ///
-    /// # TODO(ledger-peers): Subscribe to `SPOStateMessage` here (or in `run()`) to receive
-    /// relay addresses at epoch boundaries and forward them to `peer_manager.seed_from_ledger()`.
     pub peer_manager: Option<PeerManager>,
     min_hot_peers: usize,
     /// PeerIds of peers that were promoted from the cold list via `try_promote_cold_peer`.
-    /// Used in `on_peer_disconnected` to distinguish cold-promoted peers (eligible for
-    /// `mark_failed` if they never established) from initially-configured connections.
+    /// Used in `on_peer_disconnected` to distinguish cold-promoted peers from initially configured connections.
     cold_origin: HashSet<PeerId>,
     /// Addresses from the static `node_addresses` config. Configured peers are always
-    /// retried on disconnect and are never blacklisted via `mark_failed`.
+    /// retried on disconnect and are never blacklisted.
     configured_addrs: HashSet<String>,
     connect_timeout: Duration,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
+    discovery_interval: Duration,
 }
 
 impl NetworkManager {
@@ -116,6 +108,8 @@ impl NetworkManager {
         connect_timeout_secs: u64,
         ipv6_enabled: bool,
         allow_non_public_peer_addrs: bool,
+        discovery_interval_secs: u64,
+        peer_sharing_cooldown_secs: u64,
     ) -> Self {
         let peer_manager = if peer_sharing_enabled {
             Some(PeerManager::new(PeerManagerConfig {
@@ -124,6 +118,7 @@ impl NetworkManager {
                 peer_sharing_enabled,
                 churn_interval_secs,
                 peer_sharing_timeout_secs,
+                peer_sharing_cooldown_secs,
             }))
         } else {
             None
@@ -149,15 +144,16 @@ impl NetworkManager {
             connect_timeout: Duration::from_secs(connect_timeout_secs),
             ipv6_enabled,
             allow_non_public_peer_addrs,
+            discovery_interval: Duration::from_secs(discovery_interval_secs),
         };
 
         if peer_sharing_enabled {
-            // Seed cold list from config (FR-002): all addresses go to cold first
+            // Seed cold list from config, all addresses go to cold first
             let empty_hot: HashSet<String> = HashSet::new();
             if let Some(ref mut pm) = manager.peer_manager {
                 pm.seed(&node_addresses, &empty_hot);
             }
-            // Connect only up to min_hot_peers initially (FR-002).  These initial
+            // Connect only up to min_hot_peers initially. These initial
             // connections bypass cold_origin tracking — they are configured peers
             // and are always retried on disconnect.
             let initial_count = node_addresses.len().min(min_hot_peers);
@@ -169,7 +165,7 @@ impl NetworkManager {
                 manager.handle_new_connection(address, Duration::ZERO);
             }
         } else {
-            // Disabled mode: connect all addresses immediately (pre-feature baseline, FR-010)
+            // Disabled mode: connect all addresses immediately
             for address in node_addresses {
                 manager.handle_new_connection(address, Duration::ZERO);
             }
@@ -177,9 +173,6 @@ impl NetworkManager {
 
         manager
     }
-
-    /// Hardcoded discovery interval (not configurable per FR-009 — only the 5 items listed there).
-    const DISCOVERY_INTERVAL: Duration = Duration::from_secs(60);
 
     pub async fn run(mut self) -> Result<()> {
         let churn_interval = self
@@ -190,13 +183,9 @@ impl NetworkManager {
 
         let mut churn_ticker = time::interval(churn_interval);
         churn_ticker.tick().await; // skip the immediate first tick
-        let mut discovery_ticker = time::interval(Self::DISCOVERY_INTERVAL);
+        let mut discovery_ticker = time::interval(self.discovery_interval);
         discovery_ticker.tick().await; // skip the immediate first tick
 
-        // TODO(ledger-peers): Subscribe to `SPOStateMessage` (cardano.spo.state topic) here
-        // to receive relay addresses at epoch boundaries. On each epoch message, call
-        // `peer_manager.seed_from_ledger(relay_addrs, &hot_set)` (method TBD in PeerManager).
-        // This requires subscribing to the message bus before entering this loop.
         loop {
             tokio::select! {
                 event = self.events.recv() => {
@@ -301,7 +290,7 @@ impl NetworkManager {
     }
 
     /// Called when the discovery ticker fires. Selects a cooldown-eligible hot peer and
-    /// spawns a peer-sharing exchange task, sending results as `PeersDiscovered` events.
+    /// spawns a peer-sharing exchange task.
     fn on_discovery_tick(&mut self) {
         let pm = match self.peer_manager.as_mut() {
             Some(pm) => pm,
@@ -312,16 +301,15 @@ impl NetworkManager {
             let cold_count = pm.cold_count();
             if hot_count == 0 {
                 info!(
-                     hot_count,
-                     cold_count,
-                     "discovery tick: no hot peers available, skipping"
-                 );
+                    hot_count,
+                    cold_count, "discovery tick: no hot peers available, skipping"
+                );
             } else {
                 info!(
-                     hot_count,
-                     cold_count,
-                     "discovery tick: peer sharing disabled or discovery not needed, skipping"
-                 );
+                    hot_count,
+                    cold_count,
+                    "discovery tick: peer sharing disabled or discovery not needed, skipping"
+                );
             }
             return;
         }
@@ -347,7 +335,7 @@ impl NetworkManager {
         use rand::seq::IteratorRandom;
         let (peer_id, address) = eligible.into_iter().choose(&mut rand::rng()).unwrap();
 
-        // Record query BEFORE spawning (D-006 invariant)
+        // Record query BEFORE spawning
         pm.record_query(peer_id);
 
         let magic = self.network_magic;
@@ -389,10 +377,6 @@ impl NetworkManager {
 
     /// Called when the churn ticker fires. Demotes one randomly selected hot peer
     /// (above `min_hot_peers`) to cold and promotes a cold peer to maintain count.
-    ///
-    /// # TODO(warm-peers): When warm tier is added, churn should demote hot→warm first,
-    /// then a separate warm→cold demotion maintains the warm pool. The `should_churn`
-    /// check and peer selection logic below remain the same.
     fn on_churn(&mut self) {
         let hot_count = self.peers.len();
         let replacement = {
@@ -422,8 +406,8 @@ impl NetworkManager {
         self.cold_origin.remove(&victim_id); // clear before ghost disconnect fires
         let address = victim.conn.address.clone();
 
-        // Return to cold, bypassing the failed_peers blacklist (demote_to_cold, not
-        // add_discovered), since a currently-hot peer must not be silently discarded.
+        // Return to cold, bypassing the failed_peers blacklist
+        // since a currently hot peer must not be silently discarded.
         let hot: HashSet<String> = self.peers.values().map(|p| p.conn.address.clone()).collect();
         if let Some(ref mut pm) = self.peer_manager {
             pm.demote_to_cold(address.clone(), &hot);
@@ -443,19 +427,6 @@ impl NetworkManager {
         }
     }
 
-    /// Attempt to promote a cold peer to a hot connection.
-    ///
-    /// Returns `true` if a cold peer was found and a connection was spawned, `false` if
-    /// the cold set was empty. Callers use the return value to decide whether to fall back
-    /// to reconnecting the original peer (Issue 1 fix: avoid surplus hot connections).
-    ///
-    /// Inserts into `self.peers` at spawn time (D-012 invariant). The connection will
-    /// attempt to reach the peer after `delay`; on failure the peer is disconnected and
-    /// `mark_failed` is called via `handle_disconnect`.
-    ///
-    /// # TODO(warm-peers): When warm tier is added, this method becomes `try_promote_to_warm()`.
-    /// A separate `try_promote_warm_to_hot()` method handles the warm→hot elevation after
-    /// connection validation (e.g. version check, latency gate).
     fn try_promote_cold_peer(&mut self) -> bool {
         let Some(ref mut pm) = self.peer_manager else {
             return false;
@@ -616,7 +587,7 @@ impl NetworkManager {
         }
 
         if self.peer_manager.is_none() {
-            // Disabled mode: reconnect with 5s backoff (pre-feature baseline, FR-010)
+            // Disabled mode: reconnect with 5s backoff
             self.handle_new_connection(address, Duration::from_secs(5));
             return;
         }
@@ -799,6 +770,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -825,6 +798,8 @@ mod tests {
             15,
             false,
             true,
+            60,
+            30,
         )
     }
 
@@ -855,8 +830,6 @@ mod tests {
         }
     }
 
-    // --- US1: peer promotion test ---
-
     #[tokio::test]
     async fn promotes_cold_peer_when_hot_drops_below_min() {
         // Build NetworkManager with peer_sharing enabled, 1 cold peer, min_hot_peers=1
@@ -883,6 +856,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -909,11 +884,13 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         // Seed a cold peer manually
         if let Some(ref mut pm) = manager.peer_manager {
-            let hot: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let hot: HashSet<String> = HashSet::new();
             pm.seed(&["cold.peer.example.com:3001".to_string()], &hot);
         }
         let cold_before = manager.peer_manager.as_ref().map(|pm| pm.cold_count()).unwrap_or(0);
@@ -967,6 +944,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -993,10 +972,12 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         if let Some(ref mut pm) = manager.peer_manager {
-            let hot: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let hot: HashSet<String> = HashSet::new();
             pm.seed(&["cold.peer.example.com:3001".to_string()], &hot);
         }
 
@@ -1039,8 +1020,6 @@ mod tests {
         manager.peers.insert(peer, PeerData::new(conn));
     }
 
-    // --- FR-010: disabled mode test ---
-
     #[tokio::test]
     async fn disabled_mode_skips_all_discovery() {
         let context = test_context();
@@ -1064,6 +1043,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1090,6 +1071,8 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         assert!(
@@ -1102,8 +1085,6 @@ mod tests {
             "no peers connected with empty node_addresses and disabled mode"
         );
     }
-
-    // --- US2: peers discovered event test ---
 
     #[tokio::test]
     async fn peers_discovered_event_adds_to_cold_list() {
@@ -1128,6 +1109,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1154,6 +1137,8 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         let addresses = vec![
@@ -1181,8 +1166,6 @@ mod tests {
         );
     }
 
-    // --- US3: churn tests ---
-
     #[tokio::test]
     async fn churn_skips_rotation_when_no_cold_peer_is_available() {
         let context = test_context();
@@ -1206,6 +1189,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1232,6 +1217,8 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         // Add 4 hot peers
@@ -1270,6 +1257,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1296,10 +1285,12 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         if let Some(ref mut pm) = manager.peer_manager {
-            let hot: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let hot: HashSet<String> = HashSet::new();
             pm.seed(&["cold.peer.example.com:3001".to_string()], &hot);
         }
 
@@ -1350,6 +1341,8 @@ mod tests {
             connect_timeout_secs: 15,
             ipv6_enabled: false,
             allow_non_public_peer_addrs: true,
+            discovery_interval_secs: 0,
+            peer_sharing_cooldown_secs: 0,
         };
 
         let flow_handler = BlockFlowHandler::new(
@@ -1376,6 +1369,8 @@ mod tests {
             cfg.connect_timeout_secs,
             cfg.ipv6_enabled,
             cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         );
 
         // Add exactly min_hot_peers = 3 peers
@@ -1390,8 +1385,6 @@ mod tests {
             "churn must not demote at min_hot_peers"
         );
     }
-
-    // --- Existing tests ---
 
     #[tokio::test]
     async fn block_wanted_for_fetched_block_uses_fetched_announcers() {

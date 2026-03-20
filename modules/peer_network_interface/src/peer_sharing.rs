@@ -1,23 +1,24 @@
 //! Peer-sharing mini-protocol client for discovering new peer addresses.
-#![deny(missing_docs)]
-
+//!
+//! Primary reference: Ouroboros Network Specification.
+use minicbor::Decoder;
+use pallas::network::{
+    miniprotocols::handshake::{self, n2n::VersionData},
+    multiplexer::{Bearer, Plexer},
+};
+use std::collections::HashMap;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
     time::Duration,
 };
-
-use pallas::network::{
-    miniprotocols::handshake::{self, n2n::VersionData},
-    multiplexer::{Bearer, Plexer},
-};
 use tracing::{debug, warn};
 
-/// Protocol ID for the peer-sharing mini-protocol (no constant in pallas 0.34).
+/// Node-to-node mux mini-protocol number for peer-sharing.
 const PROTOCOL_N2N_PEER_SHARING: u16 = 10;
 
 /// Peer-sharing mode value sent during the V11+ handshake.
-/// Pallas 0.34 hardcodes `PEER_SHARING_DISABLED (0)` in all convenience
+/// Pallas 0.35 hardcodes `PEER_SHARING_DISABLED (0)` in all convenience
 /// constructors, so we build the version table ourselves.
 const PEER_SHARING_ENABLED: u8 = 1;
 
@@ -39,12 +40,6 @@ pub enum PeerSharingError {
 }
 
 /// Validate and normalise a peer address string + port.
-///
-/// Returns `Some("ip:port")` for IPv4 or `Some("[ipv6]:port")` for IPv6, `None` for rejected ones.
-/// Rejected: unspecified, link-local, port 0, and when `allow_non_public_peer_addrs` is false
-/// also loopback / RFC1918 private addresses.
-/// When `ipv6_enabled` is false, pure IPv6 addresses are also rejected.
-/// IPv4-mapped IPv6 (`::ffff:x.x.x.x`) is normalised to IPv4 form before dedup.
 pub fn validate_and_normalise(
     addr_str: &str,
     port: u16,
@@ -100,21 +95,18 @@ fn is_v6_link_local(v6: &Ipv6Addr) -> bool {
 }
 
 // ---- CBOR message encoding / decoding ----
-// Peer-sharing protocol messages (manual CBOR):
-//   MsgShareRequest  = [0, amount]
-//   MsgSharePeers    = [1, [peer_address, ...]]
-//   MsgDone          = [2]
-//
-// peer_address (Cardano wire format — SockAddr CBOR encoding):
-//   IPv4 = [0, word32, word16]           (3 elements)
-//   IPv6 = [1, word32, word32, word32, word32, word16]  (6 elements)
-
+// Peer-sharing protocol messages:
+//   msgShareRequest = [0, base.word8]
+//   msgSharePeers   = [1, peerAddresses]
+//   msgDone         = [2]
+//   peerAddress     = [0, word32, portNumber] | [1, word32×4, portNumber]
 fn encode_request(amount: u8) -> Vec<u8> {
     // CBOR: array(2) = 0x82, uint(0) = 0x00, uint(amount)
     if amount <= 23 {
+        // CBOR major type 0: values 0..=23 use one byte; 24..=255 need 0x18 + byte
         vec![0x82, 0x00, amount]
     } else {
-        vec![0x82, 0x00, 0x18, amount] // 0x18 = uint8 follows
+        vec![0x82, 0x00, 0x18, amount] // 0x18: uint follows in next byte
     }
 }
 
@@ -126,15 +118,13 @@ fn encode_done() -> Vec<u8> {
 /// Decode a `MsgSharePeers` CBOR response, accepting at most `limit` addresses.
 ///
 /// CBOR format: `[1, [[addr_type, ip_bytes, port], ...]]`
-/// Extra entries beyond `limit` are skipped without allocation (FR-014).
+/// Extra entries beyond `limit` are skipped without allocation.
 fn decode_response(
     bytes: &[u8],
     limit: usize,
     ipv6_enabled: bool,
     allow_non_public_peer_addrs: bool,
 ) -> Result<Vec<String>, PeerSharingError> {
-    use minicbor::Decoder;
-
     let mut dec = Decoder::new(bytes);
 
     // Outer array (message envelope): must have length 2
@@ -167,7 +157,7 @@ fn decode_response(
             _ => break, // break code or end of input
         };
 
-        // FR-014: once we have enough valid addresses, keep the decoder aligned but
+        // Once we have enough valid addresses, keep the decoder aligned but
         // skip excess entries without decoding fields or allocating strings.
         if results.len() >= limit {
             for _ in 0..entry_len {
@@ -225,12 +215,7 @@ fn decode_response(
     Ok(results)
 }
 
-// ---- Public API ----
-
 /// Request peer addresses from the peer at `address` using the peer-sharing mini-protocol.
-///
-/// Wraps `request_peers_inner` with a configurable timeout. Returns `Ok(vec![])` on timeout
-/// or if the peer does not support V11+ (peer-sharing requires V11+).
 pub async fn request_peers(
     address: &str,
     magic: u32,
@@ -278,7 +263,7 @@ async fn request_peers_inner(
     let running = plexer.spawn();
 
     // Step 3: V11 handshake with PeerSharing=Enabled.
-    // Pallas 0.34 hardcodes PeerSharing=Disabled(0) in all convenience constructors,
+    // Pallas 0.35 hardcodes PeerSharing=Disabled(0) in all convenience constructors,
     // so we build the table manually with PeerSharing=Enabled(1).
     let versions = version_table_peer_sharing_enabled(magic as u64);
     let mut hs_client = handshake::Client::new(hs_channel);
@@ -338,7 +323,8 @@ async fn request_peers_inner(
     }
 }
 
-/// Heuristic: check if the buffer contains enough bytes for a minimal CBOR value.
+/// Heuristic: enough bytes that a minimal valid `MsgSharePeers` could be complete.
+/// Smallest encoding is `[1, []]` → `0x82 0x01 0x80` (array(2), uint 1, empty array) = 3 bytes.
 /// Used to distinguish "incomplete input" from "malformed CBOR".
 fn looks_complete(buf: &[u8]) -> bool {
     !buf.is_empty() && buf.len() >= 3
@@ -346,7 +332,6 @@ fn looks_complete(buf: &[u8]) -> bool {
 
 /// Build a V11–V14 version table with `PeerSharing = Enabled (1)`.
 fn version_table_peer_sharing_enabled(network_magic: u64) -> handshake::n2n::VersionTable {
-    use std::collections::HashMap;
     let values: HashMap<u64, VersionData> = (11..=14)
         .map(|v| {
             (

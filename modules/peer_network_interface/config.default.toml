@@ -44,3 +44,7 @@ connect-timeout-secs = 15
 ipv6-enabled = false
 # Accept loopback/private/link-local peer addresses from peer-sharing (useful for local testnets)
 allow-non-public-peer-addrs = true
+# Seconds between peer discovery (peer-sharing request) cycles
+discovery-interval-secs = 20
+# Per-peer cooldown in seconds between peer-sharing queries
+peer-sharing-cooldown-secs = 20

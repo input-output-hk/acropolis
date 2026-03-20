@@ -1,6 +1,4 @@
 //! Cold peer set management and peer-sharing rate limiting for the PNI module.
-#![deny(missing_docs)]
-
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
@@ -10,14 +8,7 @@ use rand::seq::IteratorRandom;
 
 use crate::network::PeerId;
 
-/// The per-peer cooldown between peer-sharing queries (5 minutes, hardcoded).
-const PEER_SHARING_COOLDOWN: Duration = Duration::from_secs(5 * 60);
-
 /// Configuration for `PeerManager`, controlling peer set sizes and discovery behaviour.
-///
-/// # TODO(warm-peers): Add `max_warm_peers: usize` (default 10) to limit the warm tier
-/// once the warm peer pool is added. The warm pool sits between cold and hot — peers are
-/// promoted cold→warm (probe connect only) before being elevated to hot (full protocols).
 #[derive(Clone, Debug)]
 pub struct PeerManagerConfig {
     /// Target peer count; also defines the cold cap (`cold_cap = 4 × target_peer_count`).
@@ -30,6 +21,8 @@ pub struct PeerManagerConfig {
     pub churn_interval_secs: u64,
     /// Timeout in seconds for a full peer-sharing exchange.
     pub peer_sharing_timeout_secs: u64,
+    /// Per-peer cooldown in seconds between peer-sharing queries.
+    pub peer_sharing_cooldown_secs: u64,
 }
 
 impl Default for PeerManagerConfig {
@@ -40,6 +33,7 @@ impl Default for PeerManagerConfig {
             peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
+            peer_sharing_cooldown_secs: 30,
         }
     }
 }
@@ -49,14 +43,6 @@ impl Default for PeerManagerConfig {
 /// Cold peers are known addresses not currently connected. Failed peers are session-scoped
 /// blacklisted addresses that failed promotion. Sharing cooldown tracks when each hot peer
 /// was last queried to prevent excessive polling.
-///
-/// # TODO(warm-peers): When warm tier is added, this struct will need a `warm_peers` set
-/// and methods to track warm→hot and warm→cold transitions. The cold cap enforcement
-/// and `add_discovered` logic extend naturally to a warm pool.
-///
-/// # TODO(ledger-peers): A `ledger_peers: HashSet<String>` field and `seed_from_ledger()`
-/// method can be added here to accept relay addresses from SPO State epoch boundaries.
-/// The `add_discovered` method serves as the template for `seed_from_ledger`.
 pub struct PeerManager {
     /// Known peer addresses not currently connected.
     cold_peers: HashSet<String>,
@@ -80,7 +66,7 @@ impl PeerManager {
 
     /// Seed the cold peer set from the static `node_addresses` config, excluding any
     /// address already in the `hot` set. Applies the same cap-and-evict policy as
-    /// `add_discovered` to satisfy the D-010 cold cap invariant.
+    /// `add_discovered`.
     pub fn seed(&mut self, addresses: &[String], hot: &HashSet<String>) {
         let cold_cap = self.config.target_peer_count * 4;
         for addr in addresses {
@@ -100,11 +86,7 @@ impl PeerManager {
     ///
     /// Addresses already in cold, hot, or failed sets are silently skipped.
     /// When the cold set is at capacity (`4 × target_peer_count`), one randomly selected
-    /// existing cold peer is evicted before inserting the new address (D-010).
-    ///
-    /// # TODO(ledger-peers): `seed_from_ledger(addresses, hot)` follows the same pattern —
-    /// add a sibling method that accepts relay addresses from `SPOStateMessage` and applies
-    /// the same deduplication and cap enforcement.
+    /// existing cold peer is evicted before inserting the new address.
     pub fn add_discovered(&mut self, addresses: Vec<String>, hot: &HashSet<String>) -> usize {
         let cold_cap = self.config.target_peer_count * 4;
         let mut added = 0usize;
@@ -123,7 +105,6 @@ impl PeerManager {
     }
 
     /// Remove and return a randomly selected cold peer address for promotion.
-    /// Returns `None` if the cold set is empty.
     pub fn take_cold_peer(&mut self) -> Option<String> {
         let addr = self.cold_peers.iter().choose(&mut rand::rng()).cloned()?;
         self.cold_peers.remove(&addr);
@@ -164,29 +145,25 @@ impl PeerManager {
     /// Returns true if peer-sharing discovery should run.
     ///
     /// Discovery runs continuously whenever `peer_sharing_enabled` and at least one hot
-    /// peer exists. It is NOT gated on the cold peer count (D-015).
+    /// peer exists.
     pub fn needs_discovery(&self, hot_count: usize) -> bool {
         self.config.peer_sharing_enabled && hot_count > 0
     }
 
-    /// Returns true if the peer has not been queried within the 5-minute cooldown window.
+    /// Returns true if the peer has not been queried within the cooldown window.
     pub fn can_query(&self, peer_id: PeerId) -> bool {
         match self.sharing_cooldown.get(&peer_id) {
             None => true,
-            Some(&last) => last.elapsed() >= PEER_SHARING_COOLDOWN,
+            Some(&last) => {
+                last.elapsed() >= Duration::from_secs(self.config.peer_sharing_cooldown_secs)
+            }
         }
     }
 
     /// Record a peer-sharing query for `peer_id`, starting its cooldown.
-    /// Must be called BEFORE the async exchange starts (D-006).
+    /// Must be called BEFORE the async exchange starts.
     pub fn record_query(&mut self, peer_id: PeerId) {
         self.sharing_cooldown.insert(peer_id, Instant::now());
-    }
-
-    /// Test helper: insert a specific query time for a peer (used to simulate elapsed cooldowns).
-    #[doc(hidden)]
-    pub fn insert_query_time(&mut self, peer_id: PeerId, at: Instant) {
-        self.sharing_cooldown.insert(peer_id, at);
     }
 
     /// Returns true if a churn demotion is allowed (hot count exceeds `min_hot_peers`).

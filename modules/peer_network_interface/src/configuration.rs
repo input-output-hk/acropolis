@@ -44,6 +44,10 @@ pub struct InterfaceConfig {
     pub ipv6_enabled: bool,
     #[serde(default = "default_allow_non_public_peer_addrs")]
     pub allow_non_public_peer_addrs: bool,
+    #[serde(default = "default_discovery_interval_secs")]
+    pub discovery_interval_secs: u64,
+    #[serde(default = "default_peer_sharing_cooldown_secs")]
+    pub peer_sharing_cooldown_secs: u64,
 }
 
 fn default_consensus_topic() -> String {
@@ -84,6 +88,14 @@ fn default_ipv6_enabled() -> bool {
 
 fn default_allow_non_public_peer_addrs() -> bool {
     true
+}
+
+fn default_discovery_interval_secs() -> u64 {
+    60
+}
+
+fn default_peer_sharing_cooldown_secs() -> u64 {
+    30
 }
 
 impl InterfaceConfig {

@@ -158,6 +158,8 @@ impl PeerNetworkInterface {
                 cfg.connect_timeout_secs,
                 cfg.ipv6_enabled,
                 cfg.allow_non_public_peer_addrs,
+                cfg.discovery_interval_secs,
+                cfg.peer_sharing_cooldown_secs,
             );
 
             match sync_point {

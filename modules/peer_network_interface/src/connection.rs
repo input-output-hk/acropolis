@@ -40,10 +40,6 @@ impl PeerConnection {
         };
         let (chainsync_tx, chainsync_rx) = mpsc::unbounded_channel();
         let (blockfetch_tx, blockfetch_rx) = mpsc::unbounded_channel();
-        // TODO(warm-peers): When the warm tier is added, split this spawn into two phases:
-        // Phase 1 (cold→warm): TCP connect only + version check (no ChainSync/BlockFetch).
-        // Phase 2 (warm→hot): Start ChainSync and BlockFetch after latency validation.
-        // `PeerConnectionWorker::run` would become `run_warm_probe` + `run_hot_protocols`.
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             worker.run(chainsync_rx, blockfetch_rx).await;

@@ -4,7 +4,7 @@ use acropolis_module_peer_network_interface::peer_sharing::{
 use std::net::{Ipv6Addr, SocketAddr, TcpListener as StdTcpListener};
 use std::time::Duration;
 
-// ---- Address validation unit tests (T023) ----
+// Address validation unit tests
 
 #[test]
 fn loopback_ipv4_accepted() {
@@ -118,7 +118,7 @@ fn non_public_ipv4_rejected_when_disabled() {
     assert!(validate_and_normalise("10.0.0.1", 3001, true, false).is_none());
 }
 
-// ---- Integration tests with mock TCP server (T022) ----
+// Integration tests with mock TCP server
 // These tests use a real TCP listener that simulates a peer-sharing exchange.
 
 /// Helper: find a free localhost port by binding a std listener then dropping it.
