@@ -70,72 +70,54 @@ impl MidnightState {
         mut protocol_params_reader: ProtocolParamsReader,
     ) -> Result<()> {
         loop {
-            tokio::select! {
-                address_deltas = address_deltas_reader.read_with_rollbacks() => {
-                    let mut state = {
-                        let mut h = history.lock().await;
-                        h.get_or_init_with(|| State::new(config.clone()))
-                    };
+            let mut state = {
+                let mut h = history.lock().await;
+                h.get_or_init_with(|| State::new(config.clone()))
+            };
 
-                    match address_deltas? {
-                        RollbackWrapper::Normal((blk_info, deltas)) => {
-                            if blk_info.status == BlockStatus::RolledBack {
-                                state = history.lock().await.get_rolled_back_state(blk_info.number);
-                                warn!(
-                                    block_number = blk_info.number,
-                                    block_hash = %blk_info.hash,
-                                    "applying rollback"
-                                );
+            match address_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((blk_info, deltas)) => {
+                    if blk_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(blk_info.number);
+                        warn!(
+                            block_number = blk_info.number,
+                            block_hash = %blk_info.hash,
+                            "applying rollback"
+                        );
+                    }
+
+                    if blk_info.new_epoch && blk_info.epoch > 0 {
+                        match protocol_params_reader.read_with_rollbacks().await? {
+                            RollbackWrapper::Normal((_, protocol_params)) => {
+                                state.update_stable_block_window_bounds(&protocol_params.params)?;
                             }
-
-                            if blk_info.new_epoch && blk_info.epoch > 0 {
-                                let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
-                                let nonce = nonce.as_ref().clone();
-
-                                state.handle_new_epoch(blk_info.as_ref(), nonce);
-                            }
-
-                            state.handle_address_deltas(&blk_info, deltas.as_ref())?;
-
-                            history.lock().await.commit(blk_info.number, state);
+                            RollbackWrapper::Rollback(_) => {}
                         }
-                        RollbackWrapper::Rollback(point) => {
-                            warn!(
-                                rollback_point = ?point,
-                                "received rollback wrapper message"
-                            );
+
+                        let (nonce, is_rollback) = match epoch_nonce_reader
+                            .read_with_rollbacks()
+                            .await?
+                        {
+                            RollbackWrapper::Normal((_, nonce)) => (nonce.as_ref().clone(), false),
+                            RollbackWrapper::Rollback(_) => (None, true),
+                        };
+
+                        if !is_rollback {
+                            state.handle_new_epoch(blk_info.as_ref(), nonce);
                         }
-                    };
+                    }
+
+                    state.handle_address_deltas(&blk_info, deltas.as_ref())?;
+
+                    history.lock().await.commit(blk_info.number, state);
                 }
-                protocol_params = protocol_params_reader.read_with_rollbacks() => {
-                    let mut state = {
-                        let mut h = history.lock().await;
-                        h.get_or_init_with(|| State::new(config.clone()))
-                    };
-
-                    match protocol_params? {
-                        RollbackWrapper::Normal((blk_info, protocol_params)) => {
-                            if blk_info.status == BlockStatus::RolledBack {
-                                state = history.lock().await.get_rolled_back_state(blk_info.number);
-                                warn!(
-                                    block_number = blk_info.number,
-                                    block_hash = %blk_info.hash,
-                                    "applying rollback for protocol params update"
-                                );
-                            }
-
-                            state.update_stable_block_window_bounds(&protocol_params.params)?;
-                            history.lock().await.commit(blk_info.number, state);
-                        }
-                        RollbackWrapper::Rollback(message) => {
-                            warn!(
-                                rollback_message = ?message,
-                                "ignoring protocol params rollback wrapper; awaiting address-delta rollback to rewind shared state history"
-                            );
-                        }
-                    };
+                RollbackWrapper::Rollback(point) => {
+                    warn!(
+                        rollback_point = ?point,
+                        "received rollback wrapper message"
+                    );
                 }
-            }
+            };
         }
     }
 

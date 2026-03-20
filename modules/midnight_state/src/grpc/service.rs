@@ -38,7 +38,7 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
-const STABLE_BLOCK_LOOKBACK_BATCH_SIZE: u64 = 1024;
+const PREVIOUS_BLOCKS_PAGE_SIZE: u64 = 256;
 
 #[derive(Clone)]
 pub struct MidnightStateService {
@@ -794,12 +794,8 @@ async fn query_latest_stable_block_as_of(
 
     let mut anchor_block_number = stable_boundary.number;
     loop {
-        let previous_blocks = query_previous_blocks(
-            context,
-            anchor_block_number,
-            STABLE_BLOCK_LOOKBACK_BATCH_SIZE,
-        )
-        .await?;
+        let previous_blocks =
+            query_previous_blocks(context, anchor_block_number, PREVIOUS_BLOCKS_PAGE_SIZE).await?;
 
         if previous_blocks.is_empty() {
             return Ok(None);
