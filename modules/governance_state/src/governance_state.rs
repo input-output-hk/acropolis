@@ -334,7 +334,7 @@ impl GovernanceState {
             );
 
             let (blk_g, gov_procs) =
-                match vld.consume_sync(readers.gov_reader.read_with_rollbacks().await)? {
+                match vld.consume_sync("gov", readers.gov_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(normal) => normal,
                     RollbackWrapper::Rollback(message) => {
                         let mut state = state.lock().await;

@@ -175,7 +175,7 @@ impl EpochsState {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(&genesis.values));
 
-            match ctx.consume_sync(block_reader.read_with_rollbacks().await)? {
+            match ctx.consume_sync("proposed block", block_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, blk_msg)) => {
                     if blk_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(blk_info.number);

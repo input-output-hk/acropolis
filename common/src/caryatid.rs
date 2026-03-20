@@ -256,10 +256,14 @@ impl ValidationContext {
     /// * sets current_block (in case the message is not empty).
     pub fn consume_sync<T>(
         &mut self,
+        handler: &str,
         inp: Result<RollbackWrapper<T>>,
     ) -> Result<RollbackWrapper<T>> {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
+                if let Some(blk_info) = self.current_block.clone() {
+                    self.check_sync(handler, &blk_info);
+                }
                 self.current_block = Some(blk.clone());
             }
             Ok(RollbackWrapper::Rollback(_)) => {
