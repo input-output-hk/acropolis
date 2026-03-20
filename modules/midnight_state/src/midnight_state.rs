@@ -6,7 +6,7 @@ use acropolis_common::{
     messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -75,10 +75,17 @@ impl MidnightState {
                     }
 
                     if blk_info.new_epoch && blk_info.epoch > 0 {
-                        let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
-                        let nonce = nonce.as_ref().clone();
+                        let (nonce, is_rollback) = match epoch_nonce_reader
+                            .read_with_rollbacks()
+                            .await?
+                        {
+                            RollbackWrapper::Normal((_, nonce)) => (nonce.as_ref().clone(), false),
+                            RollbackWrapper::Rollback(_) => (None, true),
+                        };
 
-                        state.handle_new_epoch(blk_info.as_ref(), nonce);
+                        if !is_rollback {
+                            state.handle_new_epoch(blk_info.as_ref(), nonce);
+                        }
                     }
 
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;

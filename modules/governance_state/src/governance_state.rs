@@ -16,7 +16,6 @@ use acropolis_common::{
         GovernanceStateQuery, GovernanceStateQueryResponse, ProposalInfo, ProposalVotes,
         ProposalsList, DEFAULT_GOVERNANCE_QUERY_TOPIC,
     },
-    BlockInfo,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
@@ -181,24 +180,25 @@ impl GovernanceState {
         vld: &mut ValidationContext,
         state: Arc<Mutex<State>>,
         readers: &mut Box<Readers>,
-    ) {
-        let Some((_, d_drep)) =
-            vld.consume("drep", readers.drep_reader.read_skip_rollbacks().await)
-        else {
-            return;
-        };
+    ) -> Result<()> {
+        let d_drep =
+            match vld.consume_sync("drep", readers.drep_reader.read_with_rollbacks().await)? {
+                RollbackWrapper::Normal((_, d_drep)) => d_drep,
+                RollbackWrapper::Rollback(_) => return Ok(()),
+            };
 
-        let Some((blk_spo, d_spo)) =
-            vld.consume("spo", readers.spo_reader.read_skip_rollbacks().await)
-        else {
-            return;
-        };
+        let (blk_spo, d_spo) =
+            match vld.consume_sync("spo", readers.spo_reader.read_with_rollbacks().await)? {
+                RollbackWrapper::Normal((blk_spo, d_spo)) => (blk_spo, d_spo),
+                RollbackWrapper::Rollback(_) => return Ok(()),
+            };
 
-        let Some((_, drep_state)) = vld.consume(
+        let drep_state = match vld.consume_sync(
             "drep state",
-            readers.drep_state_reader.read_skip_rollbacks().await,
-        ) else {
-            return;
+            readers.drep_state_reader.read_with_rollbacks().await,
+        )? {
+            RollbackWrapper::Normal((_, drep_state)) => drep_state,
+            RollbackWrapper::Rollback(_) => return Ok(()),
         };
 
         if blk_spo.epoch != d_spo.epoch + 1 {
@@ -226,6 +226,8 @@ impl GovernanceState {
             "stakes",
             state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
         );
+
+        Ok(())
     }
 
     async fn run(
@@ -364,24 +366,29 @@ impl GovernanceState {
                 );
 
                 if blk_g.new_epoch {
-                    if let Some((_, params)) =
-                        vld.consume("params", readers.param_reader.read_skip_rollbacks().await)
+                    match vld
+                        .consume_sync("params", readers.param_reader.read_with_rollbacks().await)?
                     {
-                        vld.handle(
-                            "params",
-                            state.lock().await.handle_protocol_parameters(&params).await,
-                        );
-                    }
+                        RollbackWrapper::Normal((blk_g, params)) => {
+                            vld.handle(
+                                "params",
+                                state.lock().await.handle_protocol_parameters(&params).await,
+                            );
 
-                    if blk_g.epoch > 0 {
-                        Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await;
-                    }
+                            if blk_g.epoch > 0 {
+                                Self::process_drep_spo(&mut vld, state.clone(), &mut readers)
+                                    .await?;
+                            }
 
-                    vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
+                            vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
+                        }
+                        RollbackWrapper::Rollback(_) => {}
+                    }
                 }
+                Ok::<(), anyhow::Error>(())
             }
             .instrument(span)
-            .await;
+            .await?;
 
             if blk_g.intent.do_validation() {
                 vld.publish().await;

@@ -18,7 +18,7 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -164,10 +164,15 @@ impl DRepState {
         // Consume initial protocol parameters published at epoch 0 to keep params
         // reader in sync with the main loop's epoch-boundary consumption.
         if !is_bootstrap_mode {
-            let (_, initial_params) = subs.params.read_skip_rollbacks().await?;
-            let mut state = history.lock().await.get_or_init_with(|| State::new(storage_config));
-            state.update_protocol_params(&initial_params.params)?;
-            history.lock().await.commit(0, state);
+            match subs.params.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((_, initial_params)) => {
+                    let mut state =
+                        history.lock().await.get_or_init_with(|| State::new(storage_config));
+                    state.update_protocol_params(&initial_params.params)?;
+                    history.lock().await.commit(0, state);
+                }
+                RollbackWrapper::Rollback(_) => {}
+            }
         }
 
         // Main loop of synchronised messages
@@ -205,11 +210,12 @@ impl DRepState {
 
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
-                if let Some((_, msg)) =
-                    ctx.consume("params", subs.params.read_skip_rollbacks().await)
-                {
-                    ctx.handle("params", state.update_protocol_params(&msg.params));
-                    ctx.handle("params", state.update_drep_expirations(new_epoch));
+                match ctx.consume_sync("params", subs.params.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, msg)) => {
+                        ctx.handle("params", state.update_protocol_params(&msg.params));
+                        ctx.handle("params", state.update_drep_expirations(new_epoch));
+                    }
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Publish DRep state at the end of the epoch
