@@ -6,6 +6,8 @@ topic = "cardano.sequence.start"
 
 [module.genesis-bootstrapper]
 
+#[module.era-state]
+
 #[module.mithril-snapshot-fetcher]
 #Turned off with SanchoNet
 #aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"
