@@ -3,17 +3,11 @@
 //! Provides [`EraHistory`] — a complete history of Cardano protocol eras for a
 //! network — along with utility methods for era-aware slot-to-epoch,
 //! epoch-to-slot, and slot-to-POSIX-time conversions.
-//!
-//! Data follows the structure from the Amaru / Ogmios `queryLedgerState/eraSummaries`
-//! format. See the `modules/era_state/data/` directory for per-network JSON files.
 
 use crate::{era_summary::EraSummary, types::Era, Epoch, Slot};
 use std::time::{Duration, SystemTime};
 
 /// Complete era history for a network, including system start time.
-///
-/// Load from JSON with [`serde_json`], then set [`system_start`](EraHistory::system_start)
-/// from `GenesisValues::byron_timestamp` before publishing.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EraHistory {
     /// Network stability window in slots (3k/f).
@@ -33,9 +27,6 @@ pub enum EraHistoryError {
     /// The requested slot is beyond the known era history.
     #[error("slot {0} is past the time horizon")]
     PastTimeHorizon(u64),
-    /// The requested epoch is not covered by the era history.
-    #[error("epoch {0} not found in era history")]
-    EpochNotFound(u64),
     /// The era history data is structurally invalid.
     #[error("invalid era history: {0}")]
     InvalidEraHistory(String),
