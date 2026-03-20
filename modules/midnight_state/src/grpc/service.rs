@@ -17,20 +17,16 @@ use crate::{
         stats::{RequestStats, RequestStatsSnapshot},
         utxo_events::truncate_by_legacy_tx_capacity,
     },
-    state::State,
+    state::{StableBlockWindowBounds, State},
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
-    protocol_params::ProtocolParams,
     queries::{
         blocks::{
             BlockInfo, BlockKey, BlocksStateQuery, BlocksStateQueryResponse,
             DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         errors::QueryError,
-        parameters::{
-            ParametersStateQuery, ParametersStateQueryResponse, DEFAULT_PARAMETERS_QUERY_TOPIC,
-        },
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
     },
@@ -530,12 +526,14 @@ impl MidnightState for MidnightStateService {
         }
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
+        let window =
+            stable_block_window_from_state(&self.history, as_of_timestamp_unix_millis).await?;
 
         let block_info_opt = query_stable_block_by_hash_as_of(
             &self.context,
             block_hash,
             req.stability_offset,
-            as_of_timestamp_unix_millis,
+            &window,
         )
         .await?;
 
@@ -569,13 +567,11 @@ impl MidnightState for MidnightStateService {
                 "as_of_timestamp_unix_millis must be set",
             ));
         }
+        let window =
+            stable_block_window_from_state(&self.history, as_of_timestamp_unix_millis).await?;
 
-        let block_info_opt = query_latest_stable_block_as_of(
-            &self.context,
-            req.stability_offset,
-            as_of_timestamp_unix_millis,
-        )
-        .await?;
+        let block_info_opt =
+            query_latest_stable_block_as_of(&self.context, req.stability_offset, &window).await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -667,33 +663,6 @@ async fn query_block_by_tip_offset(
             )) => Err(e),
             _ => Err(QueryError::internal_error(
                 "Unexpected message type while retrieving block info",
-            )),
-        },
-    )
-    .await
-    .map_err(|e| Status::internal(e.to_string()))
-}
-
-async fn query_latest_protocol_params(
-    context: &Arc<Context<Message>>,
-) -> Result<ProtocolParams, Status> {
-    let msg = Arc::new(Message::StateQuery(StateQuery::Parameters(
-        ParametersStateQuery::GetLatestEpochParameters,
-    )));
-
-    query_state(
-        context,
-        DEFAULT_PARAMETERS_QUERY_TOPIC.1,
-        msg,
-        |message| match message {
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::LatestEpochParameters(protocol_params),
-            )) => Ok(protocol_params),
-            Message::StateQueryResponse(StateQueryResponse::Parameters(
-                ParametersStateQueryResponse::Error(e),
-            )) => Err(e),
-            _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving protocol parameters",
             )),
         },
     )
@@ -793,23 +762,33 @@ async fn query_block_by_hash_info_opt(
     .map_err(|e| Status::internal(e.to_string()))
 }
 
+async fn stable_block_window_from_state(
+    history: &Arc<Mutex<StateHistory<State>>>,
+    as_of_timestamp_unix_millis: u64,
+) -> Result<StableBlockWindow, Status> {
+    let history = history.lock().await;
+    let state = history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+    let bounds = state.stable_block_window_bounds().ok_or_else(|| {
+        Status::failed_precondition("stable block window bounds are not initialized")
+    })?;
+
+    Ok(stable_block_window(bounds, as_of_timestamp_unix_millis))
+}
+
 async fn query_latest_stable_block_as_of(
     context: &Arc<Context<Message>>,
     stability_offset: u32,
-    as_of_timestamp_unix_millis: u64,
+    window: &StableBlockWindow,
 ) -> Result<Option<BlockInfo>, Status> {
     let Some(stable_boundary) = query_block_by_tip_offset(context, stability_offset).await? else {
         return Ok(None);
     };
 
-    let protocol_params = query_latest_protocol_params(context).await?;
-    let window = stable_block_window(&protocol_params, as_of_timestamp_unix_millis)?;
-
-    if is_block_within_stable_window(&stable_boundary, &window) {
+    if is_block_within_stable_window(&stable_boundary, window) {
         return Ok(Some(stable_boundary));
     }
 
-    if is_block_older_than_stable_window(&stable_boundary, &window) {
+    if is_block_older_than_stable_window(&stable_boundary, window) {
         return Ok(None);
     }
 
@@ -827,10 +806,10 @@ async fn query_latest_stable_block_as_of(
         }
 
         for block in previous_blocks.iter().rev() {
-            if is_block_within_stable_window(block, &window) {
+            if is_block_within_stable_window(block, window) {
                 return Ok(Some(block.clone()));
             }
-            if is_block_older_than_stable_window(block, &window) {
+            if is_block_older_than_stable_window(block, window) {
                 return Ok(None);
             }
         }
@@ -843,7 +822,7 @@ async fn query_stable_block_by_hash_as_of(
     context: &Arc<Context<Message>>,
     block_hash: BlockHash,
     stability_offset: u32,
-    as_of_timestamp_unix_millis: u64,
+    window: &StableBlockWindow,
 ) -> Result<Option<BlockInfo>, Status> {
     let Some(block_info) = query_block_by_hash_info_opt(context, block_hash).await? else {
         return Ok(None);
@@ -855,10 +834,7 @@ async fn query_stable_block_by_hash_as_of(
         return Ok(None);
     }
 
-    let protocol_params = query_latest_protocol_params(context).await?;
-    let window = stable_block_window(&protocol_params, as_of_timestamp_unix_millis)?;
-
-    Ok(is_block_within_stable_window(&block_info, &window).then_some(block_info))
+    Ok(is_block_within_stable_window(&block_info, window).then_some(block_info))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -869,52 +845,15 @@ struct StableBlockWindow {
 
 #[allow(clippy::result_large_err)]
 fn stable_block_window(
-    protocol_params: &ProtocolParams,
+    bounds: StableBlockWindowBounds,
     as_of_timestamp_unix_millis: u64,
-) -> Result<StableBlockWindow, Status> {
-    let shelley = protocol_params.shelley.as_ref().ok_or_else(|| {
-        Status::failed_precondition("latest protocol parameters do not include shelley params")
-    })?;
-
-    let active_slots_coeff_numerator = u128::from(*shelley.active_slots_coeff.numer());
-    let active_slots_coeff_denominator = u128::from(*shelley.active_slots_coeff.denom());
-    if active_slots_coeff_numerator == 0 {
-        return Err(Status::failed_precondition(
-            "active_slots_coeff numerator must be non-zero",
-        ));
-    }
-
-    let slot_duration_millis = u128::from(shelley.slot_length).saturating_mul(1000);
-    let min_block_age_millis = rounded_div_u128_to_u64(
-        slot_duration_millis
-            .saturating_mul(u128::from(shelley.security_param))
-            .saturating_mul(active_slots_coeff_denominator),
-        active_slots_coeff_numerator,
-    )?;
-    let max_block_age_millis = min_block_age_millis.saturating_mul(3);
-
-    Ok(StableBlockWindow {
+) -> StableBlockWindow {
+    StableBlockWindow {
         min_block_timestamp_unix_millis: as_of_timestamp_unix_millis
-            .saturating_sub(max_block_age_millis),
+            .saturating_sub(bounds.max_block_age_millis),
         max_block_timestamp_unix_millis: as_of_timestamp_unix_millis
-            .saturating_sub(min_block_age_millis),
-    })
-}
-
-#[allow(clippy::result_large_err)]
-fn rounded_div_u128_to_u64(numerator: u128, denominator: u128) -> Result<u64, Status> {
-    if denominator == 0 {
-        return Err(Status::failed_precondition(
-            "stability window denominator must be non-zero",
-        ));
+            .saturating_sub(bounds.min_block_age_millis),
     }
-
-    let rounded = numerator
-        .saturating_add(denominator / 2)
-        .checked_div(denominator)
-        .ok_or_else(|| Status::internal("failed to calculate rounded stability window"))?;
-
-    u64::try_from(rounded).map_err(|_| Status::internal("stability window overflow"))
 }
 
 fn is_block_within_stable_window(block: &BlockInfo, window: &StableBlockWindow) -> bool {
@@ -954,7 +893,7 @@ mod tests {
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
             utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
-            CardanoPosition, EpochCandidatesRequest, UtxoEventsRequest,
+            CardanoPosition, EpochCandidatesRequest, LatestStableBlockRequest, UtxoEventsRequest,
         },
         state::State,
     };
@@ -986,6 +925,11 @@ mod tests {
                         SPDDStateQueryResponse::EpochSPDD(Vec::new()),
                     ))
                 }
+                Message::StateQuery(StateQuery::Blocks(
+                    BlocksStateQuery::GetBlockByTipOffset { .. },
+                )) => Message::StateQueryResponse(StateQueryResponse::Blocks(
+                    BlocksStateQueryResponse::BlockByTipOffset(Some(query_block_info(100, 8))),
+                )),
                 Message::StateQuery(StateQuery::Blocks(BlocksStateQuery::GetBlockByHash {
                     block_hash,
                 })) => Message::StateQueryResponse(StateQueryResponse::Blocks(
@@ -1598,6 +1542,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn should_return_latest_stable_block_using_bounds_from_state() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 1,
+                active_slots_coeff: RationalNumber::new(1, 1),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut state = State::new(MidnightConfig::default());
+        state
+            .update_stable_block_window_bounds(&protocol_params)
+            .expect("stable bounds should be derived");
+
+        let service = service_with_committed_state(state, 100);
+        let response = service
+            .get_latest_stable_block(Request::new(LatestStableBlockRequest {
+                stability_offset: 5,
+                as_of_timestamp_unix_millis: 10_000,
+            }))
+            .await
+            .expect("latest stable block should be returned")
+            .into_inner();
+
+        let block = response
+            .block
+            .expect("block should be present when stable boundary falls within cached window");
+        assert_eq!(block.block_number, 100);
+        assert_eq!(block.block_timestamp_unix, 8);
+    }
+
     fn query_block_info(number: u64, timestamp: u64) -> QueryBlockInfo {
         QueryBlockInfo {
             timestamp,
@@ -1631,30 +1608,6 @@ mod tests {
             tx_count,
             ..query_block_info(number, timestamp)
         }
-    }
-
-    #[test]
-    fn stable_block_window_should_match_partner_chain_formula() {
-        let protocol_params = ProtocolParams {
-            shelley: Some(ShelleyParams {
-                security_param: 432,
-                active_slots_coeff: RationalNumber::new(1, 20),
-                slot_length: 1,
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-
-        let window =
-            super::stable_block_window(&protocol_params, 1_773_727_092_000).expect("window");
-
-        assert_eq!(
-            window,
-            super::StableBlockWindow {
-                min_block_timestamp_unix_millis: 1_773_701_172_000,
-                max_block_timestamp_unix_millis: 1_773_718_452_000,
-            }
-        );
     }
 
     #[test]

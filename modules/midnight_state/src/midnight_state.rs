@@ -3,7 +3,10 @@
 use acropolis_common::{
     caryatid::RollbackWrapper,
     declare_cardano_reader,
-    messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
+    messages::{
+        AddressDeltasMessage, CardanoMessage, Message, ProtocolParamsMessage,
+        StateTransitionMessage,
+    },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
@@ -41,6 +44,14 @@ declare_cardano_reader!(
     Option<Nonce>
 );
 
+declare_cardano_reader!(
+    ProtocolParamsReader,
+    "publish-parameters-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+
 /// Midnight State module
 #[module(
     message_type(Message),
@@ -56,42 +67,75 @@ impl MidnightState {
         config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
         mut epoch_nonce_reader: EpochNonceReader,
+        mut protocol_params_reader: ProtocolParamsReader,
     ) -> Result<()> {
         loop {
-            let mut state = {
-                let mut h = history.lock().await;
-                h.get_or_init_with(|| State::new(config.clone()))
-            };
+            tokio::select! {
+                address_deltas = address_deltas_reader.read_with_rollbacks() => {
+                    let mut state = {
+                        let mut h = history.lock().await;
+                        h.get_or_init_with(|| State::new(config.clone()))
+                    };
 
-            match address_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((blk_info, deltas)) => {
-                    if blk_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(blk_info.number);
-                        warn!(
-                            block_number = blk_info.number,
-                            block_hash = %blk_info.hash,
-                            "applying rollback"
-                        );
-                    }
+                    match address_deltas? {
+                        RollbackWrapper::Normal((blk_info, deltas)) => {
+                            if blk_info.status == BlockStatus::RolledBack {
+                                state = history.lock().await.get_rolled_back_state(blk_info.number);
+                                warn!(
+                                    block_number = blk_info.number,
+                                    block_hash = %blk_info.hash,
+                                    "applying rollback"
+                                );
+                            }
 
-                    if blk_info.new_epoch && blk_info.epoch > 0 {
-                        let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
-                        let nonce = nonce.as_ref().clone();
+                            if blk_info.new_epoch && blk_info.epoch > 0 {
+                                let (_, nonce) = epoch_nonce_reader.read_skip_rollbacks().await?;
+                                let nonce = nonce.as_ref().clone();
 
-                        state.handle_new_epoch(blk_info.as_ref(), nonce);
-                    }
+                                state.handle_new_epoch(blk_info.as_ref(), nonce);
+                            }
 
-                    state.handle_address_deltas(&blk_info, deltas.as_ref())?;
+                            state.handle_address_deltas(&blk_info, deltas.as_ref())?;
 
-                    history.lock().await.commit(blk_info.number, state);
+                            history.lock().await.commit(blk_info.number, state);
+                        }
+                        RollbackWrapper::Rollback(point) => {
+                            warn!(
+                                rollback_point = ?point,
+                                "received rollback wrapper message"
+                            );
+                        }
+                    };
                 }
-                RollbackWrapper::Rollback(point) => {
-                    warn!(
-                        rollback_point = ?point,
-                        "received rollback wrapper message"
-                    );
+                protocol_params = protocol_params_reader.read_with_rollbacks() => {
+                    let mut state = {
+                        let mut h = history.lock().await;
+                        h.get_or_init_with(|| State::new(config.clone()))
+                    };
+
+                    match protocol_params? {
+                        RollbackWrapper::Normal((blk_info, protocol_params)) => {
+                            if blk_info.status == BlockStatus::RolledBack {
+                                state = history.lock().await.get_rolled_back_state(blk_info.number);
+                                warn!(
+                                    block_number = blk_info.number,
+                                    block_hash = %blk_info.hash,
+                                    "applying rollback for protocol params update"
+                                );
+                            }
+
+                            state.update_stable_block_window_bounds(&protocol_params.params)?;
+                            history.lock().await.commit(blk_info.number, state);
+                        }
+                        RollbackWrapper::Rollback(message) => {
+                            warn!(
+                                rollback_message = ?message,
+                                "ignoring protocol params rollback wrapper; awaiting address-delta rollback to rewind shared state history"
+                            );
+                        }
+                    };
                 }
-            };
+            }
         }
     }
 
@@ -103,6 +147,7 @@ impl MidnightState {
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
         let epoch_nonce_reader = EpochNonceReader::new(&context, &config).await?;
+        let protocol_params_reader = ProtocolParamsReader::new(&context, &config).await?;
 
         // Initialize unbounded state history for rollback-safe replay.
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -113,9 +158,15 @@ impl MidnightState {
         let grpc_context = context.clone();
         // Start the main run loop
         context.run(async move {
-            Self::run(history, cfg, address_deltas_reader, epoch_nonce_reader)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                history,
+                cfg,
+                address_deltas_reader,
+                epoch_nonce_reader,
+                protocol_params_reader,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         // Start the gRPC server
