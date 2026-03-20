@@ -1,8 +1,8 @@
 //! Era history types and slot/epoch/time conversion utilities.
 //!
 //! Provides [`EraHistory`] — a complete history of Cardano protocol eras for a
-//! network — along with utility methods for era-aware slot-to-epoch,
-//! epoch-to-slot, and slot-to-POSIX-time conversions.
+//! network — along with utility methods for era-aware slot-to-epoch and
+//! slot-to-POSIX-time conversions.
 
 use crate::{era_summary::EraSummary, types::Era, Epoch, Slot};
 use std::time::{Duration, SystemTime};
