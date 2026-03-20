@@ -151,11 +151,14 @@ impl EraHistory {
     }
 }
 
-/// Compute the time in milliseconds between the start of the system and the given slot.
+/// Compute the time elapsed in seconds between the start of the system and the given slot.
 ///
 /// **pre-condition**: the given summary must be the era containing that slot.
 fn slot_to_relative_time(slot: Slot, era: &EraSummary) -> Result<Duration, EraHistoryError> {
     let slots_elapsed: u32 = match slot.checked_sub(era.start.slot) {
+        // Here we convert elapsed slots to a u32
+        // It is practically impossible that relative slot can be greater than u32::MAX for now.
+        // As each slot is 1 second, u32::MAX is approximately 136 years.
         Some(elapsed) => elapsed.try_into().map_err(|_| EraHistoryError::SlotTooFar(slot))?,
         None => {
             return Err(EraHistoryError::InvalidEraHistory(format!(

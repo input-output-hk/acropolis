@@ -34,7 +34,7 @@ const SANCHONET_ERA_HISTORY: &str = include_str!("../data/sanchonet-era-history.
 pub struct EraState;
 
 /// Load era history JSON for the given network name, or from a custom file path.
-fn load_era_history(network_name: &str, config: &Config) -> Result<EraHistory, String> {
+async fn load_era_history(network_name: &str, config: &Config) -> Result<EraHistory, String> {
     let json_str: Cow<'static, str> = match network_name {
         "mainnet" => Cow::Borrowed(MAINNET_ERA_HISTORY),
         "preprod" => Cow::Borrowed(PREPROD_ERA_HISTORY),
@@ -44,7 +44,8 @@ fn load_era_history(network_name: &str, config: &Config) -> Result<EraHistory, S
             let path = config
                 .get_string("era-history-file")
                 .map_err(|_| format!("no bundled era history for network '{network_name}'; set era-history-file for custom networks"))?;
-            let content = std::fs::read_to_string(&path)
+            let content = tokio::fs::read_to_string(&path)
+                .await
                 .map_err(|e| format!("cannot read era history file {path}: {e}"))?;
             Cow::Owned(content)
         }
@@ -85,7 +86,7 @@ impl EraState {
             async {
                 info!("Received startup message, loading era history for '{network_name}'");
 
-                let mut era_history = match load_era_history(&network_name, &config) {
+                let mut era_history = match load_era_history(&network_name, &config).await {
                     Ok(h) => {
                         info!(
                             eras = h.eras.len(),
@@ -151,40 +152,40 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn load_mainnet() {
+    #[tokio::test]
+    async fn load_mainnet() {
         let config = Config::default();
-        let h = load_era_history("mainnet", &config).expect("mainnet loads");
+        let h = load_era_history("mainnet", &config).await.expect("mainnet loads");
         assert_eq!(h.eras.len(), 7);
         assert_eq!(h.stability_window, 129_600);
     }
 
-    #[test]
-    fn load_preprod() {
+    #[tokio::test]
+    async fn load_preprod() {
         let config = Config::default();
-        let h = load_era_history("preprod", &config).expect("preprod loads");
+        let h = load_era_history("preprod", &config).await.expect("preprod loads");
         assert_eq!(h.eras.len(), 7);
     }
 
-    #[test]
-    fn load_preview() {
+    #[tokio::test]
+    async fn load_preview() {
         let config = Config::default();
-        let h = load_era_history("preview", &config).expect("preview loads");
+        let h = load_era_history("preview", &config).await.expect("preview loads");
         assert_eq!(h.eras.len(), 7);
     }
 
-    #[test]
-    fn load_sanchonet() {
+    #[tokio::test]
+    async fn load_sanchonet() {
         let config = Config::default();
-        let h = load_era_history("sanchonet", &config).expect("sanchonet loads");
+        let h = load_era_history("sanchonet", &config).await.expect("sanchonet loads");
         assert_eq!(h.eras.len(), 1);
         assert_eq!(h.eras[0].params.era_name, Era::Conway);
     }
 
-    #[test]
-    fn load_unknown_network_without_config_fails() {
+    #[tokio::test]
+    async fn load_unknown_network_without_config_fails() {
         let config = Config::default();
-        let result = load_era_history("unknown-network", &config);
+        let result = load_era_history("unknown-network", &config).await;
         assert!(result.is_err());
     }
 }
