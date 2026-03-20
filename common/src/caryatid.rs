@@ -246,8 +246,8 @@ impl ValidationContext {
     ) -> Result<RollbackWrapper<T>> {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
-                if let Some(blk_info) = self.current_block.clone() {
-                    self.check_sync(handler, &blk_info);
+                if self.current_block.is_some() {
+                    self.check_sync(handler, blk);
                 } else {
                     self.current_block = Some(blk.clone());
                 }
