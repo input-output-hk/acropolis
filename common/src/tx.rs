@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ReferenceScript, ScriptHash, ScriptLang, ScriptRef, StakeRegistrationUpdate,
+    Redeemer, ReferenceScript, ScriptHash, ScriptLang, ScriptRef, Slot, StakeRegistrationUpdate,
     TxCertificate, TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness,
     Value, ValueMap, VotingProcedures, Withdrawal,
 };
@@ -38,6 +38,38 @@ impl TxOutput {
     }
 }
 
+/// [invalid_before, invalid_hereafter)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ValidityInterval {
+    /// Transaction invalid before this slot (optional)
+    pub invalid_before: Option<Slot>,
+    /// Transaction invalid at or after this slot (optional)
+    pub invalid_hereafter: Option<Slot>,
+}
+
+impl ValidityInterval {
+    pub fn new(invalid_before: Option<Slot>, invalid_hereafter: Option<Slot>) -> Self {
+        Self {
+            invalid_before,
+            invalid_hereafter,
+        }
+    }
+
+    pub fn contains(&self, current_slot: Slot) -> bool {
+        if let Some(invalid_before) = self.invalid_before {
+            if current_slot < invalid_before {
+                return false;
+            }
+        }
+        if let Some(invalid_hereafter) = self.invalid_hereafter {
+            if current_slot >= invalid_hereafter {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Transaction {
     pub id: TxIdentifier,
@@ -53,6 +85,7 @@ pub struct Transaction {
     pub is_valid: bool,
     pub certs: Vec<TxCertificateWithPos>,
     pub withdrawals: Vec<Withdrawal>,
+    pub validity_interval: ValidityInterval,
     pub mint_burn_deltas: NativeAssetsDelta,
     pub required_signers: Vec<KeyHash>,
     pub proposal_update: Option<AlonzoBabbageUpdateProposal>,
@@ -87,6 +120,7 @@ impl Transaction {
             is_valid,
             certs,
             withdrawals,
+            validity_interval,
             mint_burn_deltas,
             required_signers,
             proposal_update,
@@ -110,6 +144,7 @@ impl Transaction {
             is_valid,
             withdrawals: None,
             certs: None,
+            validity_interval: None,
             mint_burn_deltas: None,
             required_signers: None,
             proposal_update: None,
@@ -125,6 +160,7 @@ impl Transaction {
             utxo_deltas.created_reference_scripts = Some(created_reference_scripts);
             utxo_deltas.certs = Some(certs);
             utxo_deltas.withdrawals = Some(withdrawals);
+            utxo_deltas.validity_interval = Some(validity_interval);
             utxo_deltas.mint_burn_deltas = Some(mint_burn_deltas);
             utxo_deltas.required_signers = Some(required_signers);
             utxo_deltas.proposal_update = proposal_update;
@@ -182,6 +218,10 @@ pub struct TxUTxODeltas {
 
     // Withdrawls
     pub withdrawals: Option<Vec<Withdrawal>>,
+
+    // Transaction's Validity Interval
+    // We will convert this to PosixTimeRange in utxo_state
+    pub validity_interval: Option<ValidityInterval>,
 
     // Value Minted and Burnt
     pub mint_burn_deltas: Option<NativeAssetsDelta>,

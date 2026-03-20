@@ -3,49 +3,18 @@
 
 use std::collections::HashSet;
 
-use crate::crypto::verify_ed25519_signature;
+use crate::{crypto::verify_ed25519_signature, validations::utils};
 use acropolis_common::{
-    crypto::keyhash_256, protocol_params::ProtocolVersion, soft_fork,
-    validation::UTxOWValidationError, DataHash, GenesisDelegates, KeyHash, Metadata, Metadatum,
-    NativeScript, TxHash, VKeyWitness,
+    crypto::keyhash_256,
+    protocol_params::{ProtocolParams, ProtocolVersion},
+    soft_fork,
+    validation::UTxOWValidationError,
+    DataHash, GenesisDelegates, KeyHash, Metadata, Metadatum, NativeScript, TxHash, VKeyWitness,
 };
 use anyhow::Result;
-use pallas::{codec::utils::Nullable, ledger::primitives::alonzo};
+use pallas::ledger::traverse::MultiEraTx;
 
 const METADATUM_MAX_BYTES: usize = 64;
-
-fn has_mir_certificate(mtx: &alonzo::MintedTx) -> bool {
-    mtx.transaction_body
-        .certificates
-        .as_ref()
-        .map(|certs| {
-            certs
-                .iter()
-                .any(|cert| matches!(cert, alonzo::Certificate::MoveInstantaneousRewardsCert(_)))
-        })
-        .unwrap_or(false)
-}
-
-fn get_aux_data_hash(
-    mtx: &alonzo::MintedTx,
-) -> Result<Option<DataHash>, Box<UTxOWValidationError>> {
-    let aux_data_hash = match mtx.transaction_body.auxiliary_data_hash.as_ref() {
-        Some(x) => Some(DataHash::try_from(x.to_vec()).map_err(|_| {
-            Box::new(UTxOWValidationError::InvalidMetadataHash {
-                reason: "invalid metadata hash".to_string(),
-            })
-        })?),
-        None => None,
-    };
-    Ok(aux_data_hash)
-}
-
-fn get_aux_data(mtx: &alonzo::MintedTx) -> Option<Vec<u8>> {
-    match &mtx.auxiliary_data {
-        Nullable::Some(x) => Some(x.raw_cbor().to_vec()),
-        _ => None,
-    }
-}
 
 fn validate_metadatum(metadatum: &Metadatum) -> bool {
     match metadatum {
@@ -177,18 +146,15 @@ pub fn validate_mir_genesis_sigs(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn validate(
-    mtx: &alonzo::MintedTx,
-    tx_hash: TxHash,
+    tx: &MultiEraTx,
     vkey_witnesses: &[VKeyWitness],
     native_scripts: &[NativeScript],
     metadata: &Option<Metadata>,
+    protocol_params: &ProtocolParams,
     genesis_delegs: &GenesisDelegates,
-    update_quorum: u32,
-    protocol_version: &ProtocolVersion,
 ) -> Result<(), Box<UTxOWValidationError>> {
-    let transaction_body = &mtx.transaction_body;
+    let tx_hash = TxHash::from(*tx.hash());
 
     // Extract vkey hashes from vkey_witnesses
     let vkey_hashes_provided = vkey_witnesses.iter().map(|w| w.key_hash()).collect::<HashSet<_>>();
@@ -197,24 +163,39 @@ pub fn validate(
     validate_native_scripts(
         native_scripts,
         &vkey_hashes_provided,
-        transaction_body.validity_interval_start,
-        transaction_body.ttl,
+        tx.validity_start(),
+        tx.ttl(),
     )?;
 
     // validate vkey witnesses signatures
     validate_vkey_witnesses(vkey_witnesses, tx_hash)?;
 
     // validate metadata
+    let protocol_version = protocol_params.protocol_version().ok_or_else(|| {
+        Box::new(UTxOWValidationError::Other(
+            "Protocol version is not set".to_string(),
+        ))
+    })?;
     validate_metadata(
-        get_aux_data_hash(mtx)?,
-        get_aux_data(mtx),
+        utils::get_aux_data_hash(tx)
+            .map_err(|e| Box::new(UTxOWValidationError::Other(e.to_string())))?,
+        utils::get_aux_data(tx),
         metadata,
-        protocol_version,
+        &protocol_version,
     )?;
 
     // validate mir certificate genesis sig
-    if has_mir_certificate(mtx) {
-        validate_mir_genesis_sigs(&vkey_hashes_provided, genesis_delegs, update_quorum)?;
+    if utils::has_mir_certificate(tx) {
+        let shelley_params = protocol_params.shelley.as_ref().ok_or_else(|| {
+            Box::new(UTxOWValidationError::Other(
+                "Shelley params are not set".to_string(),
+            ))
+        })?;
+        validate_mir_genesis_sigs(
+            &vkey_hashes_provided,
+            genesis_delegs,
+            shelley_params.update_quorum,
+        )?;
     }
 
     Ok(())
@@ -310,24 +291,37 @@ mod tests {
         if genesis_keys.len() == 4;
         "allegra - mir_insufficient_genesis_sigs_utxow - 4 genesis sigs"
     )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "1b3a99a110ef5cc8d64f6a3d6ac0a8b3467104f1c29d306eb0293d563e962034"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "1b3a99a110ef5cc8d64f6a3d6ac0a8b3467104f1c29d306eb0293d563e962034",
+        "invalid_witnesses_utxow"
+    ) =>
+        matches Err(UTxOWValidationError::InvalidWitnessesUTxOW { key_hash, .. })
+        if key_hash == KeyHash::from_str("6c7157fc2a0a260b9789bbec5a667d4d3f798848452f2113d10eabed").unwrap();
+        "conway - invalid_witnesses_utxow"
+    )]
     #[allow(clippy::result_large_err)]
     fn shelley_utxow_test(
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), UTxOWValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        let mtx = tx.as_alonzo().unwrap();
         let vkey_witnesses = acropolis_codec::map_vkey_witnesses(tx.vkey_witnesses()).0;
         let native_scripts = acropolis_codec::map_native_scripts(tx.native_scripts());
         let metadata = acropolis_codec::map_metadata(&tx.metadata());
         validate(
-            mtx,
-            TxHash::from(*tx.hash()),
+            &tx,
             &vkey_witnesses,
             &native_scripts,
             &metadata,
-            &ctx.shelley_params.gen_delegs,
-            ctx.shelley_params.update_quorum,
-            &ctx.shelley_params.protocol_params.protocol_version,
+            &ctx.protocol_params,
+            &ctx.protocol_params.shelley.as_ref().unwrap().gen_delegs,
         )
         .map_err(|e| *e)
     }
