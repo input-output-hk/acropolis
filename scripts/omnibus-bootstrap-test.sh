@@ -2,6 +2,7 @@
 
 set -e
 logfile=omnibus.txt
+export PATH="$HOME/.cargo/bin:$PATH"
 
 # ensure download is set to true
 pipx install toml-cli
@@ -9,7 +10,7 @@ pipx install toml-cli
 
 pushd processes/omnibus
 cargo build --release
-cargo run --release > $logfile 2>&1  &
+cargo run --release > "$logfile" 2>&1 &
 sleep 2
 cargopid=$(pidof -s acropolis_process_omnibus)
 
