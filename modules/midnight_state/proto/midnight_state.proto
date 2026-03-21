@@ -173,11 +173,9 @@ message EpochCandidatesResponse {
 }
 
 message UtxoEventsRequest {
-  uint32 start_block = 1;
-  uint32 start_tx_index = 2;
-  uint32 tx_capacity = 3;
-  bytes end_block_hash = 4;
-  CardanoPosition start_position = 5;
+  uint32 tx_capacity = 1;
+  bytes end_block_hash = 2;
+  CardanoPosition start_position = 3;
 }
 message UtxoEvent {
   oneof kind {
