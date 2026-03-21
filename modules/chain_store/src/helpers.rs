@@ -5,7 +5,7 @@ use acropolis_common::{
     queries::{
         blocks::{
             BlockInfo, BlockInvolvedAddress, BlockInvolvedAddresses, BlockKey, BlockTransaction,
-            BlockTransactions, BlockTransactionsCBOR,
+            BlockTransactions, BlockTransactionsCBOR, CompactBlockInfo,
         },
         misc::Order,
         transactions::{
@@ -52,6 +52,19 @@ pub fn to_block_info(
     let blocks = vec![block];
     let mut info = to_block_info_bulk(blocks, store, state, is_latest)?;
     Ok(info.remove(0))
+}
+
+pub fn to_compact_block_info(block: Block) -> Result<CompactBlockInfo> {
+    let decoded = pallas_traverse::MultiEraBlock::decode(&block.bytes)?;
+    let header = decoded.header();
+
+    Ok(CompactBlockInfo {
+        timestamp: block.extra.timestamp,
+        number: header.number(),
+        hash: BlockHash::from(*header.hash()),
+        slot: header.slot(),
+        epoch: block.extra.epoch,
+    })
 }
 
 pub fn to_block_info_bulk(
