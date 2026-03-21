@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.91-bookworm AS chef
+FROM rust:1.93-bookworm AS chef
 WORKDIR /app
 ENV CARGO_HOME=/cargo
 
