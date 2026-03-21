@@ -170,6 +170,18 @@ impl ShelleyParams {
         (tx_bytes as u64 * self.protocol_params.minfee_a as u64)
             + (self.protocol_params.minfee_b as u64)
     }
+
+    pub fn stability_window(&self) -> u64 {
+        (self.security_param as u64) * self.active_slots_coeff.denom()
+            / self.active_slots_coeff.numer()
+            * 3
+    }
+
+    pub fn randomness_stability_window(&self) -> u64 {
+        (self.security_param as u64) * self.active_slots_coeff.denom()
+            / self.active_slots_coeff.numer()
+            * 4
+    }
 }
 
 #[serde_as]
@@ -219,10 +231,8 @@ impl From<&ShelleyParams> for PraosParams {
     fn from(params: &ShelleyParams) -> Self {
         let active_slots_coeff = &params.active_slots_coeff;
         let security_param = params.security_param;
-        let stability_window =
-            (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 3;
-        let randomness_stabilization_window =
-            (security_param as u64) * active_slots_coeff.denom() / active_slots_coeff.numer() * 4;
+        let stability_window = params.stability_window();
+        let randomness_stabilization_window = params.randomness_stability_window();
 
         Self {
             security_param,
@@ -234,7 +244,6 @@ impl From<&ShelleyParams> for PraosParams {
             slot_length: params.slot_length,
             slots_per_kes_period: params.slots_per_kes_period,
             extra_entropy: params.protocol_params.extra_entropy.clone(),
-
             stability_window,
             randomness_stabilization_window,
         }

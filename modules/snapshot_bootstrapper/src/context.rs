@@ -120,6 +120,11 @@ impl BootstrapContext {
         self.snapshot.cbor_path(&self.network_dir)
     }
 
+    /// Path to the UTxO sidecar cbor file for this snapshot point.
+    pub fn utxo_sidecar_path(&self) -> PathBuf {
+        self.snapshot.utxos_cbor_path(&self.network_dir)
+    }
+
     /// Network directory path.
     pub fn network_dir(&self) -> &Path {
         &self.network_dir

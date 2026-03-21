@@ -1,6 +1,7 @@
 use acropolis_common::Point;
 use anyhow::Result;
 use config::Config;
+use reqwest::Url;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fs;
@@ -102,6 +103,8 @@ pub struct Snapshot {
     )]
     pub point: Point,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utxo_url: Option<String>,
 }
 
 impl Snapshot {
@@ -125,11 +128,56 @@ impl Snapshot {
 
     pub fn cbor_path(&self, network_dir: &Path) -> PathBuf {
         let filename = format!(
-            "{}.{}.cbor",
+            "nes.{}.{}.cbor",
             self.point.slot(),
             self.point.hash().expect("snapshot point must have hash")
         );
         network_dir.join(filename)
+    }
+
+    pub fn utxos_cbor_path(&self, network_dir: &Path) -> PathBuf {
+        let filename = format!(
+            "utxos.{}.{}.cbor",
+            self.point.slot(),
+            self.point.hash().expect("snapshot point must have hash")
+        );
+        network_dir.join(filename)
+    }
+
+    pub fn utxo_download_url(&self) -> Option<String> {
+        self.utxo_url.clone().or_else(|| Self::derive_utxo_url(&self.url))
+    }
+
+    fn derive_utxo_url(snapshot_url: &str) -> Option<String> {
+        if snapshot_url.is_empty() {
+            return None;
+        }
+
+        let mut url = Url::parse(snapshot_url).ok()?;
+        let file_name = url.path_segments()?.next_back()?.to_string();
+        let sidecar_name = Self::derive_utxo_file_name(&file_name)?;
+
+        {
+            let mut segments = url.path_segments_mut().ok()?;
+            segments.pop_if_empty();
+            segments.pop();
+            segments.push(&sidecar_name);
+        }
+
+        Some(url.into())
+    }
+
+    fn derive_utxo_file_name(file_name: &str) -> Option<String> {
+        if file_name.is_empty() {
+            return None;
+        }
+
+        if file_name.starts_with("utxos.") {
+            return Some(file_name.to_string());
+        }
+
+        let suffix = file_name.strip_prefix("nes.").unwrap_or(file_name);
+        Some(format!("utxos.{suffix}"))
     }
 }
 
@@ -155,5 +203,58 @@ where
     match point {
         Point::Origin => serializer.serialize_str("origin"),
         Point::Specific { slot, hash } => serializer.serialize_str(&format!("{slot}.{hash}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use acropolis_common::BlockHash;
+
+    const TEST_POINT: Point = Point::Specific {
+        hash: BlockHash::new([0x33; 32]),
+        slot: 134956789,
+    };
+
+    fn test_snapshot(url: &str) -> Snapshot {
+        Snapshot {
+            epoch: 509,
+            point: TEST_POINT,
+            url: url.to_string(),
+            utxo_url: None,
+        }
+    }
+
+    #[test]
+    fn test_snapshot_derives_utxo_download_url_from_nes_url() {
+        let snapshot = test_snapshot("https://example.com/snapshots/nes.1234.abcdef.cbor.gz");
+        assert_eq!(
+            snapshot.utxo_download_url().as_deref(),
+            Some("https://example.com/snapshots/utxos.1234.abcdef.cbor.gz")
+        );
+    }
+
+    #[test]
+    fn test_snapshot_derives_utxo_download_url_from_legacy_url() {
+        let snapshot = test_snapshot("https://example.com/snapshots/1234.abcdef.cbor.gz");
+        assert_eq!(
+            snapshot.utxo_download_url().as_deref(),
+            Some("https://example.com/snapshots/utxos.1234.abcdef.cbor.gz")
+        );
+    }
+
+    #[test]
+    fn test_snapshot_prefers_explicit_utxo_download_url() {
+        let snapshot = Snapshot {
+            epoch: 509,
+            point: TEST_POINT,
+            url: "https://example.com/snapshots/nes.1234.abcdef.cbor.gz".to_string(),
+            utxo_url: Some("https://cdn.example.com/custom-utxos.cbor.gz".to_string()),
+        };
+
+        assert_eq!(
+            snapshot.utxo_download_url().as_deref(),
+            Some("https://cdn.example.com/custom-utxos.cbor.gz")
+        );
     }
 }
