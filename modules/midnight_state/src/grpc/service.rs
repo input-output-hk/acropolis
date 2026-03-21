@@ -1436,8 +1436,6 @@ mod tests {
         let service = service_with_committed_state(state, block.number);
         let response = service
             .get_utxo_events(Request::new(UtxoEventsRequest {
-                start_block: 0,
-                start_tx_index: 0,
                 tx_capacity: 10,
                 end_block_hash: [9u8; 32].to_vec(),
                 start_position: Some(CardanoPosition {
@@ -1515,8 +1513,6 @@ mod tests {
         let service = service_with_committed_state(state, block.number);
         let response = service
             .get_utxo_events(Request::new(UtxoEventsRequest {
-                start_block: 0,
-                start_tx_index: 0,
                 tx_capacity: 1,
                 end_block_hash: [9u8; 32].to_vec(),
                 start_position: Some(start_position.clone()),
