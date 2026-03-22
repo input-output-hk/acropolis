@@ -1,0 +1,6 @@
+[module.spdd-state]
+# Enables active_stakes in /epochs/latest | {number} endpoints
+store-spdd = true
+
+[module.drdd-state]
+store-drdd = true
