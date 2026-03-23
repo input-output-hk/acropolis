@@ -2,12 +2,14 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crate::{
     grpc::{
-        conversions::{bridge_checkpoint_from_proto, bridge_checkpoint_to_proto},
+        conversions::{
+            bridge_checkpoint_from_proto, bridge_checkpoint_to_proto, bridge_transfer_from_utxo,
+        },
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
             AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
-            BlockByHashResponse, BridgeUtxosRequest, BridgeUtxosResponse, CardanoPosition,
+            BlockByHashResponse, BridgeTransfersRequest, BridgeTransfersResponse, CardanoPosition,
             CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
             DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
             EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
@@ -128,45 +130,49 @@ impl MidnightState for MidnightStateService {
         }))
     }
 
-    async fn get_bridge_utxos(
+    async fn get_bridge_transfers(
         &self,
-        request: Request<BridgeUtxosRequest>,
-    ) -> Result<Response<BridgeUtxosResponse>, Status> {
+        request: Request<BridgeTransfersRequest>,
+    ) -> Result<Response<BridgeTransfersResponse>, Status> {
         self.stats.bridge_utxos.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
-        if req.utxo_capacity == 0 {
+        if req.transfer_capacity == 0 {
             return Err(Status::invalid_argument(
-                "utxo_capacity must be greater than zero",
+                "transfer_capacity must be greater than zero",
             ));
         }
 
-        let utxo_capacity = usize::try_from(req.utxo_capacity)
-            .map_err(|_| Status::invalid_argument("utxo_capacity too large"))?;
+        let transfer_capacity = usize::try_from(req.transfer_capacity)
+            .map_err(|_| Status::invalid_argument("transfer_capacity too large"))?;
         let checkpoint = bridge_checkpoint_from_proto(req.checkpoint)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let current_block_hash = BlockHash::try_from(req.current_block_hash)
+            .map_err(|_| Status::invalid_argument("invalid current_block_hash"))?;
+        let current_block = query_block_by_hash_info(&self.context, current_block_hash).await?;
 
         let utxos = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
-            state.bridge.get_bridge_utxos(checkpoint, req.to_block, utxo_capacity).map_err(
-                |err| match err {
+            state
+                .bridge
+                .get_bridge_utxos(checkpoint, current_block.number, transfer_capacity)
+                .map_err(|err| match err {
                     BridgeStateError::UnknownCheckpointUtxo(_) => {
                         Status::not_found(err.to_string())
                     }
-                },
-            )?
+                })?
         };
 
         let next_checkpoint = bridge_checkpoint_to_proto(BridgeState::next_checkpoint(
             &utxos,
-            req.to_block,
-            utxo_capacity,
+            current_block.number,
+            transfer_capacity,
         ));
 
-        Ok(Response::new(BridgeUtxosResponse {
-            utxos: utxos.into_iter().map(Into::into).collect(),
+        Ok(Response::new(BridgeTransfersResponse {
+            transfers: utxos.into_iter().filter_map(bridge_transfer_from_utxo).collect(),
             next_checkpoint: Some(next_checkpoint),
         }))
     }
@@ -928,15 +934,18 @@ mod tests {
     };
     use caryatid_sdk::{async_trait, Context, MessageBus, Subscription};
     use config::Config;
+    use minicbor::{data::Tag, Encoder};
     use tokio::sync::Mutex;
     use tonic::{Code, Request};
 
     use crate::{
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
-            bridge_checkpoint, bridge_utxos_request, utxo_event, AriadneParametersRequest,
-            AssetCreatesRequest, AssetSpendsRequest, BridgeUtxosRequest, CardanoPosition,
-            EpochCandidatesRequest, LatestStableBlockRequest, UtxoEventsRequest, UtxoId,
+            bridge_checkpoint, bridge_transfer, bridge_transfers_request, utxo_event,
+            AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
+            BridgeTransfersRequest, CardanoPosition, EpochCandidatesRequest, InvalidBridgeTransfer,
+            LatestStableBlockRequest, ReserveBridgeTransfer, UserBridgeTransfer, UtxoEventsRequest,
+            UtxoId,
         },
         state::State,
     };
@@ -1177,6 +1186,31 @@ mod tests {
         }
     }
 
+    fn user_bridge_transfer_datum(recipient: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(1).expect("single field");
+        encoder.bytes(recipient).expect("recipient bytes");
+        encoder.u8(1).expect("version");
+        bytes
+    }
+
+    fn reserve_bridge_transfer_datum() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(122)).expect("constr 1");
+        encoder.array(0).expect("empty fields");
+        encoder.u8(1).expect("version");
+        bytes
+    }
+
     fn service_with_committed_state(state: State, block_number: u64) -> MidnightStateService {
         let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
         history.commit(block_number, state);
@@ -1278,7 +1312,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_return_bridge_utxos_with_last_utxo_checkpoint_when_capacity_is_reached() {
+    async fn should_return_bridge_transfers_with_last_utxo_checkpoint_when_capacity_is_reached() {
         let bridge_policy = PolicyId::new([1u8; 28]);
         let bridge_asset = AssetName::new(b"").expect("empty asset name");
         let bridge_address =
@@ -1301,7 +1335,7 @@ mod tests {
                         vec![CreatedUTxOExtended {
                             utxo: first,
                             value: test_value_with_token(bridge_policy, bridge_asset, 10),
-                            datum: Some(Datum::Inline(vec![0xAA])),
+                            datum: Some(Datum::Inline(user_bridge_transfer_datum(&[0xAA; 32]))),
                         }],
                         vec![],
                     ),
@@ -1311,7 +1345,7 @@ mod tests {
                         vec![CreatedUTxOExtended {
                             utxo: second,
                             value: test_value_with_token(bridge_policy, bridge_asset, 20),
-                            datum: Some(Datum::Inline(vec![0xBB])),
+                            datum: Some(Datum::Inline(reserve_bridge_transfer_datum())),
                         }],
                         vec![],
                     ),
@@ -1321,18 +1355,33 @@ mod tests {
 
         let service = service_with_committed_state(state, block.number);
         let response = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
-                checkpoint: Some(bridge_utxos_request::Checkpoint::BlockNumber(0)),
-                to_block: block.number,
-                utxo_capacity: 2,
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0xAB; 32],
+                transfer_capacity: 2,
             }))
             .await
-            .expect("bridge utxos should be returned")
+            .expect("bridge transfers should be returned")
             .into_inner();
 
-        assert_eq!(response.utxos.len(), 2);
-        assert_eq!(response.utxos[0].tokens_in, 0);
-        assert_eq!(response.utxos[1].tokens_out, 20);
+        assert_eq!(response.transfers.len(), 2);
+        assert_eq!(
+            response.transfers[0].kind,
+            Some(bridge_transfer::Kind::User(UserBridgeTransfer {
+                token_amount: 10,
+                recipient: vec![0xAA; 32],
+                utxo: Some(UtxoId {
+                    tx_hash: first.tx_hash.to_vec(),
+                    index: first.output_index.into(),
+                }),
+            }))
+        );
+        assert_eq!(
+            response.transfers[1].kind,
+            Some(bridge_transfer::Kind::Reserve(ReserveBridgeTransfer {
+                token_amount: 20,
+            }))
+        );
         assert_eq!(
             response
                 .next_checkpoint
@@ -1367,7 +1416,7 @@ mod tests {
                     vec![CreatedUTxOExtended {
                         utxo,
                         value: test_value_with_token(bridge_policy, bridge_asset, 15),
-                        datum: Some(Datum::Inline(vec![0xCC])),
+                        datum: Some(Datum::Inline(reserve_bridge_transfer_datum())),
                     }],
                     vec![],
                 )]),
@@ -1376,22 +1425,22 @@ mod tests {
 
         let service = service_with_committed_state(state, block.number);
         let response = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
-                checkpoint: Some(bridge_utxos_request::Checkpoint::BlockNumber(0)),
-                to_block: block.number,
-                utxo_capacity: 10,
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0xCD; 32],
+                transfer_capacity: 10,
             }))
             .await
-            .expect("bridge utxos should be returned")
+            .expect("bridge transfers should be returned")
             .into_inner();
 
-        assert_eq!(response.utxos.len(), 1);
+        assert_eq!(response.transfers.len(), 1);
         assert_eq!(
             response
                 .next_checkpoint
                 .and_then(|checkpoint| checkpoint.kind)
                 .expect("expected checkpoint"),
-            bridge_checkpoint::Kind::BlockNumber(block.number)
+            bridge_checkpoint::Kind::BlockNumber(100)
         );
     }
 
@@ -1399,13 +1448,13 @@ mod tests {
     async fn should_return_not_found_for_unknown_bridge_checkpoint_utxo() {
         let service = service_with_committed_state(State::new(MidnightConfig::default()), 1);
         let result = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
-                checkpoint: Some(bridge_utxos_request::Checkpoint::Utxo(UtxoId {
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::Utxo(UtxoId {
                     tx_hash: vec![9u8; 32],
                     index: 0,
                 })),
-                to_block: 10,
-                utxo_capacity: 1,
+                current_block_hash: vec![0xEF; 32],
+                transfer_capacity: 1,
             }))
             .await;
 
@@ -1414,7 +1463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_validate_bridge_request_and_omit_non_inline_datum() {
+    async fn should_validate_bridge_request_and_mark_non_inline_datum_invalid() {
         let bridge_policy = PolicyId::new([4u8; 28]);
         let bridge_asset = AssetName::new(b"").expect("empty asset name");
         let bridge_address =
@@ -1444,37 +1493,46 @@ mod tests {
 
         let service = service_with_committed_state(state, block.number);
         let invalid = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
                 checkpoint: None,
-                to_block: block.number,
-                utxo_capacity: 1,
+                current_block_hash: vec![0x11; 32],
+                transfer_capacity: 1,
             }))
             .await
             .expect_err("missing checkpoint should fail");
         assert_eq!(invalid.code(), Code::InvalidArgument);
 
         let invalid = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
-                checkpoint: Some(bridge_utxos_request::Checkpoint::BlockNumber(0)),
-                to_block: block.number,
-                utxo_capacity: 0,
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0x22; 32],
+                transfer_capacity: 0,
             }))
             .await
             .expect_err("zero capacity should fail");
         assert_eq!(invalid.code(), Code::InvalidArgument);
 
         let response = service
-            .get_bridge_utxos(Request::new(BridgeUtxosRequest {
-                checkpoint: Some(bridge_utxos_request::Checkpoint::BlockNumber(0)),
-                to_block: block.number,
-                utxo_capacity: 1,
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0x33; 32],
+                transfer_capacity: 1,
             }))
             .await
-            .expect("bridge utxo should be returned")
+            .expect("bridge transfer should be returned")
             .into_inner();
 
-        assert_eq!(response.utxos.len(), 1);
-        assert!(response.utxos[0].datum.is_none());
+        assert_eq!(response.transfers.len(), 1);
+        assert_eq!(
+            response.transfers[0].kind,
+            Some(bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+                token_amount: 25,
+                utxo: Some(UtxoId {
+                    tx_hash: utxo.tx_hash.to_vec(),
+                    index: utxo.output_index.into(),
+                }),
+            }))
+        );
     }
 
     #[tokio::test]

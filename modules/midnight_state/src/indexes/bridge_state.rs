@@ -145,7 +145,7 @@ impl ResolvedBridgeCheckpoint {
 
 #[cfg(test)]
 mod tests {
-    use acropolis_common::{BlockHash, TxHash};
+    use acropolis_common::TxHash;
 
     use super::*;
 
@@ -162,9 +162,7 @@ mod tests {
         BridgeCreation {
             utxo,
             block_number,
-            block_hash: BlockHash::default(),
             tx_index,
-            block_timestamp: 0,
             tokens_out,
             tokens_in: 0,
             datum: Some(vec![0xAA]),
@@ -188,12 +186,17 @@ mod tests {
             .get_bridge_utxos(BridgeCheckpoint::Block(9), 10, 10)
             .expect("bridge utxos should be returned");
 
-        let ordered: Vec<(u64, u32, u16)> = result
-            .iter()
-            .map(|utxo| (utxo.block_number, utxo.tx_index_in_block, utxo.output_index))
-            .collect();
+        let ordered: Vec<(TxHash, u16)> =
+            result.iter().map(|utxo| (utxo.tx_hash, utxo.output_index)).collect();
 
-        assert_eq!(ordered, vec![(10, 1, 0), (10, 1, 1), (10, 2, 0)]);
+        assert_eq!(
+            ordered,
+            vec![
+                (id(1, 0).tx_hash, 0),
+                (id(2, 1).tx_hash, 1),
+                (id(3, 0).tx_hash, 0)
+            ]
+        );
     }
 
     #[test]
@@ -251,10 +254,6 @@ mod tests {
         let utxos = vec![BridgeAssetUtxo {
             tx_hash: id(1, 0).tx_hash,
             output_index: 0,
-            block_number: 10,
-            block_hash: BlockHash::default(),
-            tx_index_in_block: 0,
-            block_timestamp: 0,
             tokens_out: 1,
             tokens_in: 0,
             datum: None,
@@ -272,10 +271,6 @@ mod tests {
             BridgeAssetUtxo {
                 tx_hash: id(1, 0).tx_hash,
                 output_index: 0,
-                block_number: 10,
-                block_hash: BlockHash::default(),
-                tx_index_in_block: 0,
-                block_timestamp: 0,
                 tokens_out: 1,
                 tokens_in: 0,
                 datum: None,
@@ -283,10 +278,6 @@ mod tests {
             BridgeAssetUtxo {
                 tx_hash: id(2, 1).tx_hash,
                 output_index: 1,
-                block_number: 10,
-                block_hash: BlockHash::default(),
-                tx_index_in_block: 1,
-                block_timestamp: 0,
                 tokens_out: 2,
                 tokens_in: 0,
                 datum: None,

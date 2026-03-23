@@ -381,6 +381,7 @@ dependencies = [
  "caryatid_sdk",
  "config",
  "imbl",
+ "minicbor 0.25.1",
  "prost",
  "protoc-bin-vendored",
  "serde",
@@ -390,6 +391,7 @@ dependencies = [
  "tonic-build",
  "tonic-reflection",
  "tracing",
+ "uplc-turbo",
 ]
 
 [[package]]

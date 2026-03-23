@@ -9,7 +9,7 @@ package midnight_state;
 service MidnightState {
   rpc GetAssetCreates (AssetCreatesRequest) returns (AssetCreatesResponse);
   rpc GetAssetSpends (AssetSpendsRequest) returns (AssetSpendsResponse);
-  rpc GetBridgeUtxos (BridgeUtxosRequest) returns (BridgeUtxosResponse);
+  rpc GetBridgeTransfers (BridgeTransfersRequest) returns (BridgeTransfersResponse);
   rpc GetRegistrations (RegistrationsRequest) returns (RegistrationsResponse);
   rpc GetDeregistrations (DeregistrationsRequest) returns (DeregistrationsResponse);
   rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
@@ -69,24 +69,32 @@ message AssetSpendsResponse {
   repeated AssetSpend spends = 1;
 }
 
-message BridgeUtxosRequest {
+message BridgeTransfersRequest {
   oneof checkpoint {
     uint64 block_number = 1;
     UtxoId utxo = 2;
   }
-  uint64 to_block = 3;
-  uint32 utxo_capacity = 4;
+  bytes current_block_hash = 3;
+  uint32 transfer_capacity = 4;
 }
-message BridgeUtxo {
-  bytes tx_hash = 1;
-  uint32 output_index = 2;
-  uint64 block_number = 3;
-  bytes block_hash = 4;
-  uint32 tx_index = 5;
-  int64 block_timestamp_unix = 6;
-  uint64 tokens_out = 7;
-  uint64 tokens_in = 8;
-  optional bytes datum = 9;
+message InvalidBridgeTransfer {
+  uint64 token_amount = 1;
+  UtxoId utxo = 2;
+}
+message UserBridgeTransfer {
+  uint64 token_amount = 1;
+  bytes recipient = 2;
+  UtxoId utxo = 3;
+}
+message ReserveBridgeTransfer {
+  uint64 token_amount = 1;
+}
+message BridgeTransfer {
+  oneof kind {
+    InvalidBridgeTransfer invalid = 1;
+    UserBridgeTransfer user = 2;
+    ReserveBridgeTransfer reserve = 3;
+  }
 }
 message BridgeCheckpoint {
   oneof kind {
@@ -94,8 +102,8 @@ message BridgeCheckpoint {
     UtxoId utxo = 2;
   }
 }
-message BridgeUtxosResponse {
-  repeated BridgeUtxo utxos = 1;
+message BridgeTransfersResponse {
+  repeated BridgeTransfer transfers = 1;
   BridgeCheckpoint next_checkpoint = 2;
 }
 

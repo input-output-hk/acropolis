@@ -385,9 +385,7 @@ impl State {
             bridge_creations.push(BridgeCreation {
                 utxo: created.utxo,
                 block_number: block_info.number,
-                block_hash: block_info.hash,
                 tx_index: delta.tx_identifier.tx_index().into(),
-                block_timestamp: i64::try_from(block_info.timestamp)?,
                 tokens_out,
                 tokens_in,
                 datum,

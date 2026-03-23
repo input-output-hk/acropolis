@@ -1,11 +1,13 @@
 use anyhow::anyhow;
+use uplc_turbo::{arena::Arena, data::PlutusData};
 
 use crate::{
     grpc::midnight_state_proto::{
-        bridge_checkpoint, bridge_utxos_request, AssetCreate as AssetCreateProto,
-        AssetSpend as AssetSpendProto, BridgeCheckpoint as BridgeCheckpointProto,
-        BridgeUtxo as BridgeUtxoProto, Deregistration as DeregistrationProto, EpochCandidate,
-        Registration as RegistrationProto, UtxoId,
+        bridge_checkpoint, bridge_transfer, bridge_transfers_request,
+        AssetCreate as AssetCreateProto, AssetSpend as AssetSpendProto,
+        BridgeCheckpoint as BridgeCheckpointProto, BridgeTransfer as BridgeTransferProto,
+        Deregistration as DeregistrationProto, EpochCandidate, InvalidBridgeTransfer,
+        Registration as RegistrationProto, ReserveBridgeTransfer, UserBridgeTransfer, UtxoId,
     },
     indexes::bridge_state::BridgeCheckpoint,
     types::{
@@ -16,14 +18,19 @@ use crate::{
 };
 use acropolis_common::{TxHash, UTxOIdentifier};
 
+enum BridgeTransferKind {
+    UserTransfer { recipient: Vec<u8> },
+    ReserveTransfer,
+}
+
 pub fn bridge_checkpoint_from_proto(
-    checkpoint: Option<bridge_utxos_request::Checkpoint>,
+    checkpoint: Option<bridge_transfers_request::Checkpoint>,
 ) -> anyhow::Result<BridgeCheckpoint> {
     match checkpoint {
-        Some(bridge_utxos_request::Checkpoint::BlockNumber(block_number)) => {
+        Some(bridge_transfers_request::Checkpoint::BlockNumber(block_number)) => {
             Ok(BridgeCheckpoint::Block(block_number))
         }
-        Some(bridge_utxos_request::Checkpoint::Utxo(utxo)) => {
+        Some(bridge_transfers_request::Checkpoint::Utxo(utxo)) => {
             Ok(BridgeCheckpoint::Utxo(UTxOIdentifier::new(
                 TxHash::try_from(utxo.tx_hash)
                     .map_err(|_| anyhow!("invalid bridge checkpoint tx hash"))?,
@@ -45,6 +52,77 @@ pub fn bridge_checkpoint_to_proto(checkpoint: BridgeCheckpoint) -> BridgeCheckpo
     };
 
     BridgeCheckpointProto { kind: Some(kind) }
+}
+
+pub fn bridge_transfer_from_utxo(utxo: BridgeAssetUtxoInternal) -> Option<BridgeTransferProto> {
+    let token_amount = utxo.tokens_out.checked_sub(utxo.tokens_in)?;
+    if token_amount == 0 {
+        return None;
+    }
+
+    let utxo_id = UtxoId {
+        tx_hash: utxo.tx_hash.to_vec(),
+        index: utxo.output_index.into(),
+    };
+
+    let kind = match utxo.datum {
+        None => bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+            token_amount,
+            utxo: Some(utxo_id),
+        }),
+        Some(datum_bytes) => match decode_bridge_transfer_datum(datum_bytes) {
+            Some(BridgeTransferKind::UserTransfer { recipient }) => {
+                bridge_transfer::Kind::User(UserBridgeTransfer {
+                    token_amount,
+                    recipient,
+                    utxo: Some(utxo_id),
+                })
+            }
+            Some(BridgeTransferKind::ReserveTransfer) => {
+                bridge_transfer::Kind::Reserve(ReserveBridgeTransfer { token_amount })
+            }
+            None => bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+                token_amount,
+                utxo: Some(utxo_id),
+            }),
+        },
+    };
+
+    Some(BridgeTransferProto { kind: Some(kind) })
+}
+
+fn decode_bridge_transfer_datum(datum_bytes: Vec<u8>) -> Option<BridgeTransferKind> {
+    let arena = Arena::new();
+    let datum = PlutusData::from_cbor(&arena, &datum_bytes).ok()?;
+    let fields = match datum {
+        PlutusData::List(fields) if fields.len() == 3 => fields,
+        _ => return None,
+    };
+    let appendix = fields[1];
+    let version = match fields[2] {
+        PlutusData::Integer(version) => *version,
+        _ => return None,
+    };
+
+    if version != &1.into() {
+        return None;
+    }
+
+    let (alternative, data) = match appendix {
+        PlutusData::Constr { tag, fields } => (*tag, *fields),
+        _ => return None,
+    };
+
+    match alternative {
+        0 if data.len() == 1 => Some(BridgeTransferKind::UserTransfer {
+            recipient: match data[0] {
+                PlutusData::ByteString(bytes) => bytes.to_vec(),
+                _ => return None,
+            },
+        }),
+        1 if data.is_empty() => Some(BridgeTransferKind::ReserveTransfer),
+        _ => None,
+    }
 }
 
 impl From<AssetCreateInternal> for AssetCreateProto {
@@ -74,22 +152,6 @@ impl From<AssetSpendInternal> for AssetSpendProto {
             utxo_tx_hash: c.utxo_tx_hash.to_vec(),
             utxo_index: c.utxo_index.into(),
             block_timestamp_unix_millis: c.block_timestamp.saturating_mul(1000),
-        }
-    }
-}
-
-impl From<BridgeAssetUtxoInternal> for BridgeUtxoProto {
-    fn from(utxo: BridgeAssetUtxoInternal) -> Self {
-        BridgeUtxoProto {
-            tx_hash: utxo.tx_hash.to_vec(),
-            output_index: utxo.output_index.into(),
-            block_number: utxo.block_number,
-            block_hash: utxo.block_hash.to_vec(),
-            tx_index: utxo.tx_index_in_block,
-            block_timestamp_unix: utxo.block_timestamp,
-            tokens_out: utxo.tokens_out,
-            tokens_in: utxo.tokens_in,
-            datum: utxo.datum,
         }
     }
 }

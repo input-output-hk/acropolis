@@ -58,10 +58,6 @@ pub struct Deregistration {
 pub struct BridgeAssetUtxo {
     pub tx_hash: TxHash,
     pub output_index: u16,
-    pub block_number: BlockNumber,
-    pub block_hash: BlockHash,
-    pub tx_index_in_block: u32,
-    pub block_timestamp: i64,
     pub tokens_out: u64,
     pub tokens_in: u64,
     pub datum: Option<Vec<u8>>,
@@ -141,10 +137,6 @@ impl From<&BridgeUtxoMeta> for BridgeAssetUtxo {
         BridgeAssetUtxo {
             tx_hash: creation.utxo.tx_hash,
             output_index: creation.utxo.output_index,
-            block_number: creation.block_number,
-            block_hash: creation.block_hash,
-            tx_index_in_block: creation.tx_index,
-            block_timestamp: creation.block_timestamp,
             tokens_out: creation.tokens_out,
             tokens_in: creation.tokens_in,
             datum: creation.datum.clone(),
@@ -176,9 +168,7 @@ pub struct CNightSpend {
 pub struct BridgeCreation {
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,
-    pub block_hash: BlockHash,
     pub tx_index: u32,
-    pub block_timestamp: i64,
     pub tokens_out: u64,
     pub tokens_in: u64,
     pub datum: Option<Vec<u8>>,
