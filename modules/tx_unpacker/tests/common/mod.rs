@@ -30,7 +30,8 @@ use std::sync::OnceLock;
 use acropolis_module_tx_unpacker::validations::phase2::evaluate_raw_flat_program;
 
 /// Default number of calibration iterations.
-pub const CALIBRATION_ITERATIONS: usize = 10;
+/// Increased from 10 to 15 to improve statistical stability on CI runners.
+pub const CALIBRATION_ITERATIONS: usize = 15;
 
 /// Default performance multiplier (threshold = multiplier × baseline).
 /// Set to 10x based on empirical data: the largest benchmark script (uniswap-3)
@@ -99,15 +100,18 @@ impl CalibrationBaseline {
 /// `iterations` rounds, computes the median timing, and returns a
 /// `CalibrationBaseline` with stability statistics.
 ///
-/// A warmup run is performed first and discarded to avoid cold-start effects.
+/// Multiple warmup runs are performed first and discarded to allow CPU
+/// frequency scaling to stabilize, especially important on CI runners.
 pub fn calibrate(iterations: usize) -> CalibrationBaseline {
     assert!(
         iterations >= 3,
         "Need at least 3 iterations for a meaningful median"
     );
 
-    // Warmup run (discarded)
-    evaluate_raw_flat_program(CALIBRATION_SCRIPT).expect("Calibration script warmup must succeed");
+    // Warmup runs (discarded) - increased from 1 to 3 to help CPU stabilize
+    for _ in 0..3 {
+        evaluate_raw_flat_program(CALIBRATION_SCRIPT).expect("Calibration script warmup must succeed");
+    }
 
     // Timed iterations
     let mut timings: Vec<f64> = Vec::with_capacity(iterations);
