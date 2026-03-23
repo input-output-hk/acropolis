@@ -6,23 +6,26 @@ use crate::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
             AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
-            BlockByHashResponse, CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
-            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
-            EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
-            LatestStableBlockRequest, LatestStableBlockResponse, RegistrationsRequest,
-            RegistrationsResponse, StableBlockRequest, StableBlockResponse, StakePoolEntry,
-            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
-            UtxoEventsRequest, UtxoEventsResponse,
+            BlockByHashResponse, CardanoPosition, CouncilDatumRequest, CouncilDatumResponse,
+            DeregistrationsRequest, DeregistrationsResponse, EpochCandidatesRequest,
+            EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse, LatestBlockRequest,
+            LatestBlockResponse, LatestStableBlockRequest, LatestStableBlockResponse,
+            RegistrationsRequest, RegistrationsResponse, StableBlockRequest, StableBlockResponse,
+            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
+            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
         },
         stats::{RequestStats, RequestStatsSnapshot},
-        utxo_events::truncate_by_tx_capacity,
+        utxo_events::truncate_by_legacy_tx_capacity,
     },
-    state::State,
+    state::{StableBlockWindowBounds, State},
 };
 use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
     queries::{
-        blocks::{BlocksStateQuery, BlocksStateQueryResponse},
+        blocks::{
+            BlockInfo, BlockKey, BlocksStateQuery, BlocksStateQueryResponse,
+            DEFAULT_BLOCKS_QUERY_TOPIC,
+        },
         errors::QueryError,
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         utils::query_state,
@@ -35,6 +38,7 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 const MAX_EVENTS_PER_TX: usize = 64;
+const PREVIOUS_BLOCKS_PAGE_SIZE: u64 = 256;
 
 #[derive(Clone)]
 pub struct MidnightStateService {
@@ -192,8 +196,10 @@ impl MidnightState for MidnightStateService {
         self.stats.utxo_events.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
 
-        let start_block = req.start_block;
-        let start_tx_index = req.start_tx_index;
+        let start_position =
+            req.start_position.ok_or_else(|| Status::invalid_argument("missing start_position"))?;
+        let start_block = start_position.block_number;
+        let start_tx_index = start_position.tx_index;
 
         let tx_capacity = usize::try_from(req.tx_capacity)
             .map_err(|_| Status::invalid_argument("tx_capacity too large"))?;
@@ -204,7 +210,7 @@ impl MidnightState for MidnightStateService {
 
         let event_capacity = tx_capacity.saturating_mul(MAX_EVENTS_PER_TX);
 
-        let events = {
+        let mut events = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
@@ -256,9 +262,45 @@ impl MidnightState for MidnightStateService {
             events
         };
 
-        let events = truncate_by_tx_capacity(events, tx_capacity);
+        let end_block_hash = BlockHash::try_from(req.end_block_hash)
+            .map_err(|_| Status::invalid_argument("invalid end block hash"))?;
+        let end_block = query_block_by_hash_info(&self.context, end_block_hash).await?;
+        let end_position = (end_block.number, end_block.tx_count as u32);
+        events.retain(|event| {
+            let position = event.position();
+            position.0 < end_position.0
+                || (position.0 == end_position.0 && position.1 < end_position.1)
+        });
 
-        Ok(Response::new(UtxoEventsResponse { events }))
+        let truncated = truncate_by_legacy_tx_capacity(events, tx_capacity);
+        let next_position = if truncated.num_txs < tx_capacity {
+            CardanoPosition {
+                block_hash: end_block.hash.to_vec(),
+                block_number: u32::try_from(end_block.number)
+                    .map_err(|_| Status::internal("block number exceeds u32"))?,
+                tx_index: u32::try_from(end_block.tx_count)
+                    .map_err(|_| Status::internal("tx count exceeds u32"))?
+                    .saturating_add(1),
+                block_timestamp_unix_millis: i64::try_from(
+                    end_block.timestamp.saturating_mul(1000),
+                )
+                .map_err(|_| Status::internal("block timestamp exceeds i64"))?,
+            }
+        } else {
+            truncated.events.last().map_or_else(
+                || {
+                    let mut next_position = start_position.clone();
+                    next_position.tx_index = next_position.tx_index.saturating_add(1);
+                    next_position
+                },
+                UtxoEvent::incremented_position,
+            )
+        };
+
+        Ok(Response::new(UtxoEventsResponse {
+            events: truncated.events,
+            next_position: Some(next_position),
+        }))
     }
 
     async fn get_technical_committee_datum(
@@ -476,35 +518,24 @@ impl MidnightState for MidnightStateService {
     ) -> Result<Response<StableBlockResponse>, Status> {
         self.stats.stable_block_by_hash.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
+        let as_of_timestamp_unix_millis = req.as_of_timestamp_unix_millis;
+        if as_of_timestamp_unix_millis == 0 {
+            return Err(Status::invalid_argument(
+                "as_of_timestamp_unix_millis must be set",
+            ));
+        }
         let block_hash = BlockHash::try_from(req.block_hash)
             .map_err(|_| Status::invalid_argument("invalid block hash"))?;
+        let window =
+            stable_block_window_from_state(&self.history, as_of_timestamp_unix_millis).await?;
 
-        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-            BlocksStateQuery::GetStableBlockByHash {
-                block_hash,
-                offset: req.offset,
-            },
-        )));
-
-        let block_info_opt =
-            query_state(
-                &self.context,
-                "cardano.query.blocks",
-                msg,
-                |message| match message {
-                    Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::StableBlockByHash(block_info),
-                    )) => Ok(block_info),
-                    Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error(e),
-                    )) => Err(e),
-                    _ => Err(QueryError::internal_error(
-                        "Unexpected message type while retrieving block info",
-                    )),
-                },
-            )
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let block_info_opt = query_stable_block_by_hash_as_of(
+            &self.context,
+            block_hash,
+            req.stability_offset,
+            &window,
+        )
+        .await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -530,30 +561,17 @@ impl MidnightState for MidnightStateService {
     ) -> Result<Response<LatestStableBlockResponse>, Status> {
         self.stats.latest_stable_block.fetch_add(1, Ordering::Relaxed);
         let req = request.into_inner();
-
-        let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-            BlocksStateQuery::GetBlockByTipOffset { offset: req.offset },
-        )));
+        let as_of_timestamp_unix_millis = req.as_of_timestamp_unix_millis;
+        if as_of_timestamp_unix_millis == 0 {
+            return Err(Status::invalid_argument(
+                "as_of_timestamp_unix_millis must be set",
+            ));
+        }
+        let window =
+            stable_block_window_from_state(&self.history, as_of_timestamp_unix_millis).await?;
 
         let block_info_opt =
-            query_state(
-                &self.context,
-                "cardano.query.blocks",
-                msg,
-                |message| match message {
-                    Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::BlockByTipOffset(block_info),
-                    )) => Ok(block_info),
-                    Message::StateQueryResponse(StateQueryResponse::Blocks(
-                        BlocksStateQueryResponse::Error(e),
-                    )) => Err(e),
-                    _ => Err(QueryError::internal_error(
-                        "Unexpected message type while retrieving block info",
-                    )),
-                },
-            )
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            query_latest_stable_block_as_of(&self.context, req.stability_offset, &window).await?;
 
         #[allow(clippy::result_large_err)]
         let block_proto = block_info_opt
@@ -624,13 +642,238 @@ impl MidnightState for MidnightStateService {
     }
 }
 
+async fn query_block_by_tip_offset(
+    context: &Arc<Context<Message>>,
+    offset: u32,
+) -> Result<Option<BlockInfo>, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockByTipOffset { offset },
+    )));
+
+    query_state(
+        context,
+        DEFAULT_BLOCKS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockByTipOffset(block_info),
+            )) => Ok(block_info),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving block info",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn query_previous_blocks(
+    context: &Arc<Context<Message>>,
+    block_number: u64,
+    limit: u64,
+) -> Result<Vec<BlockInfo>, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetPreviousBlocks {
+            block_key: BlockKey::Number(block_number),
+            limit,
+            skip: 0,
+        },
+    )));
+
+    query_state(
+        context,
+        DEFAULT_BLOCKS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::PreviousBlocks(previous_blocks),
+            )) => Ok(previous_blocks.blocks),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving previous blocks",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn query_block_by_hash_info(
+    context: &Arc<Context<Message>>,
+    block_hash: BlockHash,
+) -> Result<BlockInfo, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockByHash { block_hash },
+    )));
+
+    query_state(
+        context,
+        DEFAULT_BLOCKS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockByHash(block_info),
+            )) => Ok(block_info),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving block info",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn query_block_by_hash_info_opt(
+    context: &Arc<Context<Message>>,
+    block_hash: BlockHash,
+) -> Result<Option<BlockInfo>, Status> {
+    let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
+        BlocksStateQuery::GetBlockByHash { block_hash },
+    )));
+
+    query_state(
+        context,
+        DEFAULT_BLOCKS_QUERY_TOPIC.1,
+        msg,
+        |message| match message {
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::BlockByHash(block_info),
+            )) => Ok(Some(block_info)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(e),
+            )) => Err(e),
+            _ => Err(QueryError::internal_error(
+                "Unexpected message type while retrieving block info",
+            )),
+        },
+    )
+    .await
+    .map_err(|e| Status::internal(e.to_string()))
+}
+
+async fn stable_block_window_from_state(
+    history: &Arc<Mutex<StateHistory<State>>>,
+    as_of_timestamp_unix_millis: u64,
+) -> Result<StableBlockWindow, Status> {
+    let history = history.lock().await;
+    let state = history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+    let bounds = state.stable_block_window_bounds().ok_or_else(|| {
+        Status::failed_precondition("stable block window bounds are not initialized")
+    })?;
+
+    Ok(stable_block_window(bounds, as_of_timestamp_unix_millis))
+}
+
+async fn query_latest_stable_block_as_of(
+    context: &Arc<Context<Message>>,
+    stability_offset: u32,
+    window: &StableBlockWindow,
+) -> Result<Option<BlockInfo>, Status> {
+    let Some(stable_boundary) = query_block_by_tip_offset(context, stability_offset).await? else {
+        return Ok(None);
+    };
+
+    if is_block_within_stable_window(&stable_boundary, window) {
+        return Ok(Some(stable_boundary));
+    }
+
+    if is_block_older_than_stable_window(&stable_boundary, window) {
+        return Ok(None);
+    }
+
+    let mut anchor_block_number = stable_boundary.number;
+    loop {
+        let previous_blocks =
+            query_previous_blocks(context, anchor_block_number, PREVIOUS_BLOCKS_PAGE_SIZE).await?;
+
+        if previous_blocks.is_empty() {
+            return Ok(None);
+        }
+
+        for block in previous_blocks.iter().rev() {
+            if is_block_within_stable_window(block, window) {
+                return Ok(Some(block.clone()));
+            }
+            if is_block_older_than_stable_window(block, window) {
+                return Ok(None);
+            }
+        }
+
+        anchor_block_number = previous_blocks[0].number;
+    }
+}
+
+async fn query_stable_block_by_hash_as_of(
+    context: &Arc<Context<Message>>,
+    block_hash: BlockHash,
+    stability_offset: u32,
+    window: &StableBlockWindow,
+) -> Result<Option<BlockInfo>, Status> {
+    let Some(block_info) = query_block_by_hash_info_opt(context, block_hash).await? else {
+        return Ok(None);
+    };
+    let Some(stable_boundary) = query_block_by_tip_offset(context, stability_offset).await? else {
+        return Ok(None);
+    };
+    if block_info.number > stable_boundary.number {
+        return Ok(None);
+    }
+
+    Ok(is_block_within_stable_window(&block_info, window).then_some(block_info))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StableBlockWindow {
+    min_block_timestamp_unix_millis: u64,
+    max_block_timestamp_unix_millis: u64,
+}
+
+#[allow(clippy::result_large_err)]
+fn stable_block_window(
+    bounds: StableBlockWindowBounds,
+    as_of_timestamp_unix_millis: u64,
+) -> StableBlockWindow {
+    StableBlockWindow {
+        min_block_timestamp_unix_millis: as_of_timestamp_unix_millis
+            .saturating_sub(bounds.max_block_age_millis),
+        max_block_timestamp_unix_millis: as_of_timestamp_unix_millis
+            .saturating_sub(bounds.min_block_age_millis),
+    }
+}
+
+fn is_block_within_stable_window(block: &BlockInfo, window: &StableBlockWindow) -> bool {
+    let block_timestamp_unix_millis = block.timestamp.saturating_mul(1000);
+    window.min_block_timestamp_unix_millis <= block_timestamp_unix_millis
+        && block_timestamp_unix_millis <= window.max_block_timestamp_unix_millis
+}
+
+fn is_block_older_than_stable_window(block: &BlockInfo, window: &StableBlockWindow) -> bool {
+    block.timestamp.saturating_mul(1000) < window.min_block_timestamp_unix_millis
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc, time::Duration};
 
     use acropolis_common::{
         messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
+        protocol_params::{ProtocolParams, ShelleyParams},
+        queries::blocks::{
+            BlockInfo as QueryBlockInfo, BlocksStateQuery, BlocksStateQueryResponse,
+        },
         queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
+        rational_number::RationalNumber,
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, DatumHash, Era, ExtendedAddressDelta, KeyHash, NetworkId, PolicyId, ShelleyAddress,
@@ -646,7 +889,7 @@ mod tests {
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
             utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
-            EpochCandidatesRequest, UtxoEventsRequest,
+            CardanoPosition, EpochCandidatesRequest, LatestStableBlockRequest, UtxoEventsRequest,
         },
         state::State,
     };
@@ -678,6 +921,18 @@ mod tests {
                         SPDDStateQueryResponse::EpochSPDD(Vec::new()),
                     ))
                 }
+                Message::StateQuery(StateQuery::Blocks(
+                    BlocksStateQuery::GetBlockByTipOffset { .. },
+                )) => Message::StateQueryResponse(StateQueryResponse::Blocks(
+                    BlocksStateQueryResponse::BlockByTipOffset(Some(query_block_info(100, 8))),
+                )),
+                Message::StateQuery(StateQuery::Blocks(BlocksStateQuery::GetBlockByHash {
+                    block_hash,
+                })) => Message::StateQueryResponse(StateQueryResponse::Blocks(
+                    BlocksStateQueryResponse::BlockByHash(query_block_info_with_hash(
+                        100, 10, 5, block_hash,
+                    )),
+                )),
                 _ => return Err(anyhow::anyhow!("unsupported request in tests")),
             };
 
@@ -1181,15 +1436,27 @@ mod tests {
         let service = service_with_committed_state(state, block.number);
         let response = service
             .get_utxo_events(Request::new(UtxoEventsRequest {
-                start_block: 0,
-                start_tx_index: 0,
                 tx_capacity: 10,
+                end_block_hash: [9u8; 32].to_vec(),
+                start_position: Some(CardanoPosition {
+                    block_hash: vec![0u8; 32],
+                    block_number: 0,
+                    tx_index: 0,
+                    block_timestamp_unix_millis: 0,
+                }),
             }))
             .await
             .expect("utxo events should be returned")
             .into_inner();
 
         assert_eq!(response.events.len(), 2);
+        let next_position = response
+            .next_position
+            .expect("next position should always be returned when end_block_hash is supplied");
+        assert_eq!(next_position.block_hash, vec![9u8; 32]);
+        assert_eq!(next_position.block_number, 100);
+        assert_eq!(next_position.tx_index, 6);
+        assert_eq!(next_position.block_timestamp_unix_millis, 10_000);
 
         let mut asset_creates = response.events.iter().filter_map(|event| match &event.kind {
             Some(utxo_event::Kind::AssetCreate(create)) => Some(create),
@@ -1205,5 +1472,158 @@ mod tests {
         assert!(asset_creates.next().is_none());
         assert_eq!(asset_create.address, expected_owner_address());
         assert_eq!(registrations, 1);
+    }
+
+    #[tokio::test]
+    async fn should_return_incremented_start_position_for_empty_legacy_truncation() {
+        let auth_policy = PolicyId::new([9u8; 28]);
+        let auth_asset = AssetName::new(b"auth").unwrap();
+        let mapping_address = mapping_validator_address();
+        let mut block = test_block_info(100, 0);
+        block.hash = [9u8; 32].into();
+        block.timestamp = 10;
+        let mut state = State::new(MidnightConfig {
+            mapping_validator_address: mapping_address.clone(),
+            auth_token_policy_id: auth_policy,
+            auth_token_asset_name: auth_asset,
+            ..Default::default()
+        });
+        let start_position = CardanoPosition {
+            block_hash: vec![7u8; 32],
+            block_number: 55,
+            tx_index: 0,
+            block_timestamp_unix_millis: 12_345,
+        };
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![candidate_registration_delta(
+                    mapping_address,
+                    auth_policy,
+                    auth_asset,
+                    TxHash::new([3u8; 32]),
+                    0,
+                    0,
+                    block.number,
+                )]),
+            )
+            .expect("address delta handling should succeed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_utxo_events(Request::new(UtxoEventsRequest {
+                tx_capacity: 1,
+                end_block_hash: [9u8; 32].to_vec(),
+                start_position: Some(start_position.clone()),
+            }))
+            .await
+            .expect("utxo events should be returned")
+            .into_inner();
+
+        assert!(response.events.is_empty());
+        let next_position = response
+            .next_position
+            .expect("next position should be returned from start_position fallback");
+        assert_eq!(next_position.block_hash, start_position.block_hash);
+        assert_eq!(next_position.block_number, start_position.block_number);
+        assert_eq!(next_position.tx_index, start_position.tx_index + 1);
+        assert_eq!(
+            next_position.block_timestamp_unix_millis,
+            start_position.block_timestamp_unix_millis
+        );
+    }
+
+    #[tokio::test]
+    async fn should_return_latest_stable_block_using_bounds_from_state() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 1,
+                active_slots_coeff: RationalNumber::new(1, 1),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut state = State::new(MidnightConfig::default());
+        state
+            .update_stable_block_window_bounds(&protocol_params)
+            .expect("stable bounds should be derived");
+
+        let service = service_with_committed_state(state, 100);
+        let response = service
+            .get_latest_stable_block(Request::new(LatestStableBlockRequest {
+                stability_offset: 5,
+                as_of_timestamp_unix_millis: 10_000,
+            }))
+            .await
+            .expect("latest stable block should be returned")
+            .into_inner();
+
+        let block = response
+            .block
+            .expect("block should be present when stable boundary falls within cached window");
+        assert_eq!(block.block_number, 100);
+        assert_eq!(block.block_timestamp_unix, 8);
+    }
+
+    fn query_block_info(number: u64, timestamp: u64) -> QueryBlockInfo {
+        QueryBlockInfo {
+            timestamp,
+            number,
+            hash: BlockHash::default(),
+            slot: number,
+            epoch: 0,
+            epoch_slot: number,
+            issuer: None,
+            size: 0,
+            tx_count: 0,
+            output: None,
+            fees: None,
+            block_vrf: None,
+            op_cert: None,
+            op_cert_counter: None,
+            previous_block: None,
+            next_block: None,
+            confirmations: 0,
+        }
+    }
+
+    fn query_block_info_with_hash(
+        number: u64,
+        timestamp: u64,
+        tx_count: u64,
+        hash: BlockHash,
+    ) -> QueryBlockInfo {
+        QueryBlockInfo {
+            hash,
+            tx_count,
+            ..query_block_info(number, timestamp)
+        }
+    }
+
+    #[test]
+    fn stable_block_window_predicates_should_match_expected_bounds() {
+        let window = super::StableBlockWindow {
+            min_block_timestamp_unix_millis: 1_000,
+            max_block_timestamp_unix_millis: 2_000,
+        };
+
+        assert!(super::is_block_within_stable_window(
+            &query_block_info(10, 1),
+            &window
+        ));
+        assert!(super::is_block_within_stable_window(
+            &query_block_info(11, 2),
+            &window
+        ));
+        assert!(!super::is_block_within_stable_window(
+            &query_block_info(12, 3),
+            &window
+        ));
+        assert!(super::is_block_older_than_stable_window(
+            &query_block_info(9, 0),
+            &window
+        ));
     }
 }

@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, protocol_params::Nonce, BlockInfo, BlockNumber, Datum, Epoch,
-    ExtendedAddressDelta, UTxOIdentifier,
+    messages::AddressDeltasMessage,
+    protocol_params::{Nonce, ProtocolParams},
+    BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta, UTxOIdentifier,
 };
 use imbl::HashMap;
 use tracing::warn;
@@ -21,6 +22,41 @@ use crate::{
     types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StableBlockWindowBounds {
+    pub min_block_age_millis: u64,
+    pub max_block_age_millis: u64,
+}
+
+impl StableBlockWindowBounds {
+    pub fn from_protocol_params(protocol_params: &ProtocolParams) -> Result<Self> {
+        let shelley = protocol_params
+            .shelley
+            .as_ref()
+            .ok_or_else(|| anyhow!("latest protocol parameters do not include shelley params"))?;
+
+        let active_slots_coeff_numerator = u128::from(*shelley.active_slots_coeff.numer());
+        let active_slots_coeff_denominator = u128::from(*shelley.active_slots_coeff.denom());
+        if active_slots_coeff_numerator == 0 {
+            return Err(anyhow!("active_slots_coeff numerator must be non-zero"));
+        }
+
+        let slot_duration_millis = u128::from(shelley.slot_length).saturating_mul(1000);
+        let min_block_age_millis = rounded_div_u128_to_u64(
+            slot_duration_millis
+                .saturating_mul(u128::from(shelley.security_param))
+                .saturating_mul(active_slots_coeff_denominator),
+            active_slots_coeff_numerator,
+        )?;
+        let max_block_age_millis = min_block_age_millis.saturating_mul(3);
+
+        Ok(Self {
+            min_block_age_millis,
+            max_block_age_millis,
+        })
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct State {
     // Epoch aggregate emitted as telemetry when crossing an epoch boundary.
@@ -36,6 +72,8 @@ pub struct State {
     governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
+    // Protocol-param-derived bounds used to build request-specific mc-hash stability windows.
+    stable_block_window_bounds: Option<StableBlockWindowBounds>,
     // Nonces indexed by epoch
     nonces: HashMap<Epoch, Nonce>,
     // Midnight configuration
@@ -68,6 +106,20 @@ impl State {
 
     pub fn get_epoch_candidates(&self, epoch: Epoch) -> Vec<EpochCandidate> {
         self.committee_candidates.get_epoch_candidates(epoch)
+    }
+
+    pub fn stable_block_window_bounds(&self) -> Option<StableBlockWindowBounds> {
+        self.stable_block_window_bounds
+    }
+
+    pub fn update_stable_block_window_bounds(
+        &mut self,
+        protocol_params: &ProtocolParams,
+    ) -> Result<()> {
+        self.stable_block_window_bounds = Some(StableBlockWindowBounds::from_protocol_params(
+            protocol_params,
+        )?);
+        Ok(())
     }
 
     pub fn handle_address_deltas(
@@ -469,19 +521,37 @@ impl State {
     }
 }
 
+fn rounded_div_u128_to_u64(numerator: u128, denominator: u128) -> Result<u64> {
+    if denominator == 0 {
+        return Err(anyhow!("stability window denominator must be non-zero"));
+    }
+
+    let rounded = numerator
+        .saturating_add(denominator / 2)
+        .checked_div(denominator)
+        .ok_or_else(|| anyhow!("failed to calculate rounded stability window"))?;
+
+    u64::try_from(rounded).map_err(|_| anyhow!("stability window overflow"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
 
     use acropolis_common::{
         messages::AddressDeltasMessage,
+        protocol_params::{ProtocolParams, ShelleyParams},
+        rational_number::RationalNumber,
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
         TxIdentifier, UTxOIdentifier, ValueMap,
     };
 
-    use crate::{configuration::MidnightConfig, state::State};
+    use crate::{
+        configuration::MidnightConfig,
+        state::{StableBlockWindowBounds, State},
+    };
 
     fn test_block_info() -> BlockInfo {
         BlockInfo {
@@ -1378,6 +1448,56 @@ mod tests {
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
             Some((block2.number, datum_c))
+        );
+    }
+
+    #[test]
+    fn stable_block_window_bounds_should_match_partner_chain_formula() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 432,
+                active_slots_coeff: RationalNumber::new(1, 20),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let bounds =
+            StableBlockWindowBounds::from_protocol_params(&protocol_params).expect("bounds");
+
+        assert_eq!(
+            bounds,
+            StableBlockWindowBounds {
+                min_block_age_millis: 8_640_000,
+                max_block_age_millis: 25_920_000,
+            }
+        );
+    }
+
+    #[test]
+    fn should_store_stable_block_window_bounds_from_protocol_params() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 432,
+                active_slots_coeff: RationalNumber::new(1, 20),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut state = State::new(MidnightConfig::default());
+        state
+            .update_stable_block_window_bounds(&protocol_params)
+            .expect("stable bounds should be derived");
+
+        assert_eq!(
+            state.stable_block_window_bounds(),
+            Some(StableBlockWindowBounds {
+                min_block_age_millis: 8_640_000,
+                max_block_age_millis: 25_920_000,
+            })
         );
     }
 }
