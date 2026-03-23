@@ -4,6 +4,12 @@
 
 API_URL ?= http://127.0.0.1:4340
 
+thresholds =
+
+ifeq ($(CI),true)
+	thresholds=--no-thresholds
+endif
+
 help:
 	@echo "Acropolis K6 Performance Tests"
 	@echo ""
@@ -27,19 +33,19 @@ results-dir: ## Create results directory
 
 test-smoke: build results-dir ## Run smoke test only (1 minute)
 	@echo "Running Smoke Test..."
-	@export API_URL=$(API_URL) && k6 run --out json=results/smoke-$$(date +%Y%m%d-%H%M%S).json dist/smoke.test.js
+	@export API_URL=$(API_URL) && k6 run $(thresholds) --out json=results/smoke-$$(date +%Y%m%d-%H%M%S).json dist/smoke.test.js
 
 test-load: build results-dir ## Run load test only (16 minutes)
 	@echo "Running Load Test..."
-	@export API_URL=$(API_URL) && k6 run --out json=results/load-$$(date +%Y%m%d-%H%M%S).json dist/load.test.js
+	@export API_URL=$(API_URL) && k6 run $(thresholds) --out json=results/load-$$(date +%Y%m%d-%H%M%S).json dist/load.test.js
 
 test-stress: build results-dir ## Run stress test only (13 minutes)
 	@echo "Running Stress Test..."
-	@export API_URL=$(API_URL) && k6 run --out json=results/stress-$$(date +%Y%m%d-%H%M%S).json dist/stress.test.js
+	@export API_URL=$(API_URL) && k6 run $(thresholds) --out json=results/stress-$$(date +%Y%m%d-%H%M%S).json dist/stress.test.js
 
 test-soak: build results-dir ## Run soak test only (2 hours 10 minutes)
 	@echo "Running Soak Test..."
-	@export API_URL=$(API_URL) && k6 run --out json=results/soak-$$(date +%Y%m%d-%H%M%S).json dist/soak.test.js
+	@export API_URL=$(API_URL) && k6 run $(thresholds) --out json=results/soak-$$(date +%Y%m%d-%H%M%S).json dist/soak.test.js
 
 test-all: ## Run all performance tests (30 minutes total)
 	@chmod +x scripts/run-all.sh

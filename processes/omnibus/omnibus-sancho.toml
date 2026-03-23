@@ -6,6 +6,11 @@ topic = "cardano.sequence.start"
 
 [module.genesis-bootstrapper]
 
+#[module.era-state]
+# Disable by default.
+# This module is necessary for Phase 2 Validation's Slot-Time conversion.
+# era-history-file = "/path/to/custom-era-history-file"
+
 #[module.mithril-snapshot-fetcher]
 #Turned off with SanchoNet
 #aggregator-url = "https://aggregator.release-mainnet.api.mithril.network/aggregator"

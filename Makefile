@@ -23,7 +23,7 @@ SECTIONS_ALL := --params --governance --pools --accounts --utxo
 
 .PHONY: help all build test run run-preview run-bootstrap run-bootstrap-preview run-midnight run-midnight-indexer fmt clippy
 .PHONY: snapshot-summary snapshot-sections-all snapshot-bootstrap
-.PHONY: snap-test-streaming
+.PHONY: snap-test-streaming run-bootstrap-store-spdd-drdd build-release
 
 help:
 	@echo "Acropolis Makefile Targets:"
@@ -31,10 +31,12 @@ help:
 	@echo "Build & Test:"
 	@echo "  all                      Format, lint, and test"
 	@echo "  build                    Build the omnibus process"
+	@echo "  build-release            Build release version of the omnibus process"
 	@echo "  run                      Run the omnibus (mainnet)"
 	@echo "  run-preview              Run the omnibus (preview network)"
 	@echo "  run-bootstrap            Run the omnibus (mainnet) with bootstrap config"
 	@echo "  run-bootstrap-preview    Run the omnibus (preview) with bootstrap config"
+	@echo "  run-bootstrap-spdd-drdd  Run the omnibus with bootstrap config, storing spdd and drdd (snapshot)"
 	@echo "  run-midnight-mainnet     Run the midnight indexer (mainnet)"
 	@echo "  run-midnight-preview     Run the midnight indexer (preview)"
 	@echo "  run-midnight-guardnet    Run the midnight indexer (guardnet)"
@@ -59,6 +61,9 @@ all: fmt clippy test
 build:
 	$(CARGO) build -p $(PROCESS_PKG)
 
+build-release:
+	$(CARGO) build --release -p $(PROCESS_PKG)
+
 test:
 	$(CARGO) test
 
@@ -73,6 +78,9 @@ run-bootstrap:
 
 run-bootstrap-preview:
 	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus-preview.toml --config omnibus.bootstrap.preview.toml
+
+run-bootstrap-store-spdd-drdd:
+	cd processes/omnibus && RUST_LOG=$(LOG_LEVEL) $(CARGO) run --release --bin $(PROCESS_PKG) -- --config omnibus.toml --config omnibus.bootstrap.toml --config omnibus.store-spdd-drdd.toml
 
 run-midnight-mainnet:
 	cd processes/midnight_indexer && $(CARGO) run --release --bin acropolis_process_midnight_indexer -- --config config.mainnet.toml
