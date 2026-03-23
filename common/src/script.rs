@@ -67,6 +67,15 @@ impl ReferenceScript {
             script_lang: self.get_script_lang(),
         }
     }
+
+    pub fn is_plutus_script(&self) -> bool {
+        matches!(
+            self,
+            ReferenceScript::PlutusV1(_)
+                | ReferenceScript::PlutusV2(_)
+                | ReferenceScript::PlutusV3(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]

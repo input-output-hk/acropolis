@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     validation::Phase1ValidationError, Address, AlonzoBabbageUpdateProposal, Datum, DatumHash,
     KeyHash, Lovelace, NativeAsset, NativeAssetsDelta, PoolRegistrationUpdate, ProposalProcedure,
-    Redeemer, ReferenceScript, ScriptHash, ScriptLang, ScriptRef, Slot, StakeRegistrationUpdate,
-    TxCertificate, TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness,
-    Value, ValueMap, VotingProcedures, Withdrawal,
+    Redeemer, ReferenceScript, ScriptHash, ScriptRef, Slot, StakeRegistrationUpdate, TxCertificate,
+    TxCertificateWithPos, TxIdentifier, UTXOValue, UTxOIdentifier, VKeyWitness, Value, ValueMap,
+    VotingProcedures, Withdrawal,
 };
 
 /// Transaction output (UTXO)
@@ -92,7 +92,7 @@ pub struct Transaction {
     pub voting_procedures: Option<VotingProcedures>,
     pub proposal_procedures: Option<Vec<ProposalProcedure>>,
     pub vkey_witnesses: Vec<VKeyWitness>,
-    pub script_witnesses: Vec<(ScriptHash, ScriptLang)>,
+    pub script_witnesses: Vec<(ScriptHash, ReferenceScript)>,
     pub redeemers: Vec<Redeemer>,
     pub plutus_data: Vec<(DatumHash, Vec<u8>)>,
     pub error: Option<Phase1ValidationError>,
@@ -242,7 +242,7 @@ pub struct TxUTxODeltas {
     pub vkey_witnesses: Option<Vec<VKeyWitness>>,
 
     // Scripts Witnesses Provided
-    pub script_witnesses: Option<Vec<(ScriptHash, ScriptLang)>>,
+    pub script_witnesses: Option<Vec<(ScriptHash, ReferenceScript)>>,
 
     // Redeemers
     pub redeemers: Option<Vec<Redeemer>>,
