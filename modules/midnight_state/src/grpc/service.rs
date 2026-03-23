@@ -1,27 +1,25 @@
 use std::sync::{atomic::Ordering, Arc};
 
-use anyhow::anyhow;
-
 use crate::{
     grpc::{
+        conversions::{bridge_checkpoint_from_proto, bridge_checkpoint_to_proto},
         midnight_state_proto::{
-            bridge_checkpoint, bridge_utxos_request, midnight_state_server::MidnightState,
-            utxo_event, AriadneParametersRequest, AriadneParametersResponse, AssetCreatesRequest,
-            AssetCreatesResponse, AssetSpendsRequest, AssetSpendsResponse, Block,
-            BlockByHashRequest, BlockByHashResponse, BridgeCheckpoint as BridgeCheckpointProto,
-            BridgeUtxosRequest, BridgeUtxosResponse, CardanoPosition, CouncilDatumRequest,
-            CouncilDatumResponse, DeregistrationsRequest, DeregistrationsResponse,
-            EpochCandidatesRequest, EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse,
-            LatestBlockRequest, LatestBlockResponse, LatestStableBlockRequest,
-            LatestStableBlockResponse, RegistrationsRequest, RegistrationsResponse,
-            StableBlockRequest, StableBlockResponse, StakePoolEntry,
+            midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
+            AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
+            AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
+            BlockByHashResponse, BridgeUtxosRequest, BridgeUtxosResponse, CardanoPosition,
+            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
+            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
+            EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
+            LatestStableBlockRequest, LatestStableBlockResponse, RegistrationsRequest,
+            RegistrationsResponse, StableBlockRequest, StableBlockResponse, StakePoolEntry,
             TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
             UtxoEventsRequest, UtxoEventsResponse,
         },
         stats::{RequestStats, RequestStatsSnapshot},
         utxo_events::truncate_by_legacy_tx_capacity,
     },
-    indexes::bridge_state::{BridgeCheckpoint, BridgeState, BridgeStateError},
+    indexes::bridge_state::{BridgeState, BridgeStateError},
     state::{StableBlockWindowBounds, State},
 };
 use acropolis_common::{
@@ -36,7 +34,7 @@ use acropolis_common::{
         utils::query_state,
     },
     state_history::StateHistory,
-    BlockHash, TxHash, UTxOIdentifier,
+    BlockHash,
 };
 use caryatid_sdk::Context;
 use tokio::sync::Mutex;
@@ -64,39 +62,6 @@ impl MidnightStateService {
     pub fn stats(&self) -> Option<RequestStatsSnapshot> {
         self.stats.snapshot()
     }
-}
-
-fn bridge_checkpoint_from_proto(
-    checkpoint: Option<bridge_utxos_request::Checkpoint>,
-) -> anyhow::Result<BridgeCheckpoint> {
-    match checkpoint {
-        Some(bridge_utxos_request::Checkpoint::BlockNumber(block_number)) => {
-            Ok(BridgeCheckpoint::Block(block_number))
-        }
-        Some(bridge_utxos_request::Checkpoint::Utxo(utxo)) => {
-            Ok(BridgeCheckpoint::Utxo(UTxOIdentifier::new(
-                TxHash::try_from(utxo.tx_hash)
-                    .map_err(|_| anyhow!("invalid bridge checkpoint tx hash"))?,
-                u16::try_from(utxo.index)
-                    .map_err(|_| anyhow!("invalid bridge checkpoint output index"))?,
-            )))
-        }
-        None => Err(anyhow!("missing bridge checkpoint")),
-    }
-}
-
-fn bridge_checkpoint_to_proto(checkpoint: BridgeCheckpoint) -> BridgeCheckpointProto {
-    let kind = match checkpoint {
-        BridgeCheckpoint::Block(block_number) => bridge_checkpoint::Kind::BlockNumber(block_number),
-        BridgeCheckpoint::Utxo(utxo) => {
-            bridge_checkpoint::Kind::Utxo(crate::grpc::midnight_state_proto::UtxoId {
-                tx_hash: utxo.tx_hash.to_vec(),
-                index: utxo.output_index.into(),
-            })
-        }
-    };
-
-    BridgeCheckpointProto { kind: Some(kind) }
 }
 
 #[tonic::async_trait]

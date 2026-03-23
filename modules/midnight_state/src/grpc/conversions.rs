@@ -1,15 +1,52 @@
+use anyhow::anyhow;
+
 use crate::{
     grpc::midnight_state_proto::{
-        AssetCreate as AssetCreateProto, AssetSpend as AssetSpendProto,
+        bridge_checkpoint, bridge_utxos_request, AssetCreate as AssetCreateProto,
+        AssetSpend as AssetSpendProto, BridgeCheckpoint as BridgeCheckpointProto,
         BridgeUtxo as BridgeUtxoProto, Deregistration as DeregistrationProto, EpochCandidate,
         Registration as RegistrationProto, UtxoId,
     },
+    indexes::bridge_state::BridgeCheckpoint,
     types::{
         AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal,
         BridgeAssetUtxo as BridgeAssetUtxoInternal, Deregistration as DeregistrationInternal,
         Registration as RegistrationInternal, RegistrationEvent,
     },
 };
+use acropolis_common::{TxHash, UTxOIdentifier};
+
+pub fn bridge_checkpoint_from_proto(
+    checkpoint: Option<bridge_utxos_request::Checkpoint>,
+) -> anyhow::Result<BridgeCheckpoint> {
+    match checkpoint {
+        Some(bridge_utxos_request::Checkpoint::BlockNumber(block_number)) => {
+            Ok(BridgeCheckpoint::Block(block_number))
+        }
+        Some(bridge_utxos_request::Checkpoint::Utxo(utxo)) => {
+            Ok(BridgeCheckpoint::Utxo(UTxOIdentifier::new(
+                TxHash::try_from(utxo.tx_hash)
+                    .map_err(|_| anyhow!("invalid bridge checkpoint tx hash"))?,
+                u16::try_from(utxo.index)
+                    .map_err(|_| anyhow!("invalid bridge checkpoint output index"))?,
+            )))
+        }
+        None => Err(anyhow!("missing bridge checkpoint")),
+    }
+}
+
+pub fn bridge_checkpoint_to_proto(checkpoint: BridgeCheckpoint) -> BridgeCheckpointProto {
+    let kind = match checkpoint {
+        BridgeCheckpoint::Block(block_number) => bridge_checkpoint::Kind::BlockNumber(block_number),
+        BridgeCheckpoint::Utxo(utxo) => bridge_checkpoint::Kind::Utxo(UtxoId {
+            tx_hash: utxo.tx_hash.to_vec(),
+            index: utxo.output_index.into(),
+        }),
+    };
+
+    BridgeCheckpointProto { kind: Some(kind) }
+}
+
 impl From<AssetCreateInternal> for AssetCreateProto {
     fn from(c: AssetCreateInternal) -> Self {
         AssetCreateProto {
