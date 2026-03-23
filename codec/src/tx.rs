@@ -10,6 +10,24 @@ use pallas_traverse::{
     OriginalHash,
 };
 
+pub fn extract_plutus_scripts_witnesses(tx: &MultiEraTx) -> Vec<ReferenceScript> {
+    let mut plutus_scripts_witnesses = Vec::new();
+
+    for script in tx.plutus_v1_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV1(script.as_ref().to_vec()));
+    }
+
+    for script in tx.plutus_v2_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV2(script.as_ref().to_vec()));
+    }
+
+    for script in tx.plutus_v3_scripts() {
+        plutus_scripts_witnesses.push(ReferenceScript::PlutusV3(script.as_ref().to_vec()));
+    }
+
+    plutus_scripts_witnesses
+}
+
 pub fn map_transaction_inputs(inputs: &[MultiEraInput]) -> Vec<UTxOIdentifier> {
     inputs
         .iter()
@@ -30,7 +48,7 @@ pub fn map_required_signatories(required_signers: &MultiEraSigners) -> Vec<KeyHa
 }
 
 /// Parse transaction consumes and produces,
-/// and return the parsed consumes, produces, reference scripts and errors
+/// and return the parsed consumes, produces, created reference scripts and errors
 /// NOTE:
 /// This function returns consumes sorted lexicographically by UTxO identifier
 #[allow(clippy::type_complexity)]
@@ -48,7 +66,7 @@ pub fn map_transaction_consumes_produces(
     };
     let parsed_consumes = map_transaction_inputs(&consumed);
     let mut parsed_produces = Vec::new();
-    let mut reference_scripts = Vec::new();
+    let mut created_reference_scripts = Vec::new();
     let mut errors = Vec::new();
 
     let tx_hash = TxHash::from(*tx.hash());
@@ -64,7 +82,7 @@ pub fn map_transaction_consumes_produces(
                     if let (Some(r_script), Some(s_ref)) =
                         (reference_script.as_ref(), script_ref.as_ref())
                     {
-                        reference_scripts.push((s_ref.script_hash, r_script.clone()));
+                        created_reference_scripts.push((s_ref.script_hash, r_script.clone()));
                     }
 
                     // Add TxOutput to utxo_deltas
@@ -86,7 +104,12 @@ pub fn map_transaction_consumes_produces(
         }
     }
 
-    (parsed_consumes, parsed_produces, reference_scripts, errors)
+    (
+        parsed_consumes,
+        parsed_produces,
+        created_reference_scripts,
+        errors,
+    )
 }
 
 pub fn map_transaction_donation(tx: &MultiEraTx) -> Option<u64> {
@@ -155,6 +178,10 @@ pub fn map_scripts_witnesses(tx: &MultiEraTx) -> Vec<(ScriptHash, ScriptLang)> {
     scripts_provided
 }
 
+pub fn map_validity_interval(tx: &MultiEraTx) -> ValidityInterval {
+    ValidityInterval::new(tx.validity_start(), tx.ttl())
+}
+
 /// Map a Pallas Transaction
 /// NOTE:
 /// This function sorts
@@ -168,7 +195,7 @@ pub fn map_transaction(
     network_id: NetworkId,
     era: Era,
 ) -> Transaction {
-    let (mut consumes, produces, reference_scripts, input_output_errors) =
+    let (mut consumes, produces, created_reference_scripts, input_output_errors) =
         map_transaction_consumes_produces(tx);
     consumes.sort();
 
@@ -182,6 +209,7 @@ pub fn map_transaction(
 
     let mut certs = Vec::new();
     let mut withdrawals = Vec::new();
+    let validity_interval = map_validity_interval(tx);
     let mut mint_burn_deltas = Vec::new();
     let mut alonzo_babbage_update_proposal = None;
     let mut voting_procedures = None;
@@ -309,11 +337,12 @@ pub fn map_transaction(
         reference_inputs,
         fee,
         donation,
-        reference_scripts,
+        created_reference_scripts,
         stated_total_collateral,
         is_valid,
         certs,
         withdrawals,
+        validity_interval,
         required_signers,
         mint_burn_deltas,
         proposal_update: alonzo_babbage_update_proposal,

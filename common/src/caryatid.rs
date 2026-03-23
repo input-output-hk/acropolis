@@ -168,21 +168,6 @@ macro_rules! declare_cardano_reader {
                     msg => bail!("Unexpected message {msg:?} for {}", $param),
                 }
             }
-
-            /// Reads message and takes it out of the enum constructor, rollbacks are skipped
-            /// (the function does not return until topic message is read).
-            /// Other unexpected messages (not applicable to the topic and not a rollback)
-            /// results in error.
-            pub async fn read_skip_rollbacks(
-                &mut self,
-            ) -> Result<(Arc<BlockInfo>, Arc<$msg_type>)> {
-                loop {
-                    match self.read_with_rollbacks().await? {
-                        RollbackWrapper::Normal(blk) => return Ok(blk),
-                        RollbackWrapper::Rollback(_) => continue,
-                    }
-                }
-            }
         }
     };
 }
@@ -256,11 +241,16 @@ impl ValidationContext {
     /// * sets current_block (in case the message is not empty).
     pub fn consume_sync<T>(
         &mut self,
+        handler: &str,
         inp: Result<RollbackWrapper<T>>,
     ) -> Result<RollbackWrapper<T>> {
         match &inp {
             Ok(RollbackWrapper::Normal((blk, _msg))) => {
-                self.current_block = Some(blk.clone());
+                if self.current_block.is_some() {
+                    self.check_sync(handler, blk);
+                } else {
+                    self.current_block = Some(blk.clone());
+                }
             }
             Ok(RollbackWrapper::Rollback(_)) => {
                 self.current_block = None;
@@ -271,28 +261,6 @@ impl ValidationContext {
             }
         }
         inp
-    }
-
-    /// Analyzes message retrieved from a subscriber:
-    /// * checks errors (adds them to validation outcome);
-    /// * checks block info (error is generated if current_block field set and different from
-    ///   block info of the message from the topic. That is, all blocks received by the module
-    ///   must have the same block info
-    pub fn consume<T>(
-        &mut self,
-        handler: &str,
-        inp: Result<(Arc<BlockInfo>, Arc<T>)>,
-    ) -> Option<(Arc<BlockInfo>, Arc<T>)> {
-        match inp {
-            Ok(ref msg @ (ref blk_info, _)) => {
-                self.check_sync(handler, blk_info);
-                Some(msg.clone())
-            }
-            Err(e) => {
-                self.handle_error(handler, &e);
-                None
-            }
-        }
     }
 
     pub async fn publish(&mut self) {

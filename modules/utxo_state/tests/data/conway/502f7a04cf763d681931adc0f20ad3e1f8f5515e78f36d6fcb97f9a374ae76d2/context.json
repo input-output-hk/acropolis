@@ -215,5 +215,12 @@
       },
       "script_ref": null
     }
+  },
+  "reference_scripts": {
+    "7b511d0b88a8343cc8232980a313461c5fdf0e613e3473dc2517a4b2": {
+      "Native": {
+        "ScriptPubkey": "0546e7bbd20945f2483922ce42f39c5c086359e6fb84fcc4bdcf2420"
+      }
+    }
   }
 }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
 use acropolis_common::{
     validation::UTxOWValidationError, Datum, DatumHash, Redeemer, RedeemerPointer, ScriptHash,
     ScriptLang, ShelleyAddressPaymentPart, TxOutput, UTXOValue, UTxOIdentifier,
