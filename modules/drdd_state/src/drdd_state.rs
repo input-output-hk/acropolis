@@ -1,9 +1,12 @@
 //! Acropolis DRDD state module for Caryatid
 //! Stores historical DRep delegation distributions
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message},
+    caryatid::RollbackWrapper,
+    declare_cardano_reader,
+    messages::{CardanoMessage, DRepStakeDistributionMessage, Message},
     rest_helper::handle_rest_with_query_parameters,
+    state_history::{StateHistory, StateHistoryStore},
+    BlockStatus,
 };
 use anyhow::Result;
 use caryatid_sdk::{module, Context};
@@ -16,9 +19,16 @@ use state::State;
 mod rest;
 use rest::handle_drdd;
 
-const DEFAULT_SUBSCRIBE_TOPIC: &str = "cardano.drep.distribution";
 const DEFAULT_HANDLE_DRDD_TOPIC: (&str, &str) = ("handle-topic-drdd", "rest.get.drdd");
 const DEFAULT_STORE_DRDD: (&str, bool) = ("store-drdd", false);
+
+declare_cardano_reader!(
+    DRDDReader,
+    "drep-distribution-subscribe-topic",
+    "cardano.drep.distribution",
+    DRepStakeDistribution,
+    DRepStakeDistributionMessage
+);
 
 /// DRDD State module
 #[module(
@@ -32,10 +42,6 @@ pub struct DRDDState;
 impl DRDDState {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let subscribe_topic =
-            config.get_string("subscribe-topic").unwrap_or(DEFAULT_SUBSCRIBE_TOPIC.to_string());
-        info!("Creating subscriber on '{subscribe_topic}'");
-
         let handle_drdd_topic = config
             .get_string(DEFAULT_HANDLE_DRDD_TOPIC.0)
             .unwrap_or(DEFAULT_HANDLE_DRDD_TOPIC.1.to_string());
@@ -43,42 +49,41 @@ impl DRDDState {
 
         let store_drdd = config.get_bool(DEFAULT_STORE_DRDD.0).unwrap_or(DEFAULT_STORE_DRDD.1);
 
-        let state_opt = if store_drdd {
-            let state = Arc::new(Mutex::new(State::new()));
+        let history_opt = if store_drdd {
+            let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+                "drdd_state",
+                StateHistoryStore::default_epoch_store(),
+            )));
 
             // Subscribe for drdd messages from accounts_state
-            let state_handler = state.clone();
-            let mut message_subscription = context.subscribe(&subscribe_topic).await?;
+            let history_handler = history.clone();
+            let drdd_reader = DRDDReader::new(&context, &config).await?;
             context.run(async move {
                 loop {
-                    let Ok((_, message)) = message_subscription.read_ignoring_rollbacks().await
-                    else {
-                        return;
-                    };
-                    match message.as_ref() {
-                        Message::Cardano((_, CardanoMessage::DRepStakeDistribution(msg))) => {
-                            let span = info_span!("drdd_state.handle", epoch = msg.epoch);
-                            async {
-                                let mut guard = state_handler.lock().await;
+                    let mut state = history.lock().await.get_or_init_with(|| State::new);
 
-                                guard.apply_drdd_snapshot(
-                                    msg.epoch,
-                                    msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
-                                    msg.drdd.abstain,
-                                    msg.drdd.no_confidence,
-                                );
+                    match drdd_reader.read_with_rollbacks().await? {
+                        RollbackWrapper::Normal((block_info, msg)) => {
+                            if block_info.status == BlockStatus::RolledBack {
+                                state =
+                                    history.lock().await.get_rolled_back_state(block_info.epoch);
                             }
-                            .instrument(span)
-                            .await;
-                        }
 
-                        _ => error!("Unexpected message type: {message:?}"),
+                            state.apply_drdd_snapshot(
+                                msg.epoch,
+                                msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
+                                msg.drdd.abstain,
+                                msg.drdd.no_confidence,
+                            );
+                            history.lock().await.commit(block_info.epoch, state);
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             });
             // Ticker to log stats
             let mut tick_subscription = context.subscribe("clock.tick").await?;
-            let state_logger = state.clone();
+            let history_logger = history.clone();
             context.run(async move {
                 loop {
                     let Ok((_, message)) = tick_subscription.read().await else {
@@ -89,7 +94,7 @@ impl DRDDState {
                         if clock.number % 60 == 0 {
                             let span = info_span!("drdd_state.tick", number = clock.number);
                             async {
-                                state_logger
+                                history_logger
                                     .lock()
                                     .await
                                     .tick()
@@ -103,14 +108,14 @@ impl DRDDState {
                     }
                 }
             });
-            Some(state)
+            Some(history)
         } else {
             None
         };
 
         // Register /drdd REST endpoint
         handle_rest_with_query_parameters(context.clone(), &handle_drdd_topic, move |params| {
-            let state_rest = state_opt.clone();
+            let state_rest = history_opt.clone();
             handle_drdd(state_rest.clone(), params)
         });
 
