@@ -23,15 +23,20 @@
 //! - Median ~5.1ms (closest to 5ms target)
 //! - CV 3.1% (excellent stability)
 //! - Expected ~32ms on CI (based on ~6.25x laptop:CI ratio from uniswap)
-//! - 10 iterations × ~5ms = ~50ms total calibration (well within 200ms budget)
+//! - 15 iterations × ~5ms = ~75ms total calibration (well within 200ms budget)
 
 use std::sync::OnceLock;
 
 use acropolis_module_tx_unpacker::validations::phase2::evaluate_raw_flat_program;
 
 /// Default number of calibration iterations.
-/// Increased from 10 to 15 to improve statistical stability on CI runners.
+/// Set to 15 for statistical stability on CI runners.
 pub const CALIBRATION_ITERATIONS: usize = 15;
+
+/// Number of warmup runs before timed iterations.
+/// Warmup allows CPU frequency scaling to stabilize, which is especially
+/// important on CI runners with dynamic CPU governors.
+pub const WARMUP_RUNS: usize = 3;
 
 /// Default performance multiplier (threshold = multiplier × baseline).
 /// Set to 10x based on empirical data: the largest benchmark script (uniswap-3)
@@ -108,8 +113,8 @@ pub fn calibrate(iterations: usize) -> CalibrationBaseline {
         "Need at least 3 iterations for a meaningful median"
     );
 
-    // Warmup runs (discarded) - increased from 1 to 3 to help CPU stabilize
-    for _ in 0..3 {
+    // Warmup runs (discarded) to help CPU frequency scaling stabilize
+    for _ in 0..WARMUP_RUNS {
         evaluate_raw_flat_program(CALIBRATION_SCRIPT)
             .expect("Calibration script warmup must succeed");
     }
@@ -152,7 +157,7 @@ static CALIBRATION: OnceLock<CalibrationBaseline> = OnceLock::new();
 
 /// Get or compute the calibration baseline (cached per process).
 ///
-/// The first call runs `calibrate(10)` and caches the result. All subsequent
+/// The first call runs `calibrate(CALIBRATION_ITERATIONS)` and caches the result. All subsequent
 /// calls return the cached baseline with zero overhead. This means all tests
 /// in a single `cargo test` run share the same baseline.
 pub fn get_calibration() -> &'static CalibrationBaseline {

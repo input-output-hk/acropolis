@@ -8,7 +8,7 @@ mod common;
 
 use acropolis_module_tx_unpacker::validations::phase2::evaluate_raw_flat_program;
 use common::{
-    CALIBRATION_ITERATIONS, CALIBRATION_SCRIPT, CalibrationBaseline, calibrate, get_calibration,
+    calibrate, get_calibration, CalibrationBaseline, CALIBRATION_ITERATIONS, CALIBRATION_SCRIPT,
 };
 
 /// Verify the calibration script can be loaded and evaluated.
@@ -27,7 +27,7 @@ fn test_calibration_script_evaluates() {
 
 /// Verify calibration produces stable results.
 /// Runs calibrate(15) five times and checks each run's CV,
-/// then checks that the five medians are within 30% of each other.
+/// then checks that the five medians are within 30% of the overall median.
 #[test]
 fn test_calibration_stability() {
     let runs = 5;
