@@ -110,7 +110,8 @@ pub fn calibrate(iterations: usize) -> CalibrationBaseline {
 
     // Warmup runs (discarded) - increased from 1 to 3 to help CPU stabilize
     for _ in 0..3 {
-        evaluate_raw_flat_program(CALIBRATION_SCRIPT).expect("Calibration script warmup must succeed");
+        evaluate_raw_flat_program(CALIBRATION_SCRIPT)
+            .expect("Calibration script warmup must succeed");
     }
 
     // Timed iterations
