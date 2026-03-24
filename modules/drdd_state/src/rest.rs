@@ -1,5 +1,6 @@
 use crate::state::State;
 use acropolis_common::rest_error::RESTError;
+use acropolis_common::state_history::StateHistory;
 use acropolis_common::{extract_strict_query_params, messages::RESTResponse, DRepCredential};
 use serde::Serialize;
 use std::{collections::HashMap, sync::Arc};
@@ -15,25 +16,30 @@ struct DRDDResponse {
 
 /// Handles /drdd
 pub async fn handle_drdd(
-    state: Option<Arc<Mutex<State>>>,
+    history: Option<Arc<Mutex<StateHistory<State>>>>,
     params: HashMap<String, String>,
 ) -> Result<RESTResponse, RESTError> {
-    let state_arc = state.as_ref().ok_or_else(|| RESTError::storage_disabled("DRDD"))?;
+    let history = match history {
+        Some(history) => history,
+        None => return Err(RESTError::storage_disabled("DRDD")),
+    };
 
-    let locked = state_arc.lock().await;
+    let locked = history.lock().await;
+
+    let state = locked.current().ok_or_else(|| RESTError::storage_disabled("DRDD"))?;
 
     extract_strict_query_params!(params, {
         "epoch" => epoch: Option<u64>,
     });
 
     let drdd_opt = match epoch {
-        Some(epoch) => match locked.get_epoch(epoch) {
+        Some(epoch) => match state.get_epoch(epoch) {
             Some(drdd) => Some(drdd),
             None => {
                 return Err(RESTError::not_found(&format!("DRDD in epoch {}", epoch)));
             }
         },
-        None => locked.get_latest(),
+        None => state.get_latest(),
     };
 
     if let Some(drdd) = drdd_opt {

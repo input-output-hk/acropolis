@@ -3,17 +3,17 @@
 use acropolis_common::{
     caryatid::RollbackWrapper,
     declare_cardano_reader,
-    messages::{CardanoMessage, DRepStakeDistributionMessage, Message},
+    messages::{CardanoMessage, DRepStakeDistributionMessage, Message, StateTransitionMessage},
     rest_helper::handle_rest_with_query_parameters,
     state_history::{StateHistory, StateHistoryStore},
     BlockStatus,
 };
-use anyhow::Result;
-use caryatid_sdk::{module, Context};
+use anyhow::{bail, Result};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
@@ -40,6 +40,32 @@ declare_cardano_reader!(
 pub struct DRDDState;
 
 impl DRDDState {
+    async fn run(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut drdd_reader: DRDDReader,
+    ) -> anyhow::Result<()> {
+        loop {
+            let mut state = history.lock().await.get_or_init_with(State::new);
+
+            match drdd_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, msg)) => {
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(block_info.epoch);
+                    }
+
+                    state.apply_drdd_snapshot(
+                        msg.epoch,
+                        msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
+                        msg.drdd.abstain,
+                        msg.drdd.no_confidence,
+                    );
+                    history.lock().await.commit(block_info.epoch, state);
+                }
+                RollbackWrapper::Rollback(_) => {}
+            }
+        }
+    }
+
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let handle_drdd_topic = config
@@ -52,35 +78,14 @@ impl DRDDState {
         let history_opt = if store_drdd {
             let history = Arc::new(Mutex::new(StateHistory::<State>::new(
                 "drdd_state",
-                StateHistoryStore::default_epoch_store(),
+                StateHistoryStore::Unbounded,
             )));
 
             // Subscribe for drdd messages from accounts_state
             let history_handler = history.clone();
             let drdd_reader = DRDDReader::new(&context, &config).await?;
-            context.run(async move {
-                loop {
-                    let mut state = history.lock().await.get_or_init_with(|| State::new);
+            context.run(Self::run(history_handler, drdd_reader));
 
-                    match drdd_reader.read_with_rollbacks().await? {
-                        RollbackWrapper::Normal((block_info, msg)) => {
-                            if block_info.status == BlockStatus::RolledBack {
-                                state =
-                                    history.lock().await.get_rolled_back_state(block_info.epoch);
-                            }
-
-                            state.apply_drdd_snapshot(
-                                msg.epoch,
-                                msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
-                                msg.drdd.abstain,
-                                msg.drdd.no_confidence,
-                            );
-                            history.lock().await.commit(block_info.epoch, state);
-                        }
-                        RollbackWrapper::Rollback(_) => {}
-                    }
-                }
-            });
             // Ticker to log stats
             let mut tick_subscription = context.subscribe("clock.tick").await?;
             let history_logger = history.clone();
@@ -94,13 +99,10 @@ impl DRDDState {
                         if clock.number % 60 == 0 {
                             let span = info_span!("drdd_state.tick", number = clock.number);
                             async {
-                                history_logger
-                                    .lock()
-                                    .await
-                                    .tick()
-                                    .await
-                                    .inspect_err(|e| error!("DRDD tick error: {e}"))
-                                    .ok();
+                                let locked = history_logger.lock().await;
+                                if let Some(state) = locked.current() {
+                                    state.tick().await.ok();
+                                }
                             }
                             .instrument(span)
                             .await;
@@ -113,10 +115,12 @@ impl DRDDState {
             None
         };
 
+        // handle spdd query
+        let history_query = history_opt.clone();
         // Register /drdd REST endpoint
         handle_rest_with_query_parameters(context.clone(), &handle_drdd_topic, move |params| {
-            let state_rest = history_opt.clone();
-            handle_drdd(state_rest.clone(), params)
+            let history_rest = history_query.clone();
+            handle_drdd(history_rest, params)
         });
 
         Ok(())

@@ -1,12 +1,10 @@
-use acropolis_common::{
-    state_history::{StateHistory, StateHistoryStore},
-    DRepCredential,
-};
+use acropolis_common::{DRepCredential, Epoch};
 use imbl::{OrdMap, OrdSet};
 use tracing::info;
 
+#[derive(Clone, Default)]
 pub struct State {
-    drdd_history: StateHistory<DRepDistribution>,
+    drdd_history: OrdMap<Epoch, DRepDistribution>,
 }
 
 #[derive(Clone, Default)]
@@ -19,20 +17,24 @@ pub struct DRepDistribution {
 impl State {
     pub fn new() -> Self {
         Self {
-            drdd_history: StateHistory::new("drdd", StateHistoryStore::Unbounded),
+            drdd_history: OrdMap::new(),
         }
     }
 
     pub fn apply_drdd_snapshot<I>(
         &mut self,
-        epoch: u64,
+        epoch: Epoch,
         snapshot_dreps: I,
         abstain: u64,
         no_confidence: u64,
     ) where
         I: IntoIterator<Item = (DRepCredential, u64)>,
     {
-        let mut next = self.drdd_history.get_rolled_back_state(epoch);
+        let mut next = if epoch == 0 {
+            Default::default()
+        } else {
+            self.drdd_history.get(&(epoch - 1)).cloned().unwrap_or_default()
+        };
 
         next.abstain = abstain;
         next.no_confidence = no_confidence;
@@ -49,24 +51,20 @@ impl State {
             present.insert(k);
         }
 
-        let to_remove: Vec<_> =
-            next.dreps.keys().filter(|k| !present.contains(k)).cloned().collect();
-        for k in to_remove {
-            next.dreps.remove(&k);
-        }
+        next.dreps = next.dreps.into_iter().filter(|(k, _)| present.contains(k)).collect();
 
-        self.drdd_history.commit(epoch, next);
+        self.drdd_history.insert(epoch, next);
     }
 
     pub fn get_latest(&self) -> Option<&DRepDistribution> {
-        self.drdd_history.current()
+        self.drdd_history.iter().next_back().map(|(_, v)| v)
     }
-    pub fn get_epoch(&self, epoch: u64) -> Option<&DRepDistribution> {
-        self.drdd_history.get_by_index(epoch)
+    pub fn get_epoch(&self, epoch: Epoch) -> Option<&DRepDistribution> {
+        self.drdd_history.get(&epoch)
     }
 
     pub async fn tick(&self) -> anyhow::Result<()> {
-        if let Some(latest) = self.drdd_history.current() {
+        if let Some((_, latest)) = self.drdd_history.iter().next_back() {
             let drep_count = latest.dreps.len();
             let num_epochs = self.drdd_history.len();
             info!(
