@@ -8,11 +8,12 @@ use acropolis_common::{
     messages::{
         AccountsBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage,
         SPOStakeDistributionMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
+        StateTransitionMessage,
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -327,18 +328,5 @@ impl BlockVrfValidator {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }
