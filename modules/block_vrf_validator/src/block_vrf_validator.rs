@@ -261,10 +261,10 @@ impl BlockVrfValidator {
                     }
                     .instrument(span)
                     .await;
-
-                    // Commit the new state
-                    history.lock().await.commit(block_info.number, state);
                 }
+
+                // Commit the new state
+                history.lock().await.commit(block_info.number, state);
             }
         }
     }
