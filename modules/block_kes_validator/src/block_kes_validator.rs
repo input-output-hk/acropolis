@@ -2,17 +2,19 @@
 //! Validate KES signatures in the block header
 
 use acropolis_common::{
-    caryatid::SubscriptionExt,
+    caryatid::RollbackWrapper,
     configuration::StartupMode,
+    declare_cardano_reader,
     messages::{
-        BlockKesValidatorBootstrapMessage, CardanoMessage, Message, SnapshotMessage,
-        SnapshotStateMessage,
+        BlockKesValidatorBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage,
+        RawBlockMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
+        StateTransitionMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
     validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
@@ -29,16 +31,30 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
-const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "protocol-parameters-subscribe-topic",
-    "cardano.protocol.parameters",
-);
-const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("spo-state-subscribe-topic", "cardano.spo.state");
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+
+declare_cardano_reader!(
+    BlockReader,
+    "block-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
+);
+declare_cardano_reader!(
+    ParamsReader,
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+declare_cardano_reader!(
+    SPOReader,
+    "spo-state-subscribe-topic",
+    "cardano.spo.state",
+    SPOState,
+    SPOStateMessage
+);
 
 /// Block KES Validator module
 #[module(
@@ -104,9 +120,9 @@ impl BlockKesValidator {
         context: Arc<Context<Message>>,
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut block_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut spo_state_subscription: Box<dyn Subscription<Message>>,
+        mut block_reader: BlockReader,
+        mut params_reader: ParamsReader,
+        mut spo_state_reader: SPOReader,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         kes_validation_publisher_topic: String,
     ) -> Result<()> {
@@ -122,98 +138,89 @@ impl BlockKesValidator {
         if let Some(subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
-            let _ = protocol_parameters_subscription.read().await?;
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, params)) => {
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.handle_protocol_parameters(&params);
+                    history.lock().await.commit(block_info.number, state);
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
         }
 
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
-            let mut current_block: Option<BlockInfo> = None;
 
-            let (_, message) = block_subscription.read_ignoring_rollbacks().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
+            let blocks_msg = match block_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, blocks)) => {
                     // handle rollback here
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    current_block = Some(block_info.clone());
-                    let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
 
-                    if is_new_epoch {
-                        // read epoch boundary messages
-                        let (_, protocol_parameters_msg) =
-                            protocol_parameters_subscription.read_ignoring_rollbacks().await?;
-                        let span = info_span!(
-                            "block_kes_validator.handle_protocol_parameters",
-                            epoch = block_info.epoch
-                        );
-                        span.in_scope(|| match protocol_parameters_msg.as_ref() {
-                            Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_protocol_parameters(msg);
-                            }
-                            _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
-                        });
-
-                        let (_, spo_state_msg) =
-                            spo_state_subscription.read_ignoring_rollbacks().await?;
-                        let span = info_span!(
-                            "block_kes_validator.handle_spo_state",
-                            epoch = block_info.epoch
-                        );
-                        span.in_scope(|| match spo_state_msg.as_ref() {
-                            Message::Cardano((block_info, CardanoMessage::SPOState(msg))) => {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_spo_state(msg);
-                            }
-                            _ => error!("Unexpected message type: {spo_state_msg:?}"),
-                        });
-                    }
-
-                    if block_info.intent.do_validation() {
-                        let span =
-                            info_span!("block_kes_validator.validate", block = block_info.number);
-                        async {
-                            let mut validation_outcomes = ValidationOutcomes::new();
-                            let result = state
-                                .validate(block_info, &block_msg.header, &genesis)
-                                .map_err(|e| *e);
-                            match result {
-                                Ok(Some((pool_id, updated_sequence_number))) => {
-                                    // Update the operational certificate counter
-                                    // When block is validated successfully
-                                    // Reference
-                                    // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
-                                    state.update_ocert_counter(pool_id, updated_sequence_number);
-                                }
-                                Err(e) => {
-                                    validation_outcomes.push(e);
-                                }
-                                _ => {}
-                            }
-
-                            validation_outcomes
-                                .publish(
-                                    &context,
-                                    "block_kes_validator",
-                                    &kes_validation_publisher_topic,
-                                    block_info,
-                                )
-                                .await
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to publish KES validation: {e}")
-                                });
-                        }
-                        .instrument(span)
-                        .await;
-                    }
+                    Some((block_info, blocks))
                 }
-                _ => error!("Unexpected message type: {message:?}"),
+                RollbackWrapper::Rollback(_) => None,
+            };
+
+            // read epoch boundary messages
+            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, params)) => {
+                        state.handle_protocol_parameters(&params);
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
+
+                match spo_state_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, spo_state)) => {
+                        state.handle_spo_state(&spo_state);
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
             }
 
-            // Commit the new state
-            if let Some(block_info) = current_block {
+            if let Some((block_info, block_msg)) = blocks_msg {
+                if block_info.intent.do_validation() {
+                    let span =
+                        info_span!("block_kes_validator.validate", block = block_info.number);
+                    async {
+                        let mut validation_outcomes = ValidationOutcomes::new();
+                        let result = state
+                            .validate(&block_info, &block_msg.header, &genesis)
+                            .map_err(|e| *e);
+                        match result {
+                            Ok(Some((pool_id, updated_sequence_number))) => {
+                                // Update the operational certificate counter
+                                // When block is validated successfully
+                                // Reference
+                                // https://github.com/IntersectMBO/ouroboros-consensus/blob/e3c52b7c583bdb6708fac4fdaa8bf0b9588f5a88/ouroboros-consensus-protocol/src/ouroboros-consensus-protocol/Ouroboros/Consensus/Protocol/Praos.hs#L508
+                                state.update_ocert_counter(pool_id, updated_sequence_number);
+                            }
+                            Err(e) => {
+                                validation_outcomes.push(e);
+                            }
+                            _ => {}
+                        }
+
+                        validation_outcomes
+                            .publish(
+                                &context,
+                                "block_kes_validator",
+                                &kes_validation_publisher_topic,
+                                &block_info,
+                            )
+                            .await
+                            .unwrap_or_else(|e| error!("Failed to publish KES validation: {e}"));
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                // Commit the new state
                 history.lock().await.commit(block_info.number, state);
             }
         }
@@ -232,21 +239,6 @@ impl BlockKesValidator {
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
 
-        let block_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating block subscription on '{block_subscribe_topic}'");
-
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
-
-        let spo_state_subscribe_topic = config
-            .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
-
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
@@ -260,10 +252,9 @@ impl BlockKesValidator {
             None
         };
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
-        let protocol_parameters_subscription =
-            context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
+        let block_reader = BlockReader::new(&context, &config).await?;
+        let param_reader = ParamsReader::new(&context, &config).await?;
+        let spo_state_reader = SPOReader::new(&context, &config).await?;
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -278,9 +269,9 @@ impl BlockKesValidator {
                 context_run,
                 history,
                 bootstrapped_subscription,
-                block_subscription,
-                protocol_parameters_subscription,
-                spo_state_subscription,
+                block_reader,
+                param_reader,
+                spo_state_reader,
                 snapshot_subscription,
                 validation_kes_publisher_topic,
             )
@@ -289,18 +280,5 @@ impl BlockKesValidator {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }
