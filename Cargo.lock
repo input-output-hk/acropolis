@@ -178,6 +178,7 @@ dependencies = [
  "config",
  "fjall",
  "hex",
+ "imbl",
  "minicbor 0.25.1",
  "pallas",
  "pallas-traverse",
