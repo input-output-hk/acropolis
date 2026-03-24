@@ -99,20 +99,22 @@ impl HistoricalAccountsState {
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let _ = match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((_, params)) => params,
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {
+                    debug!("Consumed initial genesis params from params_subscription");
+                }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
                 }
             };
-            debug!("Consumed initial genesis params from params_subscription");
-            let _ = match stake_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal((_, deltas)) => deltas,
+            match stake_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {
+                    debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
+                }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial stake deltas");
                 }
             };
-            debug!("Consumed initial stake deltas from stake_address_deltas_subscription");
         }
 
         // Background task to persist epochs sequentially
