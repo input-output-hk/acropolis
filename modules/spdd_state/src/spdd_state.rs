@@ -1,7 +1,7 @@
 //! Acropolis SPDD state module for Caryatid
 //! Stores historical stake pool delegation distributions
 use acropolis_common::caryatid::RollbackWrapper;
-use acropolis_common::declare_cardano_reader;
+use acropolis_common::{BlockStatus, declare_cardano_reader};
 use acropolis_common::messages::SPOStakeDistributionMessage;
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::state_history::{StateHistory, StateHistoryStore};
@@ -52,6 +52,10 @@ impl SPDDState {
 
             match spdd_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((block_info, msg)) => {
+                    if block_info.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(block_info.epoch);
+                    }
+                    
                     let span = info_span!("spdd_state.handle", epoch = msg.epoch);
                     async {
                         state
