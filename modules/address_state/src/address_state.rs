@@ -26,7 +26,7 @@ use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 mod immutable_address_store;
 mod state;
 mod volatile_addresses;
@@ -70,12 +70,13 @@ impl AddressState {
     ) -> Result<()> {
         if !is_snapshot_mode {
             match params_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Normal(_) => {
+                    debug!("Consumed initial genesis params from params_subscription");
+                }
                 RollbackWrapper::Rollback(_) => {
                     bail!("Unexpected rollback while reading initial params");
                 }
             };
-            info!("Consumed initial genesis params from params_subscription");
         }
 
         // Background task to persist epochs sequentialy
@@ -108,7 +109,7 @@ impl AddressState {
                 RollbackWrapper::Rollback(_) => None,
             };
 
-            // Read params message on epoch bounday to update rollback window
+            // Read params message on epoch bounday or rollback to update rollback window
             // length if needed and set epoch start block for volatile pruning
             if deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
                 match params_reader.read_with_rollbacks().await? {
