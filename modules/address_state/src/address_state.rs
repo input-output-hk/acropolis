@@ -9,16 +9,20 @@ use crate::{
     state::{AddressStorageConfig, State},
 };
 use acropolis_common::{
-    caryatid::SubscriptionExt, configuration::StartupMode, queries::errors::QueryError,
+    caryatid::RollbackWrapper,
+    configuration::StartupMode,
+    declare_cardano_reader,
+    messages::{AddressDeltasMessage, ProtocolParamsMessage, StateTransitionMessage},
+    queries::errors::QueryError,
 };
 use acropolis_common::{
     messages::{CardanoMessage, Message, StateQuery, StateQueryResponse},
     queries::addresses::{
         AddressStateQuery, AddressStateQueryResponse, DEFAULT_ADDRESS_QUERY_TOPIC,
     },
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use tokio::sync::{mpsc, Mutex};
@@ -27,11 +31,20 @@ mod immutable_address_store;
 mod state;
 mod volatile_addresses;
 
-// Subscription topics
-const DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("address-deltas-subscribe-topic", "cardano.address.deltas");
-const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("parameters-subscribe-topic", "cardano.protocol.parameters");
+declare_cardano_reader!(
+    AddressDeltasReader,
+    "address-deltas-subscribe-topic",
+    "cardano.address.deltas",
+    AddressDeltas,
+    AddressDeltasMessage
+);
+declare_cardano_reader!(
+    ParamsReader,
+    "parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
 
 // Configuration defaults
 const DEFAULT_ADDRESS_DB_PATH: (&str, &str) = ("db-path", "./fjall-addresses");
@@ -51,12 +64,17 @@ pub struct AddressState;
 impl AddressState {
     async fn run(
         state_mutex: Arc<Mutex<State>>,
-        mut address_deltas_subscription: Box<dyn Subscription<Message>>,
-        mut params_subscription: Box<dyn Subscription<Message>>,
+        mut address_deltas_reader: AddressDeltasReader,
+        mut params_reader: ParamsReader,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let _ = params_subscription.read().await?;
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            };
             info!("Consumed initial genesis params from params_subscription");
         }
 
@@ -77,99 +95,73 @@ impl AddressState {
         // Main loop of synchronised messages
         loop {
             // Address deltas are the synchroniser
-            let (_, deltas_msg) = address_deltas_subscription.read_ignoring_rollbacks().await?;
-            let (current_block, new_epoch) = match deltas_msg.as_ref() {
-                Message::Cardano((info, _)) => (info.clone(), info.new_epoch && info.epoch > 0),
-                _ => continue,
-            };
+            let deltas_msg = match address_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, deltas_msg)) => {
+                    if block_info.status == BlockStatus::RolledBack {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.rollback_before(block_info.number);
+                        state.volatile.next_block();
+                    }
 
-            if current_block.status == BlockStatus::RolledBack {
-                let mut state = state_mutex.lock().await;
-                state.volatile.rollback_before(current_block.number);
-                state.volatile.next_block();
-            }
+                    Some((block_info, deltas_msg))
+                }
+                RollbackWrapper::Rollback(_) => None,
+            };
 
             // Read params message on epoch bounday to update rollback window
             // length if needed and set epoch start block for volatile pruning
-            if new_epoch {
-                let (_, message) = params_subscription.read_ignoring_rollbacks().await?;
-                if let Message::Cardano((ref block_info, CardanoMessage::ProtocolParams(params))) =
-                    message.as_ref()
-                {
-                    Self::check_sync(&current_block, block_info, "params");
-                    let mut state = state_mutex.lock().await;
-                    state.volatile.start_new_epoch(block_info.number);
-                    if let Some(shelley) = &params.params.shelley {
-                        state.volatile.update_k(shelley.security_param);
+            if deltas_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, params)) => {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.start_new_epoch(block_info.number);
+                        if let Some(shelley) = &params.params.shelley {
+                            state.volatile.update_k(shelley.security_param);
+                        }
                     }
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Process address deltas into volatile and persist to disk if a full epoch is out of rollback window
-            match deltas_msg.as_ref() {
-                Message::Cardano((
-                    ref block_info,
-                    CardanoMessage::AddressDeltas(address_deltas_msg),
-                )) => {
-                    let (should_prune, store, config, epoch);
-                    {
-                        let mut state = state_mutex.lock().await;
-                        // Skip processing for epochs already stored to DB
-                        if let Some(min_epoch) = state.config.skip_until {
-                            if block_info.epoch <= min_epoch {
-                                state.volatile.next_block();
-                                continue;
-                            }
-                        }
-
-                        // Add deltas to volatile
-                        let compact_deltas = address_deltas_msg.as_compact_or_convert();
-                        state.apply_address_deltas(compact_deltas.as_ref());
-
-                        store = state.immutable.clone();
-                        config = state.config.clone();
-                        epoch = block_info.epoch;
-
-                        // Move volatile deltas for an epoch to ImmutableAddressStore if out of rollback window
-                        should_prune = state.ready_to_prune(&current_block);
-                        if should_prune {
-                            state.prune_volatile().await;
+            if let Some((block_info, address_deltas_msg)) = deltas_msg {
+                let (should_prune, store, config, epoch);
+                {
+                    let mut state = state_mutex.lock().await;
+                    // Skip processing for epochs already stored to DB
+                    if let Some(min_epoch) = state.config.skip_until {
+                        if block_info.epoch <= min_epoch {
+                            state.volatile.next_block();
+                            continue;
                         }
                     }
 
+                    // Add deltas to volatile
+                    let compact_deltas = address_deltas_msg.as_compact_or_convert();
+                    state.apply_address_deltas(compact_deltas.as_ref());
+
+                    store = state.immutable.clone();
+                    config = state.config.clone();
+                    epoch = block_info.epoch;
+
+                    // Move volatile deltas for an epoch to ImmutableAddressStore if out of rollback window
+                    should_prune = state.ready_to_prune(&block_info);
                     if should_prune {
-                        if let Err(e) =
-                            persist_tx.send((epoch, store.clone(), config.clone())).await
-                        {
-                            panic!("persistence worker crashed: {e}");
-                        }
-                    }
-
-                    {
-                        let mut state = state_mutex.lock().await;
-                        state.volatile.next_block();
+                        state.prune_volatile().await;
                     }
                 }
-                other => error!("Unexpected message on address-deltas subscription: {other:?}"),
-            }
-        }
-    }
 
-    fn check_sync(expected: &BlockInfo, actual: &BlockInfo, source: &str) {
-        if expected.number != actual.number {
-            error!(
-                expected = expected.number,
-                actual = actual.number,
-                source = source,
-                "Messages out of sync (expected deltas block {}, got {} from {})",
-                expected.number,
-                actual.number,
-                source,
-            );
-            panic!(
-                "Message streams diverged: deltas at {} vs {} from {}",
-                expected.number, actual.number, source
-            );
+                if should_prune {
+                    if let Err(e) = persist_tx.send((epoch, store.clone(), config.clone())).await {
+                        panic!("persistence worker crashed: {e}");
+                    }
+                }
+
+                {
+                    let mut state = state_mutex.lock().await;
+                    state.volatile.next_block();
+                }
+            }
         }
     }
 
@@ -285,25 +277,22 @@ impl AddressState {
         });
 
         if storage_config.any_enabled() {
-            // Get subscribe topics
-            let address_deltas_subscribe_topic =
-                get_string_flag(&config, DEFAULT_ADDRESS_DELTAS_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{address_deltas_subscribe_topic}'");
-            let params_subscribe_topic =
-                get_string_flag(&config, DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC);
-            info!("Creating subscriber on '{params_subscribe_topic}'");
-
             // Subscribe to enabled topics
-            let address_deltas_sub = context.subscribe(&address_deltas_subscribe_topic).await?;
-            let params_sub = context.subscribe(&params_subscribe_topic).await?;
+            let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
+            let params_reader = ParamsReader::new(&context, &config).await?;
 
             let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
 
             // Start run task
             context.run(async move {
-                Self::run(state_run, address_deltas_sub, params_sub, is_snapshot_mode)
-                    .await
-                    .unwrap_or_else(|e| error!("Failed: {e}"));
+                Self::run(
+                    state_run,
+                    address_deltas_reader,
+                    params_reader,
+                    is_snapshot_mode,
+                )
+                .await
+                .unwrap_or_else(|e| error!("Failed: {e}"));
             });
         }
 
