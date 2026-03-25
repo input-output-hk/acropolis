@@ -1,11 +1,16 @@
 //! Acropolis SPO state module for Caryatid
 //! Accepts certificate events and derives the SPO state in memory
 
-use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::caryatid::{RollbackWrapper, ValidationContext};
 use acropolis_common::configuration::StartupMode;
-use acropolis_common::messages::StateTransitionMessage;
+use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{
+    EpochActivityMessage, GovernanceProceduresMessage, ProtocolParamsMessage, RawBlockMessage,
+    SPORewardsMessage, SPOStakeDistributionMessage, StakeAddressDeltasMessage,
+    StakeRewardDeltasMessage, StateTransitionMessage, TxCertificatesMessage, WithdrawalsMessage,
+};
 use acropolis_common::queries::errors::QueryError;
-use acropolis_common::validation::ValidationOutcomes;
+
 use acropolis_common::{
     messages::{
         CardanoMessage, Message, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
@@ -17,9 +22,9 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus, Era, PoolId,
+    BlockStatus, Era, PoolId,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use pallas::ledger::traverse::MultiEraHeader;
@@ -46,29 +51,75 @@ use state::State;
 use store_config::StoreConfig;
 
 // Subscribe Topics
-const DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("certificates-subscribe-topic", "cardano.certificates");
-const DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("withdrawals-subscribe-topic", "cardano.withdrawals");
-const DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("governance-subscribe-topic", "cardano.governance");
-const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
-const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("spdd-subscribe-topic", "cardano.spo.distribution");
-const DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("stake-deltas-subscribe-topic", "cardano.stake.deltas");
-const DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("spo-rewards-subscribe-topic", "cardano.spo.rewards");
-const DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    CertsReader,
+    "certificates-subscribe-topic",
+    "cardano.certificates",
+    TxCertificates,
+    TxCertificatesMessage
+);
+declare_cardano_reader!(
+    WithdrawalsReader,
+    "withdrawals-subscribe-topic",
+    "cardano.withdrawals",
+    Withdrawals,
+    WithdrawalsMessage
+);
+declare_cardano_reader!(
+    GovReader,
+    "governance-subscribe-topic",
+    "cardano.governance",
+    GovernanceProcedures,
+    GovernanceProceduresMessage
+);
+declare_cardano_reader!(
+    BlockReader,
+    "blocks-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
+);
+declare_cardano_reader!(
+    EpochActivityReader,
+    "epoch-activity-subscribe-topic",
+    "cardano.epoch.activity",
+    EpochActivity,
+    EpochActivityMessage
+);
+declare_cardano_reader!(
+    SPDDReader,
+    "spdd-subscribe-topic",
+    "cardano.spo.distribution",
+    SPOStakeDistribution,
+    SPOStakeDistributionMessage
+);
+declare_cardano_reader!(
+    StakeDeltasReader,
+    "stake-deltas-subscribe-topic",
+    "cardano.stake.deltas",
+    StakeAddressDeltas,
+    StakeAddressDeltasMessage
+);
+declare_cardano_reader!(
+    SPORewardsReader,
+    "spo-rewards-subscribe-topic",
+    "cardano.spo.rewards",
+    SPORewards,
+    SPORewardsMessage
+);
+declare_cardano_reader!(
+    RewardsReader,
     "stake-reward-deltas-subscribe-topic",
     "cardano.stake.reward.deltas",
+    StakeRewardDeltas,
+    StakeRewardDeltasMessage
 );
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
+declare_cardano_reader!(
+    ParamsReader,
     "protocol-parameters-subscribe-topic",
     "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
 );
 const DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC: (&str, &str) =
     ("clock-tick-subscribe-topic", "clock.tick");
@@ -94,72 +145,6 @@ const DEFAULT_VALIDATION_PUBLISH_TOPIC: (&str, &str) =
     description = "In-memory SPO State from certificate events"
 )]
 pub struct SPOState;
-
-struct SPOStateImpl {
-    validation: ValidationOutcomes,
-    current_block: Option<BlockInfo>,
-    context: Arc<Context<Message>>,
-    validation_topic: String,
-}
-
-impl SPOStateImpl {
-    pub fn new(context: &Arc<Context<Message>>, validation_topic: &str) -> Self {
-        Self {
-            validation: ValidationOutcomes::new(),
-            current_block: None,
-            context: context.clone(),
-            validation_topic: validation_topic.to_owned(),
-        }
-    }
-
-    pub fn set_current_block(&mut self, block: &BlockInfo) {
-        self.current_block = Some(block.clone());
-    }
-
-    pub fn unexpected_message_type(&mut self, topic: &str, msg: &Message) {
-        self.validation.push_anyhow(anyhow!(
-            "Unexpected message type for {topic} topic: {msg:?}"
-        ));
-    }
-
-    pub fn handling_error(&mut self, handler: &str, error: &anyhow::Error) {
-        self.validation.push_anyhow(anyhow!("Error handling {handler}: {error:#}"));
-    }
-
-    pub fn merge_handling(&mut self, handler: &str, outcome: Result<ValidationOutcomes>) {
-        match outcome {
-            Err(e) => self.handling_error(handler, &e),
-            Ok(mut outcome) => self.validation.merge(&mut outcome),
-        }
-    }
-
-    pub async fn publish(&mut self) {
-        if let Some(blk) = &self.current_block {
-            if let Err(e) = self
-                .validation
-                .publish(&self.context, "spo_state", &self.validation_topic, blk)
-                .await
-            {
-                error!("Publish failed: {:?}", e);
-            }
-        } else {
-            self.validation.print_errors("spo_state", None);
-        }
-    }
-
-    /// Check for synchronisation
-    fn check_sync(&mut self, actual: &BlockInfo) {
-        if let Some(ref block) = self.current_block {
-            if block.number != actual.number {
-                self.validation.push_anyhow(anyhow!(
-                    "Messages out of sync: expected {}, actual {}",
-                    block.number,
-                    actual.number
-                ));
-            }
-        }
-    }
-}
 
 impl SPOState {
     /// Wait for and process snapshot bootstrap messages
@@ -213,16 +198,17 @@ impl SPOState {
         store_config: &StoreConfig,
         // subscribers
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut certificates_subscription: Box<dyn Subscription<Message>>,
-        mut block_subscription: Box<dyn Subscription<Message>>,
-        mut withdrawals_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut governance_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut epoch_activity_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut spdd_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut stake_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut spo_rewards_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut stake_reward_deltas_subscription: Option<Box<dyn Subscription<Message>>>,
-        mut parameters_subscription: Box<dyn Subscription<Message>>,
+        mut certs_reader: CertsReader,
+        mut block_reader: BlockReader,
+        mut params_reader: ParamsReader,
+        mut withdrawals_reader: Option<WithdrawalsReader>,
+        mut gov_reader: Option<GovReader>,
+        mut epoch_activity_reader: Option<EpochActivityReader>,
+        mut spdd_reader: Option<SPDDReader>,
+        mut stake_deltas_reader: Option<StakeDeltasReader>,
+        mut spo_rewards_reader: Option<SPORewardsReader>,
+        mut stake_reward_deltas_reader: Option<RewardsReader>,
+
         // publishers
         mut spo_state_publisher: SPOStatePublisher,
         mut pool_registration_updates_publisher: PoolRegistrationUpdatesPublisher,
@@ -233,58 +219,54 @@ impl SPOState {
             Self::wait_for_bootstrap(history.clone(), subscription).await?;
         } else {
             // Consume initial protocol parameters (only needed for genesis bootstrap)
-            let _ = parameters_subscription.read().await?;
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
         }
 
         // Get the stake address deltas from the genesis bootstrap, which we know
         // don't contain any stake, plus an extra parameter state (!unexplained)
         // !TODO this seems overly specific to our startup process
-        if let Some(sub) = stake_deltas_subscription.as_mut() {
-            let _ = sub.read().await?;
+        if let Some(sub) = stake_deltas_reader.as_mut() {
+            match sub.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial stake deltas");
+                }
+            }
         }
 
         // Main loop of synchronised messages
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
-            let mut ctx = SPOStateImpl::new(&context, &validation_publish_topic);
+            let mut ctx =
+                ValidationContext::new(&context, &validation_publish_topic, "governance_state");
 
             // Use certs_message as the synchroniser
-            let (_, certs_message) = certificates_subscription.read().await?;
-            let new_epoch = match certs_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::TxCertificates(_))) => {
+            let certs_msg = match ctx
+                .consume_sync("certs", certs_reader.read_with_rollbacks().await)?
+            {
+                RollbackWrapper::Normal((block_info, certs_msg)) => {
                     // Handle rollbacks on this topic only
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    ctx.set_current_block(block_info);
-
-                    // new_epoch?
-                    block_info.new_epoch && block_info.epoch > 0
+                    Some((block_info, certs_msg))
                 }
-
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    spo_state_publisher.publish_rollback(certs_message.clone()).await?;
-                    pool_registration_updates_publisher
-                        .publish_rollback(certs_message.clone())
-                        .await?;
-                    false
-                }
-
-                _ => {
-                    ctx.unexpected_message_type("certificates", &certs_message);
-                    false
+                RollbackWrapper::Rollback(message) => {
+                    spo_state_publisher.publish_rollback(message.clone()).await?;
+                    pool_registration_updates_publisher.publish_rollback(message.clone()).await?;
+                    None
                 }
             };
 
-            // handle blocks (handle_mint) before handle_tx_certs
-            // in case of epoch boundary
-            let (_, block_message) = block_subscription.read_ignoring_rollbacks().await?;
-            match block_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
+            // handle blocks (handle_mint) before handle_tx_certs in case of epoch boundary
+            match ctx.consume_sync("blocks", block_reader.read_with_rollbacks().await)? {
+                RollbackWrapper::Normal((block_info, block_msg)) => {
                     let span =
                         info_span!("spo_state.handle_block_header", block = block_info.number);
 
@@ -302,275 +284,209 @@ impl SPOState {
 
                         // Parse the header - note we ignore the subtag because EBBs
                         // are suppressed upstream
-                        match MultiEraHeader::decode(variant, None, &block_msg.header) {
-                            Ok(header) => {
-                                if let Some(vrf_vkey) = header.vrf_vkey() {
-                                    state.handle_mint(block_info, vrf_vkey);
-                                }
-                            }
+                        ctx.handle(
+                            "decode_header",
+                            (|| {
+                                let header =
+                                    MultiEraHeader::decode(variant, None, &block_msg.header)
+                                        .map_err(anyhow::Error::from)?;
 
-                            Err(e) => ctx.validation.push_anyhow(anyhow!(
-                                "Can't decode header {}: {e}",
-                                block_info.slot
-                            )),
-                        }
+                                if let Some(vrf_vkey) = header.vrf_vkey() {
+                                    state.handle_mint(&block_info, vrf_vkey);
+                                }
+
+                                Ok(())
+                            })(),
+                        );
                     });
                 }
-
-                _ => ctx.unexpected_message_type("block header", &block_message),
+                RollbackWrapper::Rollback(_) => {}
             }
 
             // handle tx certificates
-            match certs_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_certs_msg))) => {
-                    let span = info_span!("spo_state.handle_certs", block = block_info.number);
-                    async {
-                        ctx.check_sync(block_info);
-                        let result = state
-                            .handle_tx_certs(block_info, tx_certs_msg, &mut ctx.validation)
-                            .inspect_err(|e| ctx.handling_error("TxCerts", e))
-                            .ok();
+            if let Some((block_info, tx_certs_msg)) = certs_msg.as_ref() {
+                let span = info_span!("spo_state.handle_certs", block = block_info.number);
+                async {
+                    let (message_opt, pool_registration_updates_message, outcomes) =
+                        state.handle_tx_certs(block_info, tx_certs_msg);
+                    ctx.merge("certs", Ok(outcomes));
 
-                        if let Some((maybe_message, pool_registration_updates_message)) = result {
-                            if let Some(message) = maybe_message {
-                                if let Message::Cardano((
-                                    _,
-                                    CardanoMessage::SPOState(SPOStateMessage {
-                                        retired_spos, ..
-                                    }),
-                                )) = message.as_ref()
-                                {
-                                    let pool_ids: Vec<PoolId> =
-                                        retired_spos.iter().map(|(spo, _sa)| *spo).collect();
-                                    retired_pools_history
-                                        .handle_deregistrations(block_info, &pool_ids);
-                                }
-
-                                // publish spo message
-                                if let Err(e) = spo_state_publisher.publish(message).await {
-                                    ctx.validation
-                                        .push_anyhow(anyhow!("Error publishing SPO State: {e:#}"))
-                                }
-                            }
-
-                            if let Err(e) = pool_registration_updates_publisher
-                                .publish(pool_registration_updates_message)
-                                .await
-                            {
-                                ctx.validation.push_anyhow(anyhow!(
-                                    "Error publishing Pool Registration Updates: {e:#}"
-                                ))
-                            }
+                    if let Some(message) = message_opt {
+                        if let Message::Cardano((
+                            _,
+                            CardanoMessage::SPOState(SPOStateMessage { retired_spos, .. }),
+                        )) = message.as_ref()
+                        {
+                            let pool_ids: Vec<PoolId> =
+                                retired_spos.iter().map(|(spo, _sa)| *spo).collect();
+                            retired_pools_history.handle_deregistrations(block_info, &pool_ids);
                         }
+
+                        // publish spo message
+                        ctx.handle("spo publisher", spo_state_publisher.publish(message).await);
                     }
-                    .instrument(span)
-                    .await;
-                }
 
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
-                    // Do nothing, we handled rollback earlier
+                    ctx.handle(
+                        "pool regs update",
+                        pool_registration_updates_publisher
+                            .publish(pool_registration_updates_message)
+                            .await,
+                    );
                 }
-
-                _ => ctx.unexpected_message_type("tx certificates", &certs_message),
-            };
+                .instrument(span)
+                .await;
+            }
 
             // read from epoch-boundary messages only when it's a new epoch
-            if new_epoch {
-                if let Some(spdd_subscription) = spdd_subscription.as_mut() {
+            if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+                if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
-                    let (_, spdd_message) = spdd_subscription.read_ignoring_rollbacks().await?;
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::SPOStakeDistribution(spdd_message),
-                    )) = spdd_message.as_ref()
-                    {
-                        let span = info_span!("spo_state.handle_spdd", block = block_info.number);
-                        span.in_scope(|| {
-                            ctx.check_sync(block_info);
+                    match ctx.consume_sync("spdd", reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, spdd_message)) => {
                             // update epochs_history
-                            epochs_history.handle_spdd(block_info, spdd_message);
-                        });
+                            epochs_history.handle_spdd(&block_info, &spdd_message);
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
                 // Handle SPO rewards
-                if let Some(spo_rewards_subscription) = spo_rewards_subscription.as_mut() {
-                    let (_, spo_rewards_message) =
-                        spo_rewards_subscription.read_ignoring_rollbacks().await?;
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::SPORewards(spo_rewards_message),
-                    )) = spo_rewards_message.as_ref()
-                    {
-                        let span =
-                            info_span!("spo_state.handle_spo_rewards", block = block_info.number);
-                        span.in_scope(|| {
-                            ctx.check_sync(block_info);
-                            // update epochs_history
-                            ctx.validation.merge(
-                                &mut epochs_history
-                                    .handle_spo_rewards(block_info, spo_rewards_message),
+                if let Some(reader) = spo_rewards_reader.as_mut() {
+                    match ctx.consume_sync("spo rewards", reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, spo_rewards_message)) => {
+                            let span = info_span!(
+                                "spo_state.handle_spo_rewards",
+                                block = block_info.number
                             );
-                        });
+                            span.in_scope(|| {
+                                // update epochs_history
+                                ctx.handle(
+                                    "",
+                                    epochs_history
+                                        .handle_spo_rewards(&block_info, &spo_rewards_message)
+                                        .as_result(),
+                                );
+                            });
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
                 // Handle Stake Reward Deltas
-                if let Some(stake_reward_deltas_subscription) =
-                    stake_reward_deltas_subscription.as_mut()
-                {
-                    let (_, stake_reward_deltas_message) =
-                        stake_reward_deltas_subscription.read_ignoring_rollbacks().await?;
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::StakeRewardDeltas(stake_reward_deltas_message),
-                    )) = stake_reward_deltas_message.as_ref()
-                    {
-                        let span = info_span!(
-                            "spo_state.handle_stake_reward_deltas",
-                            block = block_info.number
-                        );
-                        span.in_scope(|| {
-                            ctx.check_sync(block_info);
-                            // update epochs_history
-                            ctx.merge_handling(
-                                "StakeRewardDeltas",
-                                state.handle_stake_reward_deltas(
-                                    block_info,
-                                    stake_reward_deltas_message,
-                                ),
+                if let Some(reader) = stake_reward_deltas_reader.as_mut() {
+                    match ctx.consume_sync("rewards", reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, stake_reward_deltas_message)) => {
+                            let span = info_span!(
+                                "spo_state.handle_stake_reward_deltas",
+                                block = block_info.number
                             );
-                        });
+                            span.in_scope(|| {
+                                // update epochs_history
+                                ctx.handle(
+                                    "StakeRewardDeltas",
+                                    state.handle_stake_reward_deltas(
+                                        &block_info,
+                                        &stake_reward_deltas_message,
+                                    ),
+                                );
+                            });
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
 
                 // Handle ProtocolParamsMessage
-
-                let (_, message) = parameters_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params_msg))) => {
+                match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, params_msg)) => {
                         let span =
                             info_span!("spo_state.handle_parameters", block = block_info.number);
                         async {
-                            ctx.check_sync(block_info);
-                            state.handle_parameters(params_msg);
+                            state.handle_parameters(&params_msg);
                         }
                         .instrument(span)
                         .await;
                     }
-
-                    _ => error!("Unexpected message type: {message:?}"),
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
                 // Handle EpochActivityMessage
-                if let Some(epoch_activity_subscription) = epoch_activity_subscription.as_mut() {
-                    let (_, ea_message) =
-                        epoch_activity_subscription.read_ignoring_rollbacks().await?;
-                    if let Message::Cardano((
-                        block_info,
-                        CardanoMessage::EpochActivity(epoch_activity_message),
-                    )) = ea_message.as_ref()
-                    {
-                        let span = info_span!(
-                            "spo_state.handle_epoch_activity",
-                            block = block_info.number
-                        );
-                        span.in_scope(|| {
-                            ctx.check_sync(block_info);
-                            // update epochs_history
-                            let spos: Vec<(PoolId, usize)> = epoch_activity_message
-                                .spo_blocks
-                                .iter()
-                                .map(|(hash, count)| (*hash, *count))
-                                .collect();
-                            epochs_history.handle_epoch_activity(
-                                block_info,
-                                epoch_activity_message,
-                                &spos,
+                if let Some(reader) = epoch_activity_reader.as_mut() {
+                    match ctx.consume_sync("epoch activity", reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, epoch_activity_message)) => {
+                            let span = info_span!(
+                                "spo_state.handle_epoch_activity",
+                                block = block_info.number
                             );
-                        });
+                            span.in_scope(|| {
+                                // update epochs_history
+                                let spos: Vec<(PoolId, usize)> = epoch_activity_message
+                                    .spo_blocks
+                                    .iter()
+                                    .map(|(hash, count)| (*hash, *count))
+                                    .collect();
+                                epochs_history.handle_epoch_activity(
+                                    &block_info,
+                                    &epoch_activity_message,
+                                    &spos,
+                                );
+                            });
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
                 }
             }
 
             // Handle withdrawals
-            if let Some(withdrawals_subscription) = withdrawals_subscription.as_mut() {
-                let (_, message) = withdrawals_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((
-                        block_info,
-                        CardanoMessage::Withdrawals(withdrawals_msg),
-                    )) => {
+            if let Some(reader) = withdrawals_reader.as_mut() {
+                match ctx.consume_sync("withdrawals", reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
                         let span =
                             info_span!("spo_state.handle_withdrawals", block = block_info.number);
                         async {
-                            ctx.check_sync(block_info);
-                            state
-                                .handle_withdrawals(withdrawals_msg)
-                                .inspect_err(|e| ctx.handling_error("Withdrawals", e))
-                                .ok();
+                            ctx.handle("withdrawals", state.handle_withdrawals(&withdrawals_msg));
                         }
                         .instrument(span)
                         .await;
                     }
-
-                    _ => ctx.unexpected_message_type("spo state", &message),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Handle stake deltas
-            if let Some(stake_deltas_subscription) = stake_deltas_subscription.as_mut() {
-                let (_, message) = stake_deltas_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((
-                        block_info,
-                        CardanoMessage::StakeAddressDeltas(deltas_msg),
-                    )) => {
+            if let Some(reader) = stake_deltas_reader.as_mut() {
+                match ctx.consume_sync("stake deltas", reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, deltas_msg)) => {
                         let span =
                             info_span!("spo_state.handle_stake_deltas", block = block_info.number);
                         async {
-                            ctx.check_sync(block_info);
-                            state
-                                .handle_stake_deltas(deltas_msg)
-                                .inspect_err(|e| ctx.handling_error("StakeAddressDeltas", e))
-                                .ok();
+                            ctx.handle("stake deltas", state.handle_stake_deltas(&deltas_msg));
                         }
                         .instrument(span)
                         .await;
                     }
-
-                    _ => ctx.unexpected_message_type("stake delta", &message),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Handle governance
-            if let Some(governance_subscription) = governance_subscription.as_mut() {
-                let (_, message) = governance_subscription.read_ignoring_rollbacks().await?;
-                match message.as_ref() {
-                    Message::Cardano((
-                        block_info,
-                        CardanoMessage::GovernanceProcedures(governance_msg),
-                    )) => {
+            if let Some(reader) = gov_reader.as_mut() {
+                match ctx.consume_sync("gov", reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, governance_msg)) => {
                         let span =
                             info_span!("spo_state.handle_governance", block = block_info.number);
                         span.in_scope(|| {
-                            ctx.check_sync(block_info);
-                            state
-                                .handle_governance(&governance_msg.voting_procedures)
-                                .inspect_err(|e| ctx.handling_error("Governance", e))
-                                .ok();
+                            ctx.handle(
+                                "gov",
+                                state.handle_governance(&governance_msg.voting_procedures),
+                            );
                         });
                     }
-
-                    _ => ctx.unexpected_message_type("governance", &message),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Commit the new state, publish validation outcome
-            if let Some(block_info) = &ctx.current_block {
+            if let Some((block_info, _)) = certs_msg {
                 history.lock().await.commit(block_info.number, state);
 
                 if block_info.intent.do_validation() {
@@ -604,55 +520,6 @@ impl SPOState {
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
-        let certificates_subscribe_topic = config
-            .get_string(DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_CERTIFICATES_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{certificates_subscribe_topic}'");
-
-        let withdrawals_subscribe_topic = config
-            .get_string(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_WITHDRAWALS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating withdrawals subscriber on '{withdrawals_subscribe_topic}'");
-
-        let governance_subscribe_topic = config
-            .get_string(DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_GOVERNANCE_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating governance subscriber on '{governance_subscribe_topic}'");
-
-        let stake_deltas_subscribe_topic = config
-            .get_string(DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_STAKE_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating stake deltas subscriber on '{stake_deltas_subscribe_topic}'");
-
-        let epoch_activity_subscribe_topic = config
-            .get_string(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{epoch_activity_subscribe_topic}'");
-
-        let spdd_subscribe_topic = config
-            .get_string(DEFAULT_SPDD_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber on '{spdd_subscribe_topic}'");
-
-        let spo_rewards_subscribe_topic = config
-            .get_string(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SPO_REWARDS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating SPO rewards subscriber on '{spo_rewards_subscribe_topic}'");
-
-        let block_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating block subscriber on '{block_subscribe_topic}'");
-
-        let stake_reward_deltas_subscribe_topic = config
-            .get_string(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_STAKE_REWARD_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating stake reward deltas subscriber on '{stake_reward_deltas_subscribe_topic}'");
-
-        let parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating protocol parameters subscriber on '{parameters_subscribe_topic}'");
 
         let clock_tick_subscribe_topic = config
             .get_string(DEFAULT_CLOCK_TICK_SUBSCRIBE_TOPIC.0)
@@ -945,55 +812,54 @@ impl SPOState {
 
         // Subscriptions
         // Mandatory
-        let certificates_subscription = context.subscribe(&certificates_subscribe_topic).await?;
-        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
+        let certs_reader = CertsReader::new(&context, &config).await?;
+        let block_reader = BlockReader::new(&context, &config).await?;
         let clock_tick_subscription = context.subscribe(&clock_tick_subscribe_topic).await?;
 
         // Optional depending on store features
         // only when stake_addresses are enabled
-        let withdrawals_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&withdrawals_subscribe_topic).await?)
+        let withdrawals_reader = if store_config.store_stake_addresses {
+            Some(WithdrawalsReader::new(&context, &config).await?)
         } else {
             None
         };
 
         // when historical spo's votes are enabled
-        let governance_subscription = if store_config.store_votes {
-            Some(context.subscribe(&governance_subscribe_topic).await?)
+        let gov_reader = if store_config.store_votes {
+            Some(GovReader::new(&context, &config).await?)
         } else {
             None
         };
 
         // when epochs_history is enabled
-        let spo_rewards_subscription = if store_config.store_epochs_history {
-            Some(context.subscribe(&spo_rewards_subscribe_topic).await?)
+        let spo_rewards_reader = if store_config.store_epochs_history {
+            Some(SPORewardsReader::new(&context, &config).await?)
         } else {
             None
         };
-        let epoch_activity_subscription = if store_config.store_epochs_history {
-            Some(context.subscribe(&epoch_activity_subscribe_topic).await?)
+        let epoch_activity_reader = if store_config.store_epochs_history {
+            Some(EpochActivityReader::new(&context, &config).await?)
         } else {
             None
         };
-        let spdd_subscription = if store_config.store_epochs_history {
-            Some(context.subscribe(&spdd_subscribe_topic).await?)
+        let spdd_reader = if store_config.store_epochs_history {
+            Some(SPDDReader::new(&context, &config).await?)
         } else {
             None
         };
 
         // when stake_addresses are enabled
-        let stake_deltas_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&stake_deltas_subscribe_topic).await?)
+        let stake_deltas_reader = if store_config.store_stake_addresses {
+            Some(StakeDeltasReader::new(&context, &config).await?)
         } else {
             None
         };
-        let stake_reward_deltas_subscription = if store_config.store_stake_addresses {
-            Some(context.subscribe(&stake_reward_deltas_subscribe_topic).await?)
+        let stake_reward_deltas_reader = if store_config.store_stake_addresses {
+            Some(RewardsReader::new(&context, &config).await?)
         } else {
             None
         };
-
-        let parameters_subscription = context.subscribe(&parameters_subscribe_topic).await?;
 
         // Publishers
         let spo_state_publisher = SPOStatePublisher::new(context.clone(), spo_state_publish_topic);
@@ -1011,16 +877,16 @@ impl SPOState {
                 context_copy,
                 &store_config,
                 snapshot_subscription,
-                certificates_subscription,
-                block_subscription,
-                withdrawals_subscription,
-                governance_subscription,
-                epoch_activity_subscription,
-                spdd_subscription,
-                stake_deltas_subscription,
-                spo_rewards_subscription,
-                stake_reward_deltas_subscription,
-                parameters_subscription,
+                certs_reader,
+                block_reader,
+                params_reader,
+                withdrawals_reader,
+                gov_reader,
+                epoch_activity_reader,
+                spdd_reader,
+                stake_deltas_reader,
+                spo_rewards_reader,
+                stake_reward_deltas_reader,
                 spo_state_publisher,
                 pool_registration_updates_publisher,
                 validation_publish_topic,
