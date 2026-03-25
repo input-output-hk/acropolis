@@ -5,7 +5,7 @@ use anyhow::Result;
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use minicbor::{decode, to_vec};
 use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tracing::{error, warn};
 
 pub struct ImmutableHistoricalEpochsState {
     epochs_history: Keyspace,
@@ -77,7 +77,6 @@ impl ImmutableHistoricalEpochsState {
             return Err(e.into());
         }
 
-        info!("persisted {persisted_epochs} epochs for epoch {saving_epoch}");
         Ok(persisted_epochs)
     }
 
