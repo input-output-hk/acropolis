@@ -114,7 +114,7 @@ impl super::Store for FjallStore {
 
         batch.commit()?;
 
-        self.last_persisted_block.store(info.number, std::sync::atomic::Ordering::Relaxed);
+        self.last_persisted_block.store(info.number - 1, std::sync::atomic::Ordering::Relaxed);
 
         Ok(())
     }
@@ -239,7 +239,8 @@ impl FjallBlockStore {
         for block in self.block_hashes_by_number.range(number_start..) {
             let (key, value) = block.into_inner()?;
             if let Some(block) = self.blocks.get(&value)? {
-                tx_hashes.extend(extract_tx_hashes(&block)?);
+                let decoded: Block = minicbor::decode(&block)?;
+                tx_hashes.extend(extract_tx_hashes(&decoded.bytes)?);
             }
             batch.remove(&self.block_hashes_by_number, key);
             batch.remove(&self.blocks, value);
