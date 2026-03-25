@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use uplc_turbo::{arena::Arena, data::PlutusData};
 
 use crate::{
     grpc::midnight_state_proto::{
@@ -12,16 +11,12 @@ use crate::{
     indexes::bridge_state::BridgeCheckpoint,
     types::{
         AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal,
-        BridgeAssetUtxo as BridgeAssetUtxoInternal, Deregistration as DeregistrationInternal,
+        BridgeTransferKind as BridgeTransferKindInternal, Deregistration as DeregistrationInternal,
+        IndexedBridgeTransfer as IndexedBridgeTransferInternal,
         Registration as RegistrationInternal, RegistrationEvent,
     },
 };
 use acropolis_common::{TxHash, UTxOIdentifier};
-
-enum BridgeTransferKind {
-    UserTransfer { recipient: Vec<u8> },
-    ReserveTransfer,
-}
 
 pub fn bridge_checkpoint_from_proto(
     checkpoint: Option<bridge_transfers_request::Checkpoint>,
@@ -54,75 +49,33 @@ pub fn bridge_checkpoint_to_proto(checkpoint: BridgeCheckpoint) -> BridgeCheckpo
     BridgeCheckpointProto { kind: Some(kind) }
 }
 
-pub fn bridge_transfer_from_utxo(utxo: BridgeAssetUtxoInternal) -> Option<BridgeTransferProto> {
-    let token_amount = utxo.tokens_out.checked_sub(utxo.tokens_in)?;
-    if token_amount == 0 {
-        return None;
-    }
-
+pub fn bridge_transfer_to_proto(transfer: IndexedBridgeTransferInternal) -> BridgeTransferProto {
     let utxo_id = UtxoId {
-        tx_hash: utxo.tx_hash.to_vec(),
-        index: utxo.output_index.into(),
+        tx_hash: transfer.utxo.tx_hash.to_vec(),
+        index: transfer.utxo.output_index.into(),
     };
 
-    let kind = match utxo.datum {
-        None => bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
-            token_amount,
-            utxo: Some(utxo_id),
-        }),
-        Some(datum_bytes) => match decode_bridge_transfer_datum(datum_bytes) {
-            Some(BridgeTransferKind::UserTransfer { recipient }) => {
-                bridge_transfer::Kind::User(UserBridgeTransfer {
-                    token_amount,
-                    recipient,
-                    utxo: Some(utxo_id),
-                })
-            }
-            Some(BridgeTransferKind::ReserveTransfer) => {
-                bridge_transfer::Kind::Reserve(ReserveBridgeTransfer { token_amount })
-            }
-            None => bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+    let kind = match transfer.kind {
+        BridgeTransferKindInternal::Invalid { token_amount } => {
+            bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
                 token_amount,
                 utxo: Some(utxo_id),
-            }),
-        },
-    };
-
-    Some(BridgeTransferProto { kind: Some(kind) })
-}
-
-fn decode_bridge_transfer_datum(datum_bytes: Vec<u8>) -> Option<BridgeTransferKind> {
-    let arena = Arena::new();
-    let datum = PlutusData::from_cbor(&arena, &datum_bytes).ok()?;
-    let fields = match datum {
-        PlutusData::List(fields) if fields.len() == 3 => fields,
-        _ => return None,
-    };
-    let appendix = fields[1];
-    let version = match fields[2] {
-        PlutusData::Integer(version) => *version,
-        _ => return None,
-    };
-
-    if version != &1.into() {
-        return None;
-    }
-
-    let (alternative, data) = match appendix {
-        PlutusData::Constr { tag, fields } => (*tag, *fields),
-        _ => return None,
-    };
-
-    match alternative {
-        0 if data.len() == 1 => Some(BridgeTransferKind::UserTransfer {
-            recipient: match data[0] {
-                PlutusData::ByteString(bytes) => bytes.to_vec(),
-                _ => return None,
-            },
+            })
+        }
+        BridgeTransferKindInternal::User {
+            token_amount,
+            recipient,
+        } => bridge_transfer::Kind::User(UserBridgeTransfer {
+            token_amount,
+            recipient,
+            utxo: Some(utxo_id),
         }),
-        1 if data.is_empty() => Some(BridgeTransferKind::ReserveTransfer),
-        _ => None,
-    }
+        BridgeTransferKindInternal::Reserve { token_amount } => {
+            bridge_transfer::Kind::Reserve(ReserveBridgeTransfer { token_amount })
+        }
+    };
+
+    BridgeTransferProto { kind: Some(kind) }
 }
 
 impl From<AssetCreateInternal> for AssetCreateProto {

@@ -54,15 +54,6 @@ pub struct Deregistration {
     pub utxo_index: u16,
 }
 
-#[derive(Debug)]
-pub struct BridgeAssetUtxo {
-    pub tx_hash: TxHash,
-    pub output_index: u16,
-    pub tokens_out: u64,
-    pub tokens_in: u64,
-    pub datum: Option<Vec<u8>>,
-}
-
 /// ---------------------------------------------------------------------------
 /// Internal State Types
 /// ---------------------------------------------------------------------------
@@ -74,21 +65,6 @@ pub struct BridgeAssetUtxo {
 pub struct UTxOMeta {
     pub creation: CNightCreation,
     pub spend: Option<CNightSpend>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BridgeUtxoMeta {
-    pub creation: BridgeCreation,
-}
-
-impl BridgeUtxoMeta {
-    pub fn ordering_key(&self) -> (BlockNumber, u32, u16) {
-        (
-            self.creation.block_number,
-            self.creation.tx_index,
-            self.creation.utxo.output_index,
-        )
-    }
 }
 
 impl TryFrom<&UTxOMeta> for AssetCreate {
@@ -130,20 +106,6 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
     }
 }
 
-impl From<&BridgeUtxoMeta> for BridgeAssetUtxo {
-    fn from(meta: &BridgeUtxoMeta) -> Self {
-        let creation = &meta.creation;
-
-        BridgeAssetUtxo {
-            tx_hash: creation.utxo.tx_hash,
-            output_index: creation.utxo.output_index,
-            tokens_out: creation.tokens_out,
-            tokens_in: creation.tokens_in,
-            datum: creation.datum.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
     pub holder_address: StakeAddress,
@@ -165,13 +127,31 @@ pub struct CNightSpend {
 }
 
 #[derive(Debug, Clone)]
-pub struct BridgeCreation {
+pub struct IndexedBridgeTransfer {
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,
     pub tx_index: u32,
-    pub tokens_out: u64,
-    pub tokens_in: u64,
-    pub datum: Option<Vec<u8>>,
+    pub kind: BridgeTransferKind,
+}
+
+impl IndexedBridgeTransfer {
+    pub fn ordering_key(&self) -> (BlockNumber, u32, u16) {
+        (self.block_number, self.tx_index, self.utxo.output_index)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeTransferKind {
+    Invalid {
+        token_amount: u64,
+    },
+    User {
+        token_amount: u64,
+        recipient: Vec<u8>,
+    },
+    Reserve {
+        token_amount: u64,
+    },
 }
 
 #[derive(Clone)]

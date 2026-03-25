@@ -1,6 +1,7 @@
 use std::collections::{HashMap as StdHashMap, HashSet};
 
 use anyhow::{anyhow, Result};
+use uplc_turbo::{arena::Arena, data::PlutusData};
 
 use acropolis_common::{
     messages::AddressDeltasMessage,
@@ -19,7 +20,10 @@ use crate::{
         committee_candidate_state::CommitteeCandidateState, governance_state::GovernanceState,
         mapping_registration_state::MappingRegistrationState, parameters_state::ParametersState,
     },
-    types::{BridgeCreation, CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
+    types::{
+        BridgeTransferKind, CNightCreation, CNightSpend, DeregistrationEvent,
+        IndexedBridgeTransfer, RegistrationEvent,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +139,7 @@ impl State {
         let mut block_created_utxos = HashSet::new();
         let mut cnight_spends = Vec::new();
 
-        let mut bridge_creations = Vec::new();
+        let mut bridge_transfers = Vec::new();
         let mut block_created_bridge_utxos = StdHashMap::new();
         let mut mapping_registrations = Vec::new();
         let mut block_created_mapping_registrations = HashSet::new();
@@ -165,7 +169,7 @@ impl State {
             self.collect_bridge_creations(
                 delta,
                 block_info,
-                &mut bridge_creations,
+                &mut bridge_transfers,
                 &mut block_created_bridge_utxos,
             )?;
 
@@ -215,9 +219,13 @@ impl State {
             self.utxos.add_spent_utxos(block_info.number, cnight_spends)?;
         }
 
-        self.epoch_totals.add_indexed_bridge_utxos(bridge_creations.len());
-        if !bridge_creations.is_empty() {
-            self.bridge.add_created_utxos(block_info.number, bridge_creations);
+        self.epoch_totals.add_indexed_bridge_utxos(block_created_bridge_utxos.len());
+        if !bridge_transfers.is_empty() || !block_created_bridge_utxos.is_empty() {
+            self.bridge.add_created_outputs(
+                block_info.number,
+                bridge_transfers,
+                block_created_bridge_utxos.into_iter().collect(),
+            );
         }
 
         // Add registered and deregistered candidates to state
@@ -347,7 +355,7 @@ impl State {
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
-        bridge_creations: &mut Vec<BridgeCreation>,
+        bridge_transfers: &mut Vec<IndexedBridgeTransfer>,
         block_created_bridge_utxos: &mut StdHashMap<UTxOIdentifier, u64>,
     ) -> Result<()> {
         if delta.address != self.config.illiquid_circulation_supply_validator_address {
@@ -361,9 +369,7 @@ impl State {
                 block_created_bridge_utxos
                     .get(&spent.utxo)
                     .copied()
-                    .or_else(|| {
-                        self.bridge.utxo_index.get(&spent.utxo).map(|meta| meta.creation.tokens_out)
-                    })
+                    .or_else(|| self.bridge.token_amount_for_utxo(&spent.utxo))
                     .unwrap_or(0)
             })
             .sum();
@@ -381,19 +387,41 @@ impl State {
                 continue;
             }
 
-            let datum = created.datum.as_ref().and_then(|datum| datum.to_bytes());
-            bridge_creations.push(BridgeCreation {
+            block_created_bridge_utxos.insert(created.utxo, tokens_out);
+
+            let Some(token_amount) = tokens_out.checked_sub(tokens_in) else {
+                continue;
+            };
+            if token_amount == 0 {
+                continue;
+            }
+
+            bridge_transfers.push(IndexedBridgeTransfer {
                 utxo: created.utxo,
                 block_number: block_info.number,
                 tx_index: delta.tx_identifier.tx_index().into(),
-                tokens_out,
-                tokens_in,
-                datum,
+                kind: Self::classify_bridge_transfer(created.datum.as_ref(), token_amount),
             });
-            block_created_bridge_utxos.insert(created.utxo, tokens_out);
         }
 
         Ok(())
+    }
+
+    fn classify_bridge_transfer(datum: Option<&Datum>, token_amount: u64) -> BridgeTransferKind {
+        let Some(datum_bytes) = datum.and_then(Datum::to_bytes) else {
+            return BridgeTransferKind::Invalid { token_amount };
+        };
+
+        match decode_bridge_transfer_datum(&datum_bytes) {
+            Some(DecodedBridgeTransferKind::User { recipient }) => BridgeTransferKind::User {
+                token_amount,
+                recipient,
+            },
+            Some(DecodedBridgeTransferKind::Reserve) => {
+                BridgeTransferKind::Reserve { token_amount }
+            }
+            None => BridgeTransferKind::Invalid { token_amount },
+        }
     }
 
     fn collect_mapping_registrations(
@@ -590,6 +618,45 @@ impl State {
     }
 }
 
+enum DecodedBridgeTransferKind {
+    User { recipient: Vec<u8> },
+    Reserve,
+}
+
+fn decode_bridge_transfer_datum(datum_bytes: &[u8]) -> Option<DecodedBridgeTransferKind> {
+    let arena = Arena::new();
+    let datum = PlutusData::from_cbor(&arena, datum_bytes).ok()?;
+    let fields = match datum {
+        PlutusData::List(fields) if fields.len() == 3 => fields,
+        _ => return None,
+    };
+    let appendix = fields[1];
+    let version = match fields[2] {
+        PlutusData::Integer(version) => version,
+        _ => return None,
+    };
+
+    if *version != &uplc_turbo::constant::Integer::from(1u8) {
+        return None;
+    }
+
+    let (alternative, data) = match appendix {
+        PlutusData::Constr { tag, fields } => (*tag, *fields),
+        _ => return None,
+    };
+
+    match alternative {
+        0 if data.len() == 1 => Some(DecodedBridgeTransferKind::User {
+            recipient: match data[0] {
+                PlutusData::ByteString(bytes) => bytes.to_vec(),
+                _ => return None,
+            },
+        }),
+        1 if data.is_empty() => Some(DecodedBridgeTransferKind::Reserve),
+        _ => None,
+    }
+}
+
 fn rounded_div_u128_to_u64(numerator: u128, denominator: u128) -> Result<u64> {
     if denominator == 0 {
         return Err(anyhow!("stability window denominator must be non-zero"));
@@ -616,11 +683,13 @@ mod tests {
         Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
         TxIdentifier, UTxOIdentifier, ValueMap,
     };
+    use minicbor::{data::Tag, Encoder};
 
     use crate::{
         configuration::MidnightConfig,
         indexes::bridge_state::BridgeCheckpoint,
         state::{StableBlockWindowBounds, State},
+        types::BridgeTransferKind,
     };
 
     fn test_block_info() -> BlockInfo {
@@ -774,6 +843,31 @@ mod tests {
         spent_utxos: Vec<(UTxOIdentifier, TxHash)>,
     ) -> ExtendedAddressDelta {
         test_candidate_delta(address, tx_index, created, spent_utxos)
+    }
+
+    fn user_bridge_transfer_datum(recipient: &[u8]) -> Datum {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(1).expect("single field");
+        encoder.bytes(recipient).expect("recipient bytes");
+        encoder.u8(1).expect("version");
+        Datum::Inline(bytes)
+    }
+
+    fn reserve_bridge_transfer_datum() -> Datum {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(122)).expect("constr 1");
+        encoder.array(0).expect("empty fields");
+        encoder.u8(1).expect("version");
+        Datum::Inline(bytes)
     }
 
     fn test_address(value: &str) -> Address {
@@ -1589,12 +1683,223 @@ mod tests {
 
         let indexed = state
             .bridge
-            .get_bridge_utxos(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
             .unwrap();
 
         assert_eq!(indexed.len(), 1);
-        assert_eq!(indexed[0].tx_hash, bridge_utxo.tx_hash);
-        assert_eq!(indexed[0].tokens_out, 42);
+        assert_eq!(indexed[0].utxo.tx_hash, bridge_utxo.tx_hash);
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 42 }
+        );
+    }
+
+    #[test]
+    fn should_classify_inline_user_bridge_datum_at_ingest_time() {
+        let block_info = test_block_info();
+        let bridge_policy = PolicyId::new([0x35; 28]);
+        let bridge_asset = AssetName::new(b"").unwrap();
+        let bridge_address =
+            test_address("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk");
+        let mut state = State::new(test_config_bridge(
+            bridge_address.clone(),
+            bridge_policy,
+            bridge_asset,
+        ));
+
+        let bridge_utxo = UTxOIdentifier::new(TxHash::new([3u8; 32]), 0);
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![(
+                        bridge_utxo,
+                        test_value_with_token(bridge_policy, bridge_asset, 42),
+                        Some(user_bridge_transfer_datum(&[0xAB; 32])),
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .unwrap();
+
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::User {
+                token_amount: 42,
+                recipient: vec![0xAB; 32],
+            }
+        );
+    }
+
+    #[test]
+    fn should_classify_inline_reserve_bridge_datum_at_ingest_time() {
+        let block_info = test_block_info();
+        let bridge_policy = PolicyId::new([0x36; 28]);
+        let bridge_asset = AssetName::new(b"").unwrap();
+        let bridge_address =
+            test_address("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk");
+        let mut state = State::new(test_config_bridge(
+            bridge_address.clone(),
+            bridge_policy,
+            bridge_asset,
+        ));
+
+        let bridge_utxo = UTxOIdentifier::new(TxHash::new([4u8; 32]), 0);
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![(
+                        bridge_utxo,
+                        test_value_with_token(bridge_policy, bridge_asset, 17),
+                        Some(reserve_bridge_transfer_datum()),
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .unwrap();
+
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Reserve { token_amount: 17 }
+        );
+    }
+
+    #[test]
+    fn should_classify_missing_bridge_datum_as_invalid_at_ingest_time() {
+        let block_info = test_block_info();
+        let bridge_policy = PolicyId::new([0x37; 28]);
+        let bridge_asset = AssetName::new(b"").unwrap();
+        let bridge_address =
+            test_address("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk");
+        let mut state = State::new(test_config_bridge(
+            bridge_address.clone(),
+            bridge_policy,
+            bridge_asset,
+        ));
+
+        let bridge_utxo = UTxOIdentifier::new(TxHash::new([5u8; 32]), 0);
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![(
+                        bridge_utxo,
+                        test_value_with_token(bridge_policy, bridge_asset, 12),
+                        None,
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .unwrap();
+
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 12 }
+        );
+    }
+
+    #[test]
+    fn should_classify_malformed_bridge_datum_as_invalid_at_ingest_time() {
+        let block_info = test_block_info();
+        let bridge_policy = PolicyId::new([0x38; 28]);
+        let bridge_asset = AssetName::new(b"").unwrap();
+        let bridge_address =
+            test_address("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk");
+        let mut state = State::new(test_config_bridge(
+            bridge_address.clone(),
+            bridge_policy,
+            bridge_asset,
+        ));
+
+        let bridge_utxo = UTxOIdentifier::new(TxHash::new([6u8; 32]), 0);
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![(
+                        bridge_utxo,
+                        test_value_with_token(bridge_policy, bridge_asset, 13),
+                        Some(Datum::Inline(vec![0xDE, 0xAD])),
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .unwrap();
+
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 13 }
+        );
+    }
+
+    #[test]
+    fn should_classify_hash_bridge_datum_as_invalid_at_ingest_time() {
+        let block_info = test_block_info();
+        let bridge_policy = PolicyId::new([0x39; 28]);
+        let bridge_asset = AssetName::new(b"").unwrap();
+        let bridge_address =
+            test_address("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk");
+        let mut state = State::new(test_config_bridge(
+            bridge_address.clone(),
+            bridge_policy,
+            bridge_asset,
+        ));
+
+        let bridge_utxo = UTxOIdentifier::new(TxHash::new([7u8; 32]), 0);
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![(
+                        bridge_utxo,
+                        test_value_with_token(bridge_policy, bridge_asset, 14),
+                        Some(Datum::Hash([0xAA; 32].into())),
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .unwrap();
+
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 14 }
+        );
     }
 
     #[test]
@@ -1630,11 +1935,13 @@ mod tests {
 
         let indexed = state
             .bridge
-            .get_bridge_utxos(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
             .unwrap();
 
-        assert_eq!(indexed[0].tokens_in, 0);
-        assert_eq!(indexed[0].tokens_out, 11);
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 11 }
+        );
     }
 
     #[test]
@@ -1699,12 +2006,16 @@ mod tests {
             )
             .unwrap();
 
-        let indexed =
-            state.bridge.get_bridge_utxos(BridgeCheckpoint::Block(1), block2.number, 10).unwrap();
+        let indexed = state
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(1), block2.number, 10)
+            .unwrap();
 
         assert_eq!(indexed.len(), 1);
-        assert_eq!(indexed[0].tokens_in, 15);
-        assert_eq!(indexed[0].tokens_out, 20);
+        assert_eq!(
+            indexed[0].kind,
+            BridgeTransferKind::Invalid { token_amount: 5 }
+        );
     }
 
     #[test]
@@ -1753,12 +2064,14 @@ mod tests {
 
         let indexed = state
             .bridge
-            .get_bridge_utxos(BridgeCheckpoint::Block(0), block_info.number, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block_info.number, 10)
             .unwrap();
 
         assert_eq!(indexed.len(), 2);
-        assert_eq!(indexed[1].tokens_in, 13);
-        assert_eq!(indexed[1].tokens_out, 17);
+        assert_eq!(
+            indexed[1].kind,
+            BridgeTransferKind::Invalid { token_amount: 4 }
+        );
     }
 
     #[test]
@@ -1816,18 +2129,20 @@ mod tests {
         history.commit(block2.number, state);
 
         let current = history.current().unwrap();
-        let current_bridge =
-            current.bridge.get_bridge_utxos(BridgeCheckpoint::Block(0), block2.number, 10).unwrap();
+        let current_bridge = current
+            .bridge
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block2.number, 10)
+            .unwrap();
         assert_eq!(current_bridge.len(), 2);
-        assert_eq!(current_bridge[1].tx_hash, utxo_b.tx_hash);
+        assert_eq!(current_bridge[1].utxo.tx_hash, utxo_b.tx_hash);
 
         let mut rolled_back_state = history.get_rolled_back_state(block2.number);
         let rolled_back_bridge = rolled_back_state
             .bridge
-            .get_bridge_utxos(BridgeCheckpoint::Block(0), block2.number, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block2.number, 10)
             .unwrap();
         assert_eq!(rolled_back_bridge.len(), 1);
-        assert_eq!(rolled_back_bridge[0].tx_hash, utxo_a.tx_hash);
+        assert_eq!(rolled_back_bridge[0].utxo.tx_hash, utxo_a.tx_hash);
 
         rolled_back_state
             .handle_address_deltas(
@@ -1850,11 +2165,14 @@ mod tests {
             .current()
             .unwrap()
             .bridge
-            .get_bridge_utxos(BridgeCheckpoint::Block(0), block2.number, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Block(0), block2.number, 10)
             .unwrap();
         assert_eq!(replayed_bridge.len(), 2);
-        assert_eq!(replayed_bridge[1].tx_hash, utxo_c.tx_hash);
-        assert_eq!(replayed_bridge[1].tokens_in, 3);
+        assert_eq!(replayed_bridge[1].utxo.tx_hash, utxo_c.tx_hash);
+        assert_eq!(
+            replayed_bridge[1].kind,
+            BridgeTransferKind::Invalid { token_amount: 4 }
+        );
     }
 
     #[test]

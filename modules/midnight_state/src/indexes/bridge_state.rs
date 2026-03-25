@@ -3,7 +3,7 @@ use std::{error::Error, fmt};
 use acropolis_common::{BlockNumber, UTxOIdentifier};
 use imbl::{HashMap, OrdMap};
 
-use crate::types::{BridgeAssetUtxo, BridgeCreation, BridgeUtxoMeta};
+use crate::types::IndexedBridgeTransfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeCheckpoint {
@@ -32,57 +32,66 @@ impl Error for BridgeStateError {}
 
 #[derive(Clone, Default)]
 pub struct BridgeState {
-    // Bridge UTxOs indexed by the block in which they were created.
-    created_utxos: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
-    // An index mapping UTxO identifiers to their corresponding bridge metadata.
-    pub utxo_index: HashMap<UTxOIdentifier, BridgeUtxoMeta>,
+    // Bridge transfers indexed by the block in which they were created.
+    created_transfers: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,
+    // An index mapping transfer UTxO identifiers to their corresponding transfer metadata.
+    transfer_index: HashMap<UTxOIdentifier, IndexedBridgeTransfer>,
+    // A lightweight index of all ICS token-bearing outputs used to compute future tokens_in values.
+    token_index: HashMap<UTxOIdentifier, u64>,
 }
 
 impl BridgeState {
-    pub fn add_created_utxos(
+    pub fn add_created_outputs(
         &mut self,
         block: BlockNumber,
-        mut utxos: Vec<BridgeCreation>,
+        mut transfers: Vec<IndexedBridgeTransfer>,
+        token_outputs: Vec<(UTxOIdentifier, u64)>,
     ) -> usize {
-        utxos.sort_by_key(|creation| (creation.tx_index, creation.utxo.output_index));
+        transfers.sort_by_key(|transfer| (transfer.tx_index, transfer.utxo.output_index));
 
-        let mut identifiers = Vec::with_capacity(utxos.len());
+        let mut identifiers = Vec::with_capacity(transfers.len());
 
-        for creation in utxos {
-            identifiers.push(creation.utxo);
-            self.utxo_index.insert(creation.utxo, BridgeUtxoMeta { creation });
+        for transfer in transfers {
+            identifiers.push(transfer.utxo);
+            self.transfer_index.insert(transfer.utxo, transfer);
+        }
+
+        for (utxo, token_amount) in token_outputs {
+            self.token_index.insert(utxo, token_amount);
         }
 
         let inserted = identifiers.len();
-        self.created_utxos.insert(block, identifiers);
+        if !identifiers.is_empty() {
+            self.created_transfers.insert(block, identifiers);
+        }
         inserted
     }
 
-    pub fn get_bridge_utxos(
+    pub fn get_bridge_transfers(
         &self,
         checkpoint: BridgeCheckpoint,
         to_block: BlockNumber,
-        utxo_capacity: usize,
-    ) -> Result<Vec<BridgeAssetUtxo>, BridgeStateError> {
+        transfer_capacity: usize,
+    ) -> Result<Vec<IndexedBridgeTransfer>, BridgeStateError> {
         let checkpoint = self.resolve_checkpoint(checkpoint)?;
         let start_block = checkpoint.start_block();
-        let mut result = Vec::with_capacity(utxo_capacity);
+        let mut result = Vec::with_capacity(transfer_capacity);
 
-        for (block_number, utxos) in self.created_utxos.range(start_block..) {
-            if *block_number > to_block || result.len() >= utxo_capacity {
+        for (block_number, transfers) in self.created_transfers.range(start_block..) {
+            if *block_number > to_block || result.len() >= transfer_capacity {
                 break;
             }
 
-            for utxo_id in utxos {
-                let Some(meta) = self.utxo_index.get(utxo_id) else {
+            for utxo_id in transfers {
+                let Some(transfer) = self.transfer_index.get(utxo_id) else {
                     continue;
                 };
 
-                if checkpoint.includes(meta.ordering_key()) {
-                    result.push(BridgeAssetUtxo::from(meta));
+                if checkpoint.includes(transfer.ordering_key()) {
+                    result.push(transfer.clone());
                 }
 
-                if result.len() >= utxo_capacity {
+                if result.len() >= transfer_capacity {
                     break;
                 }
             }
@@ -92,18 +101,23 @@ impl BridgeState {
     }
 
     pub fn next_checkpoint(
-        utxos: &[BridgeAssetUtxo],
+        transfers: &[IndexedBridgeTransfer],
         to_block: BlockNumber,
-        utxo_capacity: usize,
+        transfer_capacity: usize,
     ) -> BridgeCheckpoint {
-        if utxos.len() < utxo_capacity {
+        if transfers.len() < transfer_capacity {
             return BridgeCheckpoint::Block(to_block);
         }
 
-        let last =
-            utxos.last().expect("non-empty bridge utxo list required when capacity is reached");
+        let last = transfers
+            .last()
+            .expect("non-empty bridge transfer list required when capacity is reached");
 
-        BridgeCheckpoint::Utxo(UTxOIdentifier::new(last.tx_hash, last.output_index))
+        BridgeCheckpoint::Utxo(last.utxo)
+    }
+
+    pub fn token_amount_for_utxo(&self, utxo: &UTxOIdentifier) -> Option<u64> {
+        self.token_index.get(utxo).copied()
     }
 
     fn resolve_checkpoint(
@@ -113,9 +127,9 @@ impl BridgeState {
         match checkpoint {
             BridgeCheckpoint::Block(block) => Ok(ResolvedBridgeCheckpoint::Block(block)),
             BridgeCheckpoint::Utxo(utxo) => self
-                .utxo_index
+                .transfer_index
                 .get(&utxo)
-                .map(|meta| ResolvedBridgeCheckpoint::Utxo(meta.ordering_key()))
+                .map(|transfer| ResolvedBridgeCheckpoint::Utxo(transfer.ordering_key()))
                 .ok_or(BridgeStateError::UnknownCheckpointUtxo(utxo)),
         }
     }
@@ -148,46 +162,48 @@ mod tests {
     use acropolis_common::TxHash;
 
     use super::*;
+    use crate::types::BridgeTransferKind;
 
     fn id(tx_byte: u8, output_index: u16) -> UTxOIdentifier {
         UTxOIdentifier::new(TxHash::from([tx_byte; 32]), output_index)
     }
 
-    fn creation(
+    fn transfer(
         block_number: BlockNumber,
         tx_index: u32,
         utxo: UTxOIdentifier,
-        tokens_out: u64,
-    ) -> BridgeCreation {
-        BridgeCreation {
+        token_amount: u64,
+    ) -> IndexedBridgeTransfer {
+        IndexedBridgeTransfer {
             utxo,
             block_number,
             tx_index,
-            tokens_out,
-            tokens_in: 0,
-            datum: Some(vec![0xAA]),
+            kind: BridgeTransferKind::Reserve { token_amount },
         }
     }
 
     #[test]
-    fn bridge_utxos_are_ordered_by_block_tx_and_output() {
+    fn bridge_transfers_are_ordered_by_block_tx_and_output() {
         let mut state = BridgeState::default();
 
-        state.add_created_utxos(
+        state.add_created_outputs(
             10,
             vec![
-                creation(10, 2, id(3, 0), 3),
-                creation(10, 1, id(2, 1), 2),
-                creation(10, 1, id(1, 0), 1),
+                transfer(10, 2, id(3, 0), 3),
+                transfer(10, 1, id(2, 1), 2),
+                transfer(10, 1, id(1, 0), 1),
             ],
+            vec![],
         );
 
         let result = state
-            .get_bridge_utxos(BridgeCheckpoint::Block(9), 10, 10)
-            .expect("bridge utxos should be returned");
+            .get_bridge_transfers(BridgeCheckpoint::Block(9), 10, 10)
+            .expect("bridge transfers should be returned");
 
-        let ordered: Vec<(TxHash, u16)> =
-            result.iter().map(|utxo| (utxo.tx_hash, utxo.output_index)).collect();
+        let ordered: Vec<(TxHash, u16)> = result
+            .iter()
+            .map(|transfer| (transfer.utxo.tx_hash, transfer.utxo.output_index))
+            .collect();
 
         assert_eq!(
             ordered,
@@ -203,15 +219,15 @@ mod tests {
     fn block_checkpoint_resumes_from_next_block() {
         let mut state = BridgeState::default();
 
-        state.add_created_utxos(10, vec![creation(10, 0, id(1, 0), 1)]);
-        state.add_created_utxos(11, vec![creation(11, 0, id(2, 0), 2)]);
+        state.add_created_outputs(10, vec![transfer(10, 0, id(1, 0), 1)], vec![]);
+        state.add_created_outputs(11, vec![transfer(11, 0, id(2, 0), 2)], vec![]);
 
         let result = state
-            .get_bridge_utxos(BridgeCheckpoint::Block(10), 11, 10)
-            .expect("bridge utxos should be returned");
+            .get_bridge_transfers(BridgeCheckpoint::Block(10), 11, 10)
+            .expect("bridge transfers should be returned");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].tx_hash, id(2, 0).tx_hash);
+        assert_eq!(result[0].utxo.tx_hash, id(2, 0).tx_hash);
     }
 
     #[test]
@@ -221,29 +237,30 @@ mod tests {
         let second = id(2, 0);
         let third = id(3, 1);
 
-        state.add_created_utxos(
+        state.add_created_outputs(
             10,
             vec![
-                creation(10, 0, first, 1),
-                creation(10, 1, second, 2),
-                creation(10, 1, third, 3),
+                transfer(10, 0, first, 1),
+                transfer(10, 1, second, 2),
+                transfer(10, 1, third, 3),
             ],
+            vec![],
         );
 
         let result = state
-            .get_bridge_utxos(BridgeCheckpoint::Utxo(second), 10, 10)
-            .expect("bridge utxos should be returned");
+            .get_bridge_transfers(BridgeCheckpoint::Utxo(second), 10, 10)
+            .expect("bridge transfers should be returned");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].tx_hash, third.tx_hash);
-        assert_eq!(result[0].output_index, third.output_index);
+        assert_eq!(result[0].utxo.tx_hash, third.tx_hash);
+        assert_eq!(result[0].utxo.output_index, third.output_index);
     }
 
     #[test]
     fn unknown_utxo_checkpoint_is_rejected() {
         let state = BridgeState::default();
         let err = state
-            .get_bridge_utxos(BridgeCheckpoint::Utxo(id(9, 0)), 10, 10)
+            .get_bridge_transfers(BridgeCheckpoint::Utxo(id(9, 0)), 10, 10)
             .expect_err("unknown checkpoint should fail");
 
         assert_eq!(err, BridgeStateError::UnknownCheckpointUtxo(id(9, 0)));
@@ -251,41 +268,20 @@ mod tests {
 
     #[test]
     fn next_checkpoint_is_block_when_under_capacity() {
-        let utxos = vec![BridgeAssetUtxo {
-            tx_hash: id(1, 0).tx_hash,
-            output_index: 0,
-            tokens_out: 1,
-            tokens_in: 0,
-            datum: None,
-        }];
+        let transfers = vec![transfer(10, 0, id(1, 0), 1)];
 
         assert_eq!(
-            BridgeState::next_checkpoint(&utxos, 99, 2),
+            BridgeState::next_checkpoint(&transfers, 99, 2),
             BridgeCheckpoint::Block(99)
         );
     }
 
     #[test]
     fn next_checkpoint_is_last_utxo_when_capacity_is_reached() {
-        let utxos = vec![
-            BridgeAssetUtxo {
-                tx_hash: id(1, 0).tx_hash,
-                output_index: 0,
-                tokens_out: 1,
-                tokens_in: 0,
-                datum: None,
-            },
-            BridgeAssetUtxo {
-                tx_hash: id(2, 1).tx_hash,
-                output_index: 1,
-                tokens_out: 2,
-                tokens_in: 0,
-                datum: None,
-            },
-        ];
+        let transfers = vec![transfer(10, 0, id(1, 0), 1), transfer(10, 1, id(2, 1), 2)];
 
         assert_eq!(
-            BridgeState::next_checkpoint(&utxos, 99, 2),
+            BridgeState::next_checkpoint(&transfers, 99, 2),
             BridgeCheckpoint::Utxo(id(2, 1))
         );
     }

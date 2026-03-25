@@ -3,7 +3,7 @@ use std::sync::{atomic::Ordering, Arc};
 use crate::{
     grpc::{
         conversions::{
-            bridge_checkpoint_from_proto, bridge_checkpoint_to_proto, bridge_transfer_from_utxo,
+            bridge_checkpoint_from_proto, bridge_checkpoint_to_proto, bridge_transfer_to_proto,
         },
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
@@ -150,29 +150,27 @@ impl MidnightState for MidnightStateService {
             .map_err(|_| Status::invalid_argument("invalid current_block_hash"))?;
         let current_block = query_block_by_hash_info(&self.context, current_block_hash).await?;
 
-        let utxos = {
+        let transfers = {
             let history = self.history.lock().await;
             let state =
                 history.current().ok_or_else(|| Status::internal("state not initialized"))?;
 
             state
                 .bridge
-                .get_bridge_utxos(checkpoint, current_block.number, transfer_capacity)
+                .get_bridge_transfers(checkpoint, current_block.number, transfer_capacity)
                 .map_err(|err| match err {
-                    BridgeStateError::UnknownCheckpointUtxo(_) => {
-                        Status::not_found(err.to_string())
-                    }
-                })?
+                BridgeStateError::UnknownCheckpointUtxo(_) => Status::not_found(err.to_string()),
+            })?
         };
 
         let next_checkpoint = bridge_checkpoint_to_proto(BridgeState::next_checkpoint(
-            &utxos,
+            &transfers,
             current_block.number,
             transfer_capacity,
         ));
 
         Ok(Response::new(BridgeTransfersResponse {
-            transfers: utxos.into_iter().filter_map(bridge_transfer_from_utxo).collect(),
+            transfers: transfers.into_iter().map(bridge_transfer_to_proto).collect(),
             next_checkpoint: Some(next_checkpoint),
         }))
     }
