@@ -12,7 +12,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    validation::ValidationOutcomes,
     BlockStatus,
 };
 use anyhow::{bail, Result};
@@ -244,27 +243,20 @@ impl BlockVrfValidator {
                     let span =
                         info_span!("block_vrf_validator.validate", block = block_info.number);
                     async {
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state.validate(block_info, block_header, &genesis) {
-                            validation_outcomes.push(*e);
-                        }
-
-                        validation_outcomes
-                            .publish(
-                                &context,
-                                "block_vrf_validator",
-                                &publish_vrf_validation_topic,
-                                block_info,
-                            )
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish VRF validation: {e}"));
+                        ctx.handle(
+                            "vrf",
+                            state
+                                .validate(block_info, block_header, &genesis)
+                                .map_err(anyhow::Error::from),
+                        );
                     }
                     .instrument(span)
                     .await;
                 }
 
-                // Commit the new state
+                // Commit the new state and publish validation outcomes
                 history.lock().await.commit(block_info.number, state);
+                ctx.publish().await;
             }
         }
     }
