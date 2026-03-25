@@ -168,7 +168,8 @@ impl ChainStore {
                     RollbackWrapper::Normal((block_info, block)) => {
                         if block_info.status == BlockStatus::RolledBack {
                             let mut history = history.lock().await;
-                            state = history.get_rolled_back_state(block_info.number)
+                            state = history.get_rolled_back_state(block_info.number);
+                            store.rollback(&block_info)?;
                         }
 
                         if let Err(err) =

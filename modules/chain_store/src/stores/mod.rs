@@ -5,6 +5,7 @@ pub mod fjall;
 
 pub trait Store: Send + Sync {
     fn insert_block(&self, info: &BlockInfo, block: &[u8]) -> Result<()>;
+    fn rollback(&self, info: &BlockInfo) -> Result<()>;
     fn should_persist(&self, block_number: u64) -> bool;
 
     fn get_tip_block_number(&self) -> u64;
