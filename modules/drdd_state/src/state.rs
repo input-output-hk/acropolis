@@ -1,10 +1,10 @@
-use acropolis_common::{DRepCredential, Epoch};
+use acropolis_common::DRepCredential;
 use imbl::{OrdMap, OrdSet};
 use tracing::info;
 
 #[derive(Clone, Default)]
 pub struct State {
-    drdd_history: OrdMap<Epoch, DRepDistribution>,
+    drdd_history: DRepDistribution,
 }
 
 #[derive(Clone, Default)]
@@ -17,24 +17,15 @@ pub struct DRepDistribution {
 impl State {
     pub fn new() -> Self {
         Self {
-            drdd_history: OrdMap::new(),
+            drdd_history: DRepDistribution::default(),
         }
     }
 
-    pub fn apply_drdd_snapshot<I>(
-        &mut self,
-        epoch: Epoch,
-        snapshot_dreps: I,
-        abstain: u64,
-        no_confidence: u64,
-    ) where
+    pub fn apply_drdd_snapshot<I>(&mut self, snapshot_dreps: I, abstain: u64, no_confidence: u64)
+    where
         I: IntoIterator<Item = (DRepCredential, u64)>,
     {
-        let mut next = if epoch == 0 {
-            Default::default()
-        } else {
-            self.drdd_history.get(&(epoch - 1)).cloned().unwrap_or_default()
-        };
+        let mut next = self.drdd_history.clone();
 
         next.abstain = abstain;
         next.no_confidence = no_confidence;
@@ -53,27 +44,18 @@ impl State {
 
         next.dreps = next.dreps.into_iter().filter(|(k, _)| present.contains(k)).collect();
 
-        self.drdd_history.insert(epoch, next);
+        self.drdd_history = next;
     }
 
-    pub fn get_latest(&self) -> Option<&DRepDistribution> {
-        self.drdd_history.iter().next_back().map(|(_, v)| v)
-    }
-    pub fn get_epoch(&self, epoch: Epoch) -> Option<&DRepDistribution> {
-        self.drdd_history.get(&epoch)
+    pub fn get_latest(&self) -> &DRepDistribution {
+        &self.drdd_history
     }
 
-    pub async fn tick(&self) -> anyhow::Result<()> {
-        if let Some((_, latest)) = self.drdd_history.iter().next_back() {
-            let drep_count = latest.dreps.len();
-            let num_epochs = self.drdd_history.len();
-            info!(
-                num_epochs,
-                drep_count, "Tracking {num_epochs} epochs, latest snapshot has {drep_count} DReps"
-            );
-        } else {
-            info!("DRDD state: no data yet");
-        }
-        Ok(())
+    pub fn tick(&self, num_epochs: usize) {
+        let drep_count = self.drdd_history.dreps.len();
+        info!(
+            num_epochs,
+            drep_count, "Tracking {num_epochs} epochs, latest snapshot has {drep_count} DReps"
+        );
     }
 }

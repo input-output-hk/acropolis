@@ -32,9 +32,9 @@ pub async fn handle_drdd(
         "epoch" => epoch: Option<u64>,
     });
 
-    let drdd_opt = match epoch {
-        Some(epoch) => match state.get_epoch(epoch) {
-            Some(drdd) => Some(drdd),
+    let drdd = match epoch {
+        Some(epoch) => match locked.get_by_index(epoch) {
+            Some(epoch_state) => epoch_state.get_latest(),
             None => {
                 return Err(RESTError::not_found(&format!("DRDD in epoch {}", epoch)));
             }
@@ -42,36 +42,25 @@ pub async fn handle_drdd(
         None => state.get_latest(),
     };
 
-    if let Some(drdd) = drdd_opt {
-        let dreps: HashMap<String, u64> = drdd
-            .dreps
-            .iter()
-            .map(|(k, v)| {
-                let key = k.to_drep_bech32().unwrap_or_else(|_| match k {
-                    DRepCredential::AddrKeyHash(bytes) | DRepCredential::ScriptHash(bytes) => {
-                        hex::encode(bytes)
-                    }
-                });
-                (key, *v)
-            })
-            .collect();
+    let dreps: HashMap<String, u64> = drdd
+        .dreps
+        .iter()
+        .map(|(k, v)| {
+            let key = k.to_drep_bech32().unwrap_or_else(|_| match k {
+                DRepCredential::AddrKeyHash(bytes) | DRepCredential::ScriptHash(bytes) => {
+                    hex::encode(bytes)
+                }
+            });
+            (key, *v)
+        })
+        .collect();
 
-        let response = DRDDResponse {
-            dreps,
-            abstain: drdd.abstain,
-            no_confidence: drdd.no_confidence,
-        };
+    let response = DRDDResponse {
+        dreps,
+        abstain: drdd.abstain,
+        no_confidence: drdd.no_confidence,
+    };
 
-        let body = serde_json::to_string(&response)?;
-        Ok(RESTResponse::with_json(200, &body))
-    } else {
-        let response = DRDDResponse {
-            dreps: HashMap::new(),
-            abstain: 0,
-            no_confidence: 0,
-        };
-
-        let body = serde_json::to_string(&response)?;
-        Ok(RESTResponse::with_json(200, &body))
-    }
+    let body = serde_json::to_string(&response)?;
+    Ok(RESTResponse::with_json(200, &body))
 }

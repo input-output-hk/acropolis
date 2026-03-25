@@ -13,7 +13,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{info, info_span, Instrument};
 mod state;
 use state::State;
 mod rest;
@@ -54,7 +54,6 @@ impl DRDDState {
                     }
 
                     state.apply_drdd_snapshot(
-                        msg.epoch,
                         msg.drdd.dreps.iter().map(|(k, v)| (k.clone(), *v)),
                         msg.drdd.abstain,
                         msg.drdd.no_confidence,
@@ -101,11 +100,7 @@ impl DRDDState {
                             async {
                                 let locked = history_logger.lock().await;
                                 if let Some(state) = locked.current() {
-                                    state
-                                        .tick()
-                                        .await
-                                        .inspect_err(|e| error!("DRDD tick error: {e}"))
-                                        .ok();
+                                    state.tick(locked.len());
                                 }
                             }
                             .instrument(span)
