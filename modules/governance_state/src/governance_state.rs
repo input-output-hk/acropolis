@@ -183,49 +183,55 @@ impl GovernanceState {
     ) -> Result<()> {
         let d_drep =
             match vld.consume_sync("drep", readers.drep_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((_, d_drep)) => d_drep,
-                RollbackWrapper::Rollback(_) => return Ok(()),
+                RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
+                RollbackWrapper::Rollback(_) => None,
             };
 
-        let (blk_spo, d_spo) =
+        let spo_msg =
             match vld.consume_sync("spo", readers.spo_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((blk_spo, d_spo)) => (blk_spo, d_spo),
-                RollbackWrapper::Rollback(_) => return Ok(()),
+                RollbackWrapper::Normal((blk_spo, d_spo)) => Some((blk_spo, d_spo)),
+                RollbackWrapper::Rollback(_) => None,
             };
 
         let drep_state = match vld.consume_sync(
             "drep state",
             readers.drep_state_reader.read_with_rollbacks().await,
         )? {
-            RollbackWrapper::Normal((_, drep_state)) => drep_state,
-            RollbackWrapper::Rollback(_) => return Ok(()),
+            RollbackWrapper::Normal((_, drep_state)) => Some(drep_state),
+            RollbackWrapper::Rollback(_) => None,
         };
 
-        if blk_spo.epoch != d_spo.epoch + 1 {
-            vld.handle_error(
-                "spo",
-                &anyhow!(
-                    "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
-                    d_spo.epoch
-                ),
-            );
-        }
+        if let Some((blk_spo, d_spo)) = spo_msg {
+            if let Some(drep_state) = drep_state {
+                if let Some(d_drep) = d_drep {
+                    if blk_spo.epoch != d_spo.epoch + 1 {
+                        vld.handle_error(
+                            "spo",
+                            &anyhow!(
+                                "SPO distibution {blk_spo:?} != SPO epoch + 1 ({})",
+                                d_spo.epoch
+                            ),
+                        );
+                    }
 
-        if drep_state.epoch != d_drep.epoch {
-            vld.handle_error(
-                "drep state",
-                &anyhow!(
-                    "DRep state {} epoch != DRep epoch ({})",
-                    drep_state.epoch,
-                    d_drep.epoch
-                ),
-            );
-        }
+                    if drep_state.epoch != d_drep.epoch {
+                        vld.handle_error(
+                            "drep state",
+                            &anyhow!(
+                                "DRep state {} epoch != DRep epoch ({})",
+                                drep_state.epoch,
+                                d_drep.epoch
+                            ),
+                        );
+                    }
 
-        vld.handle(
-            "stakes",
-            state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
-        );
+                    vld.handle(
+                        "stakes",
+                        state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
@@ -346,8 +352,7 @@ impl GovernanceState {
                 };
 
             async {
-                if let Some(msg) = gov_msg {
-                    let (blk_g, gov_procs) = msg;
+                if let Some((blk_g, gov_procs)) = gov_msg {
                     if blk_g.new_epoch {
                         // New governance from new epoch means that we must prepare all governance
                         // outcome for the previous epoch.
@@ -392,6 +397,7 @@ impl GovernanceState {
                     }
                 } else {
                     vld.consume_sync("params", readers.param_reader.read_with_rollbacks().await)?;
+                    Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await?;
                 }
 
                 Ok::<(), anyhow::Error>(())
