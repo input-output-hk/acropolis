@@ -3,6 +3,7 @@
 .DEFAULT_GOAL := build
 
 SHELL := bash
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 CARGO := cargo
 PYTHON := python3
 PROCESS_PKG := acropolis_process_omnibus
