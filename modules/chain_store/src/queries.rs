@@ -1,11 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
 use acropolis_common::{
-    BlockHash, NetworkId,
     queries::{
         blocks::{
-            BlockHashAndTxIndex, BlockHashes, BlockKey, BlocksStateQuery, BlocksStateQueryResponse,
-            CompactBlockInfo, NextBlocks, PreviousBlocks, TransactionHashes,
+            BlockHashAndTxIndex, BlockHashes, BlockInfo, BlockKey, BlocksStateQuery,
+            BlocksStateQueryResponse, NextBlocks, PreviousBlocks, TransactionHashes,
             TransactionHashesAndTimeStamps,
         },
         errors::QueryError,
@@ -16,6 +15,7 @@ use acropolis_common::{
             TransactionsStateQueryResponse,
         },
     },
+    BlockHash, NetworkId,
 };
 use anyhow::Result;
 
@@ -23,9 +23,8 @@ use crate::{
     helpers::{
         get_block_by_key, get_block_hash, get_block_number, to_block_info, to_block_info_bulk,
         to_block_involved_addresses, to_block_transaction_hashes, to_block_transactions,
-        to_block_transactions_cbor, to_compact_block_info, to_tx_delegations, to_tx_info,
-        to_tx_metadata, to_tx_mirs, to_tx_pool_retirements, to_tx_pool_updates, to_tx_stakes,
-        to_tx_withdrawals,
+        to_block_transactions_cbor, to_tx_delegations, to_tx_info, to_tx_metadata, to_tx_mirs,
+        to_tx_pool_retirements, to_tx_pool_updates, to_tx_stakes, to_tx_withdrawals,
     },
     state::State,
     stores::{Block, Store},
@@ -405,6 +404,7 @@ pub fn handle_blocks_query(
         } => Ok(BlocksStateQueryResponse::LatestStableBlockAsOf(
             get_latest_stable_block_as_of(
                 store,
+                state,
                 *stability_offset,
                 *min_block_timestamp_unix_millis,
                 *max_block_timestamp_unix_millis,
@@ -418,6 +418,7 @@ pub fn handle_blocks_query(
         } => Ok(BlocksStateQueryResponse::StableBlockByHashAsOf(
             get_stable_block_by_hash_as_of(
                 store,
+                state,
                 *block_hash,
                 *stability_offset,
                 *min_block_timestamp_unix_millis,
@@ -429,10 +430,11 @@ pub fn handle_blocks_query(
 
 fn get_latest_stable_block_as_of(
     store: &Arc<dyn Store>,
+    state: &State,
     stability_offset: u32,
     min_block_timestamp_unix_millis: u64,
     max_block_timestamp_unix_millis: u64,
-) -> Result<Option<CompactBlockInfo>> {
+) -> Result<Option<BlockInfo>> {
     let tip = store.get_tip_block_number();
     let stable_boundary_number = tip.saturating_sub(stability_offset as u64);
     let Some(stable_boundary_block) = store.get_block_by_number(stable_boundary_number)? else {
@@ -444,7 +446,12 @@ fn get_latest_stable_block_as_of(
         min_block_timestamp_unix_millis,
         max_block_timestamp_unix_millis,
     ) {
-        return Ok(Some(to_compact_block_info(stable_boundary_block)?));
+        return Ok(Some(to_block_info(
+            stable_boundary_block,
+            store,
+            state,
+            false,
+        )?));
     }
 
     if block_is_older_than_timestamp_window(&stable_boundary_block, min_block_timestamp_unix_millis)
@@ -452,13 +459,9 @@ fn get_latest_stable_block_as_of(
         return Ok(None);
     }
 
-    if stable_boundary_number == 0 {
-        return Ok(None);
-    }
-
     let Some(candidate) = find_latest_block_at_or_before_timestamp(
         store,
-        stable_boundary_number - 1,
+        stable_boundary_number.saturating_sub(1),
         max_block_timestamp_unix_millis,
     )?
     else {
@@ -469,16 +472,17 @@ fn get_latest_stable_block_as_of(
         return Ok(None);
     }
 
-    Ok(Some(to_compact_block_info(candidate)?))
+    Ok(Some(to_block_info(candidate, store, state, false)?))
 }
 
 fn get_stable_block_by_hash_as_of(
     store: &Arc<dyn Store>,
+    state: &State,
     block_hash: BlockHash,
     stability_offset: u32,
     min_block_timestamp_unix_millis: u64,
     max_block_timestamp_unix_millis: u64,
-) -> Result<Option<CompactBlockInfo>> {
+) -> Result<Option<BlockInfo>> {
     let tip = store.get_tip_block_number();
     let stable_boundary_number = tip.saturating_sub(stability_offset as u64);
     let Some(block) = store.get_block_by_hash(block_hash.as_slice())? else {
@@ -493,8 +497,8 @@ fn get_stable_block_by_hash_as_of(
         return Ok(None);
     }
 
-    let compact = to_compact_block_info(block)?;
-    Ok((compact.number <= stable_boundary_number).then_some(compact))
+    let block_info = to_block_info(block, store, state, false)?;
+    Ok((block_info.number <= stable_boundary_number).then_some(block_info))
 }
 
 fn find_latest_block_at_or_before_timestamp(
@@ -509,9 +513,6 @@ fn find_latest_block_at_or_before_timestamp(
     while low <= high {
         let mid = low + (high - low) / 2;
         let Some(block) = store.get_block_by_number(mid)? else {
-            if mid == 0 {
-                break;
-            }
             anyhow::bail!("Block {mid} not found during stable block search");
         };
 
@@ -664,8 +665,11 @@ pub fn handle_txs_query(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, HashMap};
+
     use super::*;
-    use crate::stores::{Store, fjall::FjallStore};
+    use crate::stores::{fjall::FjallStore, Block, ExtraBlockData, Store, Tx, TxBlockReference};
+    use anyhow::{anyhow, Result};
     use config::Config;
     use tempfile::TempDir;
 
@@ -693,14 +697,117 @@ mod tests {
         (dir, store, infos)
     }
 
-    fn compact_from(info: &acropolis_common::BlockInfo) -> CompactBlockInfo {
-        let info = info.clone();
-        CompactBlockInfo {
-            timestamp: info.timestamp,
-            number: info.number,
-            hash: info.hash,
-            slot: info.slot,
-            epoch: info.epoch,
+    fn assert_block_matches_info(block: &BlockInfo, info: &acropolis_common::BlockInfo) {
+        assert_eq!(block.timestamp, info.timestamp);
+        assert_eq!(block.number, info.number);
+        assert_eq!(block.hash, info.hash);
+        assert_eq!(block.slot, info.slot);
+        assert_eq!(block.epoch, info.epoch);
+        assert_eq!(block.epoch_slot, info.epoch_slot);
+    }
+
+    fn build_store_block(
+        info: &acropolis_common::BlockInfo,
+        bytes: &[u8],
+        timestamp: u64,
+    ) -> Block {
+        Block {
+            bytes: bytes.to_vec(),
+            extra: ExtraBlockData {
+                epoch: info.epoch,
+                epoch_slot: info.epoch_slot,
+                timestamp,
+            },
+        }
+    }
+
+    fn copy_block(block: &Block) -> Block {
+        Block {
+            bytes: block.bytes.clone(),
+            extra: ExtraBlockData {
+                epoch: block.extra.epoch,
+                epoch_slot: block.extra.epoch_slot,
+                timestamp: block.extra.timestamp,
+            },
+        }
+    }
+
+    struct MemoryStore {
+        blocks_by_number: BTreeMap<u64, Block>,
+        blocks_by_hash: HashMap<Vec<u8>, Block>,
+    }
+
+    impl MemoryStore {
+        fn new(indexed_blocks: impl IntoIterator<Item = (u64, Block)>) -> Self {
+            let mut blocks_by_number = BTreeMap::new();
+            let mut blocks_by_hash = HashMap::new();
+
+            for (number, block) in indexed_blocks {
+                let hash = BlockHash::from(
+                    *pallas_traverse::MultiEraBlock::decode(&block.bytes).unwrap().hash(),
+                );
+                blocks_by_hash.insert(hash.to_vec(), copy_block(&block));
+                blocks_by_number.insert(number, block);
+            }
+
+            Self {
+                blocks_by_number,
+                blocks_by_hash,
+            }
+        }
+    }
+
+    impl Store for MemoryStore {
+        fn insert_block(&self, _info: &acropolis_common::BlockInfo, _block: &[u8]) -> Result<()> {
+            Err(anyhow!("MemoryStore does not support inserts"))
+        }
+
+        fn should_persist(&self, _block_number: u64) -> bool {
+            false
+        }
+
+        fn get_tip_block_number(&self) -> u64 {
+            self.blocks_by_number.last_key_value().map(|(number, _)| *number).unwrap_or_default()
+        }
+
+        fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
+            Ok(self.blocks_by_hash.get(hash).map(copy_block))
+        }
+
+        fn get_block_by_slot(&self, _slot: u64) -> Result<Option<Block>> {
+            Ok(None)
+        }
+
+        fn get_block_by_number(&self, number: u64) -> Result<Option<Block>> {
+            Ok(self.blocks_by_number.get(&number).map(copy_block))
+        }
+
+        fn get_blocks_by_number_range(
+            &self,
+            min_number: u64,
+            max_number: u64,
+        ) -> Result<Vec<Block>> {
+            Ok(self
+                .blocks_by_number
+                .range(min_number..=max_number)
+                .map(|(_, block)| copy_block(block))
+                .collect())
+        }
+
+        fn get_block_by_epoch_slot(&self, _epoch: u64, _epoch_slot: u64) -> Result<Option<Block>> {
+            Ok(None)
+        }
+
+        fn get_latest_block(&self) -> Result<Option<Block>> {
+            Ok(self.blocks_by_number.last_key_value().map(|(_, block)| copy_block(block)))
+        }
+
+        fn get_tx_by_hash(&self, _hash: &[u8]) -> Result<Option<Tx>> {
+            Ok(None)
+        }
+
+        fn get_tx_block_ref_by_hash(&self, _hash: &[u8]) -> Result<Option<TxBlockReference>> {
+            Ok(None)
         }
     }
 
@@ -723,7 +830,7 @@ mod tests {
 
         match response {
             BlocksStateQueryResponse::LatestStableBlockAsOf(Some(block)) => {
-                assert_eq!(block, compact_from(&expected));
+                assert_block_matches_info(&block, &expected);
             }
             other => panic!("unexpected response: {other:?}"),
         }
@@ -748,7 +855,39 @@ mod tests {
 
         match response {
             BlocksStateQueryResponse::LatestStableBlockAsOf(Some(block)) => {
-                assert_eq!(block, compact_from(&expected));
+                assert_block_matches_info(&block, &expected);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn should_return_block_stored_at_zero_when_it_is_only_matching_candidate() {
+        let state = State::new();
+        let blocks = crate::stores::fjall::tests::test_block_range_bytes(2);
+        let infos = blocks
+            .iter()
+            .map(|bytes| crate::stores::fjall::tests::test_block_info(bytes))
+            .collect::<Vec<_>>();
+        let zero_block = build_store_block(&infos[0], &blocks[0], 5);
+        let tip_block = build_store_block(&infos[1], &blocks[1], 10);
+        let store = Arc::new(MemoryStore::new([(0, zero_block), (1, tip_block)])) as Arc<dyn Store>;
+
+        let response = handle_blocks_query(
+            &store,
+            &state,
+            &BlocksStateQuery::GetLatestStableBlockAsOf {
+                stability_offset: 0,
+                min_block_timestamp_unix_millis: 5_000,
+                max_block_timestamp_unix_millis: 5_000,
+            },
+        )
+        .unwrap();
+
+        match response {
+            BlocksStateQueryResponse::LatestStableBlockAsOf(Some(block)) => {
+                assert_eq!(block.hash, infos[0].hash);
+                assert_eq!(block.timestamp, 5);
             }
             other => panic!("unexpected response: {other:?}"),
         }
@@ -756,23 +895,56 @@ mod tests {
 
     #[test]
     fn should_return_no_latest_stable_block_when_no_block_is_within_window() {
-        let (_dir, store, infos) = init_store_with_blocks(6);
         let state = State::new();
-        let max_timestamp = infos[0].timestamp.saturating_mul(1000).saturating_sub(1);
+        let blocks = crate::stores::fjall::tests::test_block_range_bytes(2);
+        let infos = blocks
+            .iter()
+            .map(|bytes| crate::stores::fjall::tests::test_block_info(bytes))
+            .collect::<Vec<_>>();
+        let store = Arc::new(MemoryStore::new([
+            (0, build_store_block(&infos[0], &blocks[0], 5)),
+            (1, build_store_block(&infos[1], &blocks[1], 10)),
+        ])) as Arc<dyn Store>;
 
         let response = handle_blocks_query(
             &store,
             &state,
             &BlocksStateQuery::GetLatestStableBlockAsOf {
                 stability_offset: 1,
-                min_block_timestamp_unix_millis: max_timestamp,
-                max_block_timestamp_unix_millis: max_timestamp,
+                min_block_timestamp_unix_millis: 4_000,
+                max_block_timestamp_unix_millis: 4_000,
             },
         )
         .unwrap();
 
         match response {
             BlocksStateQueryResponse::LatestStableBlockAsOf(None) => {}
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn should_return_stable_block_by_hash_when_within_boundary_and_window() {
+        let (_dir, store, infos) = init_store_with_blocks(6);
+        let state = State::new();
+        let expected = infos[3].clone();
+
+        let response = handle_blocks_query(
+            &store,
+            &state,
+            &BlocksStateQuery::GetStableBlockByHashAsOf {
+                block_hash: expected.hash,
+                stability_offset: 1,
+                min_block_timestamp_unix_millis: expected.timestamp.saturating_mul(1000),
+                max_block_timestamp_unix_millis: expected.timestamp.saturating_mul(1000),
+            },
+        )
+        .unwrap();
+
+        match response {
+            BlocksStateQueryResponse::StableBlockByHashAsOf(Some(block)) => {
+                assert_block_matches_info(&block, &expected);
+            }
             other => panic!("unexpected response: {other:?}"),
         }
     }

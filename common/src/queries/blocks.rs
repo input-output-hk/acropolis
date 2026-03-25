@@ -128,8 +128,8 @@ pub enum BlocksStateQueryResponse {
     TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),
     BlockByTipOffset(Option<BlockInfo>),
     StableBlockByHash(Option<BlockInfo>),
-    LatestStableBlockAsOf(Option<CompactBlockInfo>),
-    StableBlockByHashAsOf(Option<CompactBlockInfo>),
+    LatestStableBlockAsOf(Option<BlockInfo>),
+    StableBlockByHashAsOf(Option<BlockInfo>),
     Error(QueryError),
 }
 
@@ -203,15 +203,6 @@ impl Serialize for BlockInfo {
         state.serialize_field("confirmations", &self.confirmations)?;
         state.end()
     }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct CompactBlockInfo {
-    pub timestamp: u64,
-    pub number: u64,
-    pub hash: BlockHash,
-    pub slot: u64,
-    pub epoch: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -23,8 +23,7 @@ use acropolis_common::{
     messages::{Message, StateQuery, StateQueryResponse},
     queries::{
         blocks::{
-            BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, CompactBlockInfo,
-            DEFAULT_BLOCKS_QUERY_TOPIC,
+            BlockInfo, BlocksStateQuery, BlocksStateQueryResponse, DEFAULT_BLOCKS_QUERY_TOPIC,
         },
         errors::QueryError,
         spdd::{SPDDStateQuery, SPDDStateQueryResponse},
@@ -536,7 +535,7 @@ impl MidnightState for MidnightStateService {
         )
         .await?;
 
-        let block_proto = block_info_opt.map(compact_block_to_proto).transpose()?;
+        let block_proto = block_info_opt.map(block_info_to_proto).transpose()?;
 
         Ok(Response::new(StableBlockResponse { block: block_proto }))
     }
@@ -559,7 +558,7 @@ impl MidnightState for MidnightStateService {
         let block_info_opt =
             query_latest_stable_block_as_of(&self.context, req.stability_offset, &window).await?;
 
-        let block_proto = block_info_opt.map(compact_block_to_proto).transpose()?;
+        let block_proto = block_info_opt.map(block_info_to_proto).transpose()?;
 
         Ok(Response::new(LatestStableBlockResponse {
             block: block_proto,
@@ -576,15 +575,7 @@ impl MidnightState for MidnightStateService {
             .await?
             .ok_or_else(|| Status::not_found("No blocks available"))?;
 
-        let block_proto = Block {
-            block_number: u32::try_from(block_info.number)
-                .map_err(|_| Status::internal("block number overflow"))?,
-            block_hash: block_info.hash.to_vec(),
-            epoch_number: u32::try_from(block_info.epoch)
-                .map_err(|_| Status::internal("epoch overflow"))?,
-            slot_number: block_info.slot,
-            block_timestamp_unix: block_info.timestamp,
-        };
+        let block_proto = block_info_to_proto(block_info)?;
 
         Ok(Response::new(LatestBlockResponse {
             block: Some(block_proto),
@@ -665,7 +656,7 @@ async fn query_latest_stable_block_as_of(
     context: &Arc<Context<Message>>,
     stability_offset: u32,
     window: &StableBlockWindow,
-) -> Result<Option<CompactBlockInfo>, Status> {
+) -> Result<Option<BlockInfo>, Status> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetLatestStableBlockAsOf {
             stability_offset,
@@ -699,7 +690,7 @@ async fn query_stable_block_by_hash_as_of(
     block_hash: BlockHash,
     stability_offset: u32,
     window: &StableBlockWindow,
-) -> Result<Option<CompactBlockInfo>, Status> {
+) -> Result<Option<BlockInfo>, Status> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
         BlocksStateQuery::GetStableBlockByHashAsOf {
             block_hash,
@@ -749,7 +740,7 @@ fn stable_block_window(
 }
 
 #[allow(clippy::result_large_err)]
-fn compact_block_to_proto(block: CompactBlockInfo) -> Result<Block, Status> {
+fn block_info_to_proto(block: BlockInfo) -> Result<Block, Status> {
     Ok(Block {
         block_number: u32::try_from(block.number)
             .map_err(|_| Status::internal("block number overflow"))?,
@@ -762,14 +753,17 @@ fn compact_block_to_proto(block: CompactBlockInfo) -> Result<Block, Status> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc, time::Duration};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex as StdMutex},
+        time::Duration,
+    };
 
     use acropolis_common::{
         messages::{AddressDeltasMessage, Message, StateQuery, StateQueryResponse},
         protocol_params::{ProtocolParams, ShelleyParams},
         queries::blocks::{
             BlockInfo as QueryBlockInfo, BlocksStateQuery, BlocksStateQueryResponse,
-            CompactBlockInfo,
         },
         queries::spdd::{SPDDStateQuery, SPDDStateQueryResponse},
         rational_number::RationalNumber,
@@ -798,7 +792,16 @@ mod tests {
 
     pub struct DummyBus;
 
-    pub struct StableQueryBus;
+    #[derive(Clone)]
+    pub struct StableQueryBus {
+        requests: Arc<StdMutex<Vec<BlocksStateQuery>>>,
+    }
+
+    impl StableQueryBus {
+        fn new(requests: Arc<StdMutex<Vec<BlocksStateQuery>>>) -> Self {
+            Self { requests }
+        }
+    }
 
     #[async_trait]
     impl MessageBus<Message> for DummyBus {
@@ -869,19 +872,25 @@ mod tests {
 
             let response = match message {
                 Message::StateQuery(StateQuery::Blocks(
-                    BlocksStateQuery::GetLatestStableBlockAsOf { .. },
-                )) => Message::StateQueryResponse(StateQueryResponse::Blocks(
-                    BlocksStateQueryResponse::LatestStableBlockAsOf(Some(
-                        query_compact_block_info(100, 8),
-                    )),
-                )),
+                    query @ BlocksStateQuery::GetLatestStableBlockAsOf { .. },
+                )) => {
+                    self.requests.lock().unwrap().push(query);
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::LatestStableBlockAsOf(Some(query_block_info(
+                            100, 8,
+                        ))),
+                    ))
+                }
                 Message::StateQuery(StateQuery::Blocks(
-                    BlocksStateQuery::GetStableBlockByHashAsOf { block_hash, .. },
-                )) => Message::StateQueryResponse(StateQueryResponse::Blocks(
-                    BlocksStateQueryResponse::StableBlockByHashAsOf(Some(
-                        query_compact_block_info_with_hash(95, 9, block_hash),
-                    )),
-                )),
+                    query @ BlocksStateQuery::GetStableBlockByHashAsOf { block_hash, .. },
+                )) => {
+                    self.requests.lock().unwrap().push(query);
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::StableBlockByHashAsOf(Some(
+                            query_block_info_with_hash(95, 9, 0, block_hash),
+                        )),
+                    ))
+                }
                 _ => return Err(anyhow::anyhow!("unsupported request in stable query tests")),
             };
 
@@ -1509,8 +1518,10 @@ mod tests {
         state
             .update_stable_block_window_bounds(&protocol_params)
             .expect("stable bounds should be derived");
-
-        let service = service_with_committed_state_and_bus(state, 100, StableQueryBus);
+        let bounds = state.stable_block_window_bounds().expect("stable bounds should be stored");
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let service =
+            service_with_committed_state_and_bus(state, 100, StableQueryBus::new(requests.clone()));
         let response = service
             .get_latest_stable_block(Request::new(LatestStableBlockRequest {
                 stability_offset: 5,
@@ -1525,6 +1536,26 @@ mod tests {
             .expect("block should be present when stable boundary falls within cached window");
         assert_eq!(block.block_number, 100);
         assert_eq!(block.block_timestamp_unix, 8);
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        match &requests[0] {
+            BlocksStateQuery::GetLatestStableBlockAsOf {
+                stability_offset: 5,
+                min_block_timestamp_unix_millis,
+                max_block_timestamp_unix_millis,
+            } => {
+                assert_eq!(
+                    *min_block_timestamp_unix_millis,
+                    10_000_u64.saturating_sub(bounds.max_block_age_millis)
+                );
+                assert_eq!(
+                    *max_block_timestamp_unix_millis,
+                    10_000_u64.saturating_sub(bounds.min_block_age_millis)
+                );
+            }
+            other => panic!("unexpected query: {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1542,8 +1573,10 @@ mod tests {
         state
             .update_stable_block_window_bounds(&protocol_params)
             .expect("stable bounds should be derived");
-
-        let service = service_with_committed_state_and_bus(state, 100, StableQueryBus);
+        let bounds = state.stable_block_window_bounds().expect("stable bounds should be stored");
+        let requests = Arc::new(StdMutex::new(Vec::new()));
+        let service =
+            service_with_committed_state_and_bus(state, 100, StableQueryBus::new(requests.clone()));
         let response = service
             .get_stable_block(Request::new(StableBlockRequest {
                 block_hash: vec![7u8; 32],
@@ -1560,6 +1593,29 @@ mod tests {
         assert_eq!(block.block_number, 95);
         assert_eq!(block.block_hash, vec![7u8; 32]);
         assert_eq!(block.block_timestamp_unix, 9);
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        match &requests[0] {
+            BlocksStateQuery::GetStableBlockByHashAsOf {
+                block_hash,
+                stability_offset: 5,
+                min_block_timestamp_unix_millis,
+                max_block_timestamp_unix_millis,
+            } => {
+                let expected_block_hash = BlockHash::try_from(vec![7u8; 32]).unwrap();
+                assert_eq!(*block_hash, expected_block_hash);
+                assert_eq!(
+                    *min_block_timestamp_unix_millis,
+                    10_000_u64.saturating_sub(bounds.max_block_age_millis)
+                );
+                assert_eq!(
+                    *max_block_timestamp_unix_millis,
+                    10_000_u64.saturating_sub(bounds.min_block_age_millis)
+                );
+            }
+            other => panic!("unexpected query: {other:?}"),
+        }
     }
 
     fn query_block_info(number: u64, timestamp: u64) -> QueryBlockInfo {
@@ -1594,27 +1650,6 @@ mod tests {
             hash,
             tx_count,
             ..query_block_info(number, timestamp)
-        }
-    }
-
-    fn query_compact_block_info(number: u64, timestamp: u64) -> CompactBlockInfo {
-        CompactBlockInfo {
-            timestamp,
-            number,
-            hash: BlockHash::default(),
-            slot: number,
-            epoch: 0,
-        }
-    }
-
-    fn query_compact_block_info_with_hash(
-        number: u64,
-        timestamp: u64,
-        hash: BlockHash,
-    ) -> CompactBlockInfo {
-        CompactBlockInfo {
-            hash,
-            ..query_compact_block_info(number, timestamp)
         }
     }
 
