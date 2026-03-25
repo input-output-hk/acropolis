@@ -2,30 +2,50 @@
 //! Reads address deltas and filters out only stake addresses from it; also resolves pointer addresses.
 
 use acropolis_common::{
-    caryatid::SubscriptionExt,
-    messages::{CardanoMessage, Message, StateQuery, StateQueryResponse, StateTransitionMessage},
+    caryatid::{RollbackWrapper, ValidationContext},
+    declare_cardano_reader,
+    messages::{
+        AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
+        StateTransitionMessage, TxCertificatesMessage,
+    },
     queries::{
         errors::QueryError,
         stake_deltas::{
             StakeDeltaQuery, StakeDeltaQueryResponse, DEFAULT_STAKE_DELTAS_QUERY_TOPIC,
         },
     },
+    state_history::{StateHistory, StateHistoryStore},
     NetworkId,
 };
-use anyhow::{anyhow, Result};
-use caryatid_sdk::{module, Context};
+use anyhow::{anyhow, bail, Result};
+use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use serde::Deserialize;
 use std::{path::Path, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{error, info, info_span, Instrument};
 
-const DEFAULT_ADDRESS_DELTA_TOPIC: (&str, &str) =
-    ("subscription-address-delta-topic", "cardano.address.deltas");
-const DEFAULT_CERTIFICATES_TOPIC: (&str, &str) =
-    ("subscription-certificates-topic", "cardano.certificates");
+declare_cardano_reader!(
+    AddressDeltasReader,
+    "subscription-address-delta-topic",
+    "cardano.address.deltas",
+    AddressDeltas,
+    AddressDeltasMessage
+);
+declare_cardano_reader!(
+    CertsReader,
+    "subscription-certificates-topic",
+    "cardano.certificates",
+    TxCertificates,
+    TxCertificatesMessage
+);
+
 const DEFAULT_STAKE_ADDRESS_DELTA_TOPIC: (&str, &str) =
     ("publishing-stake-delta-topic", "cardano.stake.deltas");
+const DEFAULT_VALIDATION_TOPIC: (&str, &str) = (
+    "publishing-validation-topic",
+    "cardano.validation.stake.filter",
+);
 
 /// Directory to put cached shelley address pointers into. Depending on the address
 /// cache mode, these cached pointers can be used instead of tracking current pointer
@@ -60,18 +80,15 @@ mod utils;
 use state::{DeltaPublisher, State};
 use utils::{process_message, CacheMode, PointerCache, Tracker};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct StakeDeltaFilterParams {
-    address_delta_topic: String,
     stake_address_delta_topic: String,
-    tx_certificates_topic: String,
+    validation_topic: String,
     network: NetworkId,
 
     cache_dir: String,
     cache_mode: CacheMode,
     write_full_cache: bool,
-
-    context: Arc<Context<Message>>,
 }
 
 impl StakeDeltaFilterParams {
@@ -99,15 +116,13 @@ impl StakeDeltaFilterParams {
         }
     }
 
-    fn init(context: Arc<Context<Message>>, cfg: Arc<Config>) -> Result<Arc<Self>> {
+    fn init(cfg: Arc<Config>) -> Result<Arc<Self>> {
         let params = Self {
-            address_delta_topic: Self::conf(&cfg, DEFAULT_ADDRESS_DELTA_TOPIC),
-            tx_certificates_topic: Self::conf(&cfg, DEFAULT_CERTIFICATES_TOPIC),
             stake_address_delta_topic: Self::conf(&cfg, DEFAULT_STAKE_ADDRESS_DELTA_TOPIC),
+            validation_topic: Self::conf(&cfg, DEFAULT_VALIDATION_TOPIC),
             cache_dir: Self::conf(&cfg, DEFAULT_CACHE_DIR),
             cache_mode: Self::conf_enum::<CacheMode>(&cfg, DEFAULT_CACHE_MODE)?,
             write_full_cache: Self::conf_enum::<bool>(&cfg, DEFAULT_WRITE_FULL_CACHE)?,
-            context,
             network: Self::conf_enum::<NetworkId>(&cfg, DEFAULT_NETWORK)?,
         };
 
@@ -130,31 +145,61 @@ impl StakeDeltaFilterParams {
 
 impl StakeDeltaFilter {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
-        let params = StakeDeltaFilterParams::init(context, config.clone())?;
+        let address_delta_reader = AddressDeltasReader::new(&context, &config).await?;
+        let params = StakeDeltaFilterParams::init(config.clone())?;
         let cache_path = params.get_cache_file_name(".json")?;
+        let publisher = DeltaPublisher::new(context.clone(), params.clone());
 
         match params.cache_mode {
             CacheMode::Predefined => {
                 Self::stateless_init(
                     PointerCache::try_load_predefined(&params.get_network_name())?,
-                    params,
+                    context,
+                    publisher,
+                    address_delta_reader,
                 )
                 .await
             }
 
             CacheMode::Read => {
-                Self::stateless_init(PointerCache::try_load(&cache_path)?, params).await
+                Self::stateless_init(
+                    PointerCache::try_load(&cache_path)?,
+                    context,
+                    publisher,
+                    address_delta_reader,
+                )
+                .await
             }
 
             CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
-                Ok(cache) => Self::stateless_init(cache, params).await,
+                Ok(cache) => {
+                    Self::stateless_init(cache, context, publisher, address_delta_reader).await
+                }
                 Err(e) => {
                     info!("Cannot load cache: {}, building from scratch", e);
-                    Self::stateful_init(params).await
+                    let certs_reader = CertsReader::new(&context, &config).await?;
+                    Self::stateful_init(
+                        params,
+                        context,
+                        certs_reader,
+                        address_delta_reader,
+                        publisher,
+                    )
+                    .await
                 }
             },
 
-            CacheMode::Write => Self::stateful_init(params).await,
+            CacheMode::Write => {
+                let certs_reader = CertsReader::new(&context, &config).await?;
+                Self::stateful_init(
+                    params,
+                    context,
+                    certs_reader,
+                    address_delta_reader,
+                    publisher,
+                )
+                .await
+            }
         }
     }
 
@@ -201,67 +246,49 @@ impl StakeDeltaFilter {
 
     async fn stateless_init(
         cache: Arc<PointerCache>,
-        params: Arc<StakeDeltaFilterParams>,
+        context: Arc<Context<Message>>,
+        publisher: DeltaPublisher,
+        address_delta_reader: AddressDeltasReader,
     ) -> Result<()> {
         info!("Stateless init: using stake pointer cache");
 
         // Register query handler for pointer resolution
-        Self::register_query_handler(&params.context, &params.context.config, cache.clone());
+        Self::register_query_handler(&context, &context.config, cache.clone());
 
-        // Subscribe for certificate messages
-        info!("Creating subscriber on '{}'", params.address_delta_topic);
-        let mut subscription =
-            params.context.subscribe(&params.clone().address_delta_topic).await?;
-        params.context.clone().run(async move {
-            let mut publisher = DeltaPublisher::new(params.clone());
-
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(delta))) => {
-                        let span = info_span!(
-                            "stake_delta_filter_stateless.handle_deltas",
-                            block = block_info.number
-                        );
-                        async {
-                            let msg = process_message(&cache, delta, block_info, None);
-                            publisher
-                                .publish(block_info, msg)
-                                .await
-                                .unwrap_or_else(|e| error!("Publish error: {e}"))
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    Message::Cardano((
-                        _,
-                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                    )) => {
-                        publisher
-                            .publish_rollback(message)
-                            .await
-                            .unwrap_or_else(|e| error!("Publish error: {e}"));
-                    }
-
-                    msg => error!(
-                        "Unexpected message type for {}: {msg:?}",
-                        &params.address_delta_topic
-                    ),
-                }
-            }
-        });
+        context.clone().run(Self::stateless_run(cache, publisher, address_delta_reader));
 
         Ok(())
+    }
+
+    async fn stateless_run(
+        cache: Arc<PointerCache>,
+        mut publisher: DeltaPublisher,
+        mut address_delta_reader: AddressDeltasReader,
+    ) -> Result<()> {
+        loop {
+            match address_delta_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, address_deltas)) => {
+                    let msg = process_message(&cache, &address_deltas, &block_info, None);
+                    publisher
+                        .publish(&block_info, msg)
+                        .await
+                        .unwrap_or_else(|e| error!("Publish error: {e}"))
+                }
+                RollbackWrapper::Rollback(message) => {
+                    publisher
+                        .publish_rollback(message)
+                        .await
+                        .unwrap_or_else(|e| error!("Publish error: {e}"));
+                }
+            }
+        }
     }
 
     /// Register a query handler for stateful mode, where the cache is behind a Mutex.
     fn register_query_handler_stateful(
         context: &Arc<Context<Message>>,
         config: &Arc<Config>,
-        state: Arc<Mutex<State>>,
+        history: Arc<Mutex<StateHistory<State>>>,
     ) {
         let query_topic = config
             .get_string(DEFAULT_STAKE_DELTAS_QUERY_TOPIC.0)
@@ -269,7 +296,7 @@ impl StakeDeltaFilter {
         info!("Registering stateful query handler on '{query_topic}'");
 
         context.handle(&query_topic, move |message| {
-            let state = state.clone();
+            let history = history.clone();
             async move {
                 let Message::StateQuery(StateQuery::StakeDeltas(query)) = message.as_ref() else {
                     return Arc::new(Message::StateQueryResponse(
@@ -279,9 +306,22 @@ impl StakeDeltaFilter {
                     ));
                 };
 
+                let locked = history.lock().await;
+                let state = match locked.current() {
+                    Some(state) => state,
+                    None => {
+                        return Arc::new(Message::StateQueryResponse(
+                            StateQueryResponse::StakeDeltas(StakeDeltaQueryResponse::Error(
+                                QueryError::internal_error(
+                                    "Invalid message for stake-delta-filter",
+                                ),
+                            )),
+                        ))
+                    }
+                };
+
                 let response = match query {
                     StakeDeltaQuery::ResolvePointers { pointers } => {
-                        let state = state.lock().await;
                         let mut resolved = std::collections::HashMap::new();
                         for ptr in pointers {
                             if let Some(Some(stake_addr)) = state.pointer_cache.decode_pointer(ptr)
@@ -300,99 +340,39 @@ impl StakeDeltaFilter {
         });
     }
 
-    async fn stateful_init(params: Arc<StakeDeltaFilterParams>) -> Result<()> {
+    async fn stateful_init(
+        params: Arc<StakeDeltaFilterParams>,
+        context: Arc<Context<Message>>,
+        certs_reader: CertsReader,
+        address_deltas_reader: AddressDeltasReader,
+        publisher: DeltaPublisher,
+    ) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 
         // State
-        let state = Arc::new(Mutex::new(State::new(params.clone())));
+        let history = Arc::new(Mutex::new(StateHistory::<State>::new(
+            "stake_delta_filter",
+            StateHistoryStore::default_block_store(),
+        )));
+        let history_tick = history.clone();
+
+        let vld = ValidationContext::new(&context, &params.validation_topic, "stake_delta_filter");
 
         // Register query handler for pointer resolution (stateful)
-        Self::register_query_handler_stateful(
-            &params.context,
-            &params.context.config,
-            state.clone(),
-        );
+        Self::register_query_handler_stateful(&context, &context.config, history.clone());
 
-        info!("Creating subscriber on '{}'", params.tx_certificates_topic);
-
-        let state_certs = state.clone();
-        let mut subscription = params.context.subscribe(&params.tx_certificates_topic).await?;
-        params.clone().context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read_ignoring_rollbacks().await else {
-                    return;
-                };
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::TxCertificates(tx_cert_msg))) => {
-                        let span = info_span!(
-                            "stake_delta_filter.handle_certs",
-                            block = block_info.number
-                        );
-                        async {
-                            let mut state = state_certs.lock().await;
-                            state
-                                .handle_certs(block_info, tx_cert_msg)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    _ => error!("Unexpected message type: {message:?}"),
-                }
-            }
-        });
-
-        info!("Creating subscriber on '{}'", params.address_delta_topic);
-        let state_deltas = state.clone();
-        let topic = params.address_delta_topic.clone();
-        let mut subscription = params.context.subscribe(&topic).await?;
-        params.clone().context.run(async move {
-            loop {
-                let Ok((_, message)) = subscription.read().await else {
-                    return;
-                };
-                match message.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::AddressDeltas(deltas))) => {
-                        let span = info_span!(
-                            "stake_delta_filter.handle_deltas",
-                            block = block_info.number
-                        );
-                        async {
-                            let mut state = state_deltas.lock().await;
-                            state
-                                .handle_deltas(block_info, deltas)
-                                .await
-                                .inspect_err(|e| error!("Messaging handling error: {e}"))
-                                .ok();
-                        }
-                        .instrument(span)
-                        .await;
-                    }
-
-                    Message::Cardano((
-                        _,
-                        CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                    )) => {
-                        let mut state = state_deltas.lock().await;
-                        state
-                            .handle_rollback(message)
-                            .await
-                            .inspect_err(|e| error!("Messaging handling error: {e}"))
-                            .ok();
-                    }
-
-                    _ => error!("Unexpected message type for {}: {message:?}", &topic),
-                }
-            }
-        });
+        context.run(Self::stateful_run(
+            history,
+            certs_reader,
+            address_deltas_reader,
+            publisher,
+            params,
+            vld,
+        ));
 
         // Ticker to log stats
-        let state_tick = state.clone();
-        let mut subscription = params.context.subscribe("clock.tick").await?;
-        params.clone().context.run(async move {
+        let mut subscription = context.subscribe("clock.tick").await?;
+        context.run(async move {
             loop {
                 let Ok((_, message)) = subscription.read().await else {
                     return;
@@ -401,13 +381,10 @@ impl StakeDeltaFilter {
                     if (message.number % 60) == 0 {
                         let span = info_span!("stake_delta_filter.tick", number = message.number);
                         async {
-                            state_tick
-                                .lock()
-                                .await
-                                .tick()
-                                .await
-                                .inspect_err(|e| error!("Tick error: {e}"))
-                                .ok();
+                            let history = history_tick.lock().await;
+                            if let Some(state) = history.current() {
+                                state.tick().await.inspect_err(|e| error!("Tick error: {e}")).ok();
+                            }
                         }
                         .instrument(span)
                         .await;
@@ -417,5 +394,51 @@ impl StakeDeltaFilter {
         });
 
         Ok(())
+    }
+
+    async fn stateful_run(
+        history: Arc<Mutex<StateHistory<State>>>,
+        mut certs_reader: CertsReader,
+        mut address_deltas_reader: AddressDeltasReader,
+        mut publisher: DeltaPublisher,
+        params: Arc<StakeDeltaFilterParams>,
+        mut vld: ValidationContext,
+    ) -> Result<()> {
+        loop {
+            let mut state = history.lock().await.get_or_init_with(|| State::new(params.clone()));
+
+            let block_info =
+                match vld.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
+                        state
+                            .handle_certs(&block_info, &tx_cert_msg)
+                            .await
+                            .inspect_err(|e| error!("Messaging handling error: {e}"))
+                            .ok();
+
+                        Some(block_info)
+                    }
+                    RollbackWrapper::Rollback(message) => {
+                        publisher.publish_rollback(message).await?;
+                        None
+                    }
+                };
+
+            match vld.consume_sync(
+                "address deltas",
+                address_deltas_reader.read_with_rollbacks().await,
+            )? {
+                RollbackWrapper::Normal((block_info, deltas)) => {
+                    let msg = state.handle_deltas(&block_info, &deltas);
+                    publisher.publish(&block_info, msg).await?;
+                }
+                RollbackWrapper::Rollback(_) => {}
+            }
+
+            if let Some(block_info) = block_info {
+                state.save()?;
+                history.lock().await.commit(block_info.number, state);
+            }
+        }
     }
 }

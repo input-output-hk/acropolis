@@ -144,10 +144,11 @@ impl PointerCache {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, serde::Deserialize, PartialEq)]
 pub enum CacheMode {
     /// Built-in cache (see builit-in.rs, Address::network is taken as cache name), fails if none.
     #[serde(rename = "predefined")]
+    #[default]
     Predefined,
     /// Read cache, fail if it is not found on disk.
     #[serde(rename = "read")]
@@ -160,7 +161,7 @@ pub enum CacheMode {
     WriteIfAbsent,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OccurrenceInfo {
     block: BlockInfo,
     address_delta: AddressDelta,
@@ -174,7 +175,7 @@ enum OccurrenceInfoKind {
     Mixed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct Tracker {
     occurrence: HashMap<ShelleyAddressPointer, Vec<OccurrenceInfo>>,
 }
