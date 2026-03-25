@@ -80,7 +80,7 @@ impl TxUnpacker {
         };
 
         loop {
-            let mut state = history.lock().await.get_or_init_with(|| State::new());
+            let mut state = history.lock().await.get_or_init_with(State::new);
             let mut current_block: Option<BlockInfo> = None;
 
             let Ok((_, message)) = txs_sub.read().await else {
