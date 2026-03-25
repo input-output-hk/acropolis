@@ -9,7 +9,7 @@
     "protocolParams": {
       "protocolVersion": {
         "minor": 0,
-        "major": 6
+        "major": 5
       },
       "maxTxSize": 16384,
       "maxBlockBodySize": 65536,
@@ -67,22 +67,15 @@
     }
   },
   "utxos": {
-    "944cb825a06993865dcf5d8e80354ed5afa1bcfb2f17b179c139a5bae23594cd#1": {
-      "address": "addr1wy2mjh76em44qurn5x73nzqrxua7ataasftql0u2h6g88lc3gtgpz",
+    "7510385def92ad50602b75e519f733ed2acd248610aa5f920218ce8010acd4b4#0": {
+      "address": "addr1w984jz3aszhqxy466zmy64qv8l6ssrnhy58fm06sz93sq9s9edd6l",
       "value": {
         "lovelace": 3100000,
         "assets": []
       },
-      "datum": null,
-      "script_ref": null
-    },
-    "9a2dbf8fa8ca07b43f5592cd00e7fa5d12d4fdf7bc511a15f05e9657a598e5b4#0": {
-      "address": "addr1vxk5cxgnfqkgzh25ztf6zj5p3h9pnk2mxp3xwe2pzh72rtg0nf5cs",
-      "value": {
-        "lovelace": 5000000,
-        "assets": []
+      "datum": {
+        "Hash": "818ee3db3bbbd04f9f2ce21778cac3ac605802a4fcb00c8b3a58ee2dafc17d46"
       },
-      "datum": null,
       "script_ref": null
     }
   }

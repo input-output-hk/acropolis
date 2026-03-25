@@ -897,6 +897,7 @@ impl State {
                     &utxos,
                     protocol_params.shelley.as_ref(),
                     block.era,
+                    None, // Phase 2 params - TODO: wire GenesisValues + CostModels from module state
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }

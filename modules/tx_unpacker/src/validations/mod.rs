@@ -8,7 +8,6 @@ use pallas::ledger::traverse::{Era as PallasEra, MultiEraTx};
 mod allegra;
 mod alonzo;
 mod babbage;
-pub mod phase2;
 mod shelley;
 mod utils;
 

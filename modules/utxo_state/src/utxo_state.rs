@@ -47,7 +47,7 @@ use fake_immutable_utxo_store::FakeImmutableUTXOStore;
 
 use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
-mod validations;
+pub mod validations;
 
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
@@ -82,6 +82,7 @@ impl UTXOState {
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
+        _phase2_enabled: bool,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         let mut bootstrap_block_processed = false;
@@ -258,6 +259,12 @@ impl UTXOState {
             info!("Creating stake registration updates subscriber on '{topic}'");
         }
 
+        // Phase 2 script validation (disabled by default)
+        let phase2_enabled = config.get_bool("phase2-enabled").unwrap_or(false);
+        if phase2_enabled {
+            info!("Phase 2 script validation enabled");
+        }
+
         let snapshot_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.1.to_string());
@@ -335,6 +342,7 @@ impl UTXOState {
                 pool_registration_updates_subscription,
                 stake_registration_updates_subscription,
                 utxo_validation_publish_topic,
+                phase2_enabled,
                 is_snapshot_mode,
             )
             .await

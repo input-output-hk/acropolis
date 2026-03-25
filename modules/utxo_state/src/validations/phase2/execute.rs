@@ -1,0 +1,469 @@
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+use acropolis_common::{
+    CostModels, ReferenceScript, ScriptHash, ScriptLang, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+};
+use rayon::prelude::*;
+use rayon::ThreadPool;
+use uplc_turbo::{
+    arena::Arena,
+    binder::DeBruijn,
+    bumpalo::Bump,
+    constant::Constant,
+    data::PlutusData,
+    machine::{ExBudget, PlutusVersion},
+    term::Term,
+};
+
+use super::script_context::ScriptContext;
+use acropolis_common::validation::Phase2ValidationError as PhaseTwoError;
+
+// =============================================================================
+// Evaluator Thread Pool
+// =============================================================================
+// Real Plutus scripts (4-12KB) can have deep AST structures that cause stack
+// overflow with the default 2MB stack. We use a dedicated thread pool with
+// larger stacks (16MB) for script evaluation.
+
+/// Stack size for evaluator threads: 16MB.
+const EVALUATOR_STACK_SIZE: usize = 16 * 1024 * 1024;
+
+/// Initial capacity of each arena in the pool: 1MB.
+const ARENA_INITIAL_CAPACITY: usize = 1024 * 1024;
+
+fn evaluator_thread_count() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+}
+
+/// Global thread pool with large stacks for script evaluation.
+static EVALUATOR_POOL: OnceLock<ThreadPool> = OnceLock::new();
+
+fn evaluator_pool() -> &'static ThreadPool {
+    EVALUATOR_POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(evaluator_thread_count())
+            .stack_size(EVALUATOR_STACK_SIZE)
+            .thread_name(|i| format!("plutus-eval-{i}"))
+            .build()
+            .expect("Failed to create evaluator thread pool")
+    })
+}
+
+// =============================================================================
+// Arena Pool
+// =============================================================================
+// Pre-allocated pool of arenas to reduce allocation contention during parallel
+// script evaluation. Each arena is reset and returned to the pool after use.
+
+/// A bounded pool of uplc-turbo Arenas.
+///
+/// All arenas are pre-allocated at creation time. When all arenas are in use,
+/// `acquire()` blocks until one becomes available.
+#[derive(Clone)]
+struct ArenaPool {
+    inner: Arc<ArenaPoolInner>,
+}
+
+struct ArenaPoolInner {
+    arenas: Mutex<VecDeque<Arena>>,
+    condvar: Condvar,
+}
+
+impl ArenaPool {
+    fn new(size: usize, initial_capacity: usize) -> Self {
+        let mut arenas = VecDeque::with_capacity(size);
+        for _ in 0..size {
+            arenas.push_back(Arena::from_bump(Bump::with_capacity(initial_capacity)));
+        }
+        Self {
+            inner: Arc::new(ArenaPoolInner {
+                arenas: Mutex::new(arenas),
+                condvar: Condvar::new(),
+            }),
+        }
+    }
+
+    fn acquire(&self) -> PooledArena {
+        let mut guard = self.inner.arenas.lock().unwrap_or_else(|p| p.into_inner());
+        let arena = loop {
+            if let Some(arena) = guard.pop_front() {
+                break arena;
+            }
+            guard = self.inner.condvar.wait(guard).unwrap_or_else(|p| p.into_inner());
+        };
+        PooledArena {
+            arena: ManuallyDrop::new(arena),
+            pool: self.inner.clone(),
+        }
+    }
+}
+
+/// RAII guard for a pooled arena. Resets and returns the arena on drop.
+///
+/// Returns the arena to the pool when dropped, after calling `reset()` to
+/// clear all allocations. This allows arena reuse without repeated allocations.
+struct PooledArena {
+    arena: ManuallyDrop<Arena>,
+    pool: Arc<ArenaPoolInner>,
+}
+
+impl std::ops::Deref for PooledArena {
+    type Target = Arena;
+    fn deref(&self) -> &Self::Target {
+        &self.arena
+    }
+}
+
+impl Drop for PooledArena {
+    fn drop(&mut self) {
+        // SAFETY: We only take the arena once, here in drop.
+        let mut arena = unsafe { ManuallyDrop::take(&mut self.arena) };
+        arena.reset();
+        let mut pool = self.pool.arenas.lock().unwrap_or_else(|p| p.into_inner());
+        pool.push_back(arena);
+        self.pool.condvar.notify_one();
+    }
+}
+
+/// Global arena pool for script evaluation.
+static ARENA_POOL: OnceLock<ArenaPool> = OnceLock::new();
+
+fn arena_pool() -> &'static ArenaPool {
+    ARENA_POOL.get_or_init(|| ArenaPool::new(evaluator_thread_count(), ARENA_INITIAL_CAPACITY))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn to_common_version(v: PlutusVersion) -> acropolis_common::PlutusVersion {
+    match v {
+        PlutusVersion::V1 => acropolis_common::PlutusVersion::V1,
+        PlutusVersion::V2 => acropolis_common::PlutusVersion::V2,
+        PlutusVersion::V3 => acropolis_common::PlutusVersion::V3,
+    }
+}
+
+// =============================================================================
+// Raw program evaluation (for calibration and benchmarks)
+// =============================================================================
+
+/// Evaluate a raw FLAT-encoded Plutus program without argument application.
+///
+/// Uses the same evaluator thread pool and arena pool as `execute_scripts`.
+/// Intended for calibration and benchmarking only.
+pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<std::time::Duration, String> {
+    let flat_bytes = flat_bytes.to_vec();
+    evaluator_pool().install(|| {
+        let arena = arena_pool().acquire();
+        let program: &uplc_turbo::program::Program<DeBruijn> =
+            uplc_turbo::flat::decode(&arena, &flat_bytes)
+                .map_err(|e| format!("Decode failed: {e:?}"))?;
+        let start = std::time::Instant::now();
+        let result = program.eval(&arena);
+        let elapsed = start.elapsed();
+        result
+            .term
+            .map_err(|e| format!("Evaluation failed: {e:?}"))?;
+        Ok(elapsed)
+    })
+}
+
+// =============================================================================
+// Script table
+// =============================================================================
+
+/// Build a temporary table mapping script hashes to their full `ReferenceScript`.
+///
+/// Scripts come from two sources:
+/// 1. Transaction script witnesses (`tx_deltas.script_witnesses`)
+/// 2. Reference scripts from input/reference_input UTXOs, fetched via `lookup_ref_script`
+pub fn build_scripts_table(
+    tx_deltas: &TxUTxODeltas,
+    utxos: &HashMap<UTxOIdentifier, UTXOValue>,
+    lookup_ref_script: impl Fn(&ScriptHash) -> Option<ReferenceScript>,
+) -> HashMap<ScriptHash, ReferenceScript> {
+    let mut table = HashMap::new();
+
+    // Source 1: script witnesses from the transaction
+    if let Some(witnesses) = &tx_deltas.script_witnesses {
+        for (hash, script) in witnesses {
+            table.insert(*hash, script.clone());
+        }
+    }
+
+    // Source 2: reference scripts from input/reference_input UTXOs
+    for input in tx_deltas.consumes.iter().chain(tx_deltas.reference_inputs.iter()) {
+        if let Some(utxo) = utxos.get(input) {
+            if let Some(script_ref) = &utxo.script_ref {
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    table.entry(script_ref.script_hash)
+                {
+                    if let Some(ref_script) = lookup_ref_script(&script_ref.script_hash) {
+                        e.insert(ref_script);
+                    }
+                }
+            }
+        }
+    }
+
+    table
+}
+
+// =============================================================================
+// Script execution
+// =============================================================================
+
+/// Execute all Plutus scripts for a transaction in parallel.
+///
+/// Uses a dedicated thread pool with 16MB stacks and a pre-allocated arena pool
+/// to handle deep recursion and reduce allocation overhead. Each script gets its
+/// own arena from the pool.
+///
+/// If `is_valid` is false, scripts are expected to fail (per Alonzo spec).
+pub fn execute_scripts(
+    script_contexts: &[ScriptContext<'_>],
+    scripts_table: &HashMap<ScriptHash, ReferenceScript>,
+    cost_models: &CostModels,
+    is_valid: bool,
+) -> Result<(), PhaseTwoError> {
+    if script_contexts.is_empty() {
+        return Ok(());
+    }
+
+    // Run all script evaluations in parallel on the evaluator thread pool
+    let script_result: Result<(), PhaseTwoError> = evaluator_pool().install(|| {
+        script_contexts.par_iter().try_for_each(|sc| {
+            let arena = arena_pool().acquire();
+            evaluate_single_script(&arena, sc, scripts_table, cost_models)
+        })
+    });
+
+    // Handle is_valid flag: if false, expect scripts to fail
+    if is_valid {
+        script_result
+    } else {
+        match script_result {
+            Ok(()) => Err(PhaseTwoError::ValidityStateError),
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// Evaluate a single script execution on the current thread.
+fn evaluate_single_script(
+    arena: &Arena,
+    sc: &ScriptContext<'_>,
+    scripts_table: &HashMap<ScriptHash, ReferenceScript>,
+    cost_models: &CostModels,
+) -> Result<(), PhaseTwoError> {
+    let plutus_version = match &sc.script_lang {
+        ScriptLang::PlutusV1 => PlutusVersion::V1,
+        ScriptLang::PlutusV2 => PlutusVersion::V2,
+        ScriptLang::PlutusV3 => PlutusVersion::V3,
+        ScriptLang::Native => return Ok(()),
+    };
+    let common_version = to_common_version(plutus_version);
+
+    // 1. Build script arguments
+    let args =
+        sc.to_script_args(arena, plutus_version).map_err(PhaseTwoError::ScriptContextError)?;
+
+    // 2. Look up script bytes
+    let ref_script = scripts_table
+        .get(&sc.script_hash)
+        .ok_or(PhaseTwoError::MissingScriptForHash(sc.script_hash))?;
+
+    let cbor_bytes = match ref_script {
+        ReferenceScript::PlutusV1(bytes)
+        | ReferenceScript::PlutusV2(bytes)
+        | ReferenceScript::PlutusV3(bytes) => bytes,
+        ReferenceScript::Native(_) => return Ok(()),
+    };
+
+    // Script bytes are CBOR-wrapped (a CBOR byte string containing FLAT data).
+    let script_bytes: serde_cbor::Value = serde_cbor::from_slice(cbor_bytes).map_err(|e| {
+        PhaseTwoError::UplcMachineError(format!("failed to CBOR-unwrap script bytes: {e}"))
+    })?;
+    let script_bytes = match script_bytes {
+        serde_cbor::Value::Bytes(b) => b,
+        _ => {
+            return Err(PhaseTwoError::UplcMachineError(
+                "script CBOR is not a byte string".into(),
+            ));
+        }
+    };
+
+    // 3. Get cost model for this version
+    let cost_model = match plutus_version {
+        PlutusVersion::V1 => {
+            cost_models.plutus_v1.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
+        }
+        PlutusVersion::V2 => {
+            cost_models.plutus_v2.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
+        }
+        PlutusVersion::V3 => {
+            cost_models.plutus_v3.as_ref().ok_or(PhaseTwoError::MissingCostModel(common_version))?
+        }
+    };
+
+    // 4. Flat-decode the script
+    let mut program = uplc_turbo::flat::decode::<DeBruijn>(arena, &script_bytes)
+        .map_err(|e| PhaseTwoError::FlatDecodingError(e.to_string()))?;
+
+    // 5. Apply arguments to the program
+    for arg in &args {
+        program = program.apply(arena, Term::data(arena, arg));
+    }
+
+    // 6. Evaluate with budget
+    let budget = ExBudget {
+        mem: sc.redeemer.ex_units.mem as i64,
+        cpu: sc.redeemer.ex_units.steps as i64,
+    };
+
+    let result = program.eval_with_params(arena, plutus_version, cost_model.as_vec(), budget);
+
+    // 7. Check result per version
+    match plutus_version {
+        PlutusVersion::V1 | PlutusVersion::V2 => match result.term {
+            Ok(term) => match term {
+                Term::Error => Err(PhaseTwoError::UplcMachineError(
+                    "Error term evaluated".into(),
+                )),
+                _ => Ok(()),
+            },
+            Err(e) => Err(PhaseTwoError::UplcMachineError(e.to_string())),
+        },
+        // Per CIP-117: V3 scripts must evaluate to Constant(Unit)
+        PlutusVersion::V3 => match result.term {
+            Ok(Term::Constant(Constant::Unit)) => Ok(()),
+            Ok(_) => Err(PhaseTwoError::UplcMachineError(
+                "evaluated to a non-unit term".into(),
+            )),
+            Err(e) => Err(PhaseTwoError::UplcMachineError(e.to_string())),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::script_context::{build_script_contexts, TxInfo};
+    use super::*;
+    use crate::test_utils::{to_era, to_pallas_era, TestContext};
+    use crate::validation_fixture;
+    use acropolis_common::genesis_values::GenesisValues;
+    use acropolis_common::{CostModel, CostModels, NetworkId, TxIdentifier};
+    use pallas::ledger::traverse::MultiEraTx;
+    use test_case::test_case;
+
+    fn plutus_v1_cost_model() -> CostModel {
+        CostModel::new(vec![
+            197209, 0, 1, 1, 396231, 621, 0, 1, 150000, 1000, 0, 1, 150000, 32, 2477736, 29175, 4,
+            29773, 100, 29773, 100, 29773, 100, 29773, 100, 29773, 100, 29773, 100, 100, 100,
+            29773, 100, 150000, 32, 150000, 32, 150000, 32, 150000, 1000, 0, 1, 150000, 32, 150000,
+            1000, 0, 8, 148000, 425507, 118, 0, 1, 1, 150000, 1000, 0, 8, 150000, 112536, 247, 1,
+            150000, 10000, 1, 136542, 1326, 1, 1000, 150000, 1000, 1, 150000, 32, 150000, 32,
+            150000, 32, 1, 1, 150000, 1, 150000, 4, 103599, 248, 1, 103599, 248, 1, 145276, 1366,
+            1, 179690, 497, 1, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000,
+            32, 148000, 425507, 118, 0, 1, 1, 61516, 11218, 0, 1, 150000, 32, 148000, 425507, 118,
+            0, 1, 1, 148000, 425507, 118, 0, 1, 1, 2477736, 29175, 4, 0, 82363, 4, 150000, 5000, 0,
+            1, 150000, 32, 197209, 0, 1, 1, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000,
+            32, 150000, 32, 150000, 32, 3345831, 1, 1,
+        ])
+    }
+
+    #[test_case(validation_fixture!(
+        "alonzo",
+        "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
+    ) =>
+        matches Ok(());
+        "alonzo - valid transaction 1 - with Plutus V1 Script"
+    )]
+    #[allow(clippy::result_large_err)]
+    fn phase2_test((ctx, raw_tx, era): (TestContext, Vec<u8>, &str)) -> Result<(), PhaseTwoError> {
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
+        let raw_tx = tx.encode();
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            to_era(era),
+        );
+        let tx_error = mapped_tx.error.as_ref();
+        assert!(tx_error.is_none());
+
+        let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
+
+        let scripts_table = build_scripts_table(&tx_deltas, &ctx.utxos, |_| None);
+
+        let genesis_values = GenesisValues::mainnet();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
+        let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
+        let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
+        let script_contexts =
+            build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
+
+        let cost_models = CostModels {
+            plutus_v1: Some(plutus_v1_cost_model()),
+            plutus_v2: None,
+            plutus_v3: None,
+        };
+
+        execute_scripts(
+            &script_contexts,
+            &scripts_table,
+            &cost_models,
+            tx_deltas.is_valid,
+        )
+    }
+
+    #[test]
+    fn execute_missing_script_returns_error() {
+        let (ctx, raw_tx, era): (TestContext, Vec<u8>, &str) = validation_fixture!(
+            "alonzo",
+            "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
+        );
+        let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
+        let raw_tx = tx.encode();
+        let mapped_tx = acropolis_codec::map_transaction(
+            &tx,
+            &raw_tx,
+            TxIdentifier::default(),
+            NetworkId::Mainnet,
+            to_era(era),
+        );
+        let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
+
+        let genesis_values = GenesisValues::mainnet();
+        let tx_info = TxInfo::new(&tx_deltas, &ctx.utxos, &genesis_values).unwrap();
+        let scripts_needed = crate::utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
+        let scripts_provided = crate::utils::get_scripts_provided(&tx_deltas, &ctx.utxos);
+        let script_contexts =
+            build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
+
+        // Empty scripts table - no scripts available
+        let empty_table = HashMap::new();
+        let cost_models = CostModels {
+            plutus_v1: Some(plutus_v1_cost_model()),
+            plutus_v2: None,
+            plutus_v3: None,
+        };
+
+        let result = execute_scripts(
+            &script_contexts,
+            &empty_table,
+            &cost_models,
+            tx_deltas.is_valid,
+        );
+
+        assert!(
+            matches!(result, Err(PhaseTwoError::MissingScriptForHash(_))),
+            "expected MissingScriptForHash, got: {result:?}"
+        );
+    }
+}
