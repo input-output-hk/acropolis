@@ -30,9 +30,9 @@ pub async fn handle_spdd(
         "epoch" => epoch: Option<u64>,
     });
 
-    let spdd_opt = match epoch {
-        Some(epoch) => match state.get_epoch(epoch) {
-            Some(spdd) => Some(spdd),
+    let spdd = match epoch {
+        Some(epoch) => match locked.get_by_index(epoch) {
+            Some(epoch_state) => epoch_state.get_latest(),
             None => {
                 return Ok(RESTResponse::with_text(
                     404,
@@ -43,17 +43,11 @@ pub async fn handle_spdd(
         None => state.get_latest(),
     };
 
-    if let Some(spdd) = spdd_opt {
-        let spdd: HashMap<String, DelegatedStake> = spdd
-            .iter()
-            .map(|(k, v)| (k.to_bech32().unwrap_or_else(|_| hex::encode(k)), *v))
-            .collect();
+    let spdd: HashMap<String, DelegatedStake> =
+        spdd.iter().map(|(k, v)| (k.to_bech32().unwrap_or_else(|_| hex::encode(k)), *v)).collect();
 
-        match serde_json::to_string(&spdd) {
-            Ok(body) => Ok(RESTResponse::with_json(200, &body)),
-            Err(e) => Err(RESTError::from(e)),
-        }
-    } else {
-        Ok(RESTResponse::with_json(200, "{}"))
+    match serde_json::to_string(&spdd) {
+        Ok(body) => Ok(RESTResponse::with_json(200, &body)),
+        Err(e) => Err(RESTError::from(e)),
     }
 }

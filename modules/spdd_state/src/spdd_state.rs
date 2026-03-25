@@ -15,7 +15,7 @@ use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info, info_span, Instrument};
+use tracing::{info, info_span, Instrument};
 
 mod state;
 use state::State;
@@ -58,8 +58,7 @@ impl SPDDState {
 
                     let span = info_span!("spdd_state.handle", epoch = msg.epoch);
                     async {
-                        state
-                            .apply_spdd_snapshot(msg.epoch, msg.spos.iter().map(|(k, v)| (*k, *v)));
+                        state.apply_spdd_snapshot(msg.spos.iter().map(|(k, v)| (*k, *v)));
                     }
                     .instrument(span)
                     .await;
@@ -123,11 +122,7 @@ impl SPDDState {
                                 let current_opt = history.current();
 
                                 if let Some(current) = current_opt {
-                                    current
-                                        .tick()
-                                        .await
-                                        .inspect_err(|e| error!("SPDD tick error: {e}"))
-                                        .ok();
+                                    current.tick(history.len());
                                 }
                             }
                             .instrument(span)
@@ -165,23 +160,21 @@ impl SPDDState {
 
                 let locked = history.lock().await;
 
-                let Some(state) = locked.current() else {
-                    return Arc::new(Message::StateQueryResponse(StateQueryResponse::SPDD(
-                        SPDDStateQueryResponse::Error(QueryError::storage_disabled("SPDD")),
-                    )));
-                };
-
                 let response = match query {
                     SPDDStateQuery::GetEpochTotalActiveStakes { epoch } => {
-                        SPDDStateQueryResponse::EpochTotalActiveStakes(
-                            state.get_epoch_total_active_stakes(*epoch).unwrap_or(0),
-                        )
+                        // Since this is active stakes we plus 2 to epoch number
+                        let active_stake = match locked.get_by_index(*epoch - 2) {
+                            Some(state) => state.get_total_active_stakes(),
+                            None => 0,
+                        };
+                        SPDDStateQueryResponse::EpochTotalActiveStakes(active_stake)
                     }
                     SPDDStateQuery::GetEpochSPDD { epoch } => SPDDStateQueryResponse::EpochSPDD(
-                        state
-                            .get_epoch(*epoch)
+                        locked
+                            .get_by_index(*epoch)
                             .map(|map| {
-                                map.iter()
+                                map.get_latest()
+                                    .iter()
                                     .map(|(pool_id, stake)| (*pool_id, stake.active))
                                     .collect()
                             })
