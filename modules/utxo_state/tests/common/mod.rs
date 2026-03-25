@@ -50,15 +50,18 @@ impl CalibrationBaseline {
 
 /// Run the calibration workload and return the baseline.
 pub fn calibrate(iterations: usize) -> CalibrationBaseline {
-    assert!(iterations >= 3, "Need at least 3 iterations for a meaningful median");
+    assert!(
+        iterations >= 3,
+        "Need at least 3 iterations for a meaningful median"
+    );
 
     // Warmup run (discarded)
     evaluate_raw_flat_program(CALIBRATION_SCRIPT).expect("Calibration warmup must succeed");
 
     let mut timings: Vec<f64> = Vec::with_capacity(iterations);
     for _ in 0..iterations {
-        let elapsed = evaluate_raw_flat_program(CALIBRATION_SCRIPT)
-            .expect("Calibration script must succeed");
+        let elapsed =
+            evaluate_raw_flat_program(CALIBRATION_SCRIPT).expect("Calibration script must succeed");
         timings.push(elapsed.as_secs_f64() * 1000.0);
     }
 
@@ -68,7 +71,11 @@ pub fn calibrate(iterations: usize) -> CalibrationBaseline {
     let mean = timings.iter().sum::<f64>() / timings.len() as f64;
     let variance = timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / timings.len() as f64;
     let stddev = variance.sqrt();
-    let cv_percent = if mean > 0.0 { (stddev / mean) * 100.0 } else { 0.0 };
+    let cv_percent = if mean > 0.0 {
+        (stddev / mean) * 100.0
+    } else {
+        0.0
+    };
 
     CalibrationBaseline {
         median_ms,

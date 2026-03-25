@@ -165,9 +165,7 @@ pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<std::time::Duratio
         let start = std::time::Instant::now();
         let result = program.eval(&arena);
         let elapsed = start.elapsed();
-        result
-            .term
-            .map_err(|e| format!("Evaluation failed: {e:?}"))?;
+        result.term.map_err(|e| format!("Evaluation failed: {e:?}"))?;
         Ok(elapsed)
     })
 }

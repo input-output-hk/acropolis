@@ -4,8 +4,8 @@ use acropolis_common::{
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use acropolis_common::validation::ScriptContextError;
 use super::to_plutus_data::*;
+use acropolis_common::validation::ScriptContextError;
 
 // ============================================================================
 // Withdrawals
@@ -92,23 +92,19 @@ pub fn encode_voter<'a>(
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match voter {
         Voter::ConstitutionalCommitteeKey(hash) => {
-            let cred =
-                Credential::AddrKeyHash(hash.into_inner()).to_plutus_data(arena, version)?;
+            let cred = Credential::AddrKeyHash(hash.into_inner()).to_plutus_data(arena, version)?;
             Ok(constr(arena, 0, vec![cred]))
         }
         Voter::ConstitutionalCommitteeScript(hash) => {
-            let cred =
-                Credential::ScriptHash(hash.into_inner()).to_plutus_data(arena, version)?;
+            let cred = Credential::ScriptHash(hash.into_inner()).to_plutus_data(arena, version)?;
             Ok(constr(arena, 0, vec![cred]))
         }
         Voter::DRepKey(hash) => {
-            let cred =
-                Credential::AddrKeyHash(hash.into_inner()).to_plutus_data(arena, version)?;
+            let cred = Credential::AddrKeyHash(hash.into_inner()).to_plutus_data(arena, version)?;
             Ok(constr(arena, 1, vec![cred]))
         }
         Voter::DRepScript(hash) => {
-            let cred =
-                Credential::ScriptHash(hash.into_inner()).to_plutus_data(arena, version)?;
+            let cred = Credential::ScriptHash(hash.into_inner()).to_plutus_data(arena, version)?;
             Ok(constr(arena, 1, vec![cred]))
         }
         Voter::StakePoolKey(pool_id) => {
@@ -299,10 +295,7 @@ pub fn encode_proposal_procedure<'a>(
     version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     let deposit = integer(arena, proposal.deposit as i128);
-    let reward_acct = proposal
-        .reward_account
-        .credential
-        .to_plutus_data(arena, version)?;
+    let reward_acct = proposal.reward_account.credential.to_plutus_data(arena, version)?;
     let action = encode_governance_action(&proposal.gov_action, arena, version)?;
     Ok(constr(arena, 0, vec![deposit, reward_acct, action]))
 }

@@ -1,9 +1,9 @@
 use acropolis_common::TxCertificate;
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use acropolis_common::validation::ScriptContextError;
 use super::governance::encode_drep_choice;
 use super::to_plutus_data::*;
+use acropolis_common::validation::ScriptContextError;
 
 pub fn encode_certificate<'a>(
     cert: &TxCertificate,

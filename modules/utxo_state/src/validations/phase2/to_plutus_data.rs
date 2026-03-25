@@ -62,10 +62,7 @@ pub fn constr<'a>(
     PlutusData::constr(arena, tag, alloc_fields(arena, fields))
 }
 
-pub fn list<'a>(
-    arena: &'a Arena,
-    items: Vec<&'a PlutusData<'a>>,
-) -> &'a PlutusData<'a> {
+pub fn list<'a>(arena: &'a Arena, items: Vec<&'a PlutusData<'a>>) -> &'a PlutusData<'a> {
     PlutusData::list(arena, alloc_fields(arena, items))
 }
 

@@ -10,7 +10,11 @@ use common::{
 #[test]
 fn calibration_script_evaluates() {
     let result = evaluate_raw_flat_program(CALIBRATION_SCRIPT);
-    assert!(result.is_ok(), "Calibration script failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Calibration script failed: {:?}",
+        result.err()
+    );
     let elapsed_ms = result.unwrap().as_secs_f64() * 1000.0;
     println!("Calibration script single run: {elapsed_ms:.3}ms");
     assert!(elapsed_ms > 0.0);
@@ -24,8 +28,18 @@ fn calibration_stability() {
     println!("\n=== Calibration Stability Test ===");
     for i in 0..runs {
         let baseline = calibrate(CALIBRATION_ITERATIONS);
-        println!("  Run {}: median={:.3}ms, CV={:.1}%", i + 1, baseline.median_ms, baseline.cv_percent);
-        assert!(baseline.cv_percent < 20.0, "Run {} CV too high: {:.1}%", i + 1, baseline.cv_percent);
+        println!(
+            "  Run {}: median={:.3}ms, CV={:.1}%",
+            i + 1,
+            baseline.median_ms,
+            baseline.cv_percent
+        );
+        assert!(
+            baseline.cv_percent < 20.0,
+            "Run {} CV too high: {:.1}%",
+            i + 1,
+            baseline.cv_percent
+        );
         medians.push(baseline.median_ms);
     }
 
@@ -38,7 +52,10 @@ fn calibration_stability() {
         assert!(
             diff <= tolerance,
             "Run {} median ({:.3}ms) deviates {:.3}ms from overall ({:.3}ms), exceeds ±30%",
-            i + 1, m, diff, overall_median
+            i + 1,
+            m,
+            diff,
+            overall_median
         );
     }
     println!("  Result: PASS — all runs stable\n");
@@ -63,7 +80,10 @@ fn threshold_computation() {
 fn get_calibration_cached() {
     let first = get_calibration();
     let second = get_calibration();
-    assert!(std::ptr::eq(first, second), "get_calibration should return cached result");
+    assert!(
+        std::ptr::eq(first, second),
+        "get_calibration should return cached result"
+    );
     assert!(first.median_ms > 0.0);
     assert!(first.cv_percent < 25.0);
 }

@@ -1,8 +1,8 @@
 use acropolis_common::{NativeAssetsDelta, Value};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use acropolis_common::validation::ScriptContextError;
 use super::to_plutus_data::*;
+use acropolis_common::validation::ScriptContextError;
 
 impl ToPlutusData for Value {
     fn to_plutus_data<'a>(

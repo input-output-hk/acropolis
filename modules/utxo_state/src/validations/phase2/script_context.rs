@@ -1,20 +1,20 @@
 use std::collections::HashMap;
 
+use acropolis_common::genesis_values::GenesisValues;
 use acropolis_common::{
     DatumHash, GovActionId, KeyHash, NativeAssetsDelta, ProposalProcedure, Redeemer,
     RedeemerPointer, RedeemerTag, ScriptHash, ScriptLang, ScriptPurpose, TxCertificateWithPos,
     TxHash, TxUTxODeltas, UTXOValue, UTxOIdentifier, Value, Voter, VotingProcedures, Withdrawal,
 };
-use acropolis_common::genesis_values::GenesisValues;
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 use super::cert::encode_certificate;
-use acropolis_common::validation::ScriptContextError;
 use super::governance::*;
 use super::input::*;
 use super::time_range::*;
 use super::to_plutus_data::*;
 use super::value::encode_mint_value;
+use acropolis_common::validation::ScriptContextError;
 
 /// Complete transaction information record needed for Plutus script evaluation.
 /// Constructed from `TxUTxODeltas` with resolved UTXO inputs.
@@ -56,9 +56,8 @@ impl TxInfo {
         let inputs = sorted_consumes
             .iter()
             .map(|utxo_id| {
-                let utxo_value = utxos
-                    .get(utxo_id)
-                    .ok_or(ScriptContextError::MissingInput(*utxo_id))?;
+                let utxo_value =
+                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(*utxo_id))?;
                 Ok(ResolvedInput {
                     utxo_id: *utxo_id,
                     utxo_value: utxo_value.clone(),
@@ -70,9 +69,8 @@ impl TxInfo {
             .reference_inputs
             .iter()
             .map(|utxo_id| {
-                let utxo_value = utxos
-                    .get(utxo_id)
-                    .ok_or(ScriptContextError::MissingInput(*utxo_id))?;
+                let utxo_value =
+                    utxos.get(utxo_id).ok_or(ScriptContextError::MissingInput(*utxo_id))?;
                 Ok(ResolvedInput {
                     utxo_id: *utxo_id,
                     utxo_value: utxo_value.clone(),
@@ -93,12 +91,9 @@ impl TxInfo {
             })
             .collect();
 
-        let validity = tx_deltas
-            .validity_interval
-            .as_ref()
-            .ok_or(ScriptContextError::MissingValidationData(
-                "validity_interval".into(),
-            ))?;
+        let validity = tx_deltas.validity_interval.as_ref().ok_or(
+            ScriptContextError::MissingValidationData("validity_interval".into()),
+        )?;
         let valid_range = TimeRange::new(
             validity.invalid_before,
             validity.invalid_hereafter,
@@ -112,11 +107,8 @@ impl TxInfo {
         let redeemers = tx_deltas.redeemers.clone().unwrap_or_default();
         let datums = tx_deltas.plutus_data.clone().unwrap_or_default();
 
-        let tx_hash = tx_deltas
-            .produces
-            .first()
-            .map(|out| out.utxo_identifier.tx_hash)
-            .unwrap_or_default();
+        let tx_hash =
+            tx_deltas.produces.first().map(|out| out.utxo_identifier.tx_hash).unwrap_or_default();
 
         Ok(TxInfo {
             inputs,
@@ -131,10 +123,7 @@ impl TxInfo {
             datums,
             tx_id: tx_hash,
             voting_procedures: tx_deltas.voting_procedures.clone(),
-            proposal_procedures: tx_deltas
-                .proposal_procedures
-                .clone()
-                .unwrap_or_default(),
+            proposal_procedures: tx_deltas.proposal_procedures.clone().unwrap_or_default(),
             current_treasury_amount: None,
             treasury_donation: tx_deltas.donation,
             redeemers,
@@ -168,8 +157,7 @@ pub fn build_script_contexts<'a>(
     scripts_needed: &HashMap<RedeemerPointer, ScriptHash>,
     scripts_provided: &HashMap<ScriptHash, ScriptLang>,
 ) -> Result<Vec<ScriptContext<'a>>, ScriptContextError> {
-    let sorted_inputs: Vec<UTxOIdentifier> =
-        tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
+    let sorted_inputs: Vec<UTxOIdentifier> = tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
 
     let mut contexts = Vec::new();
     for redeemer in &tx_info.redeemers {
@@ -195,10 +183,8 @@ pub fn build_script_contexts<'a>(
                 )?;
 
                 let datum = if redeemer.tag == RedeemerTag::Spend {
-                    tx_info
-                        .inputs
-                        .get(redeemer.index as usize)
-                        .and_then(|ri| match &ri.utxo_value.datum {
+                    tx_info.inputs.get(redeemer.index as usize).and_then(|ri| {
+                        match &ri.utxo_value.datum {
                             Some(acropolis_common::Datum::Hash(hash)) => tx_info
                                 .datums
                                 .iter()
@@ -206,7 +192,8 @@ pub fn build_script_contexts<'a>(
                                 .map(|(_, b)| b.clone()),
                             Some(acropolis_common::Datum::Inline(b)) => Some(b.clone()),
                             None => None,
-                        })
+                        }
+                    })
                 } else {
                     None
                 };
@@ -240,8 +227,7 @@ impl ScriptContext<'_> {
 
         match version {
             PlutusVersion::V1 | PlutusVersion::V2 => {
-                let purpose_pd =
-                    encode_script_purpose(&self.purpose, arena, version)?;
+                let purpose_pd = encode_script_purpose(&self.purpose, arena, version)?;
                 let context_pd = constr(arena, 0, vec![tx_info_pd, purpose_pd]);
 
                 let mut args = Vec::new();
@@ -254,14 +240,9 @@ impl ScriptContext<'_> {
             }
             PlutusVersion::V3 => {
                 let redeemer_pd = from_cbor(arena, &self.redeemer.data)?;
-                let script_info_pd = encode_script_info(
-                    &self.purpose,
-                    &self.datum,
-                    arena,
-                    version,
-                )?;
-                let context_pd =
-                    constr(arena, 0, vec![tx_info_pd, redeemer_pd, script_info_pd]);
+                let script_info_pd =
+                    encode_script_info(&self.purpose, &self.datum, arena, version)?;
+                let context_pd = constr(arena, 0, vec![tx_info_pd, redeemer_pd, script_info_pd]);
                 Ok(vec![context_pd])
             }
         }
@@ -338,8 +319,16 @@ fn encode_tx_info<'a>(
             arena,
             0,
             vec![
-                inputs, outputs, fee, mint_pd, certs, wdrls, valid_range, sigs,
-                datums_pd, tx_id,
+                inputs,
+                outputs,
+                fee,
+                mint_pd,
+                certs,
+                wdrls,
+                valid_range,
+                sigs,
+                datums_pd,
+                tx_id,
             ],
         )),
         PlutusVersion::V2 => {
@@ -351,14 +340,23 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd =
-                encode_redeemers_map(&tx_info.redeemers, arena, version)?;
+            let redeemers_pd = encode_redeemers_map(&tx_info.redeemers, arena, version)?;
             Ok(constr(
                 arena,
                 0,
                 vec![
-                    inputs, ref_inputs, outputs, fee, mint_pd, certs, wdrls,
-                    valid_range, sigs, redeemers_pd, datums_pd, tx_id,
+                    inputs,
+                    ref_inputs,
+                    outputs,
+                    fee,
+                    mint_pd,
+                    certs,
+                    wdrls,
+                    valid_range,
+                    sigs,
+                    redeemers_pd,
+                    datums_pd,
+                    tx_id,
                 ],
             ))
         }
@@ -371,8 +369,7 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd =
-                encode_redeemers_map(&tx_info.redeemers, arena, version)?;
+            let redeemers_pd = encode_redeemers_map(&tx_info.redeemers, arena, version)?;
             let votes = match &tx_info.voting_procedures {
                 Some(vp) => encode_voting_procedures(vp, arena, version)?,
                 None => map(arena, vec![]),
@@ -392,19 +389,29 @@ fn encode_tx_info<'a>(
                 arena,
                 0,
                 vec![
-                    inputs, ref_inputs, outputs, fee, mint_pd, certs, wdrls,
-                    valid_range, sigs, redeemers_pd, datums_pd, tx_id, votes,
-                    proposals, treasury, donation,
+                    inputs,
+                    ref_inputs,
+                    outputs,
+                    fee,
+                    mint_pd,
+                    certs,
+                    wdrls,
+                    valid_range,
+                    sigs,
+                    redeemers_pd,
+                    datums_pd,
+                    tx_id,
+                    votes,
+                    proposals,
+                    treasury,
+                    donation,
                 ],
             ))
         }
     }
 }
 
-fn encode_maybe_lovelace<'a>(
-    amount: Option<u64>,
-    arena: &'a Arena,
-) -> &'a PlutusData<'a> {
+fn encode_maybe_lovelace<'a>(amount: Option<u64>, arena: &'a Arena) -> &'a PlutusData<'a> {
     match amount {
         Some(a) => constr(arena, 0, vec![integer(arena, a as i128)]),
         None => constr(arena, 1, vec![]),
@@ -545,7 +552,10 @@ fn build_script_purpose(
     tag: &RedeemerTag,
     index: u32,
     sorted_inputs: &[UTxOIdentifier],
-    mint: &[(acropolis_common::PolicyId, Vec<acropolis_common::NativeAssetDelta>)],
+    mint: &[(
+        acropolis_common::PolicyId,
+        Vec<acropolis_common::NativeAssetDelta>,
+    )],
     withdrawals: &[Withdrawal],
     certificates: &[TxCertificateWithPos],
     voting_procedures: Option<&VotingProcedures>,
@@ -554,29 +564,39 @@ fn build_script_purpose(
     let idx = index as usize;
     match tag {
         RedeemerTag::Spend => {
-            let utxo_id = sorted_inputs
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let utxo_id = sorted_inputs.get(idx).ok_or(ScriptContextError::MissingScript(
+                RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                },
+            ))?;
             Ok(ScriptPurpose::Spending(*utxo_id))
         }
         RedeemerTag::Mint => {
-            let (policy_id, _) = mint
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let (policy_id, _) =
+                mint.get(idx).ok_or(ScriptContextError::MissingScript(RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                }))?;
             Ok(ScriptPurpose::Minting(*policy_id))
         }
         RedeemerTag::Reward => {
-            let withdrawal = withdrawals
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let withdrawal =
+                withdrawals.get(idx).ok_or(ScriptContextError::MissingScript(RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                }))?;
             Ok(ScriptPurpose::Rewarding(
                 withdrawal.address.credential.clone(),
             ))
         }
         RedeemerTag::Cert => {
-            let cert = certificates
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let cert = certificates.get(idx).ok_or(ScriptContextError::MissingScript(
+                RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                },
+            ))?;
             Ok(ScriptPurpose::Certifying(cert.clone()))
         }
         RedeemerTag::Vote => {
@@ -585,18 +605,22 @@ fn build_script_purpose(
             ))?;
             let mut voters: Vec<&Voter> = vp.votes.keys().collect();
             voters.sort();
-            let voter = voters
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let voter =
+                voters.get(idx).ok_or(ScriptContextError::MissingScript(RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                }))?;
             Ok(ScriptPurpose::Voting((*voter).clone()))
         }
         RedeemerTag::Propose => {
             let proposals = proposal_procedures.ok_or(
                 ScriptContextError::MissingValidationData("proposal_procedures".into()),
             )?;
-            let proposal = proposals
-                .get(idx)
-                .ok_or(ScriptContextError::MissingScript(RedeemerPointer { tag: tag.clone(), index }))?;
+            let proposal =
+                proposals.get(idx).ok_or(ScriptContextError::MissingScript(RedeemerPointer {
+                    tag: tag.clone(),
+                    index,
+                }))?;
             Ok(ScriptPurpose::Proposing(proposal.clone()))
         }
     }

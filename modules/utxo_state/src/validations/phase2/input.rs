@@ -1,8 +1,8 @@
 use acropolis_common::{Address, Datum, DatumHash, UTXOValue, UTxOIdentifier, Value};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use acropolis_common::validation::ScriptContextError;
 use super::to_plutus_data::*;
+use acropolis_common::validation::ScriptContextError;
 
 pub struct ResolvedInput {
     pub utxo_id: UTxOIdentifier,
@@ -19,11 +19,7 @@ impl ToPlutusData for UTxOIdentifier {
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let tx_id = constr(
-            arena,
-            0,
-            vec![self.tx_hash.to_plutus_data(arena, version)?],
-        );
+        let tx_id = constr(arena, 0, vec![self.tx_hash.to_plutus_data(arena, version)?]);
         Ok(constr(
             arena,
             0,

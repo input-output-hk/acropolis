@@ -1,11 +1,11 @@
 use acropolis_common::{
-    Address, Credential, ShelleyAddress, ShelleyAddressDelegationPart,
-    ShelleyAddressPaymentPart, StakeAddress,
+    Address, Credential, ShelleyAddress, ShelleyAddressDelegationPart, ShelleyAddressPaymentPart,
+    StakeAddress,
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use acropolis_common::validation::ScriptContextError;
 use super::to_plutus_data::*;
+use acropolis_common::validation::ScriptContextError;
 
 fn encode_staking_credential<'a>(
     delegation: &ShelleyAddressDelegationPart,
