@@ -126,6 +126,34 @@ pub struct CNightSpend {
     pub block_timestamp: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct IndexedBridgeTransfer {
+    pub utxo: UTxOIdentifier,
+    pub block_number: BlockNumber,
+    pub tx_index: u32,
+    pub kind: BridgeTransferKind,
+}
+
+impl IndexedBridgeTransfer {
+    pub fn ordering_key(&self) -> (BlockNumber, u32, u16) {
+        (self.block_number, self.tx_index, self.utxo.output_index)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeTransferKind {
+    Invalid {
+        token_amount: u64,
+    },
+    User {
+        token_amount: u64,
+        recipient: Vec<u8>,
+    },
+    Reserve {
+        token_amount: u64,
+    },
+}
+
 #[derive(Clone)]
 pub struct RegistrationEvent {
     pub block_number: u64,

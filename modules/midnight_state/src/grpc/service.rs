@@ -2,21 +2,26 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crate::{
     grpc::{
+        conversions::{
+            bridge_checkpoint_from_proto, bridge_checkpoint_to_proto, bridge_transfer_to_proto,
+        },
         midnight_state_proto::{
             midnight_state_server::MidnightState, utxo_event, AriadneParametersRequest,
             AriadneParametersResponse, AssetCreatesRequest, AssetCreatesResponse,
             AssetSpendsRequest, AssetSpendsResponse, Block, BlockByHashRequest,
-            BlockByHashResponse, CardanoPosition, CouncilDatumRequest, CouncilDatumResponse,
-            DeregistrationsRequest, DeregistrationsResponse, EpochCandidatesRequest,
-            EpochCandidatesResponse, EpochNonceRequest, EpochNonceResponse, LatestBlockRequest,
-            LatestBlockResponse, LatestStableBlockRequest, LatestStableBlockResponse,
-            RegistrationsRequest, RegistrationsResponse, StableBlockRequest, StableBlockResponse,
-            StakePoolEntry, TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse,
-            UtxoEvent, UtxoEventsRequest, UtxoEventsResponse,
+            BlockByHashResponse, BridgeTransfersRequest, BridgeTransfersResponse, CardanoPosition,
+            CouncilDatumRequest, CouncilDatumResponse, DeregistrationsRequest,
+            DeregistrationsResponse, EpochCandidatesRequest, EpochCandidatesResponse,
+            EpochNonceRequest, EpochNonceResponse, LatestBlockRequest, LatestBlockResponse,
+            LatestStableBlockRequest, LatestStableBlockResponse, RegistrationsRequest,
+            RegistrationsResponse, StableBlockRequest, StableBlockResponse, StakePoolEntry,
+            TechnicalCommitteeDatumRequest, TechnicalCommitteeDatumResponse, UtxoEvent,
+            UtxoEventsRequest, UtxoEventsResponse,
         },
         stats::{RequestStats, RequestStatsSnapshot},
         utxo_events::truncate_by_legacy_tx_capacity,
     },
+    indexes::bridge_state::{BridgeState, BridgeStateError},
     state::{StableBlockWindowBounds, State},
 };
 use acropolis_common::{
@@ -122,6 +127,51 @@ impl MidnightState for MidnightStateService {
 
         Ok(Response::new(AssetSpendsResponse {
             spends: proto_spends,
+        }))
+    }
+
+    async fn get_bridge_transfers(
+        &self,
+        request: Request<BridgeTransfersRequest>,
+    ) -> Result<Response<BridgeTransfersResponse>, Status> {
+        self.stats.bridge_utxos.fetch_add(1, Ordering::Relaxed);
+        let req = request.into_inner();
+        if req.transfer_capacity == 0 {
+            return Err(Status::invalid_argument(
+                "transfer_capacity must be greater than zero",
+            ));
+        }
+
+        let transfer_capacity = usize::try_from(req.transfer_capacity)
+            .map_err(|_| Status::invalid_argument("transfer_capacity too large"))?;
+        let checkpoint = bridge_checkpoint_from_proto(req.checkpoint)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let current_block_hash = BlockHash::try_from(req.current_block_hash)
+            .map_err(|_| Status::invalid_argument("invalid current_block_hash"))?;
+        let current_block = query_block_by_hash_info(&self.context, current_block_hash).await?;
+
+        let transfers = {
+            let history = self.history.lock().await;
+            let state =
+                history.current().ok_or_else(|| Status::internal("state not initialized"))?;
+
+            state
+                .bridge
+                .get_bridge_transfers(checkpoint, current_block.number, transfer_capacity)
+                .map_err(|err| match err {
+                BridgeStateError::UnknownCheckpointUtxo(_) => Status::not_found(err.to_string()),
+            })?
+        };
+
+        let next_checkpoint = bridge_checkpoint_to_proto(BridgeState::next_checkpoint(
+            &transfers,
+            current_block.number,
+            transfer_capacity,
+        ));
+
+        Ok(Response::new(BridgeTransfersResponse {
+            transfers: transfers.into_iter().map(bridge_transfer_to_proto).collect(),
+            next_checkpoint: Some(next_checkpoint),
         }))
     }
 
@@ -882,14 +932,18 @@ mod tests {
     };
     use caryatid_sdk::{async_trait, Context, MessageBus, Subscription};
     use config::Config;
+    use minicbor::{data::Tag, Encoder};
     use tokio::sync::Mutex;
     use tonic::{Code, Request};
 
     use crate::{
         configuration::MidnightConfig,
         grpc::midnight_state_proto::{
-            utxo_event, AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
-            CardanoPosition, EpochCandidatesRequest, LatestStableBlockRequest, UtxoEventsRequest,
+            bridge_checkpoint, bridge_transfer, bridge_transfers_request, utxo_event,
+            AriadneParametersRequest, AssetCreatesRequest, AssetSpendsRequest,
+            BridgeTransfersRequest, CardanoPosition, EpochCandidatesRequest, InvalidBridgeTransfer,
+            LatestStableBlockRequest, ReserveBridgeTransfer, UserBridgeTransfer, UtxoEventsRequest,
+            UtxoId,
         },
         state::State,
     };
@@ -974,6 +1028,44 @@ mod tests {
         ValueMap {
             lovelace: 0,
             assets,
+        }
+    }
+
+    fn test_bridge_config(address: Address, policy: PolicyId, asset: AssetName) -> MidnightConfig {
+        MidnightConfig {
+            illiquid_circulation_supply_validator_address: address,
+            bridge_token_policy_id: policy,
+            bridge_token_asset_name: asset,
+            ..Default::default()
+        }
+    }
+
+    fn test_bridge_delta(
+        address: Address,
+        tx_index: u16,
+        created_utxos: Vec<CreatedUTxOExtended>,
+        spent_utxos: Vec<SpentUTxOExtended>,
+    ) -> ExtendedAddressDelta {
+        let mut received_assets: HashMap<PolicyId, HashMap<AssetName, u64>> = HashMap::new();
+        for created in &created_utxos {
+            for (policy, policy_assets) in &created.value.assets {
+                let entry = received_assets.entry(*policy).or_default();
+                for (asset_name, amount) in policy_assets {
+                    *entry.entry(*asset_name).or_default() += *amount;
+                }
+            }
+        }
+
+        ExtendedAddressDelta {
+            address,
+            tx_identifier: TxIdentifier::new(1, tx_index),
+            spent_utxos,
+            created_utxos,
+            sent: ValueMap::default(),
+            received: ValueMap {
+                lovelace: 0,
+                assets: received_assets,
+            },
         }
     }
 
@@ -1092,6 +1184,31 @@ mod tests {
         }
     }
 
+    fn user_bridge_transfer_datum(recipient: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(1).expect("single field");
+        encoder.bytes(recipient).expect("recipient bytes");
+        encoder.u8(1).expect("version");
+        bytes
+    }
+
+    fn reserve_bridge_transfer_datum() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        let mut encoder = Encoder::new(&mut bytes);
+        encoder.array(3).expect("array");
+        encoder.tag(Tag::new(121)).expect("constr 0");
+        encoder.array(0).expect("empty fields");
+        encoder.tag(Tag::new(122)).expect("constr 1");
+        encoder.array(0).expect("empty fields");
+        encoder.u8(1).expect("version");
+        bytes
+    }
+
     fn service_with_committed_state(state: State, block_number: u64) -> MidnightStateService {
         let mut history = StateHistory::new("midnight-state", StateHistoryStore::Unbounded);
         history.commit(block_number, state);
@@ -1190,6 +1307,230 @@ mod tests {
 
         let err = result.expect_err("hash datum should be rejected");
         assert_eq!(err.code(), Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn should_return_bridge_transfers_with_last_utxo_checkpoint_when_capacity_is_reached() {
+        let bridge_policy = PolicyId::new([1u8; 28]);
+        let bridge_asset = AssetName::new(b"").expect("empty asset name");
+        let bridge_address =
+            Address::from_string("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk")
+                .expect("bridge address");
+        let config = test_bridge_config(bridge_address.clone(), bridge_policy, bridge_asset);
+
+        let mut state = State::new(config);
+        let block = test_block_info(10, 1);
+        let first = UTxOIdentifier::new(TxHash::new([1u8; 32]), 0);
+        let second = UTxOIdentifier::new(TxHash::new([2u8; 32]), 1);
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    test_bridge_delta(
+                        bridge_address.clone(),
+                        0,
+                        vec![CreatedUTxOExtended {
+                            utxo: first,
+                            value: test_value_with_token(bridge_policy, bridge_asset, 10),
+                            datum: Some(Datum::Inline(user_bridge_transfer_datum(&[0xAA; 32]))),
+                        }],
+                        vec![],
+                    ),
+                    test_bridge_delta(
+                        bridge_address,
+                        1,
+                        vec![CreatedUTxOExtended {
+                            utxo: second,
+                            value: test_value_with_token(bridge_policy, bridge_asset, 20),
+                            datum: Some(Datum::Inline(reserve_bridge_transfer_datum())),
+                        }],
+                        vec![],
+                    ),
+                ]),
+            )
+            .expect("bridge deltas should be indexed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0xAB; 32],
+                transfer_capacity: 2,
+            }))
+            .await
+            .expect("bridge transfers should be returned")
+            .into_inner();
+
+        assert_eq!(response.transfers.len(), 2);
+        assert_eq!(
+            response.transfers[0].kind,
+            Some(bridge_transfer::Kind::User(UserBridgeTransfer {
+                token_amount: 10,
+                recipient: vec![0xAA; 32],
+                utxo: Some(UtxoId {
+                    tx_hash: first.tx_hash.to_vec(),
+                    index: first.output_index.into(),
+                }),
+            }))
+        );
+        assert_eq!(
+            response.transfers[1].kind,
+            Some(bridge_transfer::Kind::Reserve(ReserveBridgeTransfer {
+                token_amount: 20,
+            }))
+        );
+        assert_eq!(
+            response
+                .next_checkpoint
+                .and_then(|checkpoint| checkpoint.kind)
+                .expect("expected checkpoint"),
+            bridge_checkpoint::Kind::Utxo(UtxoId {
+                tx_hash: second.tx_hash.to_vec(),
+                index: second.output_index.into(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn should_return_block_checkpoint_when_bridge_response_is_under_capacity() {
+        let bridge_policy = PolicyId::new([2u8; 28]);
+        let bridge_asset = AssetName::new(b"").expect("empty asset name");
+        let bridge_address =
+            Address::from_string("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk")
+                .expect("bridge address");
+        let config = test_bridge_config(bridge_address.clone(), bridge_policy, bridge_asset);
+
+        let mut state = State::new(config);
+        let block = test_block_info(12, 1);
+        let utxo = UTxOIdentifier::new(TxHash::new([3u8; 32]), 0);
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![CreatedUTxOExtended {
+                        utxo,
+                        value: test_value_with_token(bridge_policy, bridge_asset, 15),
+                        datum: Some(Datum::Inline(reserve_bridge_transfer_datum())),
+                    }],
+                    vec![],
+                )]),
+            )
+            .expect("bridge delta should be indexed");
+
+        let service = service_with_committed_state(state, block.number);
+        let response = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0xCD; 32],
+                transfer_capacity: 10,
+            }))
+            .await
+            .expect("bridge transfers should be returned")
+            .into_inner();
+
+        assert_eq!(response.transfers.len(), 1);
+        assert_eq!(
+            response
+                .next_checkpoint
+                .and_then(|checkpoint| checkpoint.kind)
+                .expect("expected checkpoint"),
+            bridge_checkpoint::Kind::BlockNumber(100)
+        );
+    }
+
+    #[tokio::test]
+    async fn should_return_not_found_for_unknown_bridge_checkpoint_utxo() {
+        let service = service_with_committed_state(State::new(MidnightConfig::default()), 1);
+        let result = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::Utxo(UtxoId {
+                    tx_hash: vec![9u8; 32],
+                    index: 0,
+                })),
+                current_block_hash: vec![0xEF; 32],
+                transfer_capacity: 1,
+            }))
+            .await;
+
+        let err = result.expect_err("unknown checkpoint should fail");
+        assert_eq!(err.code(), Code::NotFound);
+    }
+
+    #[tokio::test]
+    async fn should_validate_bridge_request_and_mark_non_inline_datum_invalid() {
+        let bridge_policy = PolicyId::new([4u8; 28]);
+        let bridge_asset = AssetName::new(b"").expect("empty asset name");
+        let bridge_address =
+            Address::from_string("addr_test1wzga9g4tw69twfvpjynyvdyzvpf5f0e88v6hnu9eh9qgdnqaw66xk")
+                .expect("bridge address");
+        let config = test_bridge_config(bridge_address.clone(), bridge_policy, bridge_asset);
+
+        let mut state = State::new(config);
+        let block = test_block_info(14, 1);
+        let utxo = UTxOIdentifier::new(TxHash::new([4u8; 32]), 0);
+
+        state
+            .handle_address_deltas(
+                &block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_bridge_delta(
+                    bridge_address,
+                    0,
+                    vec![CreatedUTxOExtended {
+                        utxo,
+                        value: test_value_with_token(bridge_policy, bridge_asset, 25),
+                        datum: Some(Datum::Hash(DatumHash::new([8u8; 32]))),
+                    }],
+                    vec![],
+                )]),
+            )
+            .expect("bridge delta should be indexed");
+
+        let service = service_with_committed_state(state, block.number);
+        let invalid = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: None,
+                current_block_hash: vec![0x11; 32],
+                transfer_capacity: 1,
+            }))
+            .await
+            .expect_err("missing checkpoint should fail");
+        assert_eq!(invalid.code(), Code::InvalidArgument);
+
+        let invalid = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0x22; 32],
+                transfer_capacity: 0,
+            }))
+            .await
+            .expect_err("zero capacity should fail");
+        assert_eq!(invalid.code(), Code::InvalidArgument);
+
+        let response = service
+            .get_bridge_transfers(Request::new(BridgeTransfersRequest {
+                checkpoint: Some(bridge_transfers_request::Checkpoint::BlockNumber(0)),
+                current_block_hash: vec![0x33; 32],
+                transfer_capacity: 1,
+            }))
+            .await
+            .expect("bridge transfer should be returned")
+            .into_inner();
+
+        assert_eq!(response.transfers.len(), 1);
+        assert_eq!(
+            response.transfers[0].kind,
+            Some(bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+                token_amount: 25,
+                utxo: Some(UtxoId {
+                    tx_hash: utxo.tx_hash.to_vec(),
+                    index: utxo.output_index.into(),
+                }),
+            }))
+        );
     }
 
     #[tokio::test]

@@ -9,6 +9,7 @@ use std::{
 #[derive(Default)]
 pub struct RequestStats {
     pub utxo_events: AtomicU64,
+    pub bridge_utxos: AtomicU64,
     pub council_datum: AtomicU64,
     pub technical_committee_datum: AtomicU64,
     pub ariadne_parameters: AtomicU64,
@@ -25,6 +26,7 @@ pub struct RequestStats {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestStatsSnapshot {
     pub utxo_events: u64,
+    pub bridge_utxos: u64,
     pub council_datum: u64,
     pub technical_committee_datum: u64,
     pub ariadne_parameters: u64,
@@ -40,10 +42,11 @@ impl fmt::Display for RequestStatsSnapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "utxo_events={} council_datum={} technical_committee_datum={} \
+            "utxo_events={} bridge_utxos={} council_datum={} technical_committee_datum={} \
              ariadne_parameters={} block_by_hash={} epoch_nonce={} epoch_candidates={} \
              latest_stable_block={} stable_block_by_hash={} latest_block={}",
             self.utxo_events,
+            self.bridge_utxos,
             self.council_datum,
             self.technical_committee_datum,
             self.ariadne_parameters,
@@ -61,6 +64,7 @@ impl RequestStats {
     pub fn snapshot(&self) -> Option<RequestStatsSnapshot> {
         let current = RequestStatsSnapshot {
             utxo_events: self.utxo_events.load(Ordering::Relaxed),
+            bridge_utxos: self.bridge_utxos.load(Ordering::Relaxed),
             council_datum: self.council_datum.load(Ordering::Relaxed),
             technical_committee_datum: self.technical_committee_datum.load(Ordering::Relaxed),
             ariadne_parameters: self.ariadne_parameters.load(Ordering::Relaxed),

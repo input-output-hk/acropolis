@@ -9,6 +9,7 @@ package midnight_state;
 service MidnightState {
   rpc GetAssetCreates (AssetCreatesRequest) returns (AssetCreatesResponse);
   rpc GetAssetSpends (AssetSpendsRequest) returns (AssetSpendsResponse);
+  rpc GetBridgeTransfers (BridgeTransfersRequest) returns (BridgeTransfersResponse);
   rpc GetRegistrations (RegistrationsRequest) returns (RegistrationsResponse);
   rpc GetDeregistrations (DeregistrationsRequest) returns (DeregistrationsResponse);
   rpc GetTechnicalCommitteeDatum (TechnicalCommitteeDatumRequest) returns (TechnicalCommitteeDatumResponse);
@@ -66,6 +67,44 @@ message AssetSpend {
 }
 message AssetSpendsResponse {
   repeated AssetSpend spends = 1;
+}
+
+message BridgeTransfersRequest {
+  oneof checkpoint {
+    uint64 block_number = 1;
+    UtxoId utxo = 2;
+  }
+  bytes current_block_hash = 3;
+  uint32 transfer_capacity = 4;
+}
+message InvalidBridgeTransfer {
+  uint64 token_amount = 1;
+  UtxoId utxo = 2;
+}
+message UserBridgeTransfer {
+  uint64 token_amount = 1;
+  bytes recipient = 2;
+  UtxoId utxo = 3;
+}
+message ReserveBridgeTransfer {
+  uint64 token_amount = 1;
+}
+message BridgeTransfer {
+  oneof kind {
+    InvalidBridgeTransfer invalid = 1;
+    UserBridgeTransfer user = 2;
+    ReserveBridgeTransfer reserve = 3;
+  }
+}
+message BridgeCheckpoint {
+  oneof kind {
+    uint64 block_number = 1;
+    UtxoId utxo = 2;
+  }
+}
+message BridgeTransfersResponse {
+  repeated BridgeTransfer transfers = 1;
+  BridgeCheckpoint next_checkpoint = 2;
 }
 
 message RegistrationsRequest {

@@ -1,15 +1,83 @@
+use anyhow::anyhow;
+
 use crate::{
     grpc::midnight_state_proto::{
+        bridge_checkpoint, bridge_transfer, bridge_transfers_request,
         AssetCreate as AssetCreateProto, AssetSpend as AssetSpendProto,
-        Deregistration as DeregistrationProto, EpochCandidate, Registration as RegistrationProto,
-        UtxoId,
+        BridgeCheckpoint as BridgeCheckpointProto, BridgeTransfer as BridgeTransferProto,
+        Deregistration as DeregistrationProto, EpochCandidate, InvalidBridgeTransfer,
+        Registration as RegistrationProto, ReserveBridgeTransfer, UserBridgeTransfer, UtxoId,
     },
+    indexes::bridge_state::BridgeCheckpoint,
     types::{
         AssetCreate as AssetCreateInternal, AssetSpend as AssetSpendInternal,
-        Deregistration as DeregistrationInternal, Registration as RegistrationInternal,
-        RegistrationEvent,
+        BridgeTransferKind as BridgeTransferKindInternal, Deregistration as DeregistrationInternal,
+        IndexedBridgeTransfer as IndexedBridgeTransferInternal,
+        Registration as RegistrationInternal, RegistrationEvent,
     },
 };
+use acropolis_common::{TxHash, UTxOIdentifier};
+
+pub fn bridge_checkpoint_from_proto(
+    checkpoint: Option<bridge_transfers_request::Checkpoint>,
+) -> anyhow::Result<BridgeCheckpoint> {
+    match checkpoint {
+        Some(bridge_transfers_request::Checkpoint::BlockNumber(block_number)) => {
+            Ok(BridgeCheckpoint::Block(block_number))
+        }
+        Some(bridge_transfers_request::Checkpoint::Utxo(utxo)) => {
+            Ok(BridgeCheckpoint::Utxo(UTxOIdentifier::new(
+                TxHash::try_from(utxo.tx_hash)
+                    .map_err(|_| anyhow!("invalid bridge checkpoint tx hash"))?,
+                u16::try_from(utxo.index)
+                    .map_err(|_| anyhow!("invalid bridge checkpoint output index"))?,
+            )))
+        }
+        None => Err(anyhow!("missing bridge checkpoint")),
+    }
+}
+
+pub fn bridge_checkpoint_to_proto(checkpoint: BridgeCheckpoint) -> BridgeCheckpointProto {
+    let kind = match checkpoint {
+        BridgeCheckpoint::Block(block_number) => bridge_checkpoint::Kind::BlockNumber(block_number),
+        BridgeCheckpoint::Utxo(utxo) => bridge_checkpoint::Kind::Utxo(UtxoId {
+            tx_hash: utxo.tx_hash.to_vec(),
+            index: utxo.output_index.into(),
+        }),
+    };
+
+    BridgeCheckpointProto { kind: Some(kind) }
+}
+
+pub fn bridge_transfer_to_proto(transfer: IndexedBridgeTransferInternal) -> BridgeTransferProto {
+    let utxo_id = UtxoId {
+        tx_hash: transfer.utxo.tx_hash.to_vec(),
+        index: transfer.utxo.output_index.into(),
+    };
+
+    let kind = match transfer.kind {
+        BridgeTransferKindInternal::Invalid { token_amount } => {
+            bridge_transfer::Kind::Invalid(InvalidBridgeTransfer {
+                token_amount,
+                utxo: Some(utxo_id),
+            })
+        }
+        BridgeTransferKindInternal::User {
+            token_amount,
+            recipient,
+        } => bridge_transfer::Kind::User(UserBridgeTransfer {
+            token_amount,
+            recipient,
+            utxo: Some(utxo_id),
+        }),
+        BridgeTransferKindInternal::Reserve { token_amount } => {
+            bridge_transfer::Kind::Reserve(ReserveBridgeTransfer { token_amount })
+        }
+    };
+
+    BridgeTransferProto { kind: Some(kind) }
+}
+
 impl From<AssetCreateInternal> for AssetCreateProto {
     fn from(c: AssetCreateInternal) -> Self {
         AssetCreateProto {

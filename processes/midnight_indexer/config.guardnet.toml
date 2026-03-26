@@ -45,8 +45,14 @@ address-deltas-topic = "cardano.address.deltas"
 cnight-policy-id = "03cf16101d110dcad9cacb225f0d1e63a8809979e7feb60426995414"
 cnight-asset-name = ""
 
+# Config for bridge ICS asset
+bridge-token-policy-id = "00000000000000000000000000000000000000000000000000000000"
+bridge-token-asset-name = ""
+illiquid-circulation-supply-validator-address = "addr_test1wpxef8ptstemdqcv6gcnydwtf8cu457ly63fusrppuay3wgly9txp"
+
 # Config for Midnight candidates
 mapping-validator-address = "addr_test1wpztklvv6scgyzne56ky0va0x5dmje56lf39eshxdha68rclu8fje"
+committee-candidate-address = "addr_test1wre2lz556a58uz3wy9jk2auahurs5cus2vfj3lpszknr4fsx9l69g"
 auth-token-asset-name = ""
 
 # Config for Midnight governance
