@@ -15,7 +15,7 @@ use acropolis_common::{
         },
     },
     state_history::{StateHistory, StateHistoryStore},
-    NetworkId,
+    BlockStatus, NetworkId,
 };
 use anyhow::{anyhow, bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -410,6 +410,10 @@ impl StakeDeltaFilter {
             let block_info =
                 match vld.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
+                        if block_info.status == BlockStatus::RolledBack {
+                            state = history.lock().await.get_rolled_back_state(block_info.number);
+                        }
+
                         state
                             .handle_certs(&block_info, &tx_cert_msg)
                             .await
