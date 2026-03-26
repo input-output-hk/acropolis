@@ -294,7 +294,7 @@ fn encode_tx_info<'a>(
     };
 
     let wdrls = encode_withdrawals(&tx_info.withdrawals, arena, version)?;
-    let valid_range = encode_time_range(&tx_info.valid_range, arena)?;
+    let valid_range = tx_info.valid_range.to_plutus_data(arena, version)?;
 
     let sigs = {
         let items: Vec<_> = tx_info

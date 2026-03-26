@@ -111,7 +111,17 @@ macro_rules! impl_to_plutus_data_for_uint {
     };
 }
 
-impl_to_plutus_data_for_uint!(u8, u16, u32, u64, usize);
+impl_to_plutus_data_for_uint!(u8, u16, u32, u64, u128, usize);
+
+impl ToPlutusData for bool {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        _version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        Ok(constr(arena, if *self { 1 } else { 0 }, vec![]))
+    }
+}
 
 impl<const N: usize> ToPlutusData for Hash<N> {
     fn to_plutus_data<'a>(
