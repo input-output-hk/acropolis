@@ -24,7 +24,7 @@ use caryatid_sdk::{module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::info;
 
 mod helpers;
 mod queries;
@@ -164,7 +164,9 @@ impl ChainStore {
                 let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
 
                 let mut state = history.lock().await.get_or_init_with(State::new);
-                match ctx.consume_sync("blocks", blocks_reader.read_with_rollbacks().await)? {
+                match ctx
+                    .consume_sync("blocks_reader", blocks_reader.read_with_rollbacks().await)?
+                {
                     RollbackWrapper::Normal((block_info, block)) => {
                         if block_info.status == BlockStatus::RolledBack {
                             let mut history = history.lock().await;
@@ -172,22 +174,27 @@ impl ChainStore {
                             store.rollback(&block_info)?;
                         }
 
-                        if let Err(err) =
-                            State::handle_new_block(&store, block_info.as_ref(), block.as_ref())
-                        {
-                            error!("Could not insert block: {err}");
-                        }
+                        ctx.handle(
+                            "handle_new_block",
+                            State::handle_new_block(&store, block_info.as_ref(), block.as_ref()),
+                        );
 
                         if block_info.new_epoch {
-                            match ctx
-                                .consume_sync("params", params_reader.read_with_rollbacks().await)?
-                            {
+                            match ctx.consume_sync(
+                                "params_reader",
+                                params_reader.read_with_rollbacks().await,
+                            )? {
                                 RollbackWrapper::Normal((_, params)) => {
                                     state.handle_new_params(params.as_ref());
                                 }
                                 RollbackWrapper::Rollback(_) => {}
                             }
                         }
+
+                        if block_info.intent.do_validation() {
+                            ctx.publish().await;
+                        }
+
                         let mut history = history.lock().await;
                         history.commit(block_info.number, state);
                     }

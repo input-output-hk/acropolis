@@ -188,7 +188,7 @@ impl DRepState {
             let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
             let (certs_message, new_epoch) =
-                match &ctx.consume_sync("certs", subs.certs.read_with_rollbacks().await)? {
+                match &ctx.consume_sync("subs.certs", subs.certs.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
                         if blk_inf.status == BlockStatus::RolledBack {
                             state = history.lock().await.get_rolled_back_state(blk_inf.number);
@@ -199,7 +199,7 @@ impl DRepState {
                     }
                     RollbackWrapper::Rollback(msg) => {
                         ctx.handle(
-                            "drep_state_rollback",
+                            "publish_rollback",
                             drep_state_publisher.publish_rollback(msg.clone()).await,
                         );
                         (None, None)
@@ -212,10 +212,16 @@ impl DRepState {
 
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
-                match ctx.consume_sync("params", subs.params.read_with_rollbacks().await)? {
+                match ctx.consume_sync("subs.params", subs.params.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((_, msg)) => {
-                        ctx.handle("params", state.update_protocol_params(&msg.params));
-                        ctx.handle("params", state.update_drep_expirations(new_epoch));
+                        ctx.handle(
+                            "update_protocol_params",
+                            state.update_protocol_params(&msg.params),
+                        );
+                        ctx.handle(
+                            "update_drep_expirations",
+                            state.update_drep_expirations(new_epoch),
+                        );
                     }
                     RollbackWrapper::Rollback(_) => {}
                 }
@@ -231,7 +237,7 @@ impl DRepState {
                 let span = info_span!("drep_state.handle_certs", block = block_info.number);
                 async {
                     ctx.merge(
-                        "certs",
+                        "process_certificates",
                         state
                             .process_certificates(
                                 context.clone(),
@@ -246,7 +252,7 @@ impl DRepState {
                 .await;
             }
 
-            match ctx.consume_sync("gov", subs.gov.read_with_rollbacks().await)? {
+            match ctx.consume_sync("subs.gov", subs.gov.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, gov)) => {
                     let span = info_span!("drep_state.handle_votes", block = blk_info.number);
                     async {
@@ -259,7 +265,7 @@ impl DRepState {
                         }
 
                         ctx.merge(
-                            "gov",
+                            "process_votes",
                             state.process_votes(
                                 &gov.voting_procedures,
                                 blk_info.epoch,
@@ -275,10 +281,12 @@ impl DRepState {
 
             // Commit the new state
             if let Some(block_info) = &ctx.get_current_block_opt() {
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
+
                 history.lock().await.commit(block_info.number, state);
             }
-
-            ctx.publish().await;
         }
     }
 

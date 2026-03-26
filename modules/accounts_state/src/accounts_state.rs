@@ -289,7 +289,7 @@ impl AccountsState {
             // Use certs_message as the synchroniser, but we have to handle it after the
             // epoch things, because they apply to the new epoch, not the last
             let certs_msg = match ctx
-                .consume_sync("certs", certs_reader.read_with_rollbacks().await)?
+                .consume_sync("certs_reader", certs_reader.read_with_rollbacks().await)?
             {
                 RollbackWrapper::Normal((block_info, certs_msg)) => {
                     // Handle rollbacks on this topic only
@@ -325,7 +325,7 @@ impl AccountsState {
                     {
                         Ok((spo_rewards, stake_reward_deltas)) => {
                             ctx.handle(
-                                "spo reward publisher",
+                                "publish_spo_rewards",
                                 spo_rewards_publisher
                                     .publish_spo_rewards(block_info, spo_rewards)
                                     .await,
@@ -333,7 +333,7 @@ impl AccountsState {
                             stake_reward_deltas
                         }
                         Err(e) => {
-                            ctx.handle_error("previous rewards calc", &e);
+                            ctx.handle_error("complete_previous_epoch_rewards_calculation", &e);
                             Vec::new()
                         }
                     }
@@ -359,7 +359,7 @@ impl AccountsState {
                     // state, so applying the subtraction again would double-count.
                     if block_info.is_new_era && block_info.era == Era::Conway && !is_snapshot_mode {
                         ctx.handle(
-                            "remove pointers",
+                            "remove_pointer_address_stake",
                             state.remove_pointer_address_stake(context.clone()).await,
                         );
                     }
@@ -367,7 +367,7 @@ impl AccountsState {
                     let spdd = state.generate_spdd();
                     verifier.verify_spdd(block_info, &spdd);
                     ctx.handle(
-                        "spdd publisher",
+                        "publish_spdd",
                         spo_publisher.publish_spdd(block_info, spdd).await,
                     );
 
@@ -380,7 +380,7 @@ impl AccountsState {
                         let spdd_state = state.dump_spdd_state();
                         // stakes distribution taken at beginning of epoch i is active for epoch + 1
                         ctx.handle(
-                            "store spdd",
+                            "store_spdd",
                             spdd_store
                                 .store_spdd(block_info.epoch + 1, spdd_state)
                                 .map_err(|e| e.into()),
@@ -389,12 +389,12 @@ impl AccountsState {
                 }
 
                 // Handle SPOs
-                match ctx.consume_sync("spo state", spos_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("spos_reader", spos_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, spo_msg)) => {
                         let span =
                             info_span!("account_state.handle_spo_state", block = block_info.number);
                         async {
-                            ctx.handle("spo state", state.handle_spo_state(&spo_msg));
+                            ctx.handle("handle_spo_state", state.handle_spo_state(&spo_msg));
                         }
                         .instrument(span)
                         .await;
@@ -403,14 +403,16 @@ impl AccountsState {
                 }
 
                 // Handle params
-                match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                match ctx
+                    .consume_sync("params_reader", params_reader.read_with_rollbacks().await)?
+                {
                     RollbackWrapper::Normal((block_info, params_msg)) => {
                         let span = info_span!(
                             "account_state.handle_parameters",
                             block = block_info.number
                         );
                         async {
-                            ctx.handle("params", state.handle_parameters(&params_msg));
+                            ctx.handle("handle_parameters", state.handle_parameters(&params_msg));
                         }
                         .instrument(span)
                         .await;
@@ -419,7 +421,7 @@ impl AccountsState {
                 }
 
                 // Handle epoch activity
-                match ctx.consume_sync("epoch activity", ea_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("ea_reader", ea_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, ea_msg)) => {
                         let span = info_span!(
                             "account_state.handle_epoch_activity",
@@ -439,7 +441,7 @@ impl AccountsState {
                                     // publish stake reward deltas
                                     stake_reward_deltas.extend(refund_deltas);
                                     ctx.handle(
-                                        "stake delta publisher",
+                                        "publish_stake_reward_deltas",
                                         stake_reward_deltas_publisher
                                             .publish_stake_reward_deltas(
                                                 &block_info,
@@ -449,13 +451,13 @@ impl AccountsState {
                                     );
                                 }
                                 Err(e) => {
-                                    ctx.handle_error("handle epoch activity", &e);
+                                    ctx.handle_error("handle_epoch_activity", &e);
                                 }
                             }
 
                             let drdd = state.generate_drdd();
                             ctx.handle(
-                                "drdd publisher",
+                                "publish_drdd",
                                 drep_publisher.publish_drdd(&block_info, drdd).await,
                             );
                         }
@@ -467,7 +469,7 @@ impl AccountsState {
 
                 // Handle governance outcomes (enacted/expired proposals) at epoch boundary
                 match ctx.consume_sync(
-                    "gov outcomes",
+                    "governance_outcomes_reader",
                     governance_outcomes_reader.read_with_rollbacks().await,
                 )? {
                     RollbackWrapper::Normal((block_info, outcomes_msg)) => {
@@ -477,7 +479,7 @@ impl AccountsState {
                         );
                         async {
                             ctx.handle(
-                                "handle gov outcomes",
+                                "handle_governance_outcomes",
                                 state.handle_governance_outcomes(&outcomes_msg),
                             );
                         }
@@ -502,11 +504,11 @@ impl AccountsState {
                         &mut ctx,
                     ) {
                         Ok(updates) => ctx.handle(
-                            "stake regs publisher",
+                            "stake_registration_updates_publisher.publish",
                             stake_registration_updates_publisher.publish(block_info, updates).await,
                         ),
                         Err(e) => {
-                            ctx.handle_error("tx certs", &e);
+                            ctx.handle_error("handle_tx_certificates", &e);
                         }
                     }
                 }
@@ -516,7 +518,7 @@ impl AccountsState {
 
             // Handle withdrawals
             match ctx.consume_sync(
-                "withdrawals",
+                "withdrawals_reader",
                 withdrawals_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, withdrawals_msg)) => {
@@ -535,7 +537,7 @@ impl AccountsState {
 
             // Handle stake address deltas
             match ctx.consume_sync(
-                "stake deltas",
+                "stake_deltas_reader",
                 stake_deltas_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas_msg)) => {
@@ -553,7 +555,7 @@ impl AccountsState {
             }
 
             match ctx.consume_sync(
-                "gov procedures",
+                "governance_procedures_reader",
                 governance_procedures_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, procedures)) => {

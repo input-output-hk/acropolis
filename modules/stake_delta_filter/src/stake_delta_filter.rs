@@ -402,13 +402,13 @@ impl StakeDeltaFilter {
         mut address_deltas_reader: AddressDeltasReader,
         mut publisher: DeltaPublisher,
         params: Arc<StakeDeltaFilterParams>,
-        mut vld: ValidationContext,
+        mut ctx: ValidationContext,
     ) -> Result<()> {
         loop {
             let mut state = history.lock().await.get_or_init_with(|| State::new(params.clone()));
 
             let block_info =
-                match vld.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("certs_reader", certs_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
                         if block_info.status == BlockStatus::RolledBack {
                             state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -428,8 +428,8 @@ impl StakeDeltaFilter {
                     }
                 };
 
-            match vld.consume_sync(
-                "address deltas",
+            match ctx.consume_sync(
+                "address_deltas_reader",
                 address_deltas_reader.read_with_rollbacks().await,
             )? {
                 RollbackWrapper::Normal((block_info, deltas)) => {
@@ -442,6 +442,10 @@ impl StakeDeltaFilter {
             if let Some(block_info) = block_info {
                 state.save()?;
                 history.lock().await.commit(block_info.number, state);
+
+                if block_info.intent.do_validation() {
+                    ctx.publish().await;
+                }
             }
         }
     }
