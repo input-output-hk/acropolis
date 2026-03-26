@@ -92,6 +92,16 @@ pub fn from_cbor<'a>(
 // Primitive implementations
 // ============================================================================
 
+impl ToPlutusData for u64 {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        _version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        Ok(integer(arena, *self as i128))
+    }
+}
+
 impl<const N: usize> ToPlutusData for Hash<N> {
     fn to_plutus_data<'a>(
         &self,
@@ -116,6 +126,22 @@ impl ToPlutusData for Credential {
             Credential::ScriptHash(hash) => {
                 let h = hash.to_plutus_data(arena, version)?;
                 Ok(constr(arena, 1, vec![h]))
+            }
+        }
+    }
+}
+
+impl<A: ToPlutusData> ToPlutusData for Option<A> {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        match self {
+            None => Ok(constr(arena, 1, vec![])),
+            Some(data) => {
+                let inner = data.to_plutus_data(arena, version)?;
+                Ok(constr(arena, 0, vec![inner]))
             }
         }
     }

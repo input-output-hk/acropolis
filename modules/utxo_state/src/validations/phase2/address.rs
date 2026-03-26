@@ -7,6 +7,20 @@ use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 use super::to_plutus_data::*;
 use acropolis_common::validation::ScriptContextError;
 
+impl ToPlutusData for ShelleyAddressPaymentPart {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        let cred = match &self {
+            ShelleyAddressPaymentPart::PaymentKeyHash(hash) => Credential::AddrKeyHash(*hash),
+            ShelleyAddressPaymentPart::ScriptHash(hash) => Credential::ScriptHash(*hash),
+        };
+        cred.to_plutus_data(arena, version)
+    }
+}
+
 impl ToPlutusData for ShelleyAddressDelegationPart {
     fn to_plutus_data<'a>(
         &self,
@@ -14,25 +28,27 @@ impl ToPlutusData for ShelleyAddressDelegationPart {
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
         match self {
-            // Just
             ShelleyAddressDelegationPart::StakeKeyHash(hash) => {
-                let addr_hash = Credential::AddrKeyHash(*hash).to_plutus_data(arena, version)?;
-                let cred = constr(arena, 0, vec![addr_hash]);
-                Ok(constr(arena, 0, vec![cred]))
+                let addr_key_cred =
+                    Credential::AddrKeyHash(*hash).to_plutus_data(arena, version)?;
+                let inline_cred = constr(arena, 0, vec![addr_key_cred]);
+                // Some(inline_cred)
+                Ok(constr(arena, 0, vec![inline_cred]))
             }
             ShelleyAddressDelegationPart::ScriptHash(hash) => {
-                let script_hash = Credential::ScriptHash(*hash).to_plutus_data(arena, version)?;
-                let cred = constr(arena, 0, vec![script_hash]);
-                Ok(constr(arena, 0, vec![cred]))
+                let script_cred = Credential::ScriptHash(*hash).to_plutus_data(arena, version)?;
+                let inline_cred = constr(arena, 0, vec![script_cred]);
+                // Some(inline_cred)
+                Ok(constr(arena, 0, vec![inline_cred]))
             }
             ShelleyAddressDelegationPart::Pointer(ptr) => {
                 let staking_ptr = constr(
                     arena,
                     1,
                     vec![
-                        integer(arena, ptr.slot as i128),
-                        integer(arena, ptr.tx_index as i128),
-                        integer(arena, ptr.cert_index as i128),
+                        ptr.slot.to_plutus_data(arena, version)?,
+                        ptr.tx_index.to_plutus_data(arena, version)?,
+                        ptr.cert_index.to_plutus_data(arena, version)?,
                     ],
                 );
                 Ok(constr(arena, 0, vec![staking_ptr]))
@@ -49,11 +65,7 @@ impl ToPlutusData for ShelleyAddress {
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let payment_cred = match &self.payment {
-            ShelleyAddressPaymentPart::PaymentKeyHash(hash) => Credential::AddrKeyHash(*hash),
-            ShelleyAddressPaymentPart::ScriptHash(hash) => Credential::ScriptHash(*hash),
-        };
-        let pay = payment_cred.to_plutus_data(arena, version)?;
+        let pay = self.payment.to_plutus_data(arena, version)?;
         let stake = self.delegation.to_plutus_data(arena, version)?;
         Ok(constr(arena, 0, vec![pay, stake]))
     }

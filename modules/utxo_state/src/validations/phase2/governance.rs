@@ -62,22 +62,24 @@ pub fn encode_withdrawals<'a>(
 // DRepChoice (V3)
 // ============================================================================
 
-pub fn encode_drep_choice<'a>(
-    drep: &DRepChoice,
-    arena: &'a Arena,
-    version: PlutusVersion,
-) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-    match drep {
-        DRepChoice::Key(hash) => {
-            let cred = Credential::AddrKeyHash(*hash).to_plutus_data(arena, version)?;
-            Ok(constr(arena, 0, vec![cred]))
+impl ToPlutusData for DRepChoice {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        match self {
+            DRepChoice::Key(hash) => {
+                let cred = Credential::AddrKeyHash(*hash).to_plutus_data(arena, version)?;
+                Ok(constr(arena, 0, vec![cred]))
+            }
+            DRepChoice::Script(hash) => {
+                let cred = Credential::ScriptHash(*hash).to_plutus_data(arena, version)?;
+                Ok(constr(arena, 0, vec![cred]))
+            }
+            DRepChoice::Abstain => Ok(constr(arena, 1, vec![])),
+            DRepChoice::NoConfidence => Ok(constr(arena, 2, vec![])),
         }
-        DRepChoice::Script(hash) => {
-            let cred = Credential::ScriptHash(*hash).to_plutus_data(arena, version)?;
-            Ok(constr(arena, 0, vec![cred]))
-        }
-        DRepChoice::Abstain => Ok(constr(arena, 1, vec![])),
-        DRepChoice::NoConfidence => Ok(constr(arena, 2, vec![])),
     }
 }
 
