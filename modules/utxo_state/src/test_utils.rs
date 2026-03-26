@@ -76,6 +76,7 @@ where
 pub struct TestContext {
     pub protocol_params: ProtocolParams,
     pub utxos: HashMap<UTxOIdentifier, UTXOValue>,
+    #[allow(dead_code)]
     pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
 }
 
