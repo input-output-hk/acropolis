@@ -1,9 +1,9 @@
 use crate::{
     genesis_values::GenesisValues,
     rational_number::{ChameleonFraction, RationalNumber},
-    BlockHash, BlockVersionData, Committee, Constitution, CostModel, DRepVotingThresholds, Era,
-    ExUnitPrices, ExUnits, GenesisDelegates, HeavyDelegate, NetworkId, PoolId,
-    PoolVotingThresholds, ProtocolConsts,
+    BlockHash, BlockVersionData, Committee, Constitution, CostModel, CostModels,
+    DRepVotingThresholds, Era, ExUnitPrices, ExUnits, GenesisDelegates, HeavyDelegate, NetworkId,
+    PoolId, PoolVotingThresholds, ProtocolConsts,
 };
 use anyhow::{bail, Result};
 use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -50,6 +50,18 @@ impl ProtocolParams {
 
     pub fn max_value_size(&self) -> Option<u64> {
         self.alonzo.as_ref().map(|a| a.max_value_size as u64)
+    }
+
+    pub fn genesis_delegates(&self) -> Option<&GenesisDelegates> {
+        self.shelley.as_ref().map(|s| &s.gen_delegs)
+    }
+
+    pub fn cost_models(&self) -> CostModels {
+        CostModels {
+            plutus_v1: self.alonzo.as_ref().and_then(|a| a.plutus_v1_cost_model.clone()),
+            plutus_v2: self.babbage.as_ref().and_then(|b| b.plutus_v2_cost_model.clone()),
+            plutus_v3: self.conway.as_ref().map(|c| c.plutus_v3_cost_model.clone()),
+        }
     }
 }
 

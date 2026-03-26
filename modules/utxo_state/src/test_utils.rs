@@ -1,8 +1,11 @@
 use std::{collections::HashMap, str::FromStr};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams, Address, Datum, Era, ReferenceScript, ScriptHash, ScriptRef,
-    TxHash, UTXOValue, UTxOIdentifier, Value,
+    protocol_params::{
+        AlonzoParams, BabbageParams, ByronParams, ConwayParams, ProtocolParams, ShelleyParams,
+    },
+    Address, Datum, Era, ReferenceScript, ScriptHash, ScriptRef, TxHash, UTXOValue, UTxOIdentifier,
+    Value,
 };
 use pallas::ledger::traverse::Era as PallasEra;
 
@@ -16,25 +19,70 @@ pub struct UTxOValueJson {
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct TestContextJson {
-    pub shelley_params: ShelleyParams,
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_protocol_params_with_defaults")]
+    pub protocol_params: ProtocolParams,
     pub utxos: HashMap<String, UTxOValueJson>,
     #[serde(default)]
     pub reference_scripts: HashMap<String, ReferenceScript>,
 }
 
+fn deep_merge(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    match (base, overlay) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(overlay_map)) => {
+            for (k, v) in overlay_map {
+                deep_merge(base_map.entry(k).or_insert(serde_json::Value::Null), v);
+            }
+        }
+        (base, overlay) => *base = overlay,
+    }
+}
+
+fn deserialize_protocol_params_with_defaults<'de, D>(
+    deserializer: D,
+) -> Result<ProtocolParams, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    let overlay = serde_json::Value::deserialize(deserializer)?;
+
+    let mut base_params = ProtocolParams::default();
+    if let Some(obj) = overlay.as_object() {
+        if obj.contains_key("shelley") {
+            base_params.shelley = Some(ShelleyParams::default());
+        }
+        if obj.contains_key("alonzo") {
+            base_params.alonzo = Some(AlonzoParams::default());
+        }
+        if obj.contains_key("byron") {
+            base_params.byron = Some(ByronParams::default());
+        }
+        if obj.contains_key("babbage") {
+            base_params.babbage = Some(BabbageParams::default());
+        }
+        if obj.contains_key("conway") {
+            base_params.conway = Some(ConwayParams::default());
+        }
+    }
+
+    let mut base = serde_json::to_value(base_params).map_err(serde::de::Error::custom)?;
+    deep_merge(&mut base, overlay);
+    serde_json::from_value(base).map_err(serde::de::Error::custom)
+}
+
 #[derive(Debug)]
 pub struct TestContext {
-    pub shelley_params: ShelleyParams,
+    pub protocol_params: ProtocolParams,
     pub utxos: HashMap<UTxOIdentifier, UTXOValue>,
-    /// This will be used for test cases of phase 2 validation.
-    #[allow(dead_code)]
     pub reference_scripts: HashMap<ScriptHash, ReferenceScript>,
 }
 
 impl From<TestContextJson> for TestContext {
     fn from(json: TestContextJson) -> Self {
         Self {
-            shelley_params: json.shelley_params,
+            protocol_params: json.protocol_params,
             utxos: json
                 .utxos
                 .iter()
