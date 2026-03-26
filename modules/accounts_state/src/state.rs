@@ -2,12 +2,12 @@
 use crate::monetary::calculate_monetary_change;
 use crate::rewards::{calculate_rewards, RewardsResult};
 use crate::verifier::Verifier;
+use acropolis_common::caryatid::ValidationContext;
 use acropolis_common::epoch_snapshot::EpochSnapshot;
 use acropolis_common::messages::{
     GovernanceProceduresMessage, Message, StateQuery, StateQueryResponse,
 };
 use acropolis_common::queries::accounts::OptimalPoolSizing;
-use acropolis_common::validation::ValidationOutcomes;
 use acropolis_common::{
     certificate::TxCertificateIdentifier,
     math::update_value_with_delta,
@@ -1342,7 +1342,7 @@ impl State {
         stake_address: &StakeAddress,
         deposit: Option<Lovelace>,
         epoch_slot: u64,
-        vld: &mut ValidationOutcomes,
+        ctx: &mut ValidationContext,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Register stake address {stake_address}");
         // Stake addresses can be registered after being used in UTXOs
@@ -1373,7 +1373,10 @@ impl State {
             Some(StakeRegistrationOutcome::Registered(deposit))
         } else {
             // Already registered, validation error
-            vld.push_anyhow(anyhow!("Stake address {stake_address} already registered"));
+            ctx.handle_error(
+                "register_stake_address",
+                &anyhow!("Stake address {stake_address} already registered"),
+            );
             None
         }
     }
@@ -1385,7 +1388,7 @@ impl State {
         stake_address: &StakeAddress,
         refund: Option<Lovelace>,
         epoch_slot: u64,
-        vld: &mut ValidationOutcomes,
+        ctx: &mut ValidationContext,
     ) -> Option<StakeRegistrationOutcome> {
         debug!("Deregister stake address {stake_address}");
 
@@ -1421,9 +1424,11 @@ impl State {
             Some(StakeRegistrationOutcome::Deregistered(refund_amount))
         } else {
             // Already deregistered, validation error
-            vld.push_anyhow(anyhow!(
-                "Stake address {stake_address} already deregistered"
-            ));
+            ctx.handle_error(
+                "deregister_stake_address",
+                &anyhow!("Stake address {stake_address} already deregistered"),
+            );
+
             None
         }
     }
@@ -1505,7 +1510,7 @@ impl State {
         tx_certs_msg: &TxCertificatesMessage,
         epoch_slot: u64,
         era: Era,
-        vld: &mut ValidationOutcomes,
+        ctx: &mut ValidationContext,
     ) -> Result<Vec<StakeRegistrationUpdate>> {
         let mut stake_registration_updates: Vec<StakeRegistrationUpdate> = Vec::new();
 
@@ -1518,7 +1523,7 @@ impl State {
 
             match &tx_cert.cert {
                 TxCertificate::StakeRegistration(reg) => {
-                    if let Some(outcome) = self.register_stake_address(reg, None, epoch_slot, vld) {
+                    if let Some(outcome) = self.register_stake_address(reg, None, epoch_slot, ctx) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
                             outcome,
@@ -1528,7 +1533,7 @@ impl State {
 
                 TxCertificate::StakeDeregistration(dreg) => {
                     if let Some(outcome) =
-                        self.deregister_stake_address(dreg, None, epoch_slot, vld)
+                        self.deregister_stake_address(dreg, None, epoch_slot, ctx)
                     {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1546,7 +1551,7 @@ impl State {
                         &reg.stake_address,
                         Some(reg.deposit),
                         epoch_slot,
-                        vld,
+                        ctx,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1560,7 +1565,7 @@ impl State {
                         &dreg.stake_address,
                         Some(dreg.refund),
                         epoch_slot,
-                        vld,
+                        ctx,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1587,7 +1592,7 @@ impl State {
                         &delegation.stake_address,
                         Some(delegation.deposit),
                         epoch_slot,
-                        vld,
+                        ctx,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1602,7 +1607,7 @@ impl State {
                         &delegation.stake_address,
                         Some(delegation.deposit),
                         epoch_slot,
-                        vld,
+                        ctx,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1617,7 +1622,7 @@ impl State {
                         &delegation.stake_address,
                         Some(delegation.deposit),
                         epoch_slot,
-                        vld,
+                        ctx,
                     ) {
                         stake_registration_updates.push(StakeRegistrationUpdate {
                             cert_identifier,
@@ -1648,37 +1653,35 @@ impl State {
     pub fn handle_withdrawals(
         &mut self,
         withdrawals_msg: &WithdrawalsMessage,
-        vld: &mut ValidationOutcomes,
-    ) -> Result<()> {
+        ctx: &mut ValidationContext,
+    ) {
         for withdrawal in withdrawals_msg.withdrawals.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
             debug!(
                 "Withdrawal: from {}, tx {}, amount {}",
                 withdrawal.address, withdrawal.tx_identifier, withdrawal.value
             );
-            if let Err(e) = stake_addresses.process_withdrawal(withdrawal) {
-                vld.push_anyhow(e);
-            }
+            ctx.handle(
+                "process withdrawal",
+                stake_addresses.process_withdrawal(withdrawal),
+            );
         }
-
-        Ok(())
     }
 
     /// Handle stake deltas
     pub fn handle_stake_deltas(
         &mut self,
         deltas_msg: &StakeAddressDeltasMessage,
-        vld: &mut ValidationOutcomes,
-    ) -> Result<()> {
+        ctx: &mut ValidationContext,
+    ) {
         // Handle deltas
         for delta in deltas_msg.deltas.iter() {
             let mut stake_addresses = self.stake_addresses.lock().unwrap();
-            if let Err(e) = stake_addresses.process_stake_delta(delta) {
-                vld.push_anyhow(e);
-            }
+            ctx.handle(
+                "process stake delta",
+                stake_addresses.process_stake_delta(delta),
+            );
         }
-
-        Ok(())
     }
 
     /// Handle pots
@@ -1810,9 +1813,13 @@ impl State {
 // -- Tests --
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use acropolis_common::crypto::{keyhash_224, keyhash_256};
     use acropolis_common::messages::BootstrapPotDeltas;
+    use acropolis_common::queries::accounts::AccountsStateQueryResponse;
+    use acropolis_common::queries::errors::QueryError;
     use acropolis_common::{
         protocol_params::ConwayParams, rational_number::RationalNumber, Anchor, Committee,
         Constitution, CostModel, DRepVotingThresholds, KeyHash, NetworkId, PoolVotingThresholds,
@@ -1823,6 +1830,8 @@ mod tests {
         Registration, StakeAndVoteDelegation, StakeRegistrationAndStakeAndVoteDelegation,
         StakeRegistrationAndVoteDelegation, TxCertificateWithPos, VoteDelegation,
     };
+    use caryatid_sdk::{async_trait, MessageBus, Subscription};
+    use config::Config;
 
     // Helper to create a StakeAddress from a byte slice
     fn create_address(hash: &[u8]) -> StakeAddress {
@@ -1849,14 +1858,63 @@ mod tests {
     const STAKE_KEY_HASH: [u8; 3] = [0x99, 0x0f, 0x00];
     const DREP_HASH: [u8; 4] = [0xca, 0xfe, 0xd0, 0x0d];
 
+    pub struct DummyBus;
+
+    #[async_trait]
+    impl MessageBus<Message> for DummyBus {
+        async fn publish(&self, _topic: &str, _message: Arc<Message>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn request_timeout(&self) -> Duration {
+            Duration::from_secs(1)
+        }
+
+        async fn request(
+            &self,
+            _topic: &str,
+            _message: Arc<Message>,
+        ) -> anyhow::Result<Arc<Message>> {
+            let response = Message::StateQueryResponse(StateQueryResponse::Accounts(
+                AccountsStateQueryResponse::Error(QueryError::NotImplemented {
+                    query: "unsupported request in tests".to_string(),
+                }),
+            ));
+
+            Ok(Arc::new(response))
+        }
+
+        async fn subscribe(&self, _topic: &str) -> anyhow::Result<Box<dyn Subscription<Message>>> {
+            Err(anyhow::anyhow!("subscriptions not supported in tests"))
+        }
+
+        async fn shutdown(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn create_validation_context() -> ValidationContext {
+        let (_, startup_watch) = tokio::sync::watch::channel(true);
+        ValidationContext::new(
+            &Arc::new(Context {
+                config: Arc::new(Config::default()),
+                message_bus: Arc::new(DummyBus),
+                startup_watch,
+            }),
+            "test_topic",
+            "accounts_state",
+        )
+    }
+
     #[test]
     fn stake_addresses_initialise_to_first_delta_and_increment_subsequently() {
         let mut state = State::default();
         let stake_address = create_address(&STAKE_KEY_HASH);
-        let mut vld = ValidationOutcomes::new();
+
+        let mut ctx = create_validation_context();
 
         // Register first
-        state.register_stake_address(&stake_address, None, 0, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -1873,21 +1931,21 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg, &mut ctx);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 42);
         }
 
-        state.handle_stake_deltas(&msg, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg, &mut ctx);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
             assert_eq!(stake_addresses.get(&stake_address).unwrap().utxo_value, 84);
         }
 
-        vld.as_result().unwrap();
+        ctx.get_validation().as_result().unwrap();
     }
 
     #[test]
@@ -1903,7 +1961,7 @@ mod tests {
     #[test]
     fn spdd_from_delegation_with_utxo_values_and_pledge() {
         let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
+        let mut ctx = create_validation_context();
 
         let spo1 = test_keyhash(0x01).into();
         let spo2 = test_keyhash(0x02).into();
@@ -1951,11 +2009,11 @@ mod tests {
 
         // Delegate
         let addr1 = create_address(&[0x11]);
-        state.register_stake_address(&addr1, None, 0, &mut vld);
+        state.register_stake_address(&addr1, None, 0, &mut ctx);
         state.record_stake_delegation(&addr1, &spo1);
 
         let addr2 = create_address(&[0x12]);
-        state.register_stake_address(&addr2, None, 0, &mut vld);
+        state.register_stake_address(&addr2, None, 0, &mut ctx);
         state.record_stake_delegation(&addr2, &spo2);
 
         // Put some value in
@@ -1968,7 +2026,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg1, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg1, &mut ctx);
 
         let msg2 = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -1979,7 +2037,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg2, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg2, &mut ctx);
 
         // Get the SPDD
         let spdd = state.generate_spdd();
@@ -1990,7 +2048,7 @@ mod tests {
         let stake2 = spdd.get(&spo2).unwrap();
         assert_eq!(stake2.active, 21);
 
-        vld.as_result().unwrap();
+        ctx.get_validation().as_result().unwrap();
     }
 
     #[test]
@@ -2051,14 +2109,14 @@ mod tests {
     #[test]
     fn mir_transfers_to_stake_addresses() {
         let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
+        let mut ctx = create_validation_context();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx);
 
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
@@ -2068,7 +2126,7 @@ mod tests {
                 delta: 99,
             }],
         };
-        state.handle_stake_deltas(&msg, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg, &mut ctx);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2097,20 +2155,20 @@ mod tests {
         let sas = stake_addresses.get(&stake_address).unwrap();
         assert_eq!(sas.utxo_value, 99);
         assert_eq!(sas.rewards, 42);
-        vld.as_result().unwrap();
+        ctx.get_validation().as_result().unwrap();
     }
 
     #[test]
     fn withdrawal_transfers_from_stake_addresses() {
         let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
+        let mut ctx = create_validation_context();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Set up one stake address
-        state.register_stake_address(&stake_address, None, 0, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx);
         let msg = StakeAddressDeltasMessage {
             deltas: vec![StakeAddressDelta {
                 stake_address: stake_address.clone(),
@@ -2120,7 +2178,7 @@ mod tests {
             }],
         };
 
-        state.handle_stake_deltas(&msg, &mut vld).unwrap();
+        state.handle_stake_deltas(&msg, &mut ctx);
 
         {
             let stake_addresses = state.stake_addresses.lock().unwrap();
@@ -2156,25 +2214,25 @@ mod tests {
             }],
         };
 
-        state.handle_withdrawals(&withdrawals, &mut vld).unwrap();
+        state.handle_withdrawals(&withdrawals, &mut ctx);
 
         let stake_addresses = state.stake_addresses.lock().unwrap();
         let sas = stake_addresses.get(&stake_address).unwrap();
         assert_eq!(sas.rewards, 0);
-        vld.as_result().unwrap();
+        ctx.get_validation().as_result().unwrap();
     }
 
     #[test]
     fn mir_not_applied_to_deregistered_account() {
         let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
+        let mut ctx = create_validation_context();
         let stake_address = create_address(&STAKE_KEY_HASH);
 
         // Bootstrap with some in reserves
         state.pots.reserves = 100;
 
         // Register stake address
-        state.register_stake_address(&stake_address, None, 0, &mut vld);
+        state.register_stake_address(&stake_address, None, 0, &mut ctx);
 
         // Queue a MIR for this account
         let mir = MoveInstantaneousReward {
@@ -2184,7 +2242,7 @@ mod tests {
         state.pay_mir(&mir, Era::Shelley);
 
         // Deregister the account BEFORE applying instant rewards (simulates deregistration during epoch)
-        state.deregister_stake_address(&stake_address, None, 100, &mut vld);
+        state.deregister_stake_address(&stake_address, None, 100, &mut ctx);
 
         // Now apply instant rewards at "epoch boundary"
         state.apply_pending_mirs();
@@ -2209,7 +2267,7 @@ mod tests {
     #[test]
     fn drdd_respects_different_delegations() -> Result<()> {
         let mut state = State::default();
-        let mut vld = ValidationOutcomes::new();
+        let mut ctx = create_validation_context();
 
         let drep_addr_cred = DRepCredential::AddrKeyHash(test_keyhash_from_bytes(&DREP_HASH));
         state.dreps.insert(drep_addr_cred.clone(), 1_000_000);
@@ -2292,7 +2350,7 @@ mod tests {
             &TxCertificatesMessage { certificates },
             0,
             Era::Shelley,
-            &mut vld,
+            &mut ctx,
         )?;
 
         let deltas = vec![
@@ -2321,7 +2379,7 @@ mod tests {
                 delta: 100_000,
             },
         ];
-        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut vld)?;
+        state.handle_stake_deltas(&StakeAddressDeltasMessage { deltas }, &mut ctx);
 
         let drdd = state.generate_drdd();
         assert_eq!(
@@ -2333,7 +2391,7 @@ mod tests {
             }
         );
 
-        vld.as_result()
+        ctx.get_validation().as_result()
     }
 
     #[test]
