@@ -895,7 +895,7 @@ impl State {
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
-                    protocol_params.shelley.as_ref(),
+                    protocol_params,
                     block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));

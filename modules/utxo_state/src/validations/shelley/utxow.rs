@@ -155,8 +155,11 @@ mod tests {
         assert!(tx_error.is_none());
 
         let tx_deltas = mapped_tx.convert_to_utxo_deltas(true);
-        let vkey_hashes_needed =
-            utils::get_vkeys_needed(&tx_deltas, &ctx.utxos, Some(&ctx.shelley_params));
+        let vkey_hashes_needed = utils::get_vkeys_needed(
+            &tx_deltas,
+            &ctx.utxos,
+            ctx.protocol_params.genesis_delegates(),
+        );
         let scripts_needed = utils::get_scripts_needed(&tx_deltas, &ctx.utxos);
         let script_hashes_needed = scripts_needed.values().cloned().collect::<HashSet<_>>();
 
