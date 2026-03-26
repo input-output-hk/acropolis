@@ -243,8 +243,7 @@ impl SPOState {
         loop {
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(|| State::new(store_config));
-            let mut ctx =
-                ValidationContext::new(&context, &validation_publish_topic, "governance_state");
+            let mut ctx = ValidationContext::new(&context, &validation_publish_topic, "spo_state");
 
             // Use certs_message as the synchroniser
             let certs_msg = match ctx
@@ -337,7 +336,7 @@ impl SPOState {
                 .await;
             }
 
-            // read from epoch-boundary messages only when it's a new epoch
+            // read from epoch-boundary messages only when it's a new epoch or rollback
             if certs_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
                 if let Some(reader) = spdd_reader.as_mut() {
                     // Handle SPDD
@@ -361,7 +360,7 @@ impl SPOState {
                             span.in_scope(|| {
                                 // update epochs_history
                                 ctx.handle(
-                                    "",
+                                    "handle spo rewards",
                                     epochs_history
                                         .handle_spo_rewards(&block_info, &spo_rewards_message)
                                         .as_result(),
