@@ -4,9 +4,9 @@ use tracing::error;
 use acropolis_common::{
     get_scripts_needed_from_certificates, get_scripts_needed_from_inputs,
     get_scripts_needed_from_mint_burn, get_scripts_needed_from_proposal,
-    get_scripts_needed_from_voting, get_scripts_needed_from_withdrawals,
-    protocol_params::ShelleyParams, KeyHash, RedeemerPointer, ScriptHash, ScriptLang,
-    ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    get_scripts_needed_from_voting, get_scripts_needed_from_withdrawals, GenesisDelegates, KeyHash,
+    RedeemerPointer, ScriptHash, ScriptLang, ShelleyAddressPaymentPart, TxUTxODeltas, UTXOValue,
+    UTxOIdentifier,
 };
 
 /// Get VKey Hashes needed for transaction
@@ -22,7 +22,7 @@ use acropolis_common::{
 pub fn get_vkeys_needed(
     tx_deltas: &TxUTxODeltas,
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    shelley_params: Option<&ShelleyParams>,
+    genesis_delegates: Option<&GenesisDelegates>,
 ) -> HashSet<KeyHash> {
     let TxUTxODeltas {
         consumes: sorted_inputs,
@@ -34,8 +34,6 @@ pub fn get_vkeys_needed(
         ..
     } = tx_deltas;
     let mut vkey_hashes = HashSet::new();
-
-    let genesis_delegs = shelley_params.map(|shelley_params| &shelley_params.gen_delegs);
 
     // for each input, get the required vkey hashes
     for input in sorted_inputs.iter() {
@@ -71,8 +69,8 @@ pub fn get_vkeys_needed(
 
     // for each governance action, get the required vkey hashes
     if let Some(proposal_update) = proposal_update.as_ref() {
-        if let Some(genesis_delegs) = genesis_delegs {
-            vkey_hashes.extend(proposal_update.get_governance_vkey_authors(genesis_delegs));
+        if let Some(genesis_delegates) = genesis_delegates {
+            vkey_hashes.extend(proposal_update.get_governance_vkey_authors(genesis_delegates));
         } else {
             error!("Genesis delegates not found in protocol parameters");
         }

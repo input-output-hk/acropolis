@@ -895,7 +895,7 @@ impl State {
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
-                    protocol_params.shelley.as_ref(),
+                    protocol_params,
                     block.era,
                     None, // Phase 2 params - TODO: wire GenesisValues + CostModels from module state
                 ) {
