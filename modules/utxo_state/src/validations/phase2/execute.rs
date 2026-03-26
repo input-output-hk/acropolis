@@ -342,7 +342,10 @@ fn evaluate_single_script(
             Ok(_) => Err(PhaseTwoError::UplcMachineError(
                 "evaluated to a non-unit term".into(),
             )),
-            Err(e) => Err(PhaseTwoError::UplcMachineError(e.to_string())),
+            Err(e) => {
+                println!("error: {:?}", e);
+                Err(PhaseTwoError::UplcMachineError(e.to_string()))
+            }
         },
     }
 }
@@ -358,28 +361,27 @@ mod tests {
     use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
-    fn plutus_v1_cost_model() -> CostModel {
-        CostModel::new(vec![
-            197209, 0, 1, 1, 396231, 621, 0, 1, 150000, 1000, 0, 1, 150000, 32, 2477736, 29175, 4,
-            29773, 100, 29773, 100, 29773, 100, 29773, 100, 29773, 100, 29773, 100, 100, 100,
-            29773, 100, 150000, 32, 150000, 32, 150000, 32, 150000, 1000, 0, 1, 150000, 32, 150000,
-            1000, 0, 8, 148000, 425507, 118, 0, 1, 1, 150000, 1000, 0, 8, 150000, 112536, 247, 1,
-            150000, 10000, 1, 136542, 1326, 1, 1000, 150000, 1000, 1, 150000, 32, 150000, 32,
-            150000, 32, 1, 1, 150000, 1, 150000, 4, 103599, 248, 1, 103599, 248, 1, 145276, 1366,
-            1, 179690, 497, 1, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000,
-            32, 148000, 425507, 118, 0, 1, 1, 61516, 11218, 0, 1, 150000, 32, 148000, 425507, 118,
-            0, 1, 1, 148000, 425507, 118, 0, 1, 1, 2477736, 29175, 4, 0, 82363, 4, 150000, 5000, 0,
-            1, 150000, 32, 197209, 0, 1, 1, 150000, 32, 150000, 32, 150000, 32, 150000, 32, 150000,
-            32, 150000, 32, 150000, 32, 3345831, 1, 1,
-        ])
-    }
-
     #[test_case(validation_fixture!(
         "alonzo",
         "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
     ) =>
         matches Ok(());
         "alonzo - valid transaction 1 - with Plutus V1 Script"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec"
+    ) =>
+        matches Ok(());
+        "conway - valid transaction 1 - with Plutus V3 Script"
+    )]
+    #[test_case(validation_fixture!(
+        "conway",
+        "332aac636f8476b1a91c0071a445103d8f55309c23bfddaf242732630efcf0ec",
+        "always_fail"
+    ) =>
+        matches Err(PhaseTwoError::UplcMachineError(_));
+        "conway - invalid transaction - with always failed Plutus V3 Script"
     )]
     #[allow(clippy::result_large_err)]
     fn phase2_test((ctx, raw_tx, era): (TestContext, Vec<u8>, &str)) -> Result<(), PhaseTwoError> {
@@ -406,11 +408,7 @@ mod tests {
         let script_contexts =
             build_script_contexts(&tx_info, &scripts_needed, &scripts_provided).unwrap();
 
-        let cost_models = CostModels {
-            plutus_v1: Some(plutus_v1_cost_model()),
-            plutus_v2: None,
-            plutus_v3: None,
-        };
+        let cost_models = ctx.protocol_params.cost_models();
 
         execute_scripts(
             &script_contexts,
@@ -446,11 +444,7 @@ mod tests {
 
         // Empty scripts table - no scripts available
         let empty_table = HashMap::new();
-        let cost_models = CostModels {
-            plutus_v1: Some(plutus_v1_cost_model()),
-            plutus_v2: None,
-            plutus_v3: None,
-        };
+        let cost_models = ctx.protocol_params.cost_models();
 
         let result = execute_scripts(
             &script_contexts,
