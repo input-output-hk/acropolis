@@ -1,7 +1,5 @@
-use acropolis_common::Credential;
+use acropolis_common::{hash::Hash, validation::ScriptContextError, Credential};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
-
-use acropolis_common::validation::ScriptContextError;
 
 /// Trait for converting Acropolis domain types into arena-allocated PlutusData.
 ///
@@ -94,7 +92,7 @@ pub fn from_cbor<'a>(
 // Primitive implementations
 // ============================================================================
 
-impl<const N: usize> ToPlutusData for acropolis_common::hash::Hash<N> {
+impl<const N: usize> ToPlutusData for Hash<N> {
     fn to_plutus_data<'a>(
         &self,
         arena: &'a Arena,
