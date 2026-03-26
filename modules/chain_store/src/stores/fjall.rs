@@ -107,6 +107,7 @@ impl super::Store for FjallStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn rollback(&self, info: &BlockInfo) -> Result<()> {
         let mut batch = self.database.batch();
         let txs = self.blocks.rollback(&mut batch, info)?;
@@ -229,6 +230,7 @@ impl FjallBlockStore {
         );
     }
 
+    #[allow(dead_code)]
     fn rollback(
         &self,
         batch: &mut OwnedWriteBatch,
@@ -357,6 +359,7 @@ impl FjallTXStore {
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 
+    #[allow(dead_code)]
     fn rollback(&self, batch: &mut OwnedWriteBatch, txs: &Vec<TxHash>) -> Result<()> {
         for tx in txs {
             batch.remove(&self.txs, tx.as_ref());
