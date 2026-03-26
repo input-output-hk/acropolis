@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::BlockSink;
-use crate::chain_state::{ChainEvent, ChainState, SpecificPoint, choose_intersect_points};
+use crate::chain_state::{ChainEvent, ChainState, SpecificPoint};
 use crate::configuration::InterfaceConfig;
 use crate::connection::Header;
 use crate::network::{NetworkEvent, PeerId};
@@ -523,7 +523,7 @@ impl ConsensusFlowState {
     }
 
     fn choose_points_for_find_intersect(&self) -> Vec<Point> {
-        choose_intersect_points(&self.published_points)
+        SpecificPoint::choose_intersect_points(&self.published_points)
     }
 
     fn handle_roll_forward(&mut self, peer: PeerId, header: &Header) {
@@ -534,6 +534,14 @@ impl ConsensusFlowState {
 
     fn handle_roll_backward(&mut self, peer: PeerId, point: Point) {
         self.tracker.handle_rollback(peer, &point);
+
+        let rollback_slot = match &point {
+            Point::Specific(slot, _) => *slot,
+            Point::Origin => 0,
+        };
+        while self.published_points.back().is_some_and(|p| p.slot > rollback_slot) {
+            self.published_points.pop_back();
+        }
     }
 
     fn handle_tip(&mut self, peer: PeerId, tip: Point) {
@@ -1129,7 +1137,7 @@ mod tests {
         let bus = Arc::new(MockBus::<Message>::new(&config));
         let (_tx, rx) = watch::channel(true);
         let context = Arc::new(Context::new(config, bus, rx));
-        ConsensusFlowState::new(context, "cardano.consensus.offers".to_string())
+        ConsensusFlowState::new(context, "test.consensus.offers".to_string())
     }
 
     fn hash_for_slot(slot: u64) -> BlockHash {
@@ -1159,12 +1167,12 @@ mod tests {
 
         // Most recent 5 should come first
         if let Point::Specific(slot, _) = &points[0] {
-            assert_eq!(*slot, 10);
+            assert_eq!(*slot, 10); // most recently published
         } else {
             panic!("expected Specific point");
         }
         if let Point::Specific(slot, _) = &points[4] {
-            assert_eq!(*slot, 6);
+            assert_eq!(*slot, 6); // 5th most recent (last in the recent window)
         } else {
             panic!("expected Specific point");
         }
@@ -1246,5 +1254,28 @@ mod tests {
 
         assert_eq!(points.len(), 1);
         assert_eq!(points[0], sync_point);
+    }
+
+    #[test]
+    fn rollback_prunes_published_points() {
+        let mut state = make_test_consensus_state();
+
+        for slot in 1..=10u64 {
+            state.published_points.push_back(SpecificPoint {
+                slot,
+                hash: hash_for_slot(slot),
+            });
+        }
+        assert_eq!(state.published_points.len(), 10);
+
+        let rollback_hash = hash_for_slot(5);
+        state.handle_roll_backward(PEER_1, Point::Specific(5, rollback_hash.to_vec()));
+
+        assert_eq!(
+            state.published_points.len(),
+            5,
+            "published_points should be pruned to slots 1..=5 after rollback to slot 5"
+        );
+        assert_eq!(state.published_points.back().unwrap().slot, 5);
     }
 }

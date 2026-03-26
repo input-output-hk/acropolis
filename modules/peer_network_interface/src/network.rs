@@ -179,7 +179,7 @@ impl NetworkManager {
             .peer_manager
             .as_ref()
             .map(|pm| Duration::from_secs(pm.config().churn_interval_secs))
-            .unwrap_or(Duration::from_secs(600));
+            .unwrap_or(Duration::from_secs(600)); // default to 10 minutes if not configured
 
         let mut churn_ticker = time::interval(churn_interval);
         churn_ticker.tick().await; // skip the immediate first tick
@@ -422,6 +422,8 @@ impl NetworkManager {
         // Disconnect the peer's connection task
         self.flow_handler.handle_disconnect(victim_id, self.peers.keys().next().copied());
 
+        self.rerequest_inflight(victim.reqs);
+
         if let Some(address) = replacement {
             self.promote_reserved_cold_peer(address);
         }
@@ -577,14 +579,7 @@ impl NetworkManager {
         // The next peer is temporary needed for Direct mode flow handler only
         self.flow_handler.handle_disconnect(id, self.peers.keys().next().copied());
 
-        // Re-request any in-flight block fetches from remaining announcers.
-        for (requested_hash, requested_slot) in peer.reqs {
-            if let Some(announcers) =
-                self.flow_handler.block_announcers(requested_slot, requested_hash)
-            {
-                self.request_block(requested_slot, requested_hash, announcers);
-            }
-        }
+        self.rerequest_inflight(peer.reqs);
 
         if self.peer_manager.is_none() {
             // Disabled mode: reconnect with 5s backoff
@@ -651,6 +646,14 @@ impl NetworkManager {
             if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
                 self.request_block(slot, hash, announcers);
                 self.pending_wanted.remove(&(slot, hash));
+            }
+        }
+    }
+
+    fn rerequest_inflight(&mut self, reqs: Vec<(BlockHash, u64)>) {
+        for (hash, slot) in reqs {
+            if let Some(announcers) = self.flow_handler.block_announcers(slot, hash) {
+                self.request_block(slot, hash, announcers);
             }
         }
     }
@@ -739,7 +742,7 @@ mod tests {
     fn test_sink(context: Arc<Context<Message>>) -> BlockSink {
         BlockSink {
             context,
-            topic: "cardano.block.available".to_string(),
+            topic: "test.block.available".to_string(),
             genesis_values: GenesisValues::mainnet(),
             upstream_cache: None,
             last_epoch: None,
@@ -748,23 +751,20 @@ mod tests {
         }
     }
 
-    async fn test_consensus_manager() -> NetworkManager {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
+    fn default_test_cfg() -> InterfaceConfig {
+        InterfaceConfig {
+            block_topic: "test.block.available".to_string(),
             sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
+            genesis_completion_topic: "test.sequence.bootstrapped".to_string(),
+            sync_command_topic: "test.sync.command".to_string(),
             node_addresses: vec![],
             cache_dir: PathBuf::from("/tmp"),
             genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
+            consensus_topic: "test.consensus.offers".to_string(),
+            block_wanted_topic: "test.consensus.wants".to_string(),
             target_peer_count: 15,
             min_hot_peers: 3,
-            peer_sharing_enabled: false,
+            peer_sharing_enabled: true,
             churn_interval_secs: 600,
             peer_sharing_timeout_secs: 10,
             connect_timeout_secs: 15,
@@ -772,8 +772,12 @@ mod tests {
             allow_non_public_peer_addrs: true,
             discovery_interval_secs: 0,
             peer_sharing_cooldown_secs: 0,
-        };
+        }
+    }
 
+    async fn test_manager_from_cfg(cfg: InterfaceConfig) -> NetworkManager {
+        let context = test_context();
+        let (events_sender, events) = mpsc::channel(32);
         let flow_handler = BlockFlowHandler::new(
             &cfg,
             BlockFlowMode::Consensus,
@@ -782,25 +786,32 @@ mod tests {
         )
         .await
         .unwrap();
-
         NetworkManager::new(
-            vec![],
+            cfg.node_addresses.clone(),
             0,
             events,
             events_sender,
             test_sink(context),
             flow_handler,
-            15,
-            3,
-            false,
-            600,
-            10,
-            15,
-            false,
-            true,
-            60,
-            30,
+            cfg.target_peer_count,
+            cfg.min_hot_peers,
+            cfg.peer_sharing_enabled,
+            cfg.churn_interval_secs,
+            cfg.peer_sharing_timeout_secs,
+            cfg.connect_timeout_secs,
+            cfg.ipv6_enabled,
+            cfg.allow_non_public_peer_addrs,
+            cfg.discovery_interval_secs,
+            cfg.peer_sharing_cooldown_secs,
         )
+    }
+
+    async fn test_consensus_manager() -> NetworkManager {
+        test_manager_from_cfg(InterfaceConfig {
+            peer_sharing_enabled: false,
+            ..default_test_cfg()
+        })
+        .await
     }
 
     fn add_test_peer(manager: &mut NetworkManager, peer: PeerId) {
@@ -835,60 +846,13 @@ mod tests {
         // Build NetworkManager with peer_sharing enabled, 1 cold peer, min_hot_peers=1
         // Send PeerEvent::Disconnected for the single hot peer
         // Assert that try_promote_cold_peer was called (cold peer count drops to 0)
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec!["cold.peer.example.com:3001".to_string()],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
+        let mut manager = test_manager_from_cfg(InterfaceConfig {
             min_hot_peers: 1,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
+            ..default_test_cfg()
+        })
+        .await;
 
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
-
-        // Seed a cold peer manually
+        // Seed a cold peer manually (not via node_addresses so no auto-connect happens)
         if let Some(ref mut pm) = manager.peer_manager {
             let hot: HashSet<String> = HashSet::new();
             pm.seed(&["cold.peer.example.com:3001".to_string()], &hot);
@@ -923,58 +887,12 @@ mod tests {
 
     #[tokio::test]
     async fn configured_peer_reconnects_even_when_cold_peer_is_promoted() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
+        let mut manager = test_manager_from_cfg(InterfaceConfig {
             node_addresses: vec!["hot.peer.example.com:3001".to_string()],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
             min_hot_peers: 1,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            cfg.node_addresses.clone(),
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+            ..default_test_cfg()
+        })
+        .await;
 
         if let Some(ref mut pm) = manager.peer_manager {
             let hot: HashSet<String> = HashSet::new();
@@ -1022,58 +940,11 @@ mod tests {
 
     #[tokio::test]
     async fn disabled_mode_skips_all_discovery() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec![],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
-            min_hot_peers: 3,
-            peer_sharing_enabled: false, // disabled
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+        let manager = test_manager_from_cfg(InterfaceConfig {
+            peer_sharing_enabled: false,
+            ..default_test_cfg()
+        })
+        .await;
 
         assert!(
             manager.peer_manager.is_none(),
@@ -1088,58 +959,7 @@ mod tests {
 
     #[tokio::test]
     async fn peers_discovered_event_adds_to_cold_list() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec![],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
-            min_hot_peers: 3,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+        let mut manager = test_manager_from_cfg(default_test_cfg()).await;
 
         let addresses = vec![
             "185.1.2.3:3001".to_string(),
@@ -1168,58 +988,11 @@ mod tests {
 
     #[tokio::test]
     async fn churn_skips_rotation_when_no_cold_peer_is_available() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec![],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
+        let mut manager = test_manager_from_cfg(InterfaceConfig {
             min_hot_peers: 2,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+            ..default_test_cfg()
+        })
+        .await;
 
         // Add 4 hot peers
         for i in 1u64..=4 {
@@ -1236,58 +1009,11 @@ mod tests {
 
     #[tokio::test]
     async fn churn_replaces_hot_peer_when_cold_peer_is_available() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec![],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
+        let mut manager = test_manager_from_cfg(InterfaceConfig {
             min_hot_peers: 2,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+            ..default_test_cfg()
+        })
+        .await;
 
         if let Some(ref mut pm) = manager.peer_manager {
             let hot: HashSet<String> = HashSet::new();
@@ -1320,58 +1046,7 @@ mod tests {
 
     #[tokio::test]
     async fn churn_does_not_demote_at_min_hot_peers() {
-        let context = test_context();
-        let (events_sender, events) = mpsc::channel(32);
-
-        let cfg = InterfaceConfig {
-            block_topic: "cardano.block.available".to_string(),
-            sync_point: SyncPoint::Origin,
-            genesis_completion_topic: "cardano.sequence.bootstrapped".to_string(),
-            sync_command_topic: "cardano.sync.command".to_string(),
-            node_addresses: vec![],
-            cache_dir: std::path::PathBuf::from("/tmp"),
-            genesis_values: None,
-            consensus_topic: "cardano.consensus.offers".to_string(),
-            block_wanted_topic: "cardano.consensus.wants".to_string(),
-            target_peer_count: 15,
-            min_hot_peers: 3,
-            peer_sharing_enabled: true,
-            churn_interval_secs: 600,
-            peer_sharing_timeout_secs: 10,
-            connect_timeout_secs: 15,
-            ipv6_enabled: false,
-            allow_non_public_peer_addrs: true,
-            discovery_interval_secs: 0,
-            peer_sharing_cooldown_secs: 0,
-        };
-
-        let flow_handler = BlockFlowHandler::new(
-            &cfg,
-            BlockFlowMode::Consensus,
-            context.clone(),
-            events_sender.clone(),
-        )
-        .await
-        .unwrap();
-
-        let mut manager = NetworkManager::new(
-            vec![],
-            0,
-            events,
-            events_sender,
-            test_sink(context),
-            flow_handler,
-            cfg.target_peer_count,
-            cfg.min_hot_peers,
-            cfg.peer_sharing_enabled,
-            cfg.churn_interval_secs,
-            cfg.peer_sharing_timeout_secs,
-            cfg.connect_timeout_secs,
-            cfg.ipv6_enabled,
-            cfg.allow_non_public_peer_addrs,
-            cfg.discovery_interval_secs,
-            cfg.peer_sharing_cooldown_secs,
-        );
+        let mut manager = test_manager_from_cfg(default_test_cfg()).await;
 
         // Add exactly min_hot_peers = 3 peers
         for i in 1u64..=3 {
