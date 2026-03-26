@@ -2,16 +2,19 @@
 //! Validate the VRF calculation in the block header
 
 use acropolis_common::{
-    caryatid::SubscriptionExt,
+    caryatid::{RollbackWrapper, ValidationContext},
     configuration::StartupMode,
+    declare_cardano_reader,
     messages::{
-        AccountsBootstrapMessage, CardanoMessage, Message, SnapshotMessage, SnapshotStateMessage,
+        AccountsBootstrapMessage, CardanoMessage, Message, ProtocolParamsMessage, RawBlockMessage,
+        SPOStakeDistributionMessage, SPOStateMessage, SnapshotMessage, SnapshotStateMessage,
+        StateTransitionMessage,
     },
+    protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    validation::ValidationOutcomes,
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
 use config::Config;
 use std::sync::Arc;
@@ -30,20 +33,49 @@ const DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC: (&str, &str) = (
     "bootstrapped-subscribe-topic",
     "cardano.sequence.bootstrapped",
 );
-const DEFAULT_BLOCK_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("block-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
-    "protocol-parameters-subscribe-topic",
-    "cardano.protocol.parameters",
-);
-const DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("epoch-nonce-subscribe-topic", "cardano.epoch.nonce");
-const DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("spo-state-subscribe-topic", "cardano.spo.state");
-const DEFAULT_SPDD_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("spdd-subscribe-topic", "cardano.spo.distribution");
+
 const DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC: (&str, &str) =
     ("snapshot-subscribe-topic", "cardano.snapshot");
+
+declare_cardano_reader!(
+    BlockReader,
+    "block-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
+);
+
+declare_cardano_reader!(
+    ParamsReader,
+    "protocol-parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+
+declare_cardano_reader!(
+    NonceReader,
+    "epoch-nonce-subscribe-topic",
+    "cardano.epoch.nonce",
+    EpochNonce,
+    Option<Nonce>
+);
+
+declare_cardano_reader!(
+    SPDDReader,
+    "spdd-subscribe-topic",
+    "cardano.spo.distribution",
+    SPOStakeDistribution,
+    SPOStakeDistributionMessage
+);
+
+declare_cardano_reader!(
+    SPOReader,
+    "spo-state-subscribe-topic",
+    "cardano.spo.state",
+    SPOState,
+    SPOStateMessage
+);
 
 /// Block VRF Validator module
 #[module(
@@ -113,11 +145,11 @@ impl BlockVrfValidator {
         context: Arc<Context<Message>>,
         history: Arc<Mutex<StateHistory<State>>>,
         mut bootstrapped_subscription: Box<dyn Subscription<Message>>,
-        mut block_subscription: Box<dyn Subscription<Message>>,
-        mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
-        mut epoch_nonce_subscription: Box<dyn Subscription<Message>>,
-        mut spo_state_subscription: Box<dyn Subscription<Message>>,
-        mut spdd_subscription: Box<dyn Subscription<Message>>,
+        mut block_reader: BlockReader,
+        mut params_reader: ParamsReader,
+        mut nonce_reader: NonceReader,
+        mut spo_reader: SPOReader,
+        mut spdd_reader: SPDDReader,
         snapshot_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_vrf_validation_topic: String,
     ) -> Result<()> {
@@ -137,126 +169,94 @@ impl BlockVrfValidator {
         if let Some(snapshot_subscription) = snapshot_subscription {
             Self::wait_for_bootstrap(history.clone(), snapshot_subscription).await?;
         } else {
-            let (_, protocol_parameters_msg) = protocol_parameters_subscription.read().await?;
-            match protocol_parameters_msg.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, params)) => {
                     let mut state = history.lock().await.get_or_init_with(State::new);
-                    state.handle_protocol_parameters(msg);
+                    state.handle_protocol_parameters(&params);
                     history.lock().await.commit(block_info.number, state);
                 }
-                _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
             }
         }
 
         loop {
+            let mut ctx = ValidationContext::new(
+                &context,
+                &publish_vrf_validation_topic,
+                "block_vrf_validator",
+            );
+
             // Get a mutable state
             let mut state = history.lock().await.get_or_init_with(State::new);
-            let mut current_block: Option<BlockInfo> = None;
 
-            let (_, message) = block_subscription.read_ignoring_rollbacks().await?;
-            match message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockAvailable(block_msg))) => {
-                    // handle rollback here
+            let block_msg = match ctx
+                .consume_sync("block available", block_reader.read_with_rollbacks().await)?
+            {
+                RollbackWrapper::Normal((block_info, block_msg)) => {
                     if block_info.status == BlockStatus::RolledBack {
                         state = history.lock().await.get_rolled_back_state(block_info.number);
                     }
-                    current_block = Some(block_info.clone());
-                    let is_new_epoch = block_info.new_epoch && block_info.epoch > 0;
+                    Some((block_info, block_msg.header.clone()))
+                }
+                RollbackWrapper::Rollback(_) => None,
+            };
 
-                    if is_new_epoch {
-                        // read epoch boundary messages
-                        let protocol_parameters_message_f = protocol_parameters_subscription.read();
-                        let epoch_nonce_message_f = epoch_nonce_subscription.read();
-
-                        let (_, protocol_parameters_msg) = protocol_parameters_message_f.await?;
-                        let span = info_span!(
-                            "block_vrf_validator.handle_protocol_parameters",
-                            epoch = block_info.epoch
-                        );
-                        span.in_scope(|| match protocol_parameters_msg.as_ref() {
-                            Message::Cardano((block_info, CardanoMessage::ProtocolParams(msg))) => {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_protocol_parameters(msg);
-                            }
-                            _ => error!("Unexpected message type: {protocol_parameters_msg:?}"),
-                        });
-
-                        let (_, epoch_nonce_msg) = epoch_nonce_message_f.await?;
-                        let span = info_span!(
-                            "block_vrf_validator.handle_epoch_nonce",
-                            epoch = block_info.epoch
-                        );
-                        span.in_scope(|| match epoch_nonce_msg.as_ref() {
-                            Message::Cardano((
-                                block_info,
-                                CardanoMessage::EpochNonce(active_nonce),
-                            )) => {
-                                Self::check_sync(&current_block, block_info);
-                                state.handle_epoch_nonce(active_nonce);
-                            }
-                            _ => error!("Unexpected message type: {epoch_nonce_msg:?}"),
-                        });
-
-                        let (_, spo_state_msg) =
-                            spo_state_subscription.read_ignoring_rollbacks().await?;
-                        let (_, spdd_msg) = spdd_subscription.read_ignoring_rollbacks().await?;
-                        let span = info_span!(
-                            "block_vrf_validator.handle_new_snapshot",
-                            epoch = block_info.epoch
-                        );
-                        span.in_scope(|| match (spo_state_msg.as_ref(), spdd_msg.as_ref()) {
-                            (
-                                Message::Cardano((
-                                    block_info_1,
-                                    CardanoMessage::SPOState(spo_state_msg),
-                                )),
-                                Message::Cardano((
-                                    block_info_2,
-                                    CardanoMessage::SPOStakeDistribution(spdd_msg),
-                                )),
-                            ) => {
-                                Self::check_sync(&current_block, block_info_1);
-                                Self::check_sync(&current_block, block_info_2);
-                                state.handle_new_snapshot(spo_state_msg, spdd_msg);
-                            }
-                            _ => {
-                                error!("Unexpected message type: {spo_state_msg:?} or {spdd_msg:?}")
-                            }
-                        });
+            if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {
+                // read epoch boundary messages
+                match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, params)) => {
+                        state.handle_protocol_parameters(&params);
                     }
+                    RollbackWrapper::Rollback(_) => {}
+                }
 
-                    if block_info.intent.do_validation() {
-                        let span =
-                            info_span!("block_vrf_validator.validate", block = block_info.number);
-                        async {
-                            let mut validation_outcomes = ValidationOutcomes::new();
-                            if let Err(e) = state.validate(block_info, &block_msg.header, &genesis)
-                            {
-                                validation_outcomes.push(*e);
-                            }
+                match ctx.consume_sync("nonce", nonce_reader.read_with_rollbacks().await)? {
+                    RollbackWrapper::Normal((_, active_nonce)) => {
+                        state.handle_epoch_nonce(&active_nonce);
+                    }
+                    RollbackWrapper::Rollback(_) => {}
+                }
 
-                            validation_outcomes
-                                .publish(
-                                    &context,
-                                    "block_vrf_validator",
-                                    &publish_vrf_validation_topic,
-                                    block_info,
-                                )
-                                .await
-                                .unwrap_or_else(|e| {
-                                    error!("Failed to publish VRF validation: {e}")
-                                });
-                        }
-                        .instrument(span)
-                        .await;
+                let spo_state_msg =
+                    match ctx.consume_sync("spo state", spo_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((_, spo_state)) => Some(spo_state),
+                        RollbackWrapper::Rollback(_) => None,
+                    };
+
+                let spdd_msg =
+                    match ctx.consume_sync("SPDD", spdd_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((_, spdd_msg)) => Some(spdd_msg),
+                        RollbackWrapper::Rollback(_) => None,
+                    };
+
+                if let Some(spo_state_msg) = spo_state_msg {
+                    if let Some(spdd_msg) = spdd_msg {
+                        state.handle_new_snapshot(&spo_state_msg, &spdd_msg);
                     }
                 }
-                _ => error!("Unexpected message type: {message:?}"),
             }
 
-            // Commit the new state
-            if let Some(block_info) = current_block {
+            if let Some((block_info, block_header)) = block_msg.as_ref() {
+                if block_info.intent.do_validation() {
+                    let span =
+                        info_span!("block_vrf_validator.validate", block = block_info.number);
+                    async {
+                        ctx.handle(
+                            "vrf",
+                            state
+                                .validate(block_info, block_header, &genesis)
+                                .map_err(anyhow::Error::from),
+                        );
+                    }
+                    .instrument(span)
+                    .await;
+                }
+
+                // Commit the new state and publish validation outcomes
                 history.lock().await.commit(block_info.number, state);
+                ctx.publish().await;
             }
         }
     }
@@ -273,30 +273,6 @@ impl BlockVrfValidator {
             .get_string(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_BOOTSTRAPPED_SUBSCRIBE_TOPIC.1.to_string());
         info!("Creating subscriber for bootstrapped on '{bootstrapped_subscribe_topic}'");
-        let protocol_parameters_subscribe_topic = config
-            .get_string(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating subscriber for protocol parameters on '{protocol_parameters_subscribe_topic}'");
-
-        let block_subscribe_topic = config
-            .get_string(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCK_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating block subscription on '{block_subscribe_topic}'");
-
-        let epoch_nonce_subscribe_topic = config
-            .get_string(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_NONCE_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating epoch nonce subscription on '{epoch_nonce_subscribe_topic}'");
-
-        let spo_state_subscribe_topic = config
-            .get_string(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SPO_STATE_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating spo state subscription on '{spo_state_subscribe_topic}'");
-
-        let spdd_subscribe_topic = config
-            .get_string(DEFAULT_SPDD_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_SPDD_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating spdd subscription on '{spdd_subscribe_topic}'");
 
         let snapshot_subscribe_topic = config
             .get_string(DEFAULT_SNAPSHOT_SUBSCRIBE_TOPIC.0)
@@ -311,12 +287,12 @@ impl BlockVrfValidator {
             None
         };
         let bootstrapped_subscription = context.subscribe(&bootstrapped_subscribe_topic).await?;
-        let protocol_parameters_subscription =
-            context.subscribe(&protocol_parameters_subscribe_topic).await?;
-        let block_subscription = context.subscribe(&block_subscribe_topic).await?;
-        let epoch_nonce_subscription = context.subscribe(&epoch_nonce_subscribe_topic).await?;
-        let spo_state_subscription = context.subscribe(&spo_state_subscribe_topic).await?;
-        let spdd_subscription = context.subscribe(&spdd_subscribe_topic).await?;
+
+        let block_reader = BlockReader::new(&context, &config).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
+        let nonce_reader = NonceReader::new(&context, &config).await?;
+        let spo_reader = SPOReader::new(&context, &config).await?;
+        let spdd_reader = SPDDReader::new(&context, &config).await?;
 
         // state history
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -331,11 +307,11 @@ impl BlockVrfValidator {
                 context_run,
                 history,
                 bootstrapped_subscription,
-                block_subscription,
-                protocol_parameters_subscription,
-                epoch_nonce_subscription,
-                spo_state_subscription,
-                spdd_subscription,
+                block_reader,
+                params_reader,
+                nonce_reader,
+                spo_reader,
+                spdd_reader,
                 snapshot_subscription,
                 validation_vrf_publisher_topic,
             )
@@ -344,18 +320,5 @@ impl BlockVrfValidator {
         });
 
         Ok(())
-    }
-
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
     }
 }

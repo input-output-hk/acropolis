@@ -275,13 +275,11 @@ impl State {
         true
     }
 
-    fn handle_new_epoch(
-        &mut self,
-        block: &BlockInfo,
-        vld: &mut ValidationOutcomes,
-    ) -> Arc<Message> {
+    fn handle_new_epoch(&mut self, block: &BlockInfo) -> (Arc<Message>, ValidationOutcomes) {
         self.epoch = block.epoch;
         debug!(epoch = self.epoch, "New epoch");
+
+        let mut vld = ValidationOutcomes::new();
 
         // Flatten into vector of registrations, before retirement so retiring ones
         // are still included **
@@ -309,14 +307,16 @@ impl State {
             }
         }
 
-        Arc::new(Message::Cardano((
+        let msg = Arc::new(Message::Cardano((
             block.clone(),
             CardanoMessage::SPOState(SPOStateMessage {
                 epoch: block.epoch - 1,
                 spos, // Note - list captured at ** before creation and deletion
                 retired_spos,
             }),
-        )))
+        )));
+
+        (msg, vld)
     }
 
     fn handle_pool_registration(
@@ -395,13 +395,13 @@ impl State {
 
     fn handle_pool_retirement(
         &mut self,
-        vld: &mut ValidationOutcomes,
         block: &BlockInfo,
         ret: &PoolRetirement,
         tx_identifier: &TxIdentifier,
         cert_index: &u64,
-    ) -> Option<PoolRegistrationUpdate> {
+    ) -> (Option<PoolRegistrationUpdate>, ValidationOutcomes) {
         let mut pool_registration_update = None;
+        let mut vld = ValidationOutcomes::new();
         debug!(
             "SPO {} wants to retire at the end of epoch {} (cert in block number {}, tx {tx_identifier})",
             ret.operator, ret.epoch, block.number
@@ -457,7 +457,7 @@ impl State {
             }
         }
 
-        pool_registration_update
+        (pool_registration_update, vld)
     }
 
     fn register_stake_address(&mut self, stake_address: &StakeAddress) {
@@ -562,10 +562,9 @@ impl State {
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
     ) -> Result<(Option<Arc<Message>>, Arc<Message>)> {
-        let mut vld = ValidationOutcomes::new();
-        let res = self.handle_tx_certs(block, tx_certs_msg, &mut vld)?;
+        let (msg_1, msg_2, vld) = self.handle_tx_certs(block, tx_certs_msg);
         vld.as_result()?;
-        Ok(res)
+        Ok((msg_1, msg_2))
     }
 
     /// Handle TxCertificates with SPO registrations / de-registrations
@@ -575,12 +574,15 @@ impl State {
         &mut self,
         block: &BlockInfo,
         tx_certs_msg: &TxCertificatesMessage,
-        vld: &mut ValidationOutcomes,
-    ) -> Result<(Option<Arc<Message>>, Arc<Message>)> {
+    ) -> (Option<Arc<Message>>, Arc<Message>, ValidationOutcomes) {
+        let mut outcomes = ValidationOutcomes::new();
+
         let mut maybe_message: Option<Arc<Message>> = None;
         if block.epoch > self.epoch {
+            let (msg, mut vld) = self.handle_new_epoch(block);
             // handle new epoch
-            maybe_message = Some(self.handle_new_epoch(block, vld));
+            maybe_message = Some(msg);
+            outcomes.merge(&mut vld);
         }
 
         let mut pool_registration_updates: Vec<PoolRegistrationUpdate> = Vec::new();
@@ -598,14 +600,19 @@ impl State {
                     ));
                 }
                 TxCertificate::PoolRetirement(ret) => {
-                    if let Some(delta) = self.handle_pool_retirement(
-                        vld,
+                    match self.handle_pool_retirement(
                         block,
                         ret,
                         &tx_cert.tx_identifier,
                         &tx_cert.cert_index,
                     ) {
-                        pool_registration_updates.push(delta);
+                        (Some(delta), mut vld) => {
+                            pool_registration_updates.push(delta);
+                            outcomes.merge(&mut vld);
+                        }
+                        (None, mut vld) => {
+                            outcomes.merge(&mut vld);
+                        }
                     }
                 }
 
@@ -654,7 +661,7 @@ impl State {
                 updates: pool_registration_updates,
             }),
         )));
-        Ok((maybe_message, pool_registration_updates_message))
+        (maybe_message, pool_registration_updates_message, outcomes)
     }
 
     pub fn handle_governance(

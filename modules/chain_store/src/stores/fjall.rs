@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use config::Config;
 use fjall::{Database, Keyspace, OwnedWriteBatch};
 
-use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
+use crate::stores::{extract_tx_hashes, Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
     database: Database,
@@ -107,7 +107,6 @@ impl super::Store for FjallStore {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn rollback(&self, info: &BlockInfo) -> Result<()> {
         let mut batch = self.database.batch();
         let txs = self.blocks.rollback(&mut batch, info)?;
@@ -230,7 +229,6 @@ impl FjallBlockStore {
         );
     }
 
-    #[allow(dead_code)]
     fn rollback(
         &self,
         batch: &mut OwnedWriteBatch,
@@ -241,21 +239,24 @@ impl FjallBlockStore {
         let epoch_slot_start = epoch_slot_key(rollback_block.epoch, rollback_block.epoch_slot);
 
         let mut tx_hashes = Vec::new();
+        // Collect `tx_hashes` from `blocks` and remove entries >= `rollback_block.number`
         for block in self.block_hashes_by_number.range(number_start..) {
             let (key, value) = block.into_inner()?;
             if let Some(block) = self.blocks.get(&value)? {
                 let decoded: Block = minicbor::decode(&block)?;
-                tx_hashes.extend(super::extract_tx_hashes(&decoded.bytes)?);
+                tx_hashes.extend(extract_tx_hashes(&decoded.bytes)?);
             }
             batch.remove(&self.block_hashes_by_number, key);
             batch.remove(&self.blocks, value);
         }
 
+        // Remove entries >= `rollback_block.slot` from `block_hashes_by_slot`
         for res in self.block_hashes_by_slot.range(slot_start..) {
             let key = res.key()?;
             batch.remove(&self.block_hashes_by_slot, key);
         }
 
+        // Remove entries >= `{rollback_block.epoch}{rollback_block.epoch_slot}` from `block_hashes_by_epoch_slot`
         for res in self.block_hashes_by_epoch_slot.range(epoch_slot_start..) {
             let key = res.key()?;
             batch.remove(&self.block_hashes_by_epoch_slot, key);
@@ -359,7 +360,6 @@ impl FjallTXStore {
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 
-    #[allow(dead_code)]
     fn rollback(&self, batch: &mut OwnedWriteBatch, txs: &Vec<TxHash>) -> Result<()> {
         for tx in txs {
             batch.remove(&self.txs, tx.as_ref());

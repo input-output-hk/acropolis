@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams,
+    protocol_params::ProtocolParams,
     validation::{Phase1ValidationError, TransactionValidationError},
     Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
     TxUTxODeltas, UTXOValue, UTxOIdentifier,
@@ -18,7 +18,7 @@ pub fn validate_tx(
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    shelley_params: Option<&ShelleyParams>,
+    protocol_params: &ProtocolParams,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
@@ -29,7 +29,8 @@ pub fn validate_tx(
         utxos,
     );
 
-    let vkey_hashes_needed = utils::get_vkeys_needed(tx_deltas, utxos, shelley_params);
+    let vkey_hashes_needed =
+        utils::get_vkeys_needed(tx_deltas, utxos, protocol_params.genesis_delegates());
     let scripts_needed = utils::get_scripts_needed(tx_deltas, utxos);
     let script_hashes_needed = scripts_needed.values().copied().collect::<HashSet<_>>();
 
