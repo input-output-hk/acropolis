@@ -535,7 +535,7 @@ impl MidnightState for MidnightStateService {
         )
         .await?;
 
-        let block_proto = block_info_opt.map(block_info_to_proto).transpose()?;
+        let block_proto = block_info_opt.map(Block::try_from).transpose()?;
 
         Ok(Response::new(StableBlockResponse { block: block_proto }))
     }
@@ -558,7 +558,7 @@ impl MidnightState for MidnightStateService {
         let block_info_opt =
             query_latest_stable_block_as_of(&self.context, req.stability_offset, &window).await?;
 
-        let block_proto = block_info_opt.map(block_info_to_proto).transpose()?;
+        let block_proto = block_info_opt.map(Block::try_from).transpose()?;
 
         Ok(Response::new(LatestStableBlockResponse {
             block: block_proto,
@@ -571,11 +571,12 @@ impl MidnightState for MidnightStateService {
     ) -> Result<Response<LatestBlockResponse>, Status> {
         self.stats.latest_block.fetch_add(1, Ordering::Relaxed);
 
-        let block_info = query_block_by_tip_offset(&self.context, 0)
-            .await?
+        let block_info = query_latest_block(&self.context)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("No blocks available"))?;
 
-        let block_proto = block_info_to_proto(block_info)?;
+        let block_proto = Block::try_from(block_info)?;
 
         Ok(Response::new(LatestBlockResponse {
             block: Some(block_proto),
@@ -583,12 +584,11 @@ impl MidnightState for MidnightStateService {
     }
 }
 
-async fn query_block_by_tip_offset(
+async fn query_latest_block(
     context: &Arc<Context<Message>>,
-    offset: u32,
-) -> Result<Option<BlockInfo>, Status> {
+) -> Result<Option<BlockInfo>, QueryError> {
     let msg = Arc::new(Message::StateQuery(StateQuery::Blocks(
-        BlocksStateQuery::GetBlockByTipOffset { offset },
+        BlocksStateQuery::GetLatestBlock,
     )));
 
     query_state(
@@ -597,18 +597,20 @@ async fn query_block_by_tip_offset(
         msg,
         |message| match message {
             Message::StateQueryResponse(StateQueryResponse::Blocks(
-                BlocksStateQueryResponse::BlockByTipOffset(block_info),
-            )) => Ok(block_info),
+                BlocksStateQueryResponse::LatestBlock(block_info),
+            )) => Ok(Some(block_info)),
+            Message::StateQueryResponse(StateQueryResponse::Blocks(
+                BlocksStateQueryResponse::Error(QueryError::NotFound { .. }),
+            )) => Ok(None),
             Message::StateQueryResponse(StateQueryResponse::Blocks(
                 BlocksStateQueryResponse::Error(e),
             )) => Err(e),
             _ => Err(QueryError::internal_error(
-                "Unexpected message type while retrieving block info",
+                "Unexpected message type while retrieving latest block",
             )),
         },
     )
     .await
-    .map_err(|e| Status::internal(e.to_string()))
 }
 
 async fn query_block_by_hash_info(
@@ -739,18 +741,6 @@ fn stable_block_window(
     }
 }
 
-#[allow(clippy::result_large_err)]
-fn block_info_to_proto(block: BlockInfo) -> Result<Block, Status> {
-    Ok(Block {
-        block_number: u32::try_from(block.number)
-            .map_err(|_| Status::internal("block number overflow"))?,
-        block_hash: block.hash.to_vec(),
-        epoch_number: u32::try_from(block.epoch).map_err(|_| Status::internal("epoch overflow"))?,
-        slot_number: block.slot,
-        block_timestamp_unix: block.timestamp,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -826,11 +816,11 @@ mod tests {
                         SPDDStateQueryResponse::EpochSPDD(Vec::new()),
                     ))
                 }
-                Message::StateQuery(StateQuery::Blocks(
-                    BlocksStateQuery::GetBlockByTipOffset { .. },
-                )) => Message::StateQueryResponse(StateQueryResponse::Blocks(
-                    BlocksStateQueryResponse::BlockByTipOffset(Some(query_block_info(100, 8))),
-                )),
+                Message::StateQuery(StateQuery::Blocks(BlocksStateQuery::GetLatestBlock)) => {
+                    Message::StateQueryResponse(StateQueryResponse::Blocks(
+                        BlocksStateQueryResponse::LatestBlock(query_block_info(100, 8)),
+                    ))
+                }
                 Message::StateQuery(StateQuery::Blocks(BlocksStateQuery::GetBlockByHash {
                     block_hash,
                 })) => Message::StateQueryResponse(StateQueryResponse::Blocks(

@@ -112,6 +112,10 @@ impl super::Store for FjallStore {
         tip == 0 || block_number > tip
     }
 
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        self.blocks.get_earliest_block_number()
+    }
+
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         self.blocks.get_by_hash(hash)
     }
@@ -232,6 +236,16 @@ impl FjallBlockStore {
             return Ok(None);
         };
         self.get_by_hash(&hash)
+    }
+
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        let Some(entry) = self.block_hashes_by_number.iter().next() else {
+            return Ok(None);
+        };
+        let key = entry.key()?;
+        let key = <[u8; 8]>::try_from(key.as_ref())
+            .map_err(|_| anyhow!("Invalid stored block number key"))?;
+        Ok(Some(u64::from_be_bytes(key)))
     }
 
     fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {

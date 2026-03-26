@@ -359,44 +359,6 @@ pub fn handle_blocks_query(
                 },
             ))
         }
-        BlocksStateQuery::GetBlockByTipOffset { offset } => {
-            let tip = store.get_tip_block_number();
-
-            let stable_block_number = tip.saturating_sub(*offset as u64);
-
-            let block_opt = match store.get_block_by_number(stable_block_number) {
-                Ok(b) => b,
-                Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-            };
-
-            let block_info_opt =
-                match block_opt.map(|b| to_block_info(b, store, state, false)).transpose() {
-                    Ok(v) => v,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-            Ok(BlocksStateQueryResponse::BlockByTipOffset(block_info_opt))
-        }
-        BlocksStateQuery::GetStableBlockByHash { block_hash, offset } => {
-            let tip = store.get_tip_block_number();
-
-            let stable_boundary = tip.saturating_sub(*offset as u64);
-
-            let block_opt = match store.get_block_by_hash(block_hash.as_slice()) {
-                Ok(b) => b,
-                Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-            };
-
-            let block_info_opt =
-                match block_opt.map(|b| to_block_info(b, store, state, false)).transpose() {
-                    Ok(v) => v,
-                    Err(e) => return Ok(BlocksStateQueryResponse::Error(e.into())),
-                };
-
-            let stable_block = block_info_opt.filter(|b| b.number <= stable_boundary);
-
-            Ok(BlocksStateQueryResponse::StableBlockByHash(stable_block))
-        }
         BlocksStateQuery::GetLatestStableBlockAsOf {
             stability_offset,
             min_block_timestamp_unix_millis,
@@ -459,8 +421,13 @@ fn get_latest_stable_block_as_of(
         return Ok(None);
     }
 
+    let Some(earliest_block_number) = store.get_earliest_block_number()? else {
+        return Ok(None);
+    };
+
     let Some(candidate) = find_latest_block_at_or_before_timestamp(
         store,
+        earliest_block_number,
         stable_boundary_number.saturating_sub(1),
         max_block_timestamp_unix_millis,
     )?
@@ -503,10 +470,15 @@ fn get_stable_block_by_hash_as_of(
 
 fn find_latest_block_at_or_before_timestamp(
     store: &Arc<dyn Store>,
+    lower_block_number: u64,
     upper_block_number: u64,
     max_block_timestamp_unix_millis: u64,
 ) -> Result<Option<Block>> {
-    let mut low = 0_u64;
+    if lower_block_number > upper_block_number {
+        return Ok(None);
+    }
+
+    let mut low = lower_block_number;
     let mut high = upper_block_number;
     let mut best = None;
 
@@ -766,6 +738,10 @@ mod tests {
             false
         }
 
+        fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+            Ok(self.blocks_by_number.first_key_value().map(|(number, _)| *number))
+        }
+
         fn get_tip_block_number(&self) -> u64 {
             self.blocks_by_number.last_key_value().map(|(number, _)| *number).unwrap_or_default()
         }
@@ -888,6 +864,41 @@ mod tests {
             BlocksStateQueryResponse::LatestStableBlockAsOf(Some(block)) => {
                 assert_eq!(block.hash, infos[0].hash);
                 assert_eq!(block.timestamp, 5);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn should_search_from_oldest_retained_block_for_latest_stable_block_when_store_starts_after_genesis(
+    ) {
+        let state = State::new();
+        let blocks = crate::stores::fjall::tests::test_block_range_bytes(3);
+        let infos = blocks
+            .iter()
+            .map(|bytes| crate::stores::fjall::tests::test_block_info(bytes))
+            .collect::<Vec<_>>();
+        let store = Arc::new(MemoryStore::new([
+            (100, build_store_block(&infos[0], &blocks[0], 5)),
+            (101, build_store_block(&infos[1], &blocks[1], 6)),
+            (102, build_store_block(&infos[2], &blocks[2], 10)),
+        ])) as Arc<dyn Store>;
+
+        let response = handle_blocks_query(
+            &store,
+            &state,
+            &BlocksStateQuery::GetLatestStableBlockAsOf {
+                stability_offset: 0,
+                min_block_timestamp_unix_millis: 6_000,
+                max_block_timestamp_unix_millis: 6_000,
+            },
+        )
+        .unwrap();
+
+        match response {
+            BlocksStateQueryResponse::LatestStableBlockAsOf(Some(block)) => {
+                assert_eq!(block.hash, infos[1].hash);
+                assert_eq!(block.timestamp, 6);
             }
             other => panic!("unexpected response: {other:?}"),
         }

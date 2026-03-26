@@ -41,13 +41,6 @@ pub enum BlocksStateQuery {
     GetBlockBySlot {
         slot: u64,
     },
-    GetBlockByTipOffset {
-        offset: u32,
-    },
-    GetStableBlockByHash {
-        block_hash: BlockHash,
-        offset: u32,
-    },
     GetLatestStableBlockAsOf {
         stability_offset: u32,
         min_block_timestamp_unix_millis: u64,
@@ -126,8 +119,6 @@ pub enum BlocksStateQueryResponse {
     BlockHashesAndIndexOfTransactionHashes(Vec<BlockHashAndTxIndex>),
     TransactionHashes(TransactionHashes),
     TransactionHashesAndTimestamps(TransactionHashesAndTimeStamps),
-    BlockByTipOffset(Option<BlockInfo>),
-    StableBlockByHash(Option<BlockInfo>),
     LatestStableBlockAsOf(Option<BlockInfo>),
     StableBlockByHashAsOf(Option<BlockInfo>),
     Error(QueryError),
