@@ -107,6 +107,19 @@ impl super::Store for FjallStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
+    fn rollback(&self, info: &BlockInfo) -> Result<()> {
+        let mut batch = self.database.batch();
+        let txs = self.blocks.rollback(&mut batch, info)?;
+        self.txs.rollback(&mut batch, &txs)?;
+
+        batch.commit()?;
+
+        self.last_persisted_block.store(info.number - 1, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(())
+    }
+
     fn should_persist(&self, block_number: u64) -> bool {
         let tip = self.last_persisted_block.load(std::sync::atomic::Ordering::Relaxed);
         tip == 0 || block_number > tip
@@ -217,6 +230,40 @@ impl FjallBlockStore {
         );
     }
 
+    #[allow(dead_code)]
+    fn rollback(
+        &self,
+        batch: &mut OwnedWriteBatch,
+        rollback_block: &BlockInfo,
+    ) -> Result<Vec<TxHash>> {
+        let number_start = rollback_block.number.to_be_bytes();
+        let slot_start = rollback_block.slot.to_be_bytes();
+        let epoch_slot_start = epoch_slot_key(rollback_block.epoch, rollback_block.epoch_slot);
+
+        let mut tx_hashes = Vec::new();
+        for block in self.block_hashes_by_number.range(number_start..) {
+            let (key, value) = block.into_inner()?;
+            if let Some(block) = self.blocks.get(&value)? {
+                let decoded: Block = minicbor::decode(&block)?;
+                tx_hashes.extend(super::extract_tx_hashes(&decoded.bytes)?);
+            }
+            batch.remove(&self.block_hashes_by_number, key);
+            batch.remove(&self.blocks, value);
+        }
+
+        for res in self.block_hashes_by_slot.range(slot_start..) {
+            let key = res.key()?;
+            batch.remove(&self.block_hashes_by_slot, key);
+        }
+
+        for res in self.block_hashes_by_epoch_slot.range(epoch_slot_start..) {
+            let key = res.key()?;
+            batch.remove(&self.block_hashes_by_epoch_slot, key);
+        }
+
+        Ok(tx_hashes)
+    }
+
     fn get_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         let Some(block) = self.blocks.get(hash)? else {
             return Ok(None);
@@ -310,6 +357,14 @@ impl FjallTXStore {
     fn insert_tx(&self, batch: &mut OwnedWriteBatch, hash: TxHash, block_ref: TxBlockReference) {
         let bytes = minicbor::to_vec(block_ref).expect("infallible");
         batch.insert(&self.txs, hash.as_ref(), bytes);
+    }
+
+    #[allow(dead_code)]
+    fn rollback(&self, batch: &mut OwnedWriteBatch, txs: &Vec<TxHash>) -> Result<()> {
+        for tx in txs {
+            batch.remove(&self.txs, tx.as_ref());
+        }
+        Ok(())
     }
 
     fn get_by_hash(&self, hash: &[u8]) -> Result<Option<TxBlockReference>> {

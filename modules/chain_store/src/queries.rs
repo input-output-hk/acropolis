@@ -734,6 +734,10 @@ mod tests {
             Err(anyhow!("MemoryStore does not support inserts"))
         }
 
+        fn rollback(&self, _info: &acropolis_common::BlockInfo) -> Result<()> {
+            Ok(())
+        }
+
         fn should_persist(&self, _block_number: u64) -> bool {
             false
         }
