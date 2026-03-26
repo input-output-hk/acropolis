@@ -8,7 +8,6 @@ use acropolis_common::{
 };
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
-use super::cert::encode_certificate;
 use super::governance::*;
 use super::input::*;
 use super::time_range::*;
@@ -289,7 +288,7 @@ fn encode_tx_info<'a>(
         let items: Vec<_> = tx_info
             .certificates
             .iter()
-            .map(|c| encode_certificate(&c.cert, arena, version))
+            .map(|c| c.cert.to_plutus_data(arena, version))
             .collect::<Result<_, _>>()?;
         list(arena, items)
     };
@@ -371,14 +370,14 @@ fn encode_tx_info<'a>(
             };
             let redeemers_pd = encode_redeemers_map(&tx_info.redeemers, arena, version)?;
             let votes = match &tx_info.voting_procedures {
-                Some(vp) => encode_voting_procedures(vp, arena, version)?,
+                Some(vp) => vp.to_plutus_data(arena, version)?,
                 None => map(arena, vec![]),
             };
             let proposals = {
                 let items: Vec<_> = tx_info
                     .proposal_procedures
                     .iter()
-                    .map(|p| encode_proposal_procedure(p, arena, version))
+                    .map(|p| p.to_plutus_data(arena, version))
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
@@ -442,17 +441,10 @@ fn encode_script_purpose<'a>(
             Ok(constr(arena, 2, vec![staking]))
         }
         ScriptPurpose::Certifying(cert_with_pos) => {
-            let c = encode_certificate(&cert_with_pos.cert, arena, version)?;
+            let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
             Ok(constr(arena, 3, vec![c]))
         }
-        ScriptPurpose::Voting(voter) => {
-            let v = encode_voter(voter, arena, version)?;
-            Ok(constr(arena, 4, vec![v]))
-        }
-        ScriptPurpose::Proposing(proposal) => {
-            let p = encode_proposal_procedure(proposal, arena, version)?;
-            Ok(constr(arena, 5, vec![p]))
-        }
+        _ => Err(ScriptContextError::UnsupportedScriptPurpose),
     }
 }
 
@@ -487,17 +479,17 @@ fn encode_script_info<'a>(
             Ok(constr(arena, 2, vec![c]))
         }
         ScriptPurpose::Certifying(cert_with_pos) => {
-            let idx = integer(arena, cert_with_pos.cert_index as i128);
-            let c = encode_certificate(&cert_with_pos.cert, arena, version)?;
+            let idx = cert_with_pos.cert_index.to_plutus_data(arena, version)?;
+            let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
             Ok(constr(arena, 3, vec![idx, c]))
         }
         ScriptPurpose::Voting(voter) => {
-            let v = encode_voter(voter, arena, version)?;
+            let v = voter.to_plutus_data(arena, version)?;
             Ok(constr(arena, 4, vec![v]))
         }
-        ScriptPurpose::Proposing(proposal) => {
-            let idx = integer(arena, 0i128);
-            let p = encode_proposal_procedure(proposal, arena, version)?;
+        ScriptPurpose::Proposing(idx, proposal) => {
+            let idx = idx.to_plutus_data(arena, version)?;
+            let p = proposal.to_plutus_data(arena, version)?;
             Ok(constr(arena, 5, vec![idx, p]))
         }
     }
@@ -621,7 +613,7 @@ fn build_script_purpose(
                     tag: tag.clone(),
                     index,
                 }))?;
-            Ok(ScriptPurpose::Proposing(proposal.clone()))
+            Ok(ScriptPurpose::Proposing(idx, proposal.clone()))
         }
     }
 }

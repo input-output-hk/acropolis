@@ -127,6 +127,9 @@ pub enum ScriptContextError {
 
     #[error("CBOR decode failed: {0}")]
     CborDecodeFailed(String),
+
+    #[error("Unsupported Script Purpose for Plutus version V1 or V2")]
+    UnsupportedScriptPurpose,
 }
 ///
 /// These errors occur during script evaluation after Phase 1 validation passes.

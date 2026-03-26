@@ -4,14 +4,16 @@ use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 use super::to_plutus_data::*;
 use acropolis_common::validation::ScriptContextError;
 
-pub fn encode_certificate<'a>(
-    cert: &TxCertificate,
-    arena: &'a Arena,
-    version: PlutusVersion,
-) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-    match version {
-        PlutusVersion::V1 | PlutusVersion::V2 => encode_dcert(cert, arena, version),
-        PlutusVersion::V3 => encode_tx_cert(cert, arena, version),
+impl ToPlutusData for TxCertificate {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        match version {
+            PlutusVersion::V1 | PlutusVersion::V2 => encode_dcert(self, arena, version),
+            PlutusVersion::V3 => encode_tx_cert(self, arena, version),
+        }
     }
 }
 

@@ -1,4 +1,7 @@
-use acropolis_common::{hash::Hash, validation::ScriptContextError, Credential};
+use acropolis_common::{
+    hash::Hash, protocol_params::ProtocolVersion, validation::ScriptContextError, Credential,
+    ProtocolParamUpdate,
+};
 use uplc_turbo::{arena::Arena, data::PlutusData, machine::PlutusVersion};
 
 /// Trait for converting Acropolis domain types into arena-allocated PlutusData.
@@ -92,15 +95,23 @@ pub fn from_cbor<'a>(
 // Primitive implementations
 // ============================================================================
 
-impl ToPlutusData for u64 {
-    fn to_plutus_data<'a>(
-        &self,
-        arena: &'a Arena,
-        _version: PlutusVersion,
-    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        Ok(integer(arena, *self as i128))
-    }
+macro_rules! impl_to_plutus_data_for_uint {
+    ($($t:ty),*) => {
+        $(
+            impl ToPlutusData for $t {
+                fn to_plutus_data<'a>(
+                    &self,
+                    arena: &'a Arena,
+                    _version: PlutusVersion,
+                ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+                    Ok(integer(arena, *self as i128))
+                }
+            }
+        )*
+    };
 }
+
+impl_to_plutus_data_for_uint!(u8, u16, u32, u64, usize);
 
 impl<const N: usize> ToPlutusData for Hash<N> {
     fn to_plutus_data<'a>(
@@ -144,5 +155,17 @@ impl<A: ToPlutusData> ToPlutusData for Option<A> {
                 Ok(constr(arena, 0, vec![inner]))
             }
         }
+    }
+}
+
+impl ToPlutusData for ProtocolVersion {
+    fn to_plutus_data<'a>(
+        &self,
+        arena: &'a Arena,
+        version: PlutusVersion,
+    ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+        let major = self.major.to_plutus_data(arena, version)?;
+        let minor = self.minor.to_plutus_data(arena, version)?;
+        Ok(constr(arena, 0, vec![major, minor]))
     }
 }

@@ -342,7 +342,7 @@ pub enum ScriptPurpose {
     Rewarding(StakeCredential),
     Certifying(TxCertificateWithPos),
     Voting(Voter),
-    Proposing(ProposalProcedure),
+    Proposing(usize, ProposalProcedure),
 }
 
 /// Get Scripts needed from UTxOs being spend

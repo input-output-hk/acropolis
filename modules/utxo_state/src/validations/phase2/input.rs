@@ -10,7 +10,7 @@ pub struct ResolvedInput {
 }
 
 // ============================================================================
-// UTxOIdentifier as TxOutRef
+// UTxOIdentifier
 // ============================================================================
 
 impl ToPlutusData for UTxOIdentifier {
@@ -19,13 +19,39 @@ impl ToPlutusData for UTxOIdentifier {
         arena: &'a Arena,
         version: PlutusVersion,
     ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-        let tx_id = constr(arena, 0, vec![self.tx_hash.to_plutus_data(arena, version)?]);
-        Ok(constr(
-            arena,
-            0,
-            vec![tx_id, integer(arena, self.output_index as i128)],
-        ))
+        match version {
+            PlutusVersion::V1 | PlutusVersion::V2 => {
+                encode_utxo_identifier_with_wrapped_tx_id(self, arena, version)
+            }
+            PlutusVersion::V3 => encode_utxo_identifier_without_wrapped_tx_id(self, arena, version),
+        }
     }
+}
+
+/// For Plutus V1 and V2
+pub fn encode_utxo_identifier_with_wrapped_tx_id<'a>(
+    utxo_id: &UTxOIdentifier,
+    arena: &'a Arena,
+    version: PlutusVersion,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    let tx_id = constr(
+        arena,
+        0,
+        vec![utxo_id.tx_hash.to_plutus_data(arena, version)?],
+    );
+    let output_idx = utxo_id.output_index.to_plutus_data(arena, version)?;
+    Ok(constr(arena, 0, vec![tx_id, output_idx]))
+}
+
+/// For Plutus V3 (no wrapping of tx_id)
+pub fn encode_utxo_identifier_without_wrapped_tx_id<'a>(
+    utxo_id: &UTxOIdentifier,
+    arena: &'a Arena,
+    version: PlutusVersion,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    let tx_id = utxo_id.tx_hash.to_plutus_data(arena, version)?;
+    let output_idx = utxo_id.output_index.to_plutus_data(arena, version)?;
+    Ok(constr(arena, 0, vec![tx_id, output_idx]))
 }
 
 // ============================================================================
