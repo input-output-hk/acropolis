@@ -124,6 +124,10 @@ impl super::Store for FjallStore {
         tip == 0 || block_number > tip
     }
 
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        self.blocks.get_earliest_block_number()
+    }
+
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         self.blocks.get_by_hash(hash)
     }
@@ -282,6 +286,16 @@ impl FjallBlockStore {
         self.get_by_hash(&hash)
     }
 
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        let Some(entry) = self.block_hashes_by_number.iter().next() else {
+            return Ok(None);
+        };
+        let key = entry.key()?;
+        let key = <[u8; 8]>::try_from(key.as_ref())
+            .map_err(|_| anyhow!("Invalid stored block number key"))?;
+        Ok(Some(u64::from_be_bytes(key)))
+    }
+
     fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
         if max_number < min_number {
             return Err(anyhow::anyhow!(
@@ -362,7 +376,7 @@ impl FjallTXStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::stores::Store;
 
     use super::*;
@@ -385,7 +399,7 @@ mod tests {
         "820183851a2d964a0958202d9136c363c69ad07e1a918de2ff5aeeba4361e33b9c2597511874f211ca26e984830058200e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a85820afc0da64183bf2664f3d4eec7238d524ba607faeeab24fc100eb861dba69971b8300582025777aca9e4a73d48fc73b4f961d345b06d4a6f349cb7916570d35537d53479f5820d36a2619a672494604e11bb447cbcf5231e9f2ba25c2169177edc941bd50ad6c5820afc0da64183bf2664f3d4eec7238d524ba607faeeab24fc100eb861dba69971b58204e66280cd94d591072349bec0a3090a53aa945562efb6d08d56e53654b0e4098848200085840d2965c869901231798c5d02d39fca2a79aa47c3e854921b5855c82fd1470891517e1fa771655ec8cad13ecf6e5719adc5392fc057e1703d5f583311e837462f1810982028284005840d2965c869901231798c5d02d39fca2a79aa47c3e854921b5855c82fd1470891517e1fa771655ec8cad13ecf6e5719adc5392fc057e1703d5f583311e837462f158409180d818e69cd997e34663c418a648c076f2e19cd4194e486e159d8580bc6cda81344440c6ad0e5306fd035bef9281da5d8fbd38f59f588f7081016ee61113d25840cf6ddc111545f61c2442b68bd7864ea952c428d145438948ef48a4af7e3f49b175564007685be5ae3c9ece0ab27de09721db0cb63aa67dc081a9f82d7e84210d58407b26babee8ad96bf5cdd20cac799ca56c90b6ff9df1f1140f50f021063f719e3791f22be92353a8ae16045b0d52a51c8b1219ce782fd4198cf15b745348021018483000000826a63617264616e6f2d736c00a058204ba92aa320c60acc9ad7b9a64f2eda55c4d2ec28e604faf186708b4f0c4e8edf849fff8300d9010280d90102809fff82809fff81a0",
     ];
 
-    fn test_block_info(bytes: &[u8]) -> BlockInfo {
+    pub(crate) fn test_block_info(bytes: &[u8]) -> BlockInfo {
         let block = MultiEraBlock::decode(bytes).unwrap();
         let genesis = GenesisValues::mainnet();
         let (epoch, epoch_slot) = block.epoch(&genesis);
@@ -410,7 +424,7 @@ mod tests {
         hex::decode(TEST_BLOCK).unwrap()
     }
 
-    fn test_block_range_bytes(count: usize) -> Vec<Vec<u8>> {
+    pub(crate) fn test_block_range_bytes(count: usize) -> Vec<Vec<u8>> {
         TEST_BLOCKS[0..count].iter().map(|b| hex::decode(b).unwrap()).collect()
     }
 
