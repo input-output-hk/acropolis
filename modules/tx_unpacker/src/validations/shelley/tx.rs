@@ -1,7 +1,7 @@
 //! Shelley era transaction validation
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 
-use acropolis_common::{protocol_params::ProtocolParams, validation::Phase1ValidationError};
+use acropolis_common::{protocol_params::ProtocolParams, validation::Phase1ValidationError, Era};
 use anyhow::Result;
 use pallas::ledger::traverse::MultiEraTx;
 pub type Phase1ValidationResult = Result<(), Box<Phase1ValidationError>>;
@@ -10,9 +10,10 @@ pub fn validate(
     tx: &MultiEraTx,
     protocol_params: &ProtocolParams,
     current_slot: u64,
+    era: Era,
 ) -> Phase1ValidationResult {
     // This check is only for shelley
-    validate_time_to_live(tx.ttl(), current_slot)?;
+    validate_time_to_live(tx.ttl(), current_slot, era)?;
 
     let tx_fee = tx.fee().unwrap_or(0);
     let tx_size = tx.size() as u32;
@@ -24,7 +25,11 @@ pub fn validate(
 /// Validate transaction's TTL field
 /// pass if ttl >= current_slot
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L421
-pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1ValidationResult {
+pub fn validate_time_to_live(
+    ttl: Option<u64>,
+    current_slot: u64,
+    era: Era,
+) -> Phase1ValidationResult {
     if let Some(ttl) = ttl {
         if ttl >= current_slot {
             Ok(())
@@ -34,10 +39,12 @@ pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1Valid
                 current_slot,
             }))
         }
-    } else {
+    } else if era == Era::Shelley {
         Err(Box::new(Phase1ValidationError::MalformedTransaction {
             errors: vec!["TTL is missing for Shelley Tx".to_string()],
         }))
+    } else {
+        Ok(())
     }
 }
 
@@ -92,7 +99,7 @@ pub fn validate_max_tx_size_utxo(
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{to_pallas_era, TestContext},
+        test_utils::{to_era, to_pallas_era, TestContext},
         validation_fixture,
     };
     use pallas::ledger::traverse::MultiEraTx;
@@ -141,6 +148,7 @@ mod tests {
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), Phase1ValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        validate(&tx, &ctx.protocol_params, ctx.current_slot).map_err(|e| *e)
+        let era = to_era(era);
+        validate(&tx, &ctx.protocol_params, ctx.current_slot, era).map_err(|e| *e)
     }
 }
