@@ -93,6 +93,7 @@ impl UTXOState {
         let (_, bootstrapped_message) = bootstraped_subscription.read().await?;
         let genesis_values = match bootstrapped_message.as_ref() {
             Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                println!("Genesis complete message received");
                 complete.values.clone()
             }
             _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),

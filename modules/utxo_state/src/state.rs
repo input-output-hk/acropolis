@@ -872,6 +872,7 @@ impl State {
         utxos
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn validate(
         &mut self,
         block: &BlockInfo,
