@@ -31,7 +31,7 @@ pub async fn handle_spdd(
     });
 
     let spdd = match epoch {
-        Some(epoch) => match locked.get_by_index(epoch) {
+        Some(epoch) => match locked.get_by_index(epoch + 1) {
             Some(epoch_state) => epoch_state.get_latest(),
             None => {
                 return Ok(RESTResponse::with_text(

@@ -48,6 +48,10 @@ impl ProtocolParams {
         self.alonzo.as_ref().map(|a| a.lovelace_per_utxo_word)
     }
 
+    pub fn coins_per_utxo_byte(&self) -> Option<u64> {
+        self.babbage.as_ref().map(|b| b.coins_per_utxo_byte)
+    }
+
     pub fn max_value_size(&self) -> Option<u64> {
         self.alonzo.as_ref().map(|a| a.max_value_size as u64)
     }

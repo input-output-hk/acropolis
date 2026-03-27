@@ -4,32 +4,8 @@ use crate::messages::{CardanoMessage, Message, StateTransitionMessage};
 use crate::types::BlockInfo;
 use crate::validation::ValidationOutcomes;
 use anyhow::{anyhow, bail, Result};
-use caryatid_sdk::{async_trait, Context, MessageBounds, Subscription};
+use caryatid_sdk::{Context, MessageBounds};
 use tracing::error;
-
-#[async_trait]
-pub trait SubscriptionExt<M: MessageBounds> {
-    async fn read_ignoring_rollbacks(&mut self) -> Result<(String, Arc<M>)>;
-}
-
-#[async_trait]
-impl SubscriptionExt<Message> for Box<dyn Subscription<Message>> {
-    async fn read_ignoring_rollbacks(&mut self) -> Result<(String, Arc<Message>)> {
-        loop {
-            let (stream, message) = self.read().await?;
-            if matches!(
-                message.as_ref(),
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_))
-                ))
-            ) {
-                continue;
-            }
-            break Ok((stream, message));
-        }
-    }
-}
 
 /// A utility to publish messages, which will only publish rollback messages if some work has been rolled back
 pub struct RollbackAwarePublisher<M: MessageBounds> {

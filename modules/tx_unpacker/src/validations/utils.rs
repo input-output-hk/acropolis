@@ -63,11 +63,11 @@ fn babbage_compute_min_lovelace(
     output: &babbage::MintedTransactionOutput,
     protocol_params: &ProtocolParams,
 ) -> Result<Lovelace> {
-    let lovelace_per_utxo_word = protocol_params
-        .lovelace_per_utxo_word()
-        .ok_or_else(|| anyhow!("Lovelace per utxo word are not set"))?;
+    let coins_per_utxo_byte = protocol_params
+        .coins_per_utxo_byte()
+        .ok_or_else(|| anyhow!("Coins per utxo byte are not set"))?;
 
-    Ok(lovelace_per_utxo_word * (get_babbage_value_size_in_words(output) + 160))
+    Ok(coins_per_utxo_byte * (get_babbage_value_size_in_words(output) + 160))
 }
 
 fn get_conway_value_size_in_bytes(output: &conway::MintedTransactionOutput) -> u64 {
@@ -91,10 +91,10 @@ fn conway_compute_min_lovelace(
     output: &conway::MintedTransactionOutput,
     protocol_params: &ProtocolParams,
 ) -> Result<Lovelace> {
-    let lovelace_per_utxo_word = protocol_params
-        .lovelace_per_utxo_word()
-        .ok_or_else(|| anyhow!("Lovelace per utxo word are not set"))?;
-    Ok(lovelace_per_utxo_word * (get_conway_value_size_in_words(output) + 160))
+    let coins_per_utxo_byte = protocol_params
+        .coins_per_utxo_byte()
+        .ok_or_else(|| anyhow!("Coins per utxo byte are not set"))?;
+    Ok(coins_per_utxo_byte * (get_conway_value_size_in_words(output) + 160))
 }
 
 pub fn get_value_size_in_bytes(output: &MultiEraOutput) -> u64 {

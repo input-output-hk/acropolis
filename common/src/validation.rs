@@ -939,9 +939,8 @@ impl ValidationOutcomes {
             let outcome_msg = Arc::new(Message::Cardano((block.clone(), BlockValidation(status))));
 
             context.message_bus.publish(topic_field, outcome_msg).await?;
-        } else {
-            self.print_errors(module, Some(block));
         }
+        self.print_errors(module, Some(block));
         self.outcomes.clear();
         Ok(())
     }
