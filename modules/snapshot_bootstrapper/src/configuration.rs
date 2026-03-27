@@ -235,6 +235,17 @@ mod tests {
     }
 
     #[test]
+    fn test_snapshot_derives_utxo_download_url_from_nested_cloudfront_nes_url() {
+        let snapshot = test_snapshot(
+            "https://d2qw03c3ve8znn.cloudfront.net/mainnet/507/nes.1234.abcdef.cbor.gz",
+        );
+        assert_eq!(
+            snapshot.utxo_download_url().as_deref(),
+            Some("https://d2qw03c3ve8znn.cloudfront.net/mainnet/507/utxos.1234.abcdef.cbor.gz")
+        );
+    }
+
+    #[test]
     fn test_snapshot_derives_utxo_download_url_from_legacy_url() {
         let snapshot = test_snapshot("https://example.com/snapshots/1234.abcdef.cbor.gz");
         assert_eq!(
@@ -248,7 +259,8 @@ mod tests {
         let snapshot = Snapshot {
             epoch: 509,
             point: TEST_POINT,
-            url: "https://example.com/snapshots/nes.1234.abcdef.cbor.gz".to_string(),
+            url: "https://d2qw03c3ve8znn.cloudfront.net/mainnet/507/nes.1234.abcdef.cbor.gz"
+                .to_string(),
             utxo_url: Some("https://cdn.example.com/custom-utxos.cbor.gz".to_string()),
         };
 
