@@ -49,8 +49,10 @@ use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
 pub mod validations;
 
-const DEFAULT_BOOTSTRAP_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("bootstraped-subscribe-topic", "cardano.genesis.complete");
+const DEFAULT_BOOTSTRAP_SUBSCRIBE_TOPIC: (&str, &str) = (
+    "bootstraped-subscribe-topic",
+    "cardano.sequence.bootstrapped",
+);
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (

@@ -97,10 +97,9 @@ pub fn validate_tx(
     }
 
     // Phase 2: Plutus script execution (if params provided and redeemers present)
-    if let Some(p2) = phase2_params {
-        let has_redeemers = tx_deltas.redeemers.as_ref().is_some_and(|r| !r.is_empty());
-
-        if has_redeemers && era >= Era::Alonzo {
+    let has_redeemers = tx_deltas.redeemers.as_ref().is_some_and(|r| !r.is_empty());
+    if has_redeemers && era >= Era::Alonzo {
+        if let Some(p2) = phase2_params {
             phase2::validate_tx_phase2(
                 tx_deltas,
                 utxos,
