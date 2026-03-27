@@ -265,6 +265,12 @@ impl StakeDeltaFilter {
         mut publisher: DeltaPublisher,
         mut address_delta_reader: AddressDeltasReader,
     ) -> Result<()> {
+        match address_delta_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal(_) => {}
+            RollbackWrapper::Rollback(_) => {
+                bail!("Unexpected rollback while reading initial deltas message")
+            }
+        }
         loop {
             match address_delta_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((block_info, address_deltas)) => {

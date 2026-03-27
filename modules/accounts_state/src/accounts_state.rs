@@ -235,12 +235,6 @@ impl AccountsState {
             // Get the stake address deltas from the genesis bootstrap, which we know
             // don't contain any stake, plus an extra parameter state (!unexplained)
             // !TODO this seems overly specific to our startup process
-            match stake_deltas_reader.read_with_rollbacks().await? {
-                RollbackWrapper::Normal(_) => {}
-                RollbackWrapper::Rollback(_) => {
-                    bail!("Unexpected rollback while reading initial stake deltas");
-                }
-            }
             match params_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal(_) => {}
                 RollbackWrapper::Rollback(_) => {
