@@ -153,7 +153,7 @@ fn to_common_version(v: PlutusVersion) -> acropolis_common::PlutusVersion {
 
 /// Evaluate a raw FLAT-encoded Plutus program without argument application.
 ///
-/// Uses the same evaluator thread pool and arena pool as `execute_scripts`.
+/// Uses the same evaluator thread pool and arena pool as `evaluate_scripts`.
 /// Intended for calibration and benchmarking only.
 pub fn evaluate_raw_flat_program(flat_bytes: &[u8]) -> Result<std::time::Duration, String> {
     let flat_bytes = flat_bytes.to_vec();
@@ -212,17 +212,17 @@ pub fn build_scripts_table(
 }
 
 // =============================================================================
-// Script execution
+// Script evaluation
 // =============================================================================
 
-/// Execute all Plutus scripts for a transaction in parallel.
+/// Evaluate all Plutus scripts for a transaction in parallel.
 ///
 /// Uses a dedicated thread pool with 16MB stacks and a pre-allocated arena pool
 /// to handle deep recursion and reduce allocation overhead. Each script gets its
 /// own arena from the pool.
 ///
 /// If `is_valid` is false, scripts are expected to fail (per Alonzo spec).
-pub fn execute_scripts(
+pub fn evaluate_scripts(
     script_contexts: &[ScriptContext<'_>],
     scripts_table: &HashMap<ScriptHash, ReferenceScript>,
     cost_models: &CostModels,
@@ -417,7 +417,7 @@ mod tests {
 
         let cost_models = ctx.protocol_params.cost_models();
 
-        execute_scripts(
+        evaluate_scripts(
             &script_contexts,
             &scripts_table,
             &cost_models,
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_missing_script_returns_error() {
+    fn evaluate_missing_script_returns_error() {
         let (ctx, raw_tx, era): (TestContext, Vec<u8>, &str) = validation_fixture!(
             "alonzo",
             "a95d16e891e51f98a3b1d3fe862ed355ebc8abffb7a7269d86f775553d9e653f"
@@ -453,7 +453,7 @@ mod tests {
         let empty_table = HashMap::new();
         let cost_models = ctx.protocol_params.cost_models();
 
-        let result = execute_scripts(
+        let result = evaluate_scripts(
             &script_contexts,
             &empty_table,
             &cost_models,

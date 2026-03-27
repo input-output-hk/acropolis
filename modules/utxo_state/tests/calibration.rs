@@ -1,7 +1,6 @@
 //! Calibration tests for UPLC performance test normalization.
 
 mod common;
-
 use acropolis_module_utxo_state::validations::phase2::evaluate_raw_flat_program;
 use common::{
     calibrate, get_calibration, CalibrationBaseline, CALIBRATION_ITERATIONS, CALIBRATION_SCRIPT,
