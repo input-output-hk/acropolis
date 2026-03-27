@@ -179,6 +179,16 @@ impl BlockVrfValidator {
                     bail!("Unexpected rollback while reading initial params");
                 }
             }
+            match nonce_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, active_nonce)) => {
+                    let mut state = history.lock().await.get_or_init_with(State::new);
+                    state.handle_epoch_nonce(&active_nonce);
+                    history.lock().await.commit(block_info.number, state);
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial nonce");
+                }
+            }
         }
 
         loop {

@@ -250,7 +250,7 @@ impl EpochsState {
                     }
                 });
 
-                if blk_info.new_epoch && blk_info.epoch > 0 {
+                if blk_info.new_epoch {
                     let active_nonce = state.get_active_nonce();
                     ctx.handle(
                         "publish",
