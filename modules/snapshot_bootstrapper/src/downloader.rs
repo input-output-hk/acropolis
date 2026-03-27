@@ -54,37 +54,49 @@ impl SnapshotDownloader {
         })
     }
 
-    /// Downloads the snapshot file specified by the metadata.
-    /// Returns the path to the downloaded file.
+    /// Downloads the NES snapshot first, then ensures the matching UTxO sidecar
+    /// is present before returning the local NES snapshot path.
     pub async fn download(&self, snapshot: &Snapshot) -> Result<PathBuf, DownloadError> {
-        let snapshot_path = snapshot.cbor_path(&self.network_dir);
-        self.download_from_url(&snapshot.url, &snapshot_path).await?;
-
-        let utxo_path = snapshot.utxos_cbor_path(&self.network_dir);
-        if !utxo_path.exists() {
-            let utxo_url = snapshot
-                .utxo_download_url()
-                .ok_or_else(|| DownloadError::MissingUtxoSidecarUrl(utxo_path.clone()))?;
-            self.download_from_url(&utxo_url, &utxo_path).await?;
-        }
-
+        let snapshot_path = self.download_nes_snapshot(snapshot).await?;
+        self.download_utxo_sidecar(snapshot).await?;
         Ok(snapshot_path)
     }
 
-    /// Downloads a gzip-compressed snapshot from the given URL, decompresses it on-the-fly,
-    /// and saves the decompressed CBOR data to the specified output path.
+    async fn download_nes_snapshot(&self, snapshot: &Snapshot) -> Result<PathBuf, DownloadError> {
+        let snapshot_path = snapshot.cbor_path(&self.network_dir);
+        self.download_gzip_artifact("NES snapshot", &snapshot.url, &snapshot_path).await?;
+        Ok(snapshot_path)
+    }
+
+    async fn download_utxo_sidecar(&self, snapshot: &Snapshot) -> Result<PathBuf, DownloadError> {
+        let utxo_path = snapshot.utxos_cbor_path(&self.network_dir);
+        let utxo_url = snapshot
+            .utxo_download_url()
+            .ok_or_else(|| DownloadError::MissingUtxoSidecarUrl(utxo_path.clone()))?;
+
+        self.download_gzip_artifact("UTxO sidecar", &utxo_url, &utxo_path).await?;
+        Ok(utxo_path)
+    }
+
+    /// Downloads a gzip-compressed NES snapshot or UTxO sidecar from the given URL,
+    /// decompresses it on-the-fly, and saves the decompressed CBOR data to the specified output path.
     /// The data is first written to a `.partial` temporary file to ensure atomicity
     /// and then renamed to the final output path upon successful completion.
-    async fn download_from_url(&self, url: &str, output_path: &Path) -> Result<(), DownloadError> {
+    async fn download_gzip_artifact(
+        &self,
+        artifact_name: &str,
+        url: &str,
+        output_path: &Path,
+    ) -> Result<(), DownloadError> {
         if output_path.exists() {
             info!(
-                "Snapshot already exists, skipping: {}",
+                "{artifact_name} already exists, skipping: {}",
                 output_path.display()
             );
             return Ok(());
         }
 
-        info!("Downloading snapshot from {}", url);
+        info!("Downloading {artifact_name} from {}", url);
 
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -125,7 +137,7 @@ impl SnapshotDownloader {
             tokio::fs::rename(&tmp_path, output_path).await?;
 
             info!(
-                "Downloaded and decompressed snapshot to {}",
+                "Downloaded and decompressed {artifact_name} to {}",
                 output_path.display()
             );
             Ok(())
