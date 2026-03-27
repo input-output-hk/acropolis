@@ -171,7 +171,7 @@ impl SPDDState {
                     }
                     SPDDStateQuery::GetEpochSPDD { epoch } => SPDDStateQueryResponse::EpochSPDD(
                         locked
-                            .get_by_index(*epoch)
+                            .get_by_index(*epoch + 1)
                             .map(|map| {
                                 map.get_latest()
                                     .iter()
