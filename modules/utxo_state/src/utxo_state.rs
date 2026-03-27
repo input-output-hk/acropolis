@@ -49,6 +49,8 @@ use crate::reference_scripts_state::ReferenceScriptsState;
 mod utils;
 pub mod validations;
 
+const DEFAULT_BOOTSTRAP_SUBSCRIBE_TOPIC: (&str, &str) =
+    ("bootstraped-subscribe-topic", "cardano.genesis.complete");
 const DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC: (&str, &str) =
     ("utxo-deltas-subscribe-topic", "cardano.utxo.deltas");
 const DEFAULT_PROTOCOL_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) = (
@@ -77,14 +79,23 @@ impl UTXOState {
     async fn run(
         context: Arc<Context<Message>>,
         state: Arc<Mutex<State>>,
+        mut bootstraped_subscription: Box<dyn Subscription<Message>>,
         mut utxo_deltas_subscription: Box<dyn Subscription<Message>>,
         mut protocol_parameters_subscription: Box<dyn Subscription<Message>>,
         mut pool_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         mut stake_registration_updates_subscription: Option<Box<dyn Subscription<Message>>>,
         publish_tx_validation_topic: String,
-        _phase2_enabled: bool,
+        phase2_enabled: bool,
         is_snapshot_mode: bool,
     ) -> Result<()> {
+        let (_, bootstrapped_message) = bootstraped_subscription.read().await?;
+        let genesis_values = match bootstrapped_message.as_ref() {
+            Message::Cardano((_, CardanoMessage::GenesisComplete(complete))) => {
+                complete.values.clone()
+            }
+            _ => panic!("Unexpected message in genesis completion topic: {bootstrapped_message:?}"),
+        };
+
         let mut bootstrap_block_processed = false;
 
         loop {
@@ -170,6 +181,8 @@ impl UTXOState {
                                     &pool_registration_updates,
                                     &stake_registration_updates,
                                     &current_protocol_params,
+                                    &genesis_values,
+                                    phase2_enabled,
                                 )
                                 .await
                             {
@@ -237,6 +250,11 @@ impl UTXOState {
     /// Main init function
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
+        let bootstraped_subscribe_topic = config
+            .get_string(DEFAULT_BOOTSTRAP_SUBSCRIBE_TOPIC.0)
+            .unwrap_or(DEFAULT_BOOTSTRAP_SUBSCRIBE_TOPIC.1.to_string());
+        info!("Creating subscriber on '{bootstraped_subscribe_topic}'");
+
         let utxo_deltas_subscribe_topic = config
             .get_string(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.0)
             .unwrap_or(DEFAULT_UTXO_DELTAS_SUBSCRIBE_TOPIC.1.to_string());
@@ -315,6 +333,7 @@ impl UTXOState {
         let state = Arc::new(Mutex::new(state));
 
         // Subscribers
+        let bootstraped_subscription = context.subscribe(&bootstraped_subscribe_topic).await?;
         let utxo_deltas_subscription = context.subscribe(&utxo_deltas_subscribe_topic).await?;
         let protocol_parameters_subscription =
             context.subscribe(&protocol_parameters_subscribe_topic).await?;
@@ -337,6 +356,7 @@ impl UTXOState {
             Self::run(
                 context_run,
                 state_run,
+                bootstraped_subscription,
                 utxo_deltas_subscription,
                 protocol_parameters_subscription,
                 pool_registration_updates_subscription,
