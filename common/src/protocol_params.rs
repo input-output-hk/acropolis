@@ -48,6 +48,10 @@ impl ProtocolParams {
         self.alonzo.as_ref().map(|a| a.lovelace_per_utxo_word)
     }
 
+    pub fn coins_per_utxo_byte(&self) -> Option<u64> {
+        self.babbage.as_ref().map(|b| b.coins_per_utxo_byte)
+    }
+
     pub fn max_value_size(&self) -> Option<u64> {
         self.alonzo.as_ref().map(|a| a.max_value_size as u64)
     }
@@ -156,6 +160,7 @@ pub struct ShelleyParams {
     #[serde_as(as = "ChameleonFraction")]
     pub active_slots_coeff: RationalNumber,
     pub epoch_length: u32,
+    #[serde(alias = "maxKESEvolutions")]
     pub max_kes_evolutions: u32,
     pub max_lovelace_supply: u64,
     pub network_id: NetworkId,
@@ -170,6 +175,7 @@ pub struct ShelleyParams {
     pub security_param: u32,
 
     pub slot_length: u32,
+    #[serde(alias = "slotsPerKESPeriod")]
     pub slots_per_kes_period: u32,
     pub system_start: DateTime<Utc>,
     pub update_quorum: u32,
