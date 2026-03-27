@@ -1,21 +1,61 @@
 use std::collections::HashSet;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use acropolis_common::{
-    messages::AddressDeltasMessage, BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta,
-    UTxOIdentifier,
+    messages::AddressDeltasMessage,
+    protocol_params::{Nonce, ProtocolParams},
+    BlockInfo, BlockNumber, Datum, Epoch, ExtendedAddressDelta, UTxOIdentifier,
 };
+use imbl::HashMap;
+use tracing::warn;
 
 use crate::{
     configuration::MidnightConfig,
     epoch_totals::EpochTotals,
+    grpc::midnight_state_proto::EpochCandidate,
     indexes::{
-        candidate_state::CandidateState, cnight_utxo_state::CNightUTxOState,
-        governance_state::GovernanceState, parameters_state::ParametersState,
+        cnight_utxo_state::CNightUTxOState, committee_candidate_state::CommitteeCandidateState,
+        governance_state::GovernanceState, mapping_registration_state::MappingRegistrationState,
+        parameters_state::ParametersState,
     },
     types::{CNightCreation, CNightSpend, DeregistrationEvent, RegistrationEvent},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StableBlockWindowBounds {
+    pub min_block_age_millis: u64,
+    pub max_block_age_millis: u64,
+}
+
+impl StableBlockWindowBounds {
+    pub fn from_protocol_params(protocol_params: &ProtocolParams) -> Result<Self> {
+        let shelley = protocol_params
+            .shelley
+            .as_ref()
+            .ok_or_else(|| anyhow!("latest protocol parameters do not include shelley params"))?;
+
+        let active_slots_coeff_numerator = u128::from(*shelley.active_slots_coeff.numer());
+        let active_slots_coeff_denominator = u128::from(*shelley.active_slots_coeff.denom());
+        if active_slots_coeff_numerator == 0 {
+            return Err(anyhow!("active_slots_coeff numerator must be non-zero"));
+        }
+
+        let slot_duration_millis = u128::from(shelley.slot_length).saturating_mul(1000);
+        let min_block_age_millis = rounded_div_u128_to_u64(
+            slot_duration_millis
+                .saturating_mul(u128::from(shelley.security_param))
+                .saturating_mul(active_slots_coeff_denominator),
+            active_slots_coeff_numerator,
+        )?;
+        let max_block_age_millis = min_block_age_millis.saturating_mul(3);
+
+        Ok(Self {
+            min_block_age_millis,
+            max_block_age_millis,
+        })
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct State {
@@ -24,12 +64,18 @@ pub struct State {
 
     // CNight UTxO spends and creations indexed by block
     pub utxos: CNightUTxOState,
-    // Candidate (Node operator) sets by epoch and registrations/deregistrations by block
-    pub candidates: CandidateState,
+    // Mapping-validator registrations and deregistrations consumed by cNIGHT observation.
+    pub mapping_registrations: MappingRegistrationState,
+    // Committee candidate set snapshotted by epoch for authority selection.
+    committee_candidates: CommitteeCandidateState,
     // Governance indexed by block
     governance: GovernanceState,
     // Parameters indexed by epoch
     parameters: ParametersState,
+    // Protocol-param-derived bounds used to build request-specific mc-hash stability windows.
+    stable_block_window_bounds: Option<StableBlockWindowBounds>,
+    // Nonces indexed by epoch
+    nonces: HashMap<Epoch, Nonce>,
     // Midnight configuration
     config: MidnightConfig,
 }
@@ -42,12 +88,38 @@ impl State {
         }
     }
 
-    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo) {
+    pub fn handle_new_epoch(&mut self, block_info: &BlockInfo, nonce_opt: Option<Nonce>) {
+        if let Some(nonce) = nonce_opt {
+            self.nonces.insert(block_info.epoch, nonce);
+        }
+        self.committee_candidates.snapshot_epoch(block_info.epoch);
         self.epoch_totals.summarise_completed_epoch(block_info);
     }
 
     pub fn get_ariadne_parameters_with_epoch(&self, epoch: Epoch) -> Option<(Epoch, Datum)> {
         self.parameters.get_ariadne_parameters_with_epoch(epoch)
+    }
+
+    pub fn get_epoch_nonce(&self, epoch: Epoch) -> Option<Vec<u8>> {
+        self.nonces.get(&epoch).and_then(|n| n.hash.map(|h| h.to_vec()))
+    }
+
+    pub fn get_epoch_candidates(&self, epoch: Epoch) -> Vec<EpochCandidate> {
+        self.committee_candidates.get_epoch_candidates(epoch)
+    }
+
+    pub fn stable_block_window_bounds(&self) -> Option<StableBlockWindowBounds> {
+        self.stable_block_window_bounds
+    }
+
+    pub fn update_stable_block_window_bounds(
+        &mut self,
+        protocol_params: &ProtocolParams,
+    ) -> Result<()> {
+        self.stable_block_window_bounds = Some(StableBlockWindowBounds::from_protocol_params(
+            protocol_params,
+        )?);
+        Ok(())
     }
 
     pub fn handle_address_deltas(
@@ -61,9 +133,12 @@ impl State {
         let mut block_created_utxos = HashSet::new();
         let mut cnight_spends = Vec::new();
 
-        let mut candidate_registrations = Vec::new();
-        let mut block_created_registrations = HashSet::new();
-        let mut candidate_deregistrations = Vec::new();
+        let mut mapping_registrations = Vec::new();
+        let mut block_created_mapping_registrations = HashSet::new();
+        let mut mapping_deregistrations = Vec::new();
+        let mut committee_candidate_registrations = Vec::new();
+        let mut block_created_committee_registrations = HashSet::new();
+        let mut committee_candidate_deregistrations = Vec::new();
 
         let mut indexed_parameter_datums = 0usize;
         let mut indexed_governance_technical_committee_datums = 0usize;
@@ -83,18 +158,34 @@ impl State {
                 &block_created_utxos,
             )?);
 
+            // TODO: Filter or annotate invalid mapping/committee registration datums so
+            // downstream gRPC consumers can skip malformed script outputs per-item instead of
+            // failing an entire response batch.
             // Collect candidate registrations and deregistrations
-            self.collect_candidate_registrations(
+            self.collect_mapping_registrations(
                 delta,
                 block_info,
-                &mut candidate_registrations,
-                &mut block_created_registrations,
+                &mut mapping_registrations,
+                &mut block_created_mapping_registrations,
             )?;
-            candidate_deregistrations.extend(self.collect_candidate_deregistrations(
+            mapping_deregistrations.extend(self.collect_mapping_deregistrations(
                 delta,
                 block_info,
-                &block_created_registrations,
+                &block_created_mapping_registrations,
             )?);
+            self.collect_committee_candidate_registrations(
+                delta,
+                block_info,
+                &mut committee_candidate_registrations,
+                &mut block_created_committee_registrations,
+            )?;
+            committee_candidate_deregistrations.extend(
+                self.collect_committee_candidate_deregistrations(
+                    delta,
+                    block_info,
+                    &block_created_committee_registrations,
+                )?,
+            );
 
             indexed_parameter_datums += self.collect_parameter_datums(delta, block_info.epoch);
 
@@ -114,15 +205,20 @@ impl State {
         }
 
         // Add registered and deregistered candidates to state
-        self.epoch_totals.add_indexed_candidates(
-            candidate_registrations.len(),
-            candidate_deregistrations.len(),
-        );
-        if !candidate_registrations.is_empty() {
-            self.candidates.register_candidates(block_info.number, candidate_registrations);
+        self.epoch_totals
+            .add_indexed_candidates(mapping_registrations.len(), mapping_deregistrations.len());
+        if !mapping_registrations.is_empty() {
+            self.mapping_registrations.add_registrations(block_info.number, mapping_registrations);
         }
-        if !candidate_deregistrations.is_empty() {
-            self.candidates.deregister_candidates(block_info.number, candidate_deregistrations);
+        if !mapping_deregistrations.is_empty() {
+            self.mapping_registrations
+                .add_deregistrations(block_info.number, mapping_deregistrations);
+        }
+        if !committee_candidate_registrations.is_empty() {
+            self.committee_candidates.register_candidates(committee_candidate_registrations);
+        }
+        if !committee_candidate_deregistrations.is_empty() {
+            self.committee_candidates.deregister_candidates(committee_candidate_deregistrations);
         }
 
         self.epoch_totals.add_indexed_parameter_datums(indexed_parameter_datums);
@@ -168,8 +264,22 @@ impl State {
                 continue;
             }
 
+            let holder_address = match delta.address.to_stake_address() {
+                Some(owner_address) => owner_address,
+                None => {
+                    warn!(
+                        block_number = block_info.number,
+                        tx_identifier = %delta.tx_identifier,
+                        utxo = %created.utxo,
+                        address_kind = delta.address.kind(),
+                        "skipping cNIGHT creation with unsupported owner address"
+                    );
+                    continue;
+                }
+            };
+
             let creation = CNightCreation {
-                address: delta.address.clone(),
+                holder_address,
                 quantity: token_amount,
                 utxo: created.utxo,
                 block_number: block_info.number,
@@ -217,7 +327,7 @@ impl State {
             .collect())
     }
 
-    fn collect_candidate_registrations(
+    fn collect_mapping_registrations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
@@ -245,11 +355,15 @@ impl State {
                 block_created_registrations.insert(created.utxo);
 
                 registrations.push(RegistrationEvent {
+                    block_number: block_info.number,
                     block_hash: block_info.hash,
                     block_timestamp: i64::try_from(block_info.timestamp)?,
+                    epoch: block_info.epoch,
+                    slot_number: block_info.slot,
                     tx_index: delta.tx_identifier.tx_index().into(),
                     tx_hash: created.utxo.tx_hash,
                     utxo_index: created.utxo.output_index,
+                    tx_inputs: delta.spent_utxos.iter().map(|s| s.utxo).collect(),
                     datum: datum.clone(),
                 });
             }
@@ -258,7 +372,7 @@ impl State {
         Ok(())
     }
 
-    fn collect_candidate_deregistrations(
+    fn collect_mapping_deregistrations(
         &self,
         delta: &ExtendedAddressDelta,
         block_info: &BlockInfo,
@@ -271,7 +385,69 @@ impl State {
         }
 
         for spent in &delta.spent_utxos {
-            if self.candidates.registration_index.contains_key(&spent.utxo)
+            if self.mapping_registrations.registration_index.contains_key(&spent.utxo)
+                || block_created_registrations.contains(&spent.utxo)
+            {
+                deregistrations.push(DeregistrationEvent {
+                    registration_utxo: spent.utxo,
+                    spent_block_hash: block_info.hash,
+                    spent_block_timestamp: i64::try_from(block_info.timestamp)?,
+                    spent_tx_hash: spent.spent_by,
+                    spent_tx_index: delta.tx_identifier.tx_index().into(),
+                });
+            }
+        }
+
+        Ok(deregistrations)
+    }
+
+    fn collect_committee_candidate_registrations(
+        &self,
+        delta: &ExtendedAddressDelta,
+        block_info: &BlockInfo,
+        registrations: &mut Vec<RegistrationEvent>,
+        block_created_registrations: &mut HashSet<UTxOIdentifier>,
+    ) -> Result<()> {
+        if delta.address != self.config.committee_candidate_address {
+            return Ok(());
+        }
+
+        for created in &delta.created_utxos {
+            if let Some(datum) = &created.datum {
+                block_created_registrations.insert(created.utxo);
+
+                registrations.push(RegistrationEvent {
+                    block_number: block_info.number,
+                    block_hash: block_info.hash,
+                    block_timestamp: i64::try_from(block_info.timestamp)?,
+                    epoch: block_info.epoch,
+                    slot_number: block_info.slot,
+                    tx_index: delta.tx_identifier.tx_index().into(),
+                    tx_hash: created.utxo.tx_hash,
+                    utxo_index: created.utxo.output_index,
+                    tx_inputs: delta.spent_utxos.iter().map(|s| s.utxo).collect(),
+                    datum: datum.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_committee_candidate_deregistrations(
+        &self,
+        delta: &ExtendedAddressDelta,
+        block_info: &BlockInfo,
+        block_created_registrations: &HashSet<UTxOIdentifier>,
+    ) -> Result<Vec<DeregistrationEvent>> {
+        let mut deregistrations = Vec::new();
+
+        if delta.address != self.config.committee_candidate_address {
+            return Ok(deregistrations);
+        }
+
+        for spent in &delta.spent_utxos {
+            if self.committee_candidates.registration_index.contains_key(&spent.utxo)
                 || block_created_registrations.contains(&spent.utxo)
             {
                 deregistrations.push(DeregistrationEvent {
@@ -345,19 +521,37 @@ impl State {
     }
 }
 
+fn rounded_div_u128_to_u64(numerator: u128, denominator: u128) -> Result<u64> {
+    if denominator == 0 {
+        return Err(anyhow!("stability window denominator must be non-zero"));
+    }
+
+    let rounded = numerator
+        .saturating_add(denominator / 2)
+        .checked_div(denominator)
+        .ok_or_else(|| anyhow!("failed to calculate rounded stability window"))?;
+
+    u64::try_from(rounded).map_err(|_| anyhow!("stability window overflow"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
 
     use acropolis_common::{
         messages::AddressDeltasMessage,
+        protocol_params::{ProtocolParams, ShelleyParams},
+        rational_number::RationalNumber,
         state_history::{StateHistory, StateHistoryStore},
         Address, AssetName, BlockHash, BlockInfo, BlockIntent, BlockStatus, CreatedUTxOExtended,
         Datum, Era, ExtendedAddressDelta, PolicyId, ShelleyAddress, SpentUTxOExtended, TxHash,
         TxIdentifier, UTxOIdentifier, ValueMap,
     };
 
-    use crate::{configuration::MidnightConfig, state::State};
+    use crate::{
+        configuration::MidnightConfig,
+        state::{StableBlockWindowBounds, State},
+    };
 
     fn test_block_info() -> BlockInfo {
         BlockInfo {
@@ -404,6 +598,12 @@ mod tests {
         }
     }
 
+    fn test_config_epoch_candidate(address: Address) -> MidnightConfig {
+        MidnightConfig {
+            committee_candidate_address: address,
+            ..Default::default()
+        }
+    }
     fn test_config_governance(
         technical_committee_address: Address,
         technical_committee_policy_id: PolicyId,
@@ -456,6 +656,37 @@ mod tests {
         }
     }
 
+    fn test_candidate_delta(
+        address: Address,
+        tx_index: u16,
+        created: Vec<(UTxOIdentifier, ValueMap, Option<Datum>)>,
+        spent_utxos: Vec<(UTxOIdentifier, TxHash)>,
+    ) -> ExtendedAddressDelta {
+        let mut received = ValueMap::default();
+        for (_, value, _) in &created {
+            for (policy, assets) in &value.assets {
+                let entry = received.assets.entry(*policy).or_default();
+                for (asset_name, amount) in assets {
+                    *entry.entry(*asset_name).or_default() += *amount;
+                }
+            }
+        }
+
+        ExtendedAddressDelta {
+            address,
+            tx_identifier: TxIdentifier::new(1, tx_index),
+            created_utxos: created
+                .into_iter()
+                .map(|(utxo, value, datum)| CreatedUTxOExtended { utxo, value, datum })
+                .collect(),
+            spent_utxos: spent_utxos
+                .into_iter()
+                .map(|(utxo, spent_by)| SpentUTxOExtended { utxo, spent_by })
+                .collect(),
+            received,
+            sent: ValueMap::default(),
+        }
+    }
     fn test_address(value: &str) -> Address {
         Address::from_string(value).unwrap()
     }
@@ -571,7 +802,9 @@ mod tests {
 
         // Creation delta
         let create_delta = ExtendedAddressDelta {
-            address: Address::default(),
+            address: test_address(
+                "addr1q82peck5fynytkgjsp9vnpul59zswsd4jqnzafd0mfzykma625r684xsx574ltpznecr9cnc7n9e2hfq9lyart3h5hpszffds5",
+            ),
             tx_identifier: TxIdentifier::default(),
             created_utxos: vec![
                 CreatedUTxOExtended {
@@ -656,7 +889,7 @@ mod tests {
     }
 
     #[test]
-    fn should_collect_candidate_registrations_and_deregistrations_when_mapping_events_present() {
+    fn should_collect_mapping_registrations_and_deregistrations_when_mapping_events_present() {
         let block_info = test_block_info();
         let address = Address::Shelley(
             ShelleyAddress::from_string(
@@ -697,7 +930,7 @@ mod tests {
         let mut registrations = Vec::new();
         let mut block_created_registrations = HashSet::new();
         state
-            .collect_candidate_registrations(
+            .collect_mapping_registrations(
                 &registration_delta,
                 &block_info,
                 &mut registrations,
@@ -706,9 +939,9 @@ mod tests {
             .unwrap();
         assert_eq!(registrations.len(), 1);
 
-        state.candidates.register_candidates(block_info.number, registrations);
+        state.mapping_registrations.add_registrations(block_info.number, registrations);
 
-        let indexed = state.candidates.get_registrations(block_info.number, 0, 50);
+        let indexed = state.mapping_registrations.get_registrations(block_info.number, 0, 50);
 
         assert_eq!(indexed.len(), 1);
         assert_eq!(indexed[0].full_datum, Datum::Inline(vec![3]));
@@ -738,13 +971,13 @@ mod tests {
         };
 
         let deregistrations = state
-            .collect_candidate_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
+            .collect_mapping_deregistrations(&deregistration_delta, &block_info, &HashSet::new())
             .unwrap();
         assert_eq!(deregistrations.len(), 1);
 
-        state.candidates.deregister_candidates(block_info.number, deregistrations);
+        state.mapping_registrations.add_deregistrations(block_info.number, deregistrations);
 
-        let indexed = state.candidates.get_deregistrations(block_info.number, 0, 50);
+        let indexed = state.mapping_registrations.get_deregistrations(block_info.number, 0, 50);
 
         // Only 1 deregistration indexed
         assert_eq!(indexed.len(), 1);
@@ -758,6 +991,114 @@ mod tests {
         assert_eq!(indexed[0].tx_hash, TxHash::new([3u8; 32]));
         assert_eq!(indexed[0].utxo_tx_hash, TxHash::new([1u8; 32]));
         assert_eq!(indexed[0].utxo_index, 1);
+    }
+
+    #[test]
+    fn should_index_epoch_candidates_from_committee_candidate_address() {
+        let block_info = test_block_info();
+        let committee_address =
+            test_address("addr_test1wz5ax0hjvhx2uqef8sqrxnmfywd37hea4truhqxu4yxp9hsvggkfm");
+        let mapping_address =
+            test_address("addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng");
+        let auth_policy = PolicyId::new([9u8; 28]);
+        let auth_asset = AssetName::new(b"auth").unwrap();
+
+        let mut config = test_config_candidate(mapping_address.clone(), auth_policy, auth_asset);
+        config.committee_candidate_address = committee_address.clone();
+        let mut state = State::new(config);
+
+        let committee_utxo = UTxOIdentifier::new(TxHash::new([7u8; 32]), 0);
+        let mapping_utxo = UTxOIdentifier::new(TxHash::new([8u8; 32]), 1);
+
+        state
+            .handle_address_deltas(
+                &block_info,
+                &AddressDeltasMessage::ExtendedDeltas(vec![
+                    test_candidate_delta(
+                        committee_address,
+                        0,
+                        vec![(
+                            committee_utxo,
+                            test_value_no_token(),
+                            Some(Datum::Inline(vec![0xCA])),
+                        )],
+                        vec![],
+                    ),
+                    test_candidate_delta(
+                        mapping_address,
+                        1,
+                        vec![(
+                            mapping_utxo,
+                            test_value_with_token(auth_policy, auth_asset, 1),
+                            Some(Datum::Inline(vec![0xAA])),
+                        )],
+                        vec![],
+                    ),
+                ]),
+            )
+            .unwrap();
+
+        state.handle_new_epoch(&block_info, None);
+
+        let epoch_candidates = state.get_epoch_candidates(block_info.epoch);
+        assert_eq!(epoch_candidates.len(), 1);
+        assert_eq!(
+            epoch_candidates[0].utxo_tx_hash,
+            committee_utxo.tx_hash.to_vec()
+        );
+        assert_eq!(
+            epoch_candidates[0].utxo_index,
+            u32::from(committee_utxo.output_index)
+        );
+        assert_eq!(epoch_candidates[0].full_datum, vec![0xCA]);
+
+        let registrations = state.mapping_registrations.get_registrations(block_info.number, 0, 50);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].tx_hash, mapping_utxo.tx_hash);
+    }
+
+    #[test]
+    fn should_remove_spent_committee_candidates_from_future_epoch_snapshots() {
+        let committee_address =
+            test_address("addr_test1wz5ax0hjvhx2uqef8sqrxnmfywd37hea4truhqxu4yxp9hsvggkfm");
+        let mut state = State::new(test_config_epoch_candidate(committee_address.clone()));
+
+        let registration_block = test_block_info_for(1, 1);
+        let deregistration_block = test_block_info_for(2, 2);
+        let committee_utxo = UTxOIdentifier::new(TxHash::new([6u8; 32]), 0);
+
+        state
+            .handle_address_deltas(
+                &registration_block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_candidate_delta(
+                    committee_address.clone(),
+                    0,
+                    vec![(
+                        committee_utxo,
+                        test_value_no_token(),
+                        Some(Datum::Inline(vec![0xAB])),
+                    )],
+                    vec![],
+                )]),
+            )
+            .unwrap();
+        state.handle_new_epoch(&registration_block, None);
+        assert_eq!(state.get_epoch_candidates(1).len(), 1);
+
+        state
+            .handle_address_deltas(
+                &deregistration_block,
+                &AddressDeltasMessage::ExtendedDeltas(vec![test_candidate_delta(
+                    committee_address,
+                    0,
+                    vec![],
+                    vec![(committee_utxo, TxHash::new([7u8; 32]))],
+                )]),
+            )
+            .unwrap();
+        state.handle_new_epoch(&deregistration_block, None);
+
+        assert!(state.get_epoch_candidates(2).is_empty());
     }
 
     #[test]
@@ -1107,6 +1448,56 @@ mod tests {
         assert_eq!(
             history.current().unwrap().governance.get_technical_committee_datum(block2.number),
             Some((block2.number, datum_c))
+        );
+    }
+
+    #[test]
+    fn stable_block_window_bounds_should_match_partner_chain_formula() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 432,
+                active_slots_coeff: RationalNumber::new(1, 20),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let bounds =
+            StableBlockWindowBounds::from_protocol_params(&protocol_params).expect("bounds");
+
+        assert_eq!(
+            bounds,
+            StableBlockWindowBounds {
+                min_block_age_millis: 8_640_000,
+                max_block_age_millis: 25_920_000,
+            }
+        );
+    }
+
+    #[test]
+    fn should_store_stable_block_window_bounds_from_protocol_params() {
+        let protocol_params = ProtocolParams {
+            shelley: Some(ShelleyParams {
+                security_param: 432,
+                active_slots_coeff: RationalNumber::new(1, 20),
+                slot_length: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut state = State::new(MidnightConfig::default());
+        state
+            .update_stable_block_window_bounds(&protocol_params)
+            .expect("stable bounds should be derived");
+
+        assert_eq!(
+            state.stable_block_window_bounds(),
+            Some(StableBlockWindowBounds {
+                min_block_age_millis: 8_640_000,
+                max_block_age_millis: 25_920_000,
+            })
         );
     }
 }

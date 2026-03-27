@@ -1,17 +1,21 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use acropolis_common::{BlockInfo, TxHash};
 use anyhow::{anyhow, Result};
 use config::Config;
 use fjall::{Database, Keyspace, OwnedWriteBatch};
 
-use crate::stores::{Block, ExtraBlockData, Tx, TxBlockReference};
+use crate::stores::{extract_tx_hashes, Block, ExtraBlockData, Tx, TxBlockReference};
 
 pub struct FjallStore {
     database: Database,
     blocks: FjallBlockStore,
     txs: FjallTXStore,
-    last_persisted_block: Option<u64>,
+    last_persisted_block: AtomicU64,
 }
 
 const DEFAULT_DATABASE_PATH: &str = "fjall-blocks";
@@ -40,13 +44,21 @@ impl FjallStore {
         let blocks = FjallBlockStore::new(&database)?;
         let txs = FjallTXStore::new(&database)?;
 
-        let last_persisted_block = if !clear {
-            blocks.block_hashes_by_number.iter().next_back().and_then(|res| {
-                res.key().ok().and_then(|key| key.as_ref().try_into().ok().map(u64::from_be_bytes))
-            })
+        let last_persisted_block = AtomicU64::new(if !clear {
+            blocks
+                .block_hashes_by_number
+                .iter()
+                .next_back()
+                .and_then(|res| {
+                    res.key()
+                        .ok()
+                        .and_then(|key| <[u8; 8]>::try_from(key.as_ref()).ok())
+                        .map(u64::from_be_bytes)
+                })
+                .unwrap_or(0)
         } else {
-            None
-        };
+            0
+        });
 
         Ok(Self {
             database,
@@ -90,14 +102,30 @@ impl super::Store for FjallStore {
 
         batch.commit()?;
 
+        self.last_persisted_block.store(info.number, std::sync::atomic::Ordering::Relaxed);
+
+        Ok(())
+    }
+
+    fn rollback(&self, info: &BlockInfo) -> Result<()> {
+        let mut batch = self.database.batch();
+        let txs = self.blocks.rollback(&mut batch, info)?;
+        self.txs.rollback(&mut batch, &txs)?;
+
+        batch.commit()?;
+
+        self.last_persisted_block.store(info.number - 1, std::sync::atomic::Ordering::Relaxed);
+
         Ok(())
     }
 
     fn should_persist(&self, block_number: u64) -> bool {
-        match self.last_persisted_block {
-            Some(last) => block_number > last,
-            None => true,
-        }
+        let tip = self.last_persisted_block.load(std::sync::atomic::Ordering::Relaxed);
+        tip == 0 || block_number > tip
+    }
+
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        self.blocks.get_earliest_block_number()
     }
 
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
@@ -118,6 +146,10 @@ impl super::Store for FjallStore {
 
     fn get_block_by_epoch_slot(&self, epoch: u64, epoch_slot: u64) -> Result<Option<Block>> {
         self.blocks.get_by_epoch_slot(epoch, epoch_slot)
+    }
+
+    fn get_tip_block_number(&self) -> u64 {
+        self.last_persisted_block.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn get_latest_block(&self) -> Result<Option<Block>> {
@@ -197,6 +229,42 @@ impl FjallBlockStore {
         );
     }
 
+    fn rollback(
+        &self,
+        batch: &mut OwnedWriteBatch,
+        rollback_block: &BlockInfo,
+    ) -> Result<Vec<TxHash>> {
+        let number_start = rollback_block.number.to_be_bytes();
+        let slot_start = rollback_block.slot.to_be_bytes();
+        let epoch_slot_start = epoch_slot_key(rollback_block.epoch, rollback_block.epoch_slot);
+
+        let mut tx_hashes = Vec::new();
+        // Collect `tx_hashes` from `blocks` and remove entries >= `rollback_block.number`
+        for block in self.block_hashes_by_number.range(number_start..) {
+            let (key, value) = block.into_inner()?;
+            if let Some(block) = self.blocks.get(&value)? {
+                let decoded: Block = minicbor::decode(&block)?;
+                tx_hashes.extend(extract_tx_hashes(&decoded.bytes)?);
+            }
+            batch.remove(&self.block_hashes_by_number, key);
+            batch.remove(&self.blocks, value);
+        }
+
+        // Remove entries >= `rollback_block.slot` from `block_hashes_by_slot`
+        for res in self.block_hashes_by_slot.range(slot_start..) {
+            let key = res.key()?;
+            batch.remove(&self.block_hashes_by_slot, key);
+        }
+
+        // Remove entries >= `{rollback_block.epoch}{rollback_block.epoch_slot}` from `block_hashes_by_epoch_slot`
+        for res in self.block_hashes_by_epoch_slot.range(epoch_slot_start..) {
+            let key = res.key()?;
+            batch.remove(&self.block_hashes_by_epoch_slot, key);
+        }
+
+        Ok(tx_hashes)
+    }
+
     fn get_by_hash(&self, hash: &[u8]) -> Result<Option<Block>> {
         let Some(block) = self.blocks.get(hash)? else {
             return Ok(None);
@@ -216,6 +284,16 @@ impl FjallBlockStore {
             return Ok(None);
         };
         self.get_by_hash(&hash)
+    }
+
+    fn get_earliest_block_number(&self) -> Result<Option<u64>> {
+        let Some(entry) = self.block_hashes_by_number.iter().next() else {
+            return Ok(None);
+        };
+        let key = entry.key()?;
+        let key = <[u8; 8]>::try_from(key.as_ref())
+            .map_err(|_| anyhow!("Invalid stored block number key"))?;
+        Ok(Some(u64::from_be_bytes(key)))
     }
 
     fn get_by_number_range(&self, min_number: u64, max_number: u64) -> Result<Vec<Block>> {
@@ -282,6 +360,13 @@ impl FjallTXStore {
         batch.insert(&self.txs, hash.as_ref(), bytes);
     }
 
+    fn rollback(&self, batch: &mut OwnedWriteBatch, txs: &Vec<TxHash>) -> Result<()> {
+        for tx in txs {
+            batch.remove(&self.txs, tx.as_ref());
+        }
+        Ok(())
+    }
+
     fn get_by_hash(&self, hash: &[u8]) -> Result<Option<TxBlockReference>> {
         let Some(block_ref) = self.txs.get(hash)? else {
             return Ok(None);
@@ -291,7 +376,7 @@ impl FjallTXStore {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::stores::Store;
 
     use super::*;
@@ -314,7 +399,7 @@ mod tests {
         "820183851a2d964a0958202d9136c363c69ad07e1a918de2ff5aeeba4361e33b9c2597511874f211ca26e984830058200e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a85820afc0da64183bf2664f3d4eec7238d524ba607faeeab24fc100eb861dba69971b8300582025777aca9e4a73d48fc73b4f961d345b06d4a6f349cb7916570d35537d53479f5820d36a2619a672494604e11bb447cbcf5231e9f2ba25c2169177edc941bd50ad6c5820afc0da64183bf2664f3d4eec7238d524ba607faeeab24fc100eb861dba69971b58204e66280cd94d591072349bec0a3090a53aa945562efb6d08d56e53654b0e4098848200085840d2965c869901231798c5d02d39fca2a79aa47c3e854921b5855c82fd1470891517e1fa771655ec8cad13ecf6e5719adc5392fc057e1703d5f583311e837462f1810982028284005840d2965c869901231798c5d02d39fca2a79aa47c3e854921b5855c82fd1470891517e1fa771655ec8cad13ecf6e5719adc5392fc057e1703d5f583311e837462f158409180d818e69cd997e34663c418a648c076f2e19cd4194e486e159d8580bc6cda81344440c6ad0e5306fd035bef9281da5d8fbd38f59f588f7081016ee61113d25840cf6ddc111545f61c2442b68bd7864ea952c428d145438948ef48a4af7e3f49b175564007685be5ae3c9ece0ab27de09721db0cb63aa67dc081a9f82d7e84210d58407b26babee8ad96bf5cdd20cac799ca56c90b6ff9df1f1140f50f021063f719e3791f22be92353a8ae16045b0d52a51c8b1219ce782fd4198cf15b745348021018483000000826a63617264616e6f2d736c00a058204ba92aa320c60acc9ad7b9a64f2eda55c4d2ec28e604faf186708b4f0c4e8edf849fff8300d9010280d90102809fff82809fff81a0",
     ];
 
-    fn test_block_info(bytes: &[u8]) -> BlockInfo {
+    pub(crate) fn test_block_info(bytes: &[u8]) -> BlockInfo {
         let block = MultiEraBlock::decode(bytes).unwrap();
         let genesis = GenesisValues::mainnet();
         let (epoch, epoch_slot) = block.epoch(&genesis);
@@ -339,7 +424,7 @@ mod tests {
         hex::decode(TEST_BLOCK).unwrap()
     }
 
-    fn test_block_range_bytes(count: usize) -> Vec<Vec<u8>> {
+    pub(crate) fn test_block_range_bytes(count: usize) -> Vec<Vec<u8>> {
         TEST_BLOCKS[0..count].iter().map(|b| hex::decode(b).unwrap()).collect()
     }
 

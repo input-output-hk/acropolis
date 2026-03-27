@@ -1,14 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use acropolis_common::{
-    protocol_params::ShelleyParams,
+    protocol_params::ProtocolParams,
     validation::{Phase1ValidationError, TransactionValidationError},
-    Era, PoolRegistrationUpdate, StakeRegistrationUpdate, TxUTxODeltas, UTXOValue, UTxOIdentifier,
+    Era, PoolRegistrationUpdate, ReferenceScript, ScriptHash, StakeRegistrationUpdate,
+    TxUTxODeltas, UTXOValue, UTxOIdentifier,
 };
 use anyhow::Result;
 
 use crate::utils;
 mod alonzo;
+mod babbage;
 mod shelley;
 
 pub fn validate_tx(
@@ -16,7 +18,7 @@ pub fn validate_tx(
     pool_registration_updates: &[PoolRegistrationUpdate],
     stake_registration_updates: &[StakeRegistrationUpdate],
     utxos: &HashMap<UTxOIdentifier, UTXOValue>,
-    shelley_params: Option<&ShelleyParams>,
+    protocol_params: &ProtocolParams,
     era: Era,
 ) -> Result<(), Box<TransactionValidationError>> {
     let inputs = &tx_deltas.consumes;
@@ -27,7 +29,8 @@ pub fn validate_tx(
         utxos,
     );
 
-    let vkey_hashes_needed = utils::get_vkeys_needed(tx_deltas, utxos, shelley_params);
+    let vkey_hashes_needed =
+        utils::get_vkeys_needed(tx_deltas, utxos, protocol_params.genesis_delegates());
     let scripts_needed = utils::get_scripts_needed(tx_deltas, utxos);
     let script_hashes_needed = scripts_needed.values().copied().collect::<HashSet<_>>();
 
@@ -52,11 +55,11 @@ pub fn validate_tx(
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
-    let outputs = &tx_deltas.produces;
-    let ref_inputs = &tx_deltas.reference_inputs;
-    let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
-    let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
     if era >= Era::Alonzo {
+        let outputs = &tx_deltas.produces;
+        let ref_inputs = &tx_deltas.reference_inputs;
+        let plutus_data = &tx_deltas.plutus_data.clone().unwrap_or_default();
+        let redeemers = &tx_deltas.redeemers.clone().unwrap_or_default();
         alonzo::utxow::validate(
             inputs,
             outputs,
@@ -69,6 +72,18 @@ pub fn validate_tx(
             tx_deltas.is_valid,
         )
         .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
+    }
+
+    if era >= Era::Babbage {
+        let created_reference_scripts: HashMap<ScriptHash, &ReferenceScript> = tx_deltas
+            .created_reference_scripts
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|(hash, script)| (*hash, script))
+            .collect();
+        babbage::utxow::validate(created_reference_scripts)
+            .map_err(|e| Box::new((Phase1ValidationError::UTxOWValidationError(*e)).into()))?;
     }
 
     Ok(())

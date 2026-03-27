@@ -1,29 +1,35 @@
 //! Shelley era transaction validation
 //! Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L343
 
-use acropolis_common::{protocol_params::ShelleyParams, validation::Phase1ValidationError};
+use acropolis_common::{protocol_params::ProtocolParams, validation::Phase1ValidationError, Era};
 use anyhow::Result;
+use pallas::ledger::traverse::MultiEraTx;
 pub type Phase1ValidationResult = Result<(), Box<Phase1ValidationError>>;
 
 pub fn validate(
-    tx_size: u32,
-    fee: u64,
-    ttl: Option<u64>,
-    shelley_params: &ShelleyParams,
+    tx: &MultiEraTx,
+    protocol_params: &ProtocolParams,
     current_slot: u64,
+    era: Era,
 ) -> Phase1ValidationResult {
     // This check is only for shelley
-    validate_time_to_live(ttl, current_slot)?;
+    validate_time_to_live(tx.ttl(), current_slot, era)?;
 
-    validate_fee_too_small_utxo(fee, tx_size, shelley_params)?;
-    validate_max_tx_size_utxo(tx_size, shelley_params)?;
+    let tx_fee = tx.fee().unwrap_or(0);
+    let tx_size = tx.size() as u32;
+    validate_fee_too_small_utxo(tx_fee, tx_size, protocol_params)?;
+    validate_max_tx_size_utxo(tx_size, protocol_params)?;
     Ok(())
 }
 
 /// Validate transaction's TTL field
 /// pass if ttl >= current_slot
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L421
-pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1ValidationResult {
+pub fn validate_time_to_live(
+    ttl: Option<u64>,
+    current_slot: u64,
+    era: Era,
+) -> Phase1ValidationResult {
     if let Some(ttl) = ttl {
         if ttl >= current_slot {
             Ok(())
@@ -33,10 +39,12 @@ pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1Valid
                 current_slot,
             }))
         }
-    } else {
+    } else if era == Era::Shelley {
         Err(Box::new(Phase1ValidationError::MalformedTransaction {
             errors: vec!["TTL is missing for Shelley Tx".to_string()],
         }))
+    } else {
+        Ok(())
     }
 }
 
@@ -47,8 +55,13 @@ pub fn validate_time_to_live(ttl: Option<u64>, current_slot: u64) -> Phase1Valid
 pub fn validate_fee_too_small_utxo(
     fee: u64,
     tx_size: u32,
-    shelley_params: &ShelleyParams,
+    protocol_params: &ProtocolParams,
 ) -> Phase1ValidationResult {
+    let Some(shelley_params) = protocol_params.shelley.as_ref() else {
+        return Err(Box::new(Phase1ValidationError::Other(
+            "Shelley params are not set".to_string(),
+        )));
+    };
     let min_fee = shelley_params.min_fee(tx_size);
     if fee < min_fee {
         Err(Box::new(Phase1ValidationError::FeeTooSmallUTxO {
@@ -64,8 +77,13 @@ pub fn validate_fee_too_small_utxo(
 /// Reference: https://github.com/IntersectMBO/cardano-ledger/blob/24ef1741c5e0109e4d73685a24d8e753e225656d/eras/shelley/impl/src/Cardano/Ledger/Shelley/Rules/Utxo.hs#L575
 pub fn validate_max_tx_size_utxo(
     tx_size: u32,
-    shelley_params: &ShelleyParams,
+    protocol_params: &ProtocolParams,
 ) -> Phase1ValidationResult {
+    let Some(shelley_params) = protocol_params.shelley.as_ref() else {
+        return Err(Box::new(Phase1ValidationError::Other(
+            "Shelley params are not set".to_string(),
+        )));
+    };
     let max_tx_size = shelley_params.protocol_params.max_tx_size;
     if tx_size > max_tx_size {
         Err(Box::new(Phase1ValidationError::MaxTxSizeUTxO {
@@ -81,7 +99,7 @@ pub fn validate_max_tx_size_utxo(
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{to_pallas_era, TestContext},
+        test_utils::{to_era, to_pallas_era, TestContext},
         validation_fixture,
     };
     use pallas::ledger::traverse::MultiEraTx;
@@ -130,13 +148,7 @@ mod tests {
         (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
     ) -> Result<(), Phase1ValidationError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
-        validate(
-            tx.size() as u32,
-            tx.fee().unwrap_or(0),
-            tx.ttl(),
-            &ctx.shelley_params,
-            ctx.current_slot,
-        )
-        .map_err(|e| *e)
+        let era = to_era(era);
+        validate(&tx, &ctx.protocol_params, ctx.current_slot, era).map_err(|e| *e)
     }
 }

@@ -3,9 +3,13 @@
 
 use crate::immutable_historical_epochs_state::ImmutableHistoricalEpochsState;
 use crate::state::{HistoricalEpochsStateConfig, State};
-use acropolis_common::caryatid::SubscriptionExt;
+use acropolis_common::caryatid::RollbackWrapper;
 use acropolis_common::configuration::StartupMode;
-use acropolis_common::messages::StateQuery;
+use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{
+    EpochActivityMessage, ProtocolParamsMessage, RawBlockMessage, StateQuery,
+    StateTransitionMessage,
+};
 use acropolis_common::queries::epochs::{
     EpochInfo, EpochsStateQuery, NextEpochs, PreviousEpochs, DEFAULT_HISTORICAL_EPOCHS_QUERY_TOPIC,
 };
@@ -13,25 +17,40 @@ use acropolis_common::{
     messages::{CardanoMessage, Message, StateQueryResponse},
     queries::epochs::EpochsStateQueryResponse,
     queries::errors::QueryError,
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, error, info, warn};
 mod immutable_historical_epochs_state;
 mod state;
 mod volatile_historical_epochs_state;
 
 // Configuration defaults
-const DEFAULT_BLOCKS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("blocks-subscribe-topic", "cardano.block.proposed");
-const DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("epoch-activity-subscribe-topic", "cardano.epoch.activity");
-const DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC: (&str, &str) =
-    ("parameters-subscribe-topic", "cardano.protocol.parameters");
+declare_cardano_reader!(
+    BlockReader,
+    "blocks-subscribe-topic",
+    "cardano.block.proposed",
+    BlockAvailable,
+    RawBlockMessage
+);
+declare_cardano_reader!(
+    EpochActivityReader,
+    "epoch-activity-subscribe-topic",
+    "cardano.epoch.activity",
+    EpochActivity,
+    EpochActivityMessage
+);
+declare_cardano_reader!(
+    ParamsReader,
+    "parameters-subscribe-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
 
 const DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH: (&str, &str) = ("db-path", "./fjall-epochs");
 const DEFAULT_CLEAR_ON_START: (&str, bool) = ("clear-on-start", true);
@@ -48,14 +67,20 @@ impl HistoricalEpochsState {
     /// Async run loop
     async fn run(
         state_mutex: Arc<Mutex<State>>,
-        mut blocks_subscription: Box<dyn Subscription<Message>>,
-        mut epoch_activity_subscription: Box<dyn Subscription<Message>>,
-        mut params_subscription: Box<dyn Subscription<Message>>,
+        mut blocks_reader: BlockReader,
+        mut epoch_activity_reader: EpochActivityReader,
+        mut params_reader: ParamsReader,
         is_snapshot_mode: bool,
     ) -> Result<()> {
         if !is_snapshot_mode {
-            let _ = params_subscription.read().await?;
-            debug!("Consumed initial genesis params from params_subscription");
+            match params_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {
+                    debug!("Consumed initial genesis params from params_subscription");
+                }
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial params");
+                }
+            }
         }
 
         // Background task to persist epoch sequentially
@@ -72,68 +97,41 @@ impl HistoricalEpochsState {
 
         // Main loop of synchronised messages
         loop {
-            let mut current_block: Option<BlockInfo> = None;
-
             // Use blocks_message as the synchroniser
-            let (_, blocks_message) = blocks_subscription.read_ignoring_rollbacks().await?;
-            let new_epoch = match blocks_message.as_ref() {
-                Message::Cardano((block_info, CardanoMessage::BlockAvailable(_))) => {
-                    // Handle rollbacks on this topic only
+            let blocks_msg = match blocks_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block_info, blocks_msg)) => {
                     let mut state = state_mutex.lock().await;
                     if block_info.status == BlockStatus::RolledBack {
                         state.volatile.rollback_before(block_info.number);
                     }
-
-                    current_block = Some(block_info.clone());
-                    block_info.new_epoch && block_info.epoch > 0
+                    Some((block_info, blocks_msg))
                 }
-                _ => false,
+                RollbackWrapper::Rollback(_) => None,
             };
 
-            // Read from epoch-boundary messages only when it's a new epoch
-            if new_epoch {
-                let (_, params_msg) = params_subscription.read_ignoring_rollbacks().await?;
-                match params_msg.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::ProtocolParams(params))) => {
-                        let span = info_span!(
-                            "historical_epochs_state.handle_params",
-                            epoch = block_info.epoch
-                        );
-                        async {
-                            Self::check_sync(&current_block, block_info);
-                            let mut state = state_mutex.lock().await;
-                            if let Some(shelley) = &params.params.shelley {
-                                state.volatile.update_k(shelley.security_param);
-                            }
+            // Read from epoch-boundary messages only when it's a new epoch or rollback
+            if blocks_msg.as_ref().map(|(b, _)| b.new_epoch && b.epoch > 0).unwrap_or(true) {
+                match params_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((_, params)) => {
+                        let mut state = state_mutex.lock().await;
+                        if let Some(shelley) = &params.params.shelley {
+                            state.volatile.update_k(shelley.security_param);
                         }
-                        .instrument(span)
-                        .await;
                     }
-                    _ => error!("Unexpected message type: {params_msg:?}"),
+                    RollbackWrapper::Rollback(_) => {}
                 }
 
-                let (_, epoch_activity_msg) =
-                    epoch_activity_subscription.read_ignoring_rollbacks().await?;
-                match epoch_activity_msg.as_ref() {
-                    Message::Cardano((block_info, CardanoMessage::EpochActivity(ea))) => {
-                        let span = info_span!(
-                            "historical_epochs_state.handle_epoch_activity",
-                            epoch = block_info.epoch
-                        );
-                        async {
-                            Self::check_sync(&current_block, block_info);
-                            let mut state = state_mutex.lock().await;
-                            state.volatile.handle_new_epoch(block_info, ea);
-                        }
-                        .instrument(span)
-                        .await;
+                match epoch_activity_reader.read_with_rollbacks().await? {
+                    RollbackWrapper::Normal((block_info, ea_msg)) => {
+                        let mut state = state_mutex.lock().await;
+                        state.volatile.handle_new_epoch(&block_info, &ea_msg);
                     }
-                    _ => error!("Unexpected message type: {epoch_activity_msg:?}"),
+                    RollbackWrapper::Rollback(_) => {}
                 }
             }
 
             // Prune volatile and persist if needed
-            if let Some(current_block) = current_block {
+            if let Some((current_block, _)) = blocks_msg {
                 let should_prune = {
                     let state = state_mutex.lock().await;
                     state.ready_to_prune(&current_block)
@@ -154,39 +152,10 @@ impl HistoricalEpochsState {
         }
     }
 
-    /// Check for synchronisation
-    fn check_sync(expected: &Option<BlockInfo>, actual: &BlockInfo) {
-        if let Some(ref block) = expected {
-            if block.number != actual.number {
-                error!(
-                    expected = block.number,
-                    actual = actual.number,
-                    "Messages out of sync"
-                );
-            }
-        }
-    }
-
     /// Async initialisation
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         // Get configuration
         let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
-
-        // Subscription topics
-        let blocks_subscribe_topic = config
-            .get_string(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_BLOCKS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating blocks subscriber on '{blocks_subscribe_topic}'");
-
-        let epoch_activity_subscribe_topic = config
-            .get_string(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_EPOCH_ACTIVITY_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating epoch activity subscriber on '{epoch_activity_subscribe_topic}'");
-
-        let params_subscribe_topic = config
-            .get_string(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.0)
-            .unwrap_or(DEFAULT_PARAMETERS_SUBSCRIBE_TOPIC.1.to_string());
-        info!("Creating parameters subscriber on '{params_subscribe_topic}'");
 
         // Query topic
         let historical_epochs_query_topic = config
@@ -195,7 +164,7 @@ impl HistoricalEpochsState {
         info!("Creating query handler on '{historical_epochs_query_topic}'");
 
         // Configuration
-        let config = HistoricalEpochsStateConfig {
+        let cfg = HistoricalEpochsStateConfig {
             db_path: config
                 .get_string(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.0)
                 .unwrap_or(DEFAULT_HISTORICAL_EPOCHS_STATE_DB_PATH.1.to_string()),
@@ -205,7 +174,7 @@ impl HistoricalEpochsState {
         };
 
         // Initalize state
-        let state = State::new(&config)?;
+        let state = State::new(&cfg)?;
         let state_mutex = Arc::new(Mutex::new(state));
         let state_query = state_mutex.clone();
 
@@ -277,18 +246,17 @@ impl HistoricalEpochsState {
         });
 
         // Subscribe
-        let blocks_subscription = context.subscribe(&blocks_subscribe_topic).await?;
-        let epoch_activity_subscription =
-            context.subscribe(&epoch_activity_subscribe_topic).await?;
-        let params_subscription = context.subscribe(&params_subscribe_topic).await?;
+        let blocks_reader = BlockReader::new(&context, &config).await?;
+        let epoch_activity_reader = EpochActivityReader::new(&context, &config).await?;
+        let params_reader = ParamsReader::new(&context, &config).await?;
 
         // Start run task
         context.run(async move {
             Self::run(
                 state_mutex,
-                blocks_subscription,
-                epoch_activity_subscription,
-                params_subscription,
+                blocks_reader,
+                epoch_activity_reader,
+                params_reader,
                 is_snapshot_mode,
             )
             .await

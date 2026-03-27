@@ -106,6 +106,17 @@ services:
       - ${CHAIN_STORE_DB_DIR_MAINNET:-midnight_indexer_mainnet_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-mainnet
       - ${SPDD_DB_DIR_MAINNET:-midnight_indexer_mainnet_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
 
+  midnight-indexer-guardnet:
+    <<: *midnight-indexer-base
+    command: ["--config", "config.guardnet.toml", "--config", "config.guardnet.docker.toml"]
+    ports:
+      - "${MIDNIGHT_GUARDNET_GRPC_PORT:-65051}:50051"
+    volumes:
+      - ${MITHRIL_DOWNLOADS_DIR_GUARDNET:-midnight_indexer_guardnet_downloads}:/app/modules/mithril_snapshot_fetcher/downloads
+      - ${SNAPSHOT_DATA_DIR_GUARDNET:-midnight_indexer_guardnet_snapshot_data}:/app/modules/snapshot_bootstrapper/data
+      - ${CHAIN_STORE_DB_DIR_GUARDNET:-midnight_indexer_guardnet_chain_store_db}:/app/processes/midnight_indexer/fjall-blocks-guardnet
+      - ${SPDD_DB_DIR_GUARDNET:-midnight_indexer_guardnet_spdd_db}:/app/processes/midnight_indexer/fjall-spdd
+
 volumes:
   omnibus_preview_spdd:
   omnibus_preview_downloads:
@@ -135,3 +146,7 @@ volumes:
   midnight_indexer_mainnet_snapshot_data:
   midnight_indexer_mainnet_chain_store_db:
   midnight_indexer_mainnet_spdd_db:
+  midnight_indexer_guardnet_downloads:
+  midnight_indexer_guardnet_snapshot_data:
+  midnight_indexer_guardnet_chain_store_db:
+  midnight_indexer_guardnet_spdd_db:

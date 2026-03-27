@@ -3,9 +3,13 @@
 use acropolis_common::{
     caryatid::RollbackWrapper,
     declare_cardano_reader,
-    messages::{AddressDeltasMessage, CardanoMessage, Message, StateTransitionMessage},
+    messages::{
+        AddressDeltasMessage, CardanoMessage, Message, ProtocolParamsMessage,
+        StateTransitionMessage,
+    },
+    protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockInfo, BlockStatus,
+    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -32,6 +36,22 @@ declare_cardano_reader!(
     AddressDeltasMessage
 );
 
+declare_cardano_reader!(
+    EpochNonceReader,
+    "epoch-nonce-topic",
+    "cardano.epoch.nonce",
+    EpochNonce,
+    Option<Nonce>
+);
+
+declare_cardano_reader!(
+    ProtocolParamsReader,
+    "publish-parameters-topic",
+    "cardano.protocol.parameters",
+    ProtocolParams,
+    ProtocolParamsMessage
+);
+
 /// Midnight State module
 #[module(
     message_type(Message),
@@ -46,6 +66,8 @@ impl MidnightState {
         history: Arc<Mutex<StateHistory<State>>>,
         config: MidnightConfig,
         mut address_deltas_reader: AddressDeltasReader,
+        mut epoch_nonce_reader: EpochNonceReader,
+        mut protocol_params_reader: ProtocolParamsReader,
     ) -> Result<()> {
         loop {
             let mut state = {
@@ -64,8 +86,24 @@ impl MidnightState {
                         );
                     }
 
-                    if blk_info.new_epoch {
-                        state.handle_new_epoch(blk_info.as_ref());
+                    if blk_info.new_epoch && blk_info.epoch > 0 {
+                        match protocol_params_reader.read_with_rollbacks().await? {
+                            RollbackWrapper::Normal((_, protocol_params)) => {
+                                state.update_stable_block_window_bounds(&protocol_params.params)?;
+                            }
+                            RollbackWrapper::Rollback(_) => {}
+                        }
+
+                        let (nonce, is_rollback) = match epoch_nonce_reader
+                            .read_with_rollbacks()
+                            .await?
+                        {
+                            RollbackWrapper::Normal((_, nonce)) => (nonce.as_ref().clone(), false),
+                            RollbackWrapper::Rollback(_) => (None, true),
+                        };
+                        if !is_rollback {
+                            state.handle_new_epoch(blk_info.as_ref(), nonce);
+                        }
                     }
 
                     state.handle_address_deltas(&blk_info, deltas.as_ref())?;
@@ -89,6 +127,8 @@ impl MidnightState {
 
         // Subscribe to the `AddressDeltasMessage` publisher
         let address_deltas_reader = AddressDeltasReader::new(&context, &config).await?;
+        let epoch_nonce_reader = EpochNonceReader::new(&context, &config).await?;
+        let protocol_params_reader = ProtocolParamsReader::new(&context, &config).await?;
 
         // Initialize unbounded state history for rollback-safe replay.
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
@@ -99,9 +139,15 @@ impl MidnightState {
         let grpc_context = context.clone();
         // Start the main run loop
         context.run(async move {
-            Self::run(history, cfg, address_deltas_reader)
-                .await
-                .unwrap_or_else(|e| error!("Failed: {e}"));
+            Self::run(
+                history,
+                cfg,
+                address_deltas_reader,
+                epoch_nonce_reader,
+                protocol_params_reader,
+            )
+            .await
+            .unwrap_or_else(|e| error!("Failed: {e}"));
         });
 
         // Start the gRPC server

@@ -1,23 +1,79 @@
-name: Run omnibus bootstrap test
+name: Run omnibus full test
 
 on:
   schedule:
-    - cron: '15 0 * * *'
+    - cron: '15 3 * * *'
 
   workflow_dispatch:
     branches:
       - main
+      - "*/omnibus-ci"
+    inputs:
+      target_epoch:
+        description: 'Begin tests when the omnibus process reaches this epoch'
+        type: number
 
 env:
-  CARGO_TERM_COLOR: always
+  ACROPOLIS_REST_URL: http://localhost:4340
+  SPDD_VALIDATION_START_EPOCH: 508
 
 jobs:
   run-test:
-    name: Run omnibus bootstrap test
+    name: Run omnibus full test
     runs-on: self-hosted
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run bootstrap test
-        run: ./scripts/omnibus-bootstrap-test.sh
+      - name: set up cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ github.workflow }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release version of omnibus process
+        run: make build-release
+
+      - name: Bootstrap omnibus and wait for target epoch
+        run: ./scripts/run-omnibus-wait-for-epoch.sh
+        env:
+          TARGET_EPOCH: ${{ inputs.target_epoch }}
+
+      - name: Run spdd tests
+        run: |
+          cd tests/integration
+          npm install
+          npm run test:spdd
+        env:
+          MAINNET_DBSYNC_URL: ${{ secrets.MAINNET_DBSYNC_URL }}
+
+      - name: Run drdd tests
+        run: |
+          cd tests/integration
+          npm run test:spdd
+        env:
+          MAINNET_DBSYNC_URL: ${{ secrets.MAINNET_DBSYNC_URL }}
+
+      - name: Run k6 smoke test
+        run: |
+          cd tests/k6
+          make install
+          make build
+          make results-dir
+          make test-smoke
+        continue-on-error: true  # threshold tests currently failing
+        env:
+          API_URL: ${{ env.ACROPOLIS_REST_URL }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omnibus-artifacts
+          path: tests/k6/results
+
+      - name: Stop omnibus process
+        run: pkill -f acropolis_process_omnibus

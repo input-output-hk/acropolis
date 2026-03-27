@@ -2921,6 +2921,7 @@ mod tests {
                     datum: None,
                     script_ref: None,
                 },
+                reference_script: None,
             })
             .unwrap();
 

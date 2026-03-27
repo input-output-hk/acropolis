@@ -1,5 +1,6 @@
 //! Acropolis UTXOState: State storage
 use crate::address_delta_mode::AddressDeltaPublishMode;
+use crate::reference_scripts_state::ReferenceScriptsState;
 use crate::validations;
 use crate::volatile_index::VolatileIndex;
 use acropolis_common::messages::Message;
@@ -16,7 +17,6 @@ use acropolis_common::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use imbl::HashMap as ImblHashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -96,8 +96,7 @@ pub struct State {
     volatile_utxos: HashMap<UTxOIdentifier, UTXOValue>,
 
     /// Reference scripts history
-    /// <script hash, (ref script struct, and its occurrence count)>
-    reference_scripts_history: StateHistory<ImblHashMap<ScriptHash, (ReferenceScript, u64)>>,
+    reference_scripts_history: StateHistory<ReferenceScriptsState>,
 
     /// Index of volatile UTXOs by created block
     volatile_created: VolatileIndex,
@@ -228,6 +227,14 @@ impl State {
         self.protocol_parameters_history.commit(block_info.number, protocol_params);
     }
 
+    pub fn commit_reference_scripts(
+        &mut self,
+        block_number: u64,
+        reference_scripts: ReferenceScriptsState,
+    ) {
+        self.reference_scripts_history.commit(block_number, reference_scripts);
+    }
+
     /// Register the delta observer
     pub fn register_address_delta_observer(&mut self, observer: Arc<dyn AddressDeltaObserver>) {
         self.address_delta_observer = Some(observer);
@@ -246,13 +253,10 @@ impl State {
         }
     }
 
-    //// Loop up a reference script
+    /// Look up a Reference script
     #[allow(dead_code)]
     pub fn lookup_reference_script(&self, script_hash: &ScriptHash) -> Option<ReferenceScript> {
-        self.reference_scripts_history
-            .get_current_state()
-            .get(script_hash)
-            .map(|(script, _)| script.clone())
+        self.reference_scripts_history.get_current_state().lookup_reference_script(script_hash)
     }
 
     /// Get the number of valid UTXOs - that is, that have a valid created_at
@@ -429,38 +433,6 @@ impl State {
         Ok(())
     }
 
-    /// Observe TxUTxODelta's Reference scripts
-    pub fn observe_reference_scripts(
-        &mut self,
-        reference_scripts: &[(ScriptHash, ReferenceScript)],
-        spent_reference_scripts: &Vec<ScriptHash>,
-        block_info: &BlockInfo,
-    ) {
-        if reference_scripts.is_empty() {
-            return;
-        }
-
-        let mut current_state =
-            self.reference_scripts_history.get_rolled_back_state(block_info.number);
-
-        // Add newly created reference scripts
-        for (script_hash, reference_script) in reference_scripts {
-            current_state.entry(*script_hash).or_insert((reference_script.clone(), 0)).1 += 1;
-        }
-
-        // Remove spent reference scripts
-        for script_hash in spent_reference_scripts {
-            if let Some((_, count)) = current_state.get_mut(script_hash) {
-                *count -= 1;
-                if *count == 0 {
-                    current_state.remove(script_hash);
-                }
-            }
-        }
-
-        self.reference_scripts_history.commit(block_info.number, current_state);
-    }
-
     /// Background prune
     async fn prune(&mut self) -> Result<()> {
         // Remove all volatile UTXOs that have now become immutably spent
@@ -528,6 +500,10 @@ impl State {
         block: &BlockInfo,
         deltas: &UTXODeltasMessage,
     ) -> Result<()> {
+        // get current reference scripts state
+        let mut current_reference_scripts_state =
+            self.reference_scripts_history.get_rolled_back_state(block.number);
+
         // Start the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
             observer.start_block(block).await;
@@ -550,7 +526,7 @@ impl State {
 
         // Process the deltas
         for tx in &deltas.deltas {
-            if tx.is_valid {
+            let spent_reference_scripts = if tx.is_valid {
                 match self.address_delta_publish_mode {
                     AddressDeltaPublishMode::Compact => {
                         self.handle_valid_tx_compact(tx, block).await?
@@ -568,8 +544,15 @@ impl State {
                         self.handle_invalid_tx_extended(tx, block).await?
                     }
                 }
-            }
+            };
+
+            let created_reference_scripts = tx.created_reference_scripts.as_deref().unwrap_or(&[]);
+            current_reference_scripts_state
+                .apply_reference_scripts(&spent_reference_scripts, created_reference_scripts);
         }
+
+        // Commit updated reference scripts state to history
+        self.commit_reference_scripts(block.number, current_reference_scripts_state);
 
         // End the block for observers
         if let Some(observer) = self.address_delta_observer.as_mut() {
@@ -582,11 +565,13 @@ impl State {
         Ok(())
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_valid_tx_compact(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
 
@@ -630,24 +615,20 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_valid_tx_extended(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         // Temporary map to sum UTxO deltas efficiently
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
@@ -713,24 +694,20 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(tx_output, tx.fee).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_invalid_tx_compact(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapCompact> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
         let mut tx_fees = 0;
@@ -777,24 +754,20 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
+    /// This function returns
+    /// the spent reference script hashes for the transaction
     async fn handle_invalid_tx_extended(
         &mut self,
         tx: &TxUTxODeltas,
         block: &BlockInfo,
-    ) -> Result<()> {
+    ) -> Result<Vec<ScriptHash>> {
         let mut address_map: HashMap<Address, AddressTxMapExtended> = HashMap::new();
         let mut spent_reference_scripts = Vec::new();
         let mut tx_fees = 0;
@@ -859,17 +832,11 @@ impl State {
             }
         }
 
-        let reference_scripts = match tx.reference_scripts.as_ref() {
-            Some(scripts) => scripts,
-            None => &vec![],
-        };
-        self.observe_reference_scripts(reference_scripts, &spent_reference_scripts, block);
-
         if let Some(observer) = self.block_totals_observer.as_ref() {
             observer.observe_tx(0, tx_fees).await;
         }
 
-        Ok(())
+        Ok(spent_reference_scripts)
     }
 
     pub async fn handle_rollback(&mut self, message: Arc<Message>) -> Result<()> {
@@ -891,20 +858,17 @@ impl State {
         inputs: &[&UTxOIdentifier],
     ) -> HashMap<UTxOIdentifier, UTXOValue> {
         let mut utxos = HashMap::new();
+
         for input in inputs.iter().cloned() {
             if utxos.contains_key(input) {
                 continue;
             }
             if let Ok(Some(utxo)) = self.lookup_utxo(input).await {
-                utxos.insert(*input, Some(utxo));
-            } else {
-                utxos.insert(*input, None);
+                utxos.insert(*input, utxo);
             }
         }
+
         utxos
-            .into_iter()
-            .filter_map(|(input, utxo)| utxo.map(|utxo| (input, utxo)))
-            .collect::<HashMap<_, _>>()
     }
 
     pub async fn validate(
@@ -918,7 +882,7 @@ impl State {
         let mut bad_transactions = Vec::new();
         let deltas = &deltas_msg.deltas;
 
-        // collect utxos needed for validation
+        // collect utxos and reference scripts needed for validation
         let mut all_inputs =
             deltas.iter().flat_map(|tx_deltas| tx_deltas.consumes.iter()).collect::<Vec<_>>();
         all_inputs.extend(deltas.iter().flat_map(|tx_deltas| tx_deltas.reference_inputs.iter()));
@@ -931,14 +895,14 @@ impl State {
                     pool_registration_updates,
                     stake_registration_updates,
                     &utxos,
-                    protocol_params.shelley.as_ref(),
+                    protocol_params,
                     block.era,
                 ) {
                     bad_transactions.push((tx_deltas.tx_identifier.tx_index(), *e));
                 }
             }
 
-            // add this transaction's outputs to the utxos
+            // add created UTxOs to the utxos
             for output in &tx_deltas.produces {
                 utxos.insert(output.utxo_identifier, output.utxo_value());
             }
@@ -1077,7 +1041,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(ref_script.compute_hash(), ref_script.clone())]),
+            created_reference_scripts: Some(vec![(ref_script.compute_hash(), ref_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };
@@ -1281,7 +1245,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(v1_script.compute_hash(), v1_script.clone())]),
+            created_reference_scripts: Some(vec![(v1_script.compute_hash(), v1_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };
@@ -1308,7 +1272,7 @@ mod tests {
             produces: vec![output.clone()],
             fee: 0,
             is_valid: true,
-            reference_scripts: Some(vec![(v2_script.compute_hash(), v2_script.clone())]),
+            created_reference_scripts: Some(vec![(v2_script.compute_hash(), v2_script.clone())]),
             ..TxUTxODeltas::default()
         }];
         let deltas = UTXODeltasMessage { deltas };

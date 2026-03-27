@@ -5,8 +5,11 @@ pub mod fjall;
 
 pub trait Store: Send + Sync {
     fn insert_block(&self, info: &BlockInfo, block: &[u8]) -> Result<()>;
+    fn rollback(&self, info: &BlockInfo) -> Result<()>;
     fn should_persist(&self, block_number: u64) -> bool;
 
+    fn get_earliest_block_number(&self) -> Result<Option<u64>>;
+    fn get_tip_block_number(&self) -> u64;
     fn get_block_by_hash(&self, hash: &[u8]) -> Result<Option<Block>>;
     fn get_block_by_slot(&self, slot: u64) -> Result<Option<Block>>;
     fn get_block_by_number(&self, number: u64) -> Result<Option<Block>>;

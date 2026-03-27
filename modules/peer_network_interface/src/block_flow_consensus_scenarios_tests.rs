@@ -108,6 +108,16 @@ async fn make_harness() -> TestHarness {
         genesis_values: None,
         consensus_topic: "cardano.consensus.offers".to_string(),
         block_wanted_topic: "cardano.consensus.wants".to_string(),
+        target_peer_count: 15,
+        min_hot_peers: 3,
+        peer_sharing_enabled: false,
+        churn_interval_secs: 600,
+        peer_sharing_timeout_secs: 10,
+        connect_timeout_secs: 15,
+        ipv6_enabled: false,
+        allow_non_public_peer_addrs: true,
+        discovery_interval_secs: 0,
+        peer_sharing_cooldown_secs: 0,
     };
 
     let flow = BlockFlowHandler::new(

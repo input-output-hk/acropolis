@@ -1,6 +1,7 @@
 #!/bin/bash
 # Use 'tarpaulin' to generate test coverage stats
 set -e
+export PATH="$HOME/.cargo/bin:$PATH"
 cargo install cargo-tarpaulin
 
 # Exclude all target files, examples and caryatid_macros

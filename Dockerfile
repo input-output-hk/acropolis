@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.91-bookworm AS chef
+FROM rust:1.93-bookworm AS chef
 WORKDIR /app
 ENV CARGO_HOME=/cargo
 
@@ -101,6 +101,8 @@ COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.main
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.mainnet.docker.toml /app/processes/midnight_indexer/config.mainnet.docker.toml
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.toml /app/processes/midnight_indexer/config.preview.toml
 COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.preview.docker.toml /app/processes/midnight_indexer/config.preview.docker.toml
+COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.guardnet.toml /app/processes/midnight_indexer/config.guardnet.toml
+COPY --from=builder-midnight-indexer /app/processes/midnight_indexer/config.guardnet.docker.toml /app/processes/midnight_indexer/config.guardnet.docker.toml
 COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.mainnet.csv /app/modules/accounts_state/test-data/pots.mainnet.csv
 COPY --from=builder-midnight-indexer /app/modules/accounts_state/test-data/pots.preview.csv /app/modules/accounts_state/test-data/pots.preview.csv
 
@@ -113,4 +115,4 @@ RUN mkdir -p /app/modules/mithril_snapshot_fetcher/downloads \
 USER acropolis:acropolis
 
 ENTRYPOINT ["acropolis_process_midnight_indexer"]
-CMD ["--config", "config.preview.toml"]
+CMD ["--config", "config.guardnet.toml"]

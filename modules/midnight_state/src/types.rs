@@ -1,4 +1,6 @@
-use acropolis_common::{Address, BlockHash, BlockNumber, Datum, TxHash, UTxOIdentifier};
+use acropolis_common::{
+    BlockHash, BlockNumber, Datum, Epoch, StakeAddress, TxHash, UTxOIdentifier,
+};
 use anyhow::{anyhow, Error};
 
 /// ---------------------------------------------------------------------------
@@ -9,7 +11,7 @@ use anyhow::{anyhow, Error};
 /// public getter methods.
 /// ---------------------------------------------------------------------------
 pub struct AssetCreate {
-    pub holder_address: Address,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
@@ -20,7 +22,7 @@ pub struct AssetCreate {
 }
 
 pub struct AssetSpend {
-    pub holder_address: Address,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub spending_tx_hash: TxHash,
     pub block_number: BlockNumber,
@@ -77,7 +79,7 @@ impl TryFrom<&UTxOMeta> for AssetCreate {
             block_timestamp: creation.block_timestamp,
             tx_index_in_block: creation.tx_index,
             quantity: creation.quantity,
-            holder_address: creation.address.clone(),
+            holder_address: creation.holder_address.clone(),
             tx_hash: creation.utxo.tx_hash,
             utxo_index: creation.utxo.output_index,
         })
@@ -96,7 +98,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
             block_timestamp: spend.block_timestamp,
             tx_index_in_block: spend.tx_index,
             quantity: meta.creation.quantity,
-            holder_address: meta.creation.address.clone(),
+            holder_address: meta.creation.holder_address.clone(),
             utxo_tx_hash: meta.creation.utxo.tx_hash,
             utxo_index: meta.creation.utxo.output_index,
             spending_tx_hash: spend.tx_hash,
@@ -106,7 +108,7 @@ impl TryFrom<&UTxOMeta> for AssetSpend {
 
 #[derive(Debug, Clone)]
 pub struct CNightCreation {
-    pub address: Address,
+    pub holder_address: StakeAddress,
     pub quantity: u64,
     pub utxo: UTxOIdentifier,
     pub block_number: BlockNumber,
@@ -126,11 +128,15 @@ pub struct CNightSpend {
 
 #[derive(Clone)]
 pub struct RegistrationEvent {
+    pub block_number: u64,
     pub block_hash: BlockHash,
     pub block_timestamp: i64,
+    pub epoch: Epoch,
+    pub slot_number: u64,
     pub tx_index: u32,
     pub tx_hash: TxHash,
     pub utxo_index: u16,
+    pub tx_inputs: Vec<UTxOIdentifier>,
     pub datum: Datum,
 }
 

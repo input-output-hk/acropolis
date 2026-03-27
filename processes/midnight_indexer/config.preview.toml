@@ -40,23 +40,24 @@ node-addresses = [
 [module.midnight-state]
 address-deltas-topic = "cardano.address.deltas"
 
-# The below configuration is for `qanet`: https://github.com/midnightntwrk/midnight-node/tree/6b96e5cfb8c200cba66b624837e1c3e6da72cf82/res/qanet
+# The below configuration is for `preview`: https://github.com/midnightntwrk/midnight-node/tree/main/res/preview
 # Config for CNight asset
 cnight-policy-id = "d2dbff622e509dda256fedbd31ef6e9fd98ed49ad91d5c0e07f68af1"
 cnight-asset-name = ""
 
 # Config for Midnight candidates
 mapping-validator-address = "addr_test1wplxjzranravtp574s2wz00md7vz9rzpucu252je68u9a8qzjheng"
+committee-candidate-address = "addr_test1wz5ax0hjvhx2uqef8sqrxnmfywd37hea4truhqxu4yxp9hsvggkfm"
 auth-token-asset-name = ""
 
 # Config for Midnight governance
-technical-committee-address = "addr_test1wqx3yfmsp82nmtyjj4k86s3l04l6lvwaqh2vk2ygcge7kdsk4xc7j"
-technical-committee-policy-id = "0d12277009d53dac92956c7d423f7d7fafb1dd05d4cb2888c233eb36"
-council-address = "addr_test1wqqwkauz0ypglg5e4u780kcp8hzt75u72yg6z7td62gnk0qed0p06"
-council-policy-id = "00eb778279028fa299af3c77db013dc4bf539e5111a1796dd2913b3c"
+technical-committee-address = "addr_test1wptcy7h9rmkhdnhn3jvm6tuhehcq2hhhzntvn00nq79ph8c44v43j"
+technical-committee-policy-id = "57827ae51eed76cef38c99bd2f97cdf0055ef714d6c9bdf3078a1b9f"
+council-address = "addr_test1wzy47zdsq22pg9l48c5v0f835ljdjzkz47sa5za9cehcejcw28k2d"
+council-policy-id = "895f09b002941417f53e28c7a4f1a7e4d90ac2afa1da0ba5c66f8ccb"
 
 # Config for Midnight Ariadne parameters
-permissioned-candidate-policy = "f8625f11a58fa5ab5b85502a8fe5c843ece460c9c5f9273be17d3424"
+permissioned-candidate-policy = "24dccfce2576ae6fa7149bc485850656ae6faf9f4158891316773a78"
 
 # Config for Midnight gRPC server
 grpc-bind-address = "0.0.0.0:50051"
