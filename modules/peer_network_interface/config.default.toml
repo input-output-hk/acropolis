@@ -33,7 +33,7 @@ target-peer-count = 15
 # Minimum number of active hot peer connections to maintain
 min-hot-peers = 3
 # Enable/disable peer-sharing discovery
-peer-sharing-enabled = true
+peer-sharing-enabled = false
 # Seconds between random hot-peer churn events
 churn-interval-secs = 600
 # Timeout in seconds for a full peer-sharing exchange
@@ -45,6 +45,6 @@ ipv6-enabled = false
 # Accept loopback/private/link-local peer addresses from peer-sharing (useful for local testnets)
 allow-non-public-peer-addrs = true
 # Seconds between peer discovery (peer-sharing request) cycles
-discovery-interval-secs = 20
+discovery-interval-secs = 60
 # Per-peer cooldown in seconds between peer-sharing queries
-peer-sharing-cooldown-secs = 20
+peer-sharing-cooldown-secs = 300
