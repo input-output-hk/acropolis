@@ -89,13 +89,54 @@ impl SlotBlockData {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SpecificPoint {
-    slot: u64,
-    hash: BlockHash,
+pub(crate) struct SpecificPoint {
+    pub slot: u64,
+    pub hash: BlockHash,
 }
 impl SpecificPoint {
-    fn as_pallas_point(&self) -> Point {
+    pub(crate) fn as_pallas_point(&self) -> Point {
         Point::Specific(self.slot, self.hash.to_vec())
+    }
+
+    /// Sample a set of chain points from a sliding window of published blocks,
+    /// suitable for `find_intersect`. Used by both Direct and Consensus modes.
+    pub(crate) fn choose_intersect_points(points: &VecDeque<SpecificPoint>) -> Vec<Point> {
+        let mut iterator = points.iter().rev();
+        let mut result = vec![];
+
+        // send the 5 most recent points
+        for _ in 0..5 {
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
+            }
+        }
+
+        // then 5 more points, spaced out by 10 block heights each
+        let mut iterator = iterator.step_by(10);
+        for _ in 0..5 {
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
+            }
+        }
+
+        // then 5 more points, spaced out by a total of 100 block heights each
+        // (in case of an implausibly long rollback)
+        let mut iterator = iterator.step_by(10);
+        for _ in 0..5 {
+            if let Some(point) = iterator.next() {
+                result.push(point.as_pallas_point());
+            }
+        }
+
+        // finally, in case of a rollback of nearly unprecedented size, fall back to the oldest point we know of
+        let oldest_point = points.front().map(|p| p.as_pallas_point());
+        if oldest_point.as_ref() != result.last()
+            && let Some(point) = oldest_point
+        {
+            result.push(point);
+        }
+
+        result
     }
 }
 
@@ -327,42 +368,7 @@ impl ChainState {
     }
 
     pub fn choose_points_for_find_intersect(&self) -> Vec<Point> {
-        let mut iterator = self.published_blocks.iter().rev();
-        let mut result = vec![];
-
-        // send the 5 most recent points
-        for _ in 0..5 {
-            if let Some(point) = iterator.next() {
-                result.push(point.as_pallas_point());
-            }
-        }
-
-        // then 5 more points, spaced out by 10 block heights each
-        let mut iterator = iterator.step_by(10);
-        for _ in 0..5 {
-            if let Some(point) = iterator.next() {
-                result.push(point.as_pallas_point());
-            }
-        }
-
-        // then 5 more points, spaced out by a total of 100 block heights each
-        // (in case of an implausibly long rollback)
-        let mut iterator = iterator.step_by(10);
-        for _ in 0..5 {
-            if let Some(point) = iterator.next() {
-                result.push(point.as_pallas_point());
-            }
-        }
-
-        // finally, in case of a rollback of nearly unprecedented size, fall back to the oldest point we know of
-        let oldest_point = self.published_blocks.front().map(|p| p.as_pallas_point());
-        if oldest_point.as_ref() != result.last()
-            && let Some(point) = oldest_point
-        {
-            result.push(point);
-        }
-
-        result
+        SpecificPoint::choose_intersect_points(&self.published_blocks)
     }
 
     pub fn block_announcers(&self, slot: u64, hash: BlockHash) -> Vec<PeerId> {
