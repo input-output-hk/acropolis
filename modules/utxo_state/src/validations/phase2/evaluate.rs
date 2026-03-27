@@ -391,7 +391,9 @@ mod tests {
         "conway - invalid transaction - with always failed Plutus V3 Script"
     )]
     #[allow(clippy::result_large_err)]
-    fn phase2_test((ctx, raw_tx, era): (TestContext, Vec<u8>, &str)) -> Result<(), PhaseTwoError> {
+    fn phase2_evalute_test(
+        (ctx, raw_tx, era): (TestContext, Vec<u8>, &str),
+    ) -> Result<(), PhaseTwoError> {
         let tx = MultiEraTx::decode_for_era(to_pallas_era(era), &raw_tx).unwrap();
         let raw_tx = tx.encode();
         let mapped_tx = acropolis_codec::map_transaction(
