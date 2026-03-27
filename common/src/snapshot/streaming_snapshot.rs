@@ -1231,6 +1231,14 @@ impl StreamingSnapshotParser {
         }
     }
 
+    fn normalize_snapshot_deposits(
+        raw_deposits: u64,
+        governance_deposits: u64,
+        drep_deposits: u64,
+    ) -> u64 {
+        raw_deposits.saturating_sub(governance_deposits).saturating_sub(drep_deposits)
+    }
+
     /// Create a new streaming parser for the given snapshot file
     pub fn new(file_path: impl Into<String>) -> Self {
         Self {
@@ -1583,7 +1591,7 @@ impl StreamingSnapshotParser {
         // UTxOState = [utxos (already consumed), deposits, fees, gov_state, donations]
 
         // Parse deposits (UTxOState[1])
-        let deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
+        let raw_deposits = remainder_decoder.decode::<u64>().unwrap_or(0);
 
         // Parse fees (UTxOState[2]) - cumulative fees in UTxO state
         // Note: us_fees contains fees from both current AND previous epoch. We subtract
@@ -1623,7 +1631,6 @@ impl StreamingSnapshotParser {
         // The snapshot's us_deposited includes these, but they shouldn't be in our deposits pot
         // Enacted proposals will be refunded at epoch boundary, but snapshot is taken before that
         let governance_deposits = pending_proposal_deposits + enacted_proposal_deposits;
-        let deposits = deposits.saturating_sub(governance_deposits);
 
         if governance_deposits > 0 {
             info!(
@@ -1727,13 +1734,21 @@ impl StreamingSnapshotParser {
         let total_drep_deposits: u64 = drep_deposits.iter().map(|(_, d)| d).sum();
         let total_pool_deposits: u64 = (pool_registrations.len() as u64) * stake_pool_deposit;
 
-        // Keep DRep deposits in us_deposited. The verifier expects deposits pot to include
-        // all active deposits (stake keys, pools, and DReps).
+        // Bootstrap deposits must match accounts_state's live accounting model and verifier input,
+        // both of which exclude DRep deposits from the deposits pot. DRep balances are tracked
+        // separately in `dreps`, while the verifier compares against `ada_pots.deposits_stake`.
+        let deposits = Self::normalize_snapshot_deposits(
+            raw_deposits,
+            governance_deposits,
+            total_drep_deposits,
+        );
 
         info!(
-            "Deposit breakdown: total_deposits={} ADA (includes {} ADA drep deposits), pool_deposits={} ADA ({} pools), drep_count={}",
-            deposits / 1_000_000,
+            "Deposit breakdown: raw_deposits={} ADA, governance_excluded={} ADA, drep_excluded={} ADA, deposits_pot={} ADA, pool_deposits={} ADA ({} pools), drep_count={}",
+            raw_deposits / 1_000_000,
+            governance_deposits / 1_000_000,
             total_drep_deposits / 1_000_000,
+            deposits / 1_000_000,
             total_pool_deposits / 1_000_000,
             pool_registrations.len(),
             drep_deposits.len()
@@ -2954,6 +2969,22 @@ mod tests {
         let path = Path::new("preview/utxos.1234.abcdef.cbor");
         let sidecar = StreamingSnapshotParser::utxo_sidecar_path(path).unwrap();
         assert_eq!(sidecar, path.to_path_buf());
+    }
+
+    #[test]
+    fn test_normalize_snapshot_deposits_excludes_governance_and_drep_balances() {
+        let raw_deposits = 4_511_738_000_000;
+        let governance_deposits = 0;
+        let drep_deposits = 139_000_000_000;
+
+        assert_eq!(
+            StreamingSnapshotParser::normalize_snapshot_deposits(
+                raw_deposits,
+                governance_deposits,
+                drep_deposits,
+            ),
+            4_372_738_000_000
+        );
     }
 
     #[test]
