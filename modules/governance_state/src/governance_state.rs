@@ -181,20 +181,22 @@ impl GovernanceState {
         state: Arc<Mutex<State>>,
         readers: &mut Box<Readers>,
     ) -> Result<()> {
-        let d_drep =
-            match vld.consume_sync("drep", readers.drep_reader.read_with_rollbacks().await)? {
-                RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
-                RollbackWrapper::Rollback(_) => None,
-            };
+        let d_drep = match vld.consume_sync(
+            "drep_reader",
+            readers.drep_reader.read_with_rollbacks().await,
+        )? {
+            RollbackWrapper::Normal((_, d_drep)) => Some(d_drep),
+            RollbackWrapper::Rollback(_) => None,
+        };
 
         let spo_msg =
-            match vld.consume_sync("spo", readers.spo_reader.read_with_rollbacks().await)? {
+            match vld.consume_sync("spo_reader", readers.spo_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_spo, d_spo)) => Some((blk_spo, d_spo)),
                 RollbackWrapper::Rollback(_) => None,
             };
 
         let drep_state = match vld.consume_sync(
-            "drep state",
+            "drep_state_reader",
             readers.drep_state_reader.read_with_rollbacks().await,
         )? {
             RollbackWrapper::Normal((_, drep_state)) => Some(drep_state),
@@ -216,7 +218,7 @@ impl GovernanceState {
 
                     if drep_state.epoch != d_drep.epoch {
                         vld.handle_error(
-                            "drep state",
+                            "drep_state",
                             &anyhow!(
                                 "DRep state {} epoch != DRep epoch ({})",
                                 drep_state.epoch,
@@ -226,7 +228,7 @@ impl GovernanceState {
                     }
 
                     vld.handle(
-                        "stakes",
+                        "handle_drep_stake",
                         state.lock().await.handle_drep_stake(&d_drep, &drep_state, &d_spo).await,
                     );
                 }
@@ -341,10 +343,9 @@ impl GovernanceState {
                 "governance_state",
             );
 
-            let gov_msg = match vld.consume_sync(
-                "readers.gov_reader",
-                readers.gov_reader.read_with_rollbacks().await,
-            )? {
+            let gov_msg = match vld
+                .consume_sync("gov_reader", readers.gov_reader.read_with_rollbacks().await)?
+            {
                 RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
                 RollbackWrapper::Rollback(message) => {
                     let mut state = state.lock().await;
@@ -375,7 +376,7 @@ impl GovernanceState {
 
                     if blk_g.new_epoch {
                         match vld.consume_sync(
-                            "readers.param_reader",
+                            "param_reader",
                             readers.param_reader.read_with_rollbacks().await,
                         )? {
                             RollbackWrapper::Normal((blk_g, params)) => {
@@ -399,7 +400,7 @@ impl GovernanceState {
                     }
                 } else {
                     vld.consume_sync(
-                        "readers.param_reader",
+                        "param_reader",
                         readers.param_reader.read_with_rollbacks().await,
                     )?;
                     Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await?;

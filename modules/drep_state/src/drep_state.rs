@@ -88,9 +88,9 @@ pub struct DRepState;
 
 struct DRepSubscriptions {
     snapshot: Option<Box<dyn Subscription<Message>>>,
-    certs: CertReader,
-    gov: GovReader,
-    params: ParamReader,
+    certs_reader: CertReader,
+    gov_reader: GovReader,
+    params_reader: ParamReader,
 }
 
 impl DRepState {
@@ -164,7 +164,7 @@ impl DRepState {
         // Consume initial protocol parameters published at epoch 0 to keep params
         // reader in sync with the main loop's epoch-boundary consumption.
         if !is_bootstrap_mode {
-            match subs.params.read_with_rollbacks().await? {
+            match subs.params_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((_, initial_params)) => {
                     let mut state =
                         history.lock().await.get_or_init_with(|| State::new(storage_config));
@@ -187,24 +187,26 @@ impl DRepState {
 
             let mut ctx = ValidationContext::new(&context, &validation_topic, "drep_state");
 
-            let (certs_message, new_epoch) =
-                match &ctx.consume_sync("subs.certs", subs.certs.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
-                        if blk_inf.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(blk_inf.number);
-                        }
-                        let new_epoch =
-                            (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
-                        (Some(msg.clone()), new_epoch)
+            let (certs_message, new_epoch) = match &ctx.consume_sync(
+                "certs_reader",
+                subs.certs_reader.read_with_rollbacks().await,
+            )? {
+                RollbackWrapper::Normal(msg @ (blk_inf, _)) => {
+                    if blk_inf.status == BlockStatus::RolledBack {
+                        state = history.lock().await.get_rolled_back_state(blk_inf.number);
                     }
-                    RollbackWrapper::Rollback(msg) => {
-                        ctx.handle(
-                            "publish_rollback",
-                            drep_state_publisher.publish_rollback(msg.clone()).await,
-                        );
-                        (None, None)
-                    }
-                };
+                    let new_epoch =
+                        (blk_inf.new_epoch && blk_inf.epoch > 0).then_some(blk_inf.epoch);
+                    (Some(msg.clone()), new_epoch)
+                }
+                RollbackWrapper::Rollback(msg) => {
+                    ctx.handle(
+                        "publish_rollback",
+                        drep_state_publisher.publish_rollback(msg.clone()).await,
+                    );
+                    (None, None)
+                }
+            };
 
             // Read from epoch-boundary messages only when it's a new epoch
             if let Some(new_epoch) = new_epoch {
@@ -212,7 +214,10 @@ impl DRepState {
 
                 // Read params subscription if store-info is enabled to obtain DRep expiration param.
                 // Update expirations on epoch transition
-                match ctx.consume_sync("subs.params", subs.params.read_with_rollbacks().await)? {
+                match ctx.consume_sync(
+                    "sparams_reader",
+                    subs.params_reader.read_with_rollbacks().await,
+                )? {
                     RollbackWrapper::Normal((_, msg)) => {
                         ctx.handle(
                             "update_protocol_params",
@@ -252,7 +257,7 @@ impl DRepState {
                 .await;
             }
 
-            match ctx.consume_sync("subs.gov", subs.gov.read_with_rollbacks().await)? {
+            match ctx.consume_sync("gov_reader", subs.gov_reader.read_with_rollbacks().await)? {
                 RollbackWrapper::Normal((blk_info, gov)) => {
                     let span = info_span!("drep_state.handle_votes", block = blk_info.number);
                     async {
@@ -322,9 +327,9 @@ impl DRepState {
             } else {
                 None
             },
-            certs: CertReader::new(&context, &config).await?,
-            gov: GovReader::new(&context, &config).await?,
-            params: ParamReader::new(&context, &config).await?,
+            certs_reader: CertReader::new(&context, &config).await?,
+            gov_reader: GovReader::new(&context, &config).await?,
+            params_reader: ParamReader::new(&context, &config).await?,
         };
 
         let drep_state_topic = config
