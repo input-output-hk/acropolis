@@ -265,6 +265,12 @@ impl StakeDeltaFilter {
         mut publisher: DeltaPublisher,
         mut address_delta_reader: AddressDeltasReader,
     ) -> Result<()> {
+        match address_delta_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal(_) => {}
+            RollbackWrapper::Rollback(_) => {
+                bail!("Unexpected rollback while reading initial deltas message")
+            }
+        }
         loop {
             match address_delta_reader.read_with_rollbacks().await? {
                 RollbackWrapper::Normal((block_info, address_deltas)) => {
@@ -356,18 +362,17 @@ impl StakeDeltaFilter {
         )));
         let history_tick = history.clone();
 
-        let vld = ValidationContext::new(&context, &params.validation_topic, "stake_delta_filter");
-
         // Register query handler for pointer resolution (stateful)
         Self::register_query_handler_stateful(&context, &context.config, history.clone());
 
+        let context_run = context.clone();
         context.run(Self::stateful_run(
             history,
             certs_reader,
             address_deltas_reader,
             publisher,
             params,
-            vld,
+            context_run,
         ));
 
         // Ticker to log stats
@@ -402,13 +407,22 @@ impl StakeDeltaFilter {
         mut address_deltas_reader: AddressDeltasReader,
         mut publisher: DeltaPublisher,
         params: Arc<StakeDeltaFilterParams>,
-        mut vld: ValidationContext,
+        context: Arc<Context<Message>>,
     ) -> Result<()> {
+        match address_deltas_reader.read_with_rollbacks().await? {
+            RollbackWrapper::Normal(_) => {}
+            RollbackWrapper::Rollback(_) => {
+                bail!("Unexpected rollback while reading initial deltas message")
+            }
+        }
         loop {
+            let mut ctx =
+                ValidationContext::new(&context, &params.validation_topic, "stake_delta_filter");
+
             let mut state = history.lock().await.get_or_init_with(|| State::new(params.clone()));
 
             let block_info =
-                match vld.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
+                match ctx.consume_sync("certs", certs_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, tx_cert_msg)) => {
                         if block_info.status == BlockStatus::RolledBack {
                             state = history.lock().await.get_rolled_back_state(block_info.number);
@@ -428,7 +442,7 @@ impl StakeDeltaFilter {
                     }
                 };
 
-            match vld.consume_sync(
+            match ctx.consume_sync(
                 "address deltas",
                 address_deltas_reader.read_with_rollbacks().await,
             )? {
