@@ -39,14 +39,12 @@ pub fn validate_time_to_live(
                 current_slot,
             }))
         }
+    } else if era == Era::Shelley {
+        Err(Box::new(Phase1ValidationError::MalformedTransaction {
+            errors: vec!["TTL is missing for Shelley Tx".to_string()],
+        }))
     } else {
-        if era == Era::Shelley {
-            Err(Box::new(Phase1ValidationError::MalformedTransaction {
-                errors: vec!["TTL is missing for Shelley Tx".to_string()],
-            }))
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 
