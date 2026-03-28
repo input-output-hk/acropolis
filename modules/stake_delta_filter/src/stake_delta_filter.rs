@@ -3,6 +3,7 @@
 
 use acropolis_common::{
     caryatid::{RollbackWrapper, ValidationContext},
+    configuration::StartupMode,
     declare_cardano_reader,
     messages::{
         AddressDeltasMessage, CardanoMessage, Message, StateQuery, StateQueryResponse,
@@ -147,6 +148,7 @@ impl StakeDeltaFilter {
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let address_delta_reader = AddressDeltasReader::new(&context, &config).await?;
         let params = StakeDeltaFilterParams::init(config.clone())?;
+        let is_snapshot_mode = StartupMode::from_config(config.as_ref()).is_snapshot();
         let cache_path = params.get_cache_file_name(".json")?;
         let publisher = DeltaPublisher::new(context.clone(), params.clone());
 
@@ -157,6 +159,7 @@ impl StakeDeltaFilter {
                     context,
                     publisher,
                     address_delta_reader,
+                    is_snapshot_mode,
                 )
                 .await
             }
@@ -167,13 +170,21 @@ impl StakeDeltaFilter {
                     context,
                     publisher,
                     address_delta_reader,
+                    is_snapshot_mode,
                 )
                 .await
             }
 
             CacheMode::WriteIfAbsent => match PointerCache::try_load(&cache_path) {
                 Ok(cache) => {
-                    Self::stateless_init(cache, context, publisher, address_delta_reader).await
+                    Self::stateless_init(
+                        cache,
+                        context,
+                        publisher,
+                        address_delta_reader,
+                        is_snapshot_mode,
+                    )
+                    .await
                 }
                 Err(e) => {
                     info!("Cannot load cache: {}, building from scratch", e);
@@ -184,6 +195,7 @@ impl StakeDeltaFilter {
                         certs_reader,
                         address_delta_reader,
                         publisher,
+                        is_snapshot_mode,
                     )
                     .await
                 }
@@ -197,6 +209,7 @@ impl StakeDeltaFilter {
                     certs_reader,
                     address_delta_reader,
                     publisher,
+                    is_snapshot_mode,
                 )
                 .await
             }
@@ -249,13 +262,19 @@ impl StakeDeltaFilter {
         context: Arc<Context<Message>>,
         publisher: DeltaPublisher,
         address_delta_reader: AddressDeltasReader,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         info!("Stateless init: using stake pointer cache");
 
         // Register query handler for pointer resolution
         Self::register_query_handler(&context, &context.config, cache.clone());
 
-        context.clone().run(Self::stateless_run(cache, publisher, address_delta_reader));
+        context.clone().run(Self::stateless_run(
+            cache,
+            publisher,
+            address_delta_reader,
+            is_snapshot_mode,
+        ));
 
         Ok(())
     }
@@ -264,11 +283,14 @@ impl StakeDeltaFilter {
         cache: Arc<PointerCache>,
         mut publisher: DeltaPublisher,
         mut address_delta_reader: AddressDeltasReader,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
-        match address_delta_reader.read_with_rollbacks().await? {
-            RollbackWrapper::Normal(_) => {}
-            RollbackWrapper::Rollback(_) => {
-                bail!("Unexpected rollback while reading initial deltas message")
+        if !is_snapshot_mode {
+            match address_delta_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial deltas message")
+                }
             }
         }
         loop {
@@ -352,6 +374,7 @@ impl StakeDeltaFilter {
         certs_reader: CertsReader,
         address_deltas_reader: AddressDeltasReader,
         publisher: DeltaPublisher,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
         info!("Stateful init: creating stake pointer cache");
 
@@ -373,6 +396,7 @@ impl StakeDeltaFilter {
             publisher,
             params,
             context_run,
+            is_snapshot_mode,
         ));
 
         // Ticker to log stats
@@ -408,11 +432,14 @@ impl StakeDeltaFilter {
         mut publisher: DeltaPublisher,
         params: Arc<StakeDeltaFilterParams>,
         context: Arc<Context<Message>>,
+        is_snapshot_mode: bool,
     ) -> Result<()> {
-        match address_deltas_reader.read_with_rollbacks().await? {
-            RollbackWrapper::Normal(_) => {}
-            RollbackWrapper::Rollback(_) => {
-                bail!("Unexpected rollback while reading initial deltas message")
+        if !is_snapshot_mode {
+            match address_deltas_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal(_) => {}
+                RollbackWrapper::Rollback(_) => {
+                    bail!("Unexpected rollback while reading initial deltas message")
+                }
             }
         }
         loop {
