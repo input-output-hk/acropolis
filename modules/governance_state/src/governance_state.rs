@@ -243,8 +243,6 @@ impl GovernanceState {
         mut readers: Box<Readers>,
     ) -> Result<()> {
         let state = Arc::new(Mutex::new(State::new(
-            context.clone(),
-            config.enact_publish_topic.clone(),
             config.verification_output_file.clone(),
             config.verify_votes_files.clone(),
         )));
@@ -345,8 +343,7 @@ impl GovernanceState {
                 match vld.consume_sync("gov", readers.gov_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, gov_msg)) => Some((block_info, gov_msg)),
                     RollbackWrapper::Rollback(message) => {
-                        let mut state = state.lock().await;
-                        state.publish_rollback(message).await?;
+                        context.publish(&config.enact_publish_topic, message).await?;
                         tracing::error!("gov: published rollback");
                         None
                     }
@@ -362,7 +359,14 @@ impl GovernanceState {
                     if let Some(gov_outcomes) =
                         vld.handle("process outcome", gov_outcomes.map(Some))
                     {
-                        vld.handle("send outcome", state.send(block_info, gov_outcomes).await);
+                        let message = Arc::new(Message::Cardano((
+                            block_info.as_ref().clone(),
+                            CardanoMessage::GovernanceOutcomes(gov_outcomes),
+                        )));
+                        vld.handle(
+                            "send outcome",
+                            context.publish(&config.enact_publish_topic, message).await,
+                        );
                     }
                 }
 
