@@ -12,6 +12,15 @@ pub type ScriptIntegrityHash = Hash<32>;
 pub type DatumHash = Hash<32>;
 
 #[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub enum PlutusVersion {
+    V1,
+    V2,
+    V3,
+}
+
+#[derive(
     Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum ScriptLang {

@@ -903,35 +903,6 @@ pub fn script_lang_to_plutus_version(
 /// Convert from Phase2Error to common::Phase2ValidationError for integration.
 impl From<Phase2Error> for acropolis_common::validation::Phase2ValidationError {
     fn from(err: Phase2Error) -> Self {
-        match err {
-            Phase2Error::ScriptFailed(script_hash, message) => {
-                acropolis_common::validation::Phase2ValidationError::ScriptFailed {
-                    script_hash,
-                    message,
-                }
-            }
-            Phase2Error::BudgetExceeded(script_hash, cpu, mem) => {
-                acropolis_common::validation::Phase2ValidationError::BudgetExceeded {
-                    script_hash,
-                    cpu,
-                    mem,
-                }
-            }
-            Phase2Error::DecodeFailed(script_hash, reason) => {
-                acropolis_common::validation::Phase2ValidationError::DecodeFailed {
-                    script_hash,
-                    reason,
-                }
-            }
-            Phase2Error::MissingScript(index) => {
-                acropolis_common::validation::Phase2ValidationError::MissingScript { index }
-            }
-            Phase2Error::MissingDatum(datum_hash) => {
-                acropolis_common::validation::Phase2ValidationError::MissingDatum { datum_hash }
-            }
-            Phase2Error::MissingRedeemer(script_hash) => {
-                acropolis_common::validation::Phase2ValidationError::MissingRedeemer { script_hash }
-            }
-        }
+        Self::UplcMachineError(err.to_string())
     }
 }

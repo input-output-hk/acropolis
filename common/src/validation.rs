@@ -9,9 +9,9 @@ use crate::{
     protocol_params::{Nonce, ProtocolVersion},
     rational_number::RationalNumber,
     Address, BlockInfo, CommitteeCredential, DataHash, DatumHash, Era, GenesisKeyhash, GovActionId,
-    KeyHash, Lovelace, NetworkId, PoolId, ProposalProcedure, RedeemerPointer, ScriptHash,
-    ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness, ValidityInterval,
-    ValueMap, Voter, VrfKeyHash,
+    KeyHash, Lovelace, NetworkId, PlutusVersion, PoolId, ProposalProcedure, RedeemerPointer,
+    ScriptHash, ScriptIntegrityHash, Slot, StakeAddress, UTxOIdentifier, VKeyWitness,
+    ValidityInterval, ValueMap, Voter, VrfKeyHash,
 };
 use anyhow::bail;
 use caryatid_sdk::Context;
@@ -106,42 +106,54 @@ pub enum TransactionValidationError {
 
 /// Phase 2 (Plutus script execution) validation errors.
 ///
+///
+/// Errors that can occur during script context construction.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
+pub enum ScriptContextError {
+    #[error("missing input UTxO: {0}")]
+    MissingInput(UTxOIdentifier),
+
+    #[error("missing script for redeemer: {0:?}")]
+    MissingScript(RedeemerPointer),
+
+    #[error("unsupported address type: {0}")]
+    UnsupportedAddress(String),
+
+    #[error("missing validation data: {0}")]
+    MissingValidationData(String),
+
+    #[error("unsupported certificate type for Plutus version")]
+    UnsupportedCertificate,
+
+    #[error("CBOR decode failed: {0}")]
+    CborDecodeFailed(String),
+
+    #[error("Unsupported Script Purpose for Plutus version V1 or V2")]
+    UnsupportedScriptPurpose,
+}
+
 /// These errors occur during script evaluation after Phase 1 validation passes.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
 pub enum Phase2ValidationError {
-    /// Script explicitly called the `error` builtin
-    #[error("Script {script_hash} failed: {message}")]
-    ScriptFailed {
-        script_hash: ScriptHash,
-        message: String,
-    },
+    #[error("script context construction failed: {0}")]
+    ScriptContextError(#[from] ScriptContextError),
 
-    /// Script exceeded CPU or memory budget
-    #[error("Script {script_hash} exceeded budget (cpu: {cpu}, mem: {mem})")]
-    BudgetExceeded {
-        script_hash: ScriptHash,
-        cpu: i64,
-        mem: i64,
-    },
+    #[error("failed to flat-decode script: {0}")]
+    FlatDecodingError(String),
 
-    /// Could not decode FLAT bytecode
-    #[error("Script {script_hash} decode failed: {reason}")]
-    DecodeFailed {
-        script_hash: ScriptHash,
-        reason: String,
-    },
+    #[error("missing cost model for Plutus version: {0:?}")]
+    MissingCostModel(PlutusVersion),
 
-    /// Missing script referenced by redeemer
-    #[error("Missing script for redeemer at index {index}")]
-    MissingScript { index: u32 },
+    #[error("missing script for hash: {0:?}")]
+    MissingScriptForHash(ScriptHash),
 
-    /// Missing datum for spending input
-    #[error("Missing datum {datum_hash}")]
-    MissingDatum { datum_hash: DatumHash },
+    /// TODO:
+    /// Explicitly differentiate between script execution failure (e.g. evaluation error, out of resource)
+    #[error("script evaluation failure {0}")]
+    UplcMachineError(String),
 
-    /// Missing redeemer for script
-    #[error("Missing redeemer for script {script_hash}")]
-    MissingRedeemer { script_hash: ScriptHash },
+    #[error("expected scripts to fail but didn't (is_valid = false)")]
+    ValidityStateError,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Error, PartialEq, Eq)]
