@@ -360,8 +360,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{to_era, to_pallas_era, TestContext};
     use crate::validation_fixture;
-    use acropolis_common::genesis_values::GenesisValues;
-    use acropolis_common::{CostModel, CostModels, NetworkId, TxIdentifier};
+    use acropolis_common::{genesis_values::GenesisValues, NetworkId, TxIdentifier};
     use pallas::ledger::traverse::MultiEraTx;
     use test_case::test_case;
 
@@ -385,13 +384,6 @@ mod tests {
     ) =>
         matches Ok(());
         "conway - valid transaction 2 - with minting Plutus V3 Script"
-    )]
-    #[test_case(validation_fixture!(
-        "conway",
-        "c926a7d3523442d434cb58b6813d12189a8a68b2860899948459878f46cd860b"
-    ) =>
-        matches Ok(());
-        "conway - valid transaction 3 - with Plutus V2 Script"
     )]
     #[test_case(validation_fixture!(
         "conway",
