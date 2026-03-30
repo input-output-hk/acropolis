@@ -46,7 +46,15 @@ be used as a prefix to resolve per-network configuration files
 needed for bootstrapping. Given a source directory `data`, and a
 a network name of `preview`, the expected layout for configuration files would be:
 
-- `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url)
+- `data/preview/snapshots.json`: a list of `Snapshot` values (epoch, point, url, optional utxo_url)
+
+The bootstrapper treats CloudFront and S3 the same way it treats any other HTTP host:
+
+- `url` should point to a gzip-compressed NES object such as `nes.<slot>.<hash>.cbor.gz`
+- `utxo_url` may be omitted when the UTxO sidecar is published as a sibling object named
+  `utxos.<slot>.<hash>.cbor.gz` in the same directory
+- published snapshot artifacts are expected to be overwritten in place when a corrected snapshot
+  is republished, so bootstrap downloads always resolve to the latest object at that URL
 
 This file along with the TOML config is loaded by [snapshot_bootstrapper](src/bootstrapper.rs)
 during bootup.
