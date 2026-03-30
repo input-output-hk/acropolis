@@ -11,7 +11,6 @@ use acropolis_common::{
         StateQueryResponse, StateTransitionMessage, UTXODeltasMessage,
     },
     queries::utxos::{UTxOStateQuery, UTxOStateQueryResponse, DEFAULT_UTXOS_QUERY_TOPIC},
-    validation::ValidationOutcomes,
 };
 use caryatid_sdk::{module, Context, Subscription};
 
@@ -185,24 +184,22 @@ impl UTXOState {
                 if block.intent.do_validation() {
                     async {
                         let mut state = state.lock().await;
-                        let mut validation_outcomes = ValidationOutcomes::new();
-                        if let Err(e) = state
-                            .validate(
-                                block,
-                                deltas_msg,
-                                &pool_registration_updates,
-                                &stake_registration_updates,
-                                &current_protocol_params,
-                            )
-                            .await
-                        {
-                            validation_outcomes.push(*e);
-                        }
 
-                        validation_outcomes
-                            .publish(&context, "utxo_state", &publish_tx_validation_topic, block)
-                            .await
-                            .unwrap_or_else(|e| error!("Failed to publish UTxO validation: {e}"));
+                        ctx.handle(
+                            "validate",
+                            state
+                                .validate(
+                                    block,
+                                    deltas_msg,
+                                    &pool_registration_updates,
+                                    &stake_registration_updates,
+                                    &current_protocol_params,
+                                )
+                                .await
+                                .map_err(|e| e.into()),
+                        );
+
+                        ctx.publish().await;
                     }
                     .instrument(span)
                     .await;
