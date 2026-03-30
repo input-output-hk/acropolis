@@ -339,7 +339,7 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd = encode_redeemers_map(&tx_info.redeemers, arena, version)?;
+            let redeemers_pd = encode_redeemers_map(tx_info, arena, version)?;
             Ok(constr(
                 arena,
                 0,
@@ -368,7 +368,7 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let redeemers_pd = encode_redeemers_map(&tx_info.redeemers, arena, version)?;
+            let redeemers_pd = encode_redeemers_map(tx_info, arena, version)?;
             let votes = match &tx_info.voting_procedures {
                 Some(vp) => vp.to_plutus_data(arena, version)?,
                 None => map(arena, vec![]),
@@ -381,8 +381,8 @@ fn encode_tx_info<'a>(
                     .collect::<Result<_, _>>()?;
                 list(arena, items)
             };
-            let treasury = encode_maybe_lovelace(tx_info.current_treasury_amount, arena);
-            let donation = encode_maybe_lovelace(tx_info.treasury_donation, arena);
+            let treasury = encode_maybe_lovelace(tx_info.current_treasury_amount, arena, version)?;
+            let donation = encode_maybe_lovelace(tx_info.treasury_donation, arena, version)?;
 
             Ok(constr(
                 arena,
@@ -410,10 +410,14 @@ fn encode_tx_info<'a>(
     }
 }
 
-fn encode_maybe_lovelace<'a>(amount: Option<u64>, arena: &'a Arena) -> &'a PlutusData<'a> {
+fn encode_maybe_lovelace<'a>(
+    amount: Option<u64>,
+    arena: &'a Arena,
+    version: PlutusVersion,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
     match amount {
-        Some(a) => constr(arena, 0, vec![integer(arena, a as i128)]),
-        None => constr(arena, 1, vec![]),
+        Some(a) => Ok(constr(arena, 0, vec![a.to_plutus_data(arena, version)?])),
+        None => Ok(constr(arena, 1, vec![])),
     }
 }
 
@@ -500,39 +504,91 @@ fn encode_script_info<'a>(
 // ============================================================================
 
 fn encode_redeemers_map<'a>(
-    redeemers: &[Redeemer],
+    tx_info: &TxInfo,
     arena: &'a Arena,
-    _version: PlutusVersion,
+    version: PlutusVersion,
 ) -> Result<&'a PlutusData<'a>, ScriptContextError> {
-    let pairs: Vec<_> = redeemers
+    let sorted_inputs: Vec<UTxOIdentifier> = tx_info.inputs.iter().map(|ri| ri.utxo_id).collect();
+
+    let pairs: Vec<_> = tx_info
+        .redeemers
         .iter()
         .map(|redeemer| {
-            let purpose_tag = match redeemer.tag {
-                RedeemerTag::Spend => 1u64,
-                RedeemerTag::Mint => 0,
-                RedeemerTag::Cert => 3,
-                RedeemerTag::Reward => 2,
-                RedeemerTag::Vote => 4,
-                RedeemerTag::Propose => 5,
-            };
-            let key = constr(
-                arena,
-                purpose_tag,
-                vec![integer(arena, redeemer.index as i128)],
-            );
-            let redeemer_data = from_cbor(arena, &redeemer.data)?;
-            let ex_units = list(
-                arena,
-                vec![
-                    integer(arena, redeemer.ex_units.mem as i128),
-                    integer(arena, redeemer.ex_units.steps as i128),
-                ],
-            );
-            let value = constr(arena, 0, vec![redeemer_data, ex_units]);
+            let purpose = build_script_purpose(
+                &redeemer.tag,
+                redeemer.index,
+                &sorted_inputs,
+                &tx_info.mint,
+                &tx_info.withdrawals,
+                &tx_info.certificates,
+                tx_info.voting_procedures.as_ref(),
+                if tx_info.proposal_procedures.is_empty() {
+                    None
+                } else {
+                    Some(tx_info.proposal_procedures.as_slice())
+                },
+            )?;
+            let key = encode_redeemer_key(&purpose, arena, version)?;
+            let value = from_cbor(arena, &redeemer.data)?;
             Ok((key, value))
         })
         .collect::<Result<_, ScriptContextError>>()?;
     Ok(map(arena, pairs))
+}
+
+/// Encode a `ScriptPurpose` as a redeemer map key.
+///
+/// V2 and V3 differ in `Rewarding` (StakingCredential vs Credential) and
+/// `Certifying` (cert only vs index + cert). V3 also adds `Voting`/`Proposing`.
+fn encode_redeemer_key<'a>(
+    purpose: &ScriptPurpose,
+    arena: &'a Arena,
+    version: PlutusVersion,
+) -> Result<&'a PlutusData<'a>, ScriptContextError> {
+    match purpose {
+        ScriptPurpose::Minting(policy_id) => {
+            let p = policy_id.to_plutus_data(arena, version)?;
+            Ok(constr(arena, 0, vec![p]))
+        }
+        ScriptPurpose::Spending(utxo_id) => {
+            let u = utxo_id.to_plutus_data(arena, version)?;
+            Ok(constr(arena, 1, vec![u]))
+        }
+        ScriptPurpose::Rewarding(cred) => match version {
+            PlutusVersion::V1 | PlutusVersion::V2 => {
+                // V1/V2: StakingCredential.StakingHash(cred)
+                let c = cred.to_plutus_data(arena, version)?;
+                let staking = constr(arena, 0, vec![c]);
+                Ok(constr(arena, 2, vec![staking]))
+            }
+            PlutusVersion::V3 => {
+                // V3: Credential directly, no StakingHash wrapper
+                let c = cred.to_plutus_data(arena, version)?;
+                Ok(constr(arena, 2, vec![c]))
+            }
+        },
+        ScriptPurpose::Certifying(cert_with_pos) => match version {
+            PlutusVersion::V1 | PlutusVersion::V2 => {
+                let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+                Ok(constr(arena, 3, vec![c]))
+            }
+            PlutusVersion::V3 => {
+                // V3: includes the certificate index
+                let idx = cert_with_pos.cert_index.to_plutus_data(arena, version)?;
+                let c = cert_with_pos.cert.to_plutus_data(arena, version)?;
+                Ok(constr(arena, 3, vec![idx, c]))
+            }
+        },
+        ScriptPurpose::Voting(voter) => {
+            let v = voter.to_plutus_data(arena, version)?;
+            Ok(constr(arena, 4, vec![v]))
+        }
+        ScriptPurpose::Proposing(idx, proposal) => {
+            let i = idx.to_plutus_data(arena, version)?;
+            let p = proposal.to_plutus_data(arena, version)?;
+            Ok(constr(arena, 5, vec![i, p]))
+        }
+    }
 }
 
 // ============================================================================
