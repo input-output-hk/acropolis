@@ -336,6 +336,7 @@ impl EpochsState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "epochs_state",
             StateHistoryStore::default_block_store(),
+            &config,
         )));
         let history_query = history.clone();
 

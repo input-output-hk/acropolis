@@ -12,7 +12,7 @@ use tracing::error;
 
 use crate::ouroboros;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     /// Tracks the latest operational certificate counter for each pool
     pub ocert_counters: ImblHashMap<PoolId, u64>,

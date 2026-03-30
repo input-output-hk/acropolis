@@ -9,7 +9,7 @@ use acropolis_common::{
 use anyhow::{anyhow, bail, Result};
 use tracing::error;
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, serde::Serialize)]
 pub struct ParametersUpdater {
     params: ProtocolParams,
 }

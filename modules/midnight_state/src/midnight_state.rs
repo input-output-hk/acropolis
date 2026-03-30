@@ -125,6 +125,7 @@ impl MidnightState {
         let history = Arc::new(Mutex::new(StateHistory::<State>::new(
             "midnight_state",
             StateHistoryStore::Unbounded,
+            &config,
         )));
         let grpc_history = history.clone();
         let grpc_context = context.clone();

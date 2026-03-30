@@ -9,7 +9,7 @@ use imbl::HashMap;
 
 use crate::stores::Store;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     pub byron_heavy_delegates: HashMap<PoolId, HeavyDelegate>,
     pub shelley_genesis_delegates: GenesisDelegates,

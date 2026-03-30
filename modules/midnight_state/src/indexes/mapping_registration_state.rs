@@ -4,7 +4,7 @@ use acropolis_common::{BlockNumber, UTxOIdentifier};
 
 use crate::types::{Deregistration, DeregistrationEvent, Registration, RegistrationEvent};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 pub struct MappingRegistrationState {
     // Mapping registrations by block enabling range lookups.
     registrations: OrdMap<BlockNumber, Vec<UTxOIdentifier>>,

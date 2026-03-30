@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// Reward Detail
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RewardDetail {
     /// Account reward paid to
     pub account: StakeAddress,
@@ -33,7 +33,7 @@ pub struct RewardDetail {
 }
 
 /// Result of a rewards calculation
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct RewardsResult {
     /// Epoch these rewards were earned in (when blocks produced)
     pub epoch: u64,

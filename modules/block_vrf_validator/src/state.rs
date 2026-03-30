@@ -18,7 +18,7 @@ use anyhow::Result;
 use pallas::ledger::traverse::MultiEraHeader;
 use tracing::error;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct EpochSnapshots {
     pub mark: Arc<Snapshot>,
     pub set: Arc<Snapshot>,
@@ -32,7 +32,7 @@ impl EpochSnapshots {
     }
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, serde::Serialize)]
 pub struct State {
     pub decentralisation_param: Option<RationalNumber>,
 

@@ -45,7 +45,7 @@ const DEFAULT_KEY_DEPOSIT: u64 = 2_000_000;
 const DEFAULT_POOL_DEPOSIT: u64 = 500_000_000;
 
 /// State for rewards calculation
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct EpochSnapshots {
     /// Latest snapshot (epoch i)
     pub mark: Arc<EpochSnapshot>,
@@ -67,7 +67,7 @@ impl EpochSnapshots {
 }
 
 /// Overall state - stored per block
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct State {
     /// Map of active SPOs by pool ID
     spos: OrdMap<PoolId, PoolRegistration>,
@@ -107,6 +107,7 @@ pub struct State {
     current_epoch_registration_changes: Arc<Mutex<Vec<RegistrationChange>>>,
 
     /// Task for rewards calculation if necessary
+    #[serde(skip)]
     epoch_rewards_task: Arc<Mutex<Option<JoinHandle<Result<RewardsResult>>>>>,
 
     /// DReps mapped to all accounts that have ever delegated to them
@@ -116,6 +117,7 @@ pub struct State {
     drep_delegators: OrdMap<DRepCredential, OrdSet<StakeAddress>>,
 
     /// Signaller to start the above - delayed in early Shelley to replicate bug
+    #[serde(skip)]
     start_rewards_tx: Option<mpsc::Sender<()>>,
 
     /// Randomness stabilization window (4k/f slots), computed from protocol params.
