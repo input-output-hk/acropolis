@@ -31,7 +31,7 @@ pause = "none"
 stop = "none"
 
 [module.snapshot-bootstrapper]
-epoch = 507
+epoch = 999
 data-dir = "../../modules/snapshot_bootstrapper/data"
 
 # ============================================================================
@@ -61,6 +61,9 @@ validators = [
 #           "cardano.validation.utxo",
 #           "cardano.validation.spo"
 ]
+# By default, the consesus module will skip validation for blocks 
+# from the Mithril snapshot but this can be set to true to force validation
+force-validation = false
 
 [module.block-unpacker]
 
@@ -152,7 +155,10 @@ write-full-cache = "false"
 [module.accounts-state]
 # Optional subscription for when governance is active
 drep-state-topic = "cardano.drep.state"
+# Verify against captured CSV
 verify-pots-file = "../../modules/accounts_state/test-data/pots.preview.csv"
+verify-rewards-files = "../../modules/accounts_state/test-data/rewards.preview.{}.csv"
+verify-spdd-files = "../../modules/accounts_state/test-data/spdd.preview.{}.csv"
 
 # Enable /epochs/{number}/stakes & /epochs/{number}/stakes/{pool_id} endpoints
 spdd-retention-epochs = 0
