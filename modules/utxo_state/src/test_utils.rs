@@ -4,17 +4,80 @@ use acropolis_common::{
     protocol_params::{
         AlonzoParams, BabbageParams, ByronParams, ConwayParams, ProtocolParams, ShelleyParams,
     },
-    Address, Datum, Era, ReferenceScript, ScriptHash, ScriptRef, TxHash, UTXOValue, UTxOIdentifier,
-    Value,
+    Address, AssetName, Datum, DatumHash, Era, NativeAsset, PolicyId, ReferenceScript, ScriptHash,
+    ScriptRef, TxHash, UTXOValue, UTxOIdentifier, Value,
 };
 use pallas::ledger::traverse::Era as PallasEra;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct UTxOValueJson {
     pub address: String,
+    #[serde(deserialize_with = "deserialize_value")]
     pub value: Value,
+    #[serde(default, deserialize_with = "deserialize_datum")]
     pub datum: Option<Datum>,
     pub script_ref: Option<ScriptRef>,
+}
+
+fn deserialize_value<'de, D>(deserializer: D) -> Result<Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    #[derive(serde::Deserialize)]
+    struct RawValue {
+        lovelace: u64,
+        assets: serde_json::Value,
+    }
+
+    let raw = RawValue::deserialize(deserializer)?;
+
+    let assets = match &raw.assets {
+        // Blockfrost format: [{"unit": "<policy_id><asset_name>", "quantity": "N"}, ...]
+        serde_json::Value::Array(entries)
+            if entries.first().is_some_and(|e| e.get("unit").is_some()) =>
+        {
+            let mut map: HashMap<PolicyId, Vec<NativeAsset>> = HashMap::new();
+            for entry in entries {
+                let unit = entry["unit"].as_str().unwrap();
+                let quantity: u64 = entry["quantity"].as_str().unwrap().parse().unwrap();
+                let policy_id = PolicyId::from_str(&unit[..56]).unwrap();
+                let asset_name = AssetName::new(&hex::decode(&unit[56..]).unwrap()).unwrap();
+                map.entry(policy_id).or_default().push(NativeAsset {
+                    name: asset_name,
+                    amount: quantity,
+                });
+            }
+            map.into_iter().collect()
+        }
+        // Native format: [["policy_id", [{"name": "...", "amount": N}]], ...]
+        _ => serde_json::from_value(raw.assets).unwrap(),
+    };
+
+    Ok(Value::new(raw.lovelace, assets))
+}
+
+fn deserialize_datum<'de, D>(deserializer: D) -> Result<Option<Datum>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    let Some(raw) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+
+    let map = raw.as_object().unwrap();
+    let datum = if let Some(val) = map.get("Inline") {
+        Datum::Inline(hex::decode(val.as_str().unwrap()).unwrap())
+    } else if let Some(val) = map.get("Hash") {
+        Datum::Hash(serde_json::from_value::<DatumHash>(val.clone()).unwrap())
+    } else {
+        panic!("expected 'Inline' or 'Hash' datum variant");
+    };
+
+    Ok(Some(datum))
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -23,7 +86,7 @@ pub struct TestContextJson {
     #[serde(deserialize_with = "deserialize_protocol_params_with_defaults")]
     pub protocol_params: ProtocolParams,
     pub utxos: HashMap<String, UTxOValueJson>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_reference_scripts")]
     pub reference_scripts: HashMap<String, ReferenceScript>,
 }
 
@@ -72,6 +135,32 @@ where
     serde_json::from_value(base).map_err(serde::de::Error::custom)
 }
 
+fn parse_reference_script(raw: &serde_json::Value) -> ReferenceScript {
+    let obj = raw.as_object().unwrap();
+    assert_eq!(obj.len(), 1, "expected exactly one variant key");
+    let (variant, val) = obj.iter().next().unwrap();
+
+    match variant.as_str() {
+        "PlutusV1" => ReferenceScript::PlutusV1(hex::decode(val.as_str().unwrap()).unwrap()),
+        "PlutusV2" => ReferenceScript::PlutusV2(hex::decode(val.as_str().unwrap()).unwrap()),
+        "PlutusV3" => ReferenceScript::PlutusV3(hex::decode(val.as_str().unwrap()).unwrap()),
+        "Native" => ReferenceScript::Native(serde_json::from_value(val.clone()).unwrap()),
+        _ => panic!("unknown ReferenceScript variant: {variant}"),
+    }
+}
+
+fn deserialize_reference_scripts<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, ReferenceScript>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+
+    let map: HashMap<String, serde_json::Value> = HashMap::deserialize(deserializer)?;
+    Ok(map.into_iter().map(|(k, v)| (k, parse_reference_script(&v))).collect())
+}
+
 #[derive(Debug)]
 pub struct TestContext {
     pub protocol_params: ProtocolParams,
@@ -109,6 +198,7 @@ impl From<TestContextJson> for TestContext {
         }
     }
 }
+
 #[macro_export]
 macro_rules! include_cbor {
     ($filepath:expr) => {
