@@ -1,8 +1,12 @@
 //! Acropolis Parameter State module for Caryatid
 //! Accepts certificate events and derives the Governance State in memory
 
+use acropolis_common::caryatid::RollbackWrapper;
 use acropolis_common::configuration::StartupMode;
-use acropolis_common::messages::{SnapshotMessage, SnapshotStateMessage, StateTransitionMessage};
+use acropolis_common::declare_cardano_reader;
+use acropolis_common::messages::{
+    GovernanceOutcomesMessage, SnapshotMessage, SnapshotStateMessage, StateTransitionMessage,
+};
 use acropolis_common::queries::errors::QueryError;
 use acropolis_common::{
     messages::{CardanoMessage, Message, ProtocolParamsMessage, StateQuery, StateQueryResponse},
@@ -12,7 +16,7 @@ use acropolis_common::{
     state_history::{StateHistory, StateHistoryStore},
     BlockInfo, BlockStatus,
 };
-use anyhow::Result;
+use anyhow::{bail, Result};
 use caryatid_sdk::{message_bus::Subscription, module, Context};
 use config::Config;
 use std::sync::Arc;
@@ -26,7 +30,14 @@ mod state;
 use parameters_updater::ParametersUpdater;
 use state::State;
 
-const CONFIG_ENACT_STATE_TOPIC: (&str, &str) = ("enact-state-topic", "cardano.enact.state");
+declare_cardano_reader!(
+    GovOutcomesReader,
+    "enact-state-topic",
+    "cardano.enact.state",
+    GovernanceOutcomes,
+    GovernanceOutcomesMessage
+);
+
 const CONFIG_PROTOCOL_PARAMETERS_TOPIC: (&str, &str) =
     ("publish-parameters-topic", "cardano.protocol.parameters");
 const CONFIG_NETWORK_NAME: (&str, &str) = ("startup.network-name", "mainnet");
@@ -46,7 +57,6 @@ pub struct ParametersState;
 struct ParametersStateConfig {
     pub context: Arc<Context<Message>>,
     pub network_name: String,
-    pub enact_state_topic: String,
     pub protocol_parameters_topic: String,
     pub parameters_query_topic: String,
     pub store_history: bool,
@@ -69,7 +79,6 @@ impl ParametersStateConfig {
         Arc::new(Self {
             context,
             network_name: Self::conf(config, CONFIG_NETWORK_NAME),
-            enact_state_topic: Self::conf(config, CONFIG_ENACT_STATE_TOPIC),
             protocol_parameters_topic: Self::conf(config, CONFIG_PROTOCOL_PARAMETERS_TOPIC),
             parameters_query_topic: Self::conf(config, DEFAULT_PARAMETERS_QUERY_TOPIC),
             store_history: Self::conf_bool(config, CONFIG_STORE_HISTORY),
@@ -104,14 +113,13 @@ impl ParametersState {
     async fn run(
         config: Arc<ParametersStateConfig>,
         history: Arc<Mutex<StateHistory<State>>>,
-        mut enact_s: Box<dyn Subscription<Message>>,
+        mut gov_reader: GovOutcomesReader,
     ) -> Result<()> {
         // Process the snapshot messages first to bootstrap state if needed
 
         loop {
-            let (_, message) = enact_s.read().await?;
-            match message.as_ref() {
-                Message::Cardano((block, CardanoMessage::GovernanceOutcomes(gov))) => {
+            match gov_reader.read_with_rollbacks().await? {
+                RollbackWrapper::Normal((block, gov)) => {
                     let span = info_span!("parameters_state.handle", epoch = block.epoch);
                     async {
                         // Get current state and current params
@@ -130,10 +138,11 @@ impl ParametersState {
                             let current_params = state.current_params.get_params();
 
                             // Process GovOutcomes message on epoch transition
-                            let new_params = state.handle_enact_state(&block.era, gov).await?;
+                            let new_params = state.handle_enact_state(&block.era, &gov).await?;
 
                             // Publish protocol params message
-                            Self::publish_update(&config, block, new_params.clone())?;
+                            Self::publish_update(&config, &block, new_params.clone())?;
+                            tracing::error!("params: Published params");
 
                             // Commit state on params change
                             if current_params != new_params.params {
@@ -152,21 +161,18 @@ impl ParametersState {
                     .instrument(span)
                     .await?;
                 }
-                Message::Cardano((
-                    _,
-                    CardanoMessage::StateTransition(StateTransitionMessage::Rollback(_)),
-                )) => {
+                RollbackWrapper::Rollback(message) => {
+                    tracing::error!("params: Published rollback");
                     // forward the rollback downstream
                     config.context.publish(&config.protocol_parameters_topic, message).await?;
                 }
-                msg => error!("Unexpected message {msg:?} for enact state topic"),
             }
         }
     }
 
     pub async fn init(&self, context: Arc<Context<Message>>, config: Arc<Config>) -> Result<()> {
         let cfg = ParametersStateConfig::new(context.clone(), &config);
-        let enact_s = cfg.context.subscribe(&cfg.enact_state_topic).await?;
+        let gov_reader = GovOutcomesReader::new(&context, &config).await?;
 
         let store_history = cfg.store_history;
 
@@ -291,7 +297,7 @@ impl ParametersState {
 
         // Start run task
         tokio::spawn(async move {
-            Self::run(cfg_clone, history_clone, enact_s)
+            Self::run(cfg_clone, history_clone, gov_reader)
                 .await
                 .unwrap_or_else(|e| error!("Failed: {e}"));
         });
