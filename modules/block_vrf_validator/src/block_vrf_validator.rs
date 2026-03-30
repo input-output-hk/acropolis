@@ -12,7 +12,6 @@ use acropolis_common::{
     },
     protocol_params::Nonce,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -204,12 +203,12 @@ impl BlockVrfValidator {
             let block_msg =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
                     RollbackWrapper::Normal((block_info, block_msg)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
                         Some((block_info, block_msg.header.clone()))
                     }
-                    RollbackWrapper::Rollback(_) => None,
+                    RollbackWrapper::Rollback((block_info, _)) => {
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
+                        None
+                    }
                 };
 
             if block_msg.as_ref().map(|(blk, _)| blk.new_epoch && blk.epoch > 0).unwrap_or(true) {

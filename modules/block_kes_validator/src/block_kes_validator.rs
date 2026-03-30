@@ -11,7 +11,6 @@ use acropolis_common::{
         StateTransitionMessage,
     },
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -158,15 +157,13 @@ impl BlockKesValidator {
 
             let blocks_msg =
                 match ctx.consume_sync("block_reader", block_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, blocks)) => {
+                    RollbackWrapper::Normal((block_info, blocks)) => Some((block_info, blocks)),
+                    RollbackWrapper::Rollback((block_info, _)) => {
                         // handle rollback here
-                        if block_info.status == BlockStatus::RolledBack {
-                            state = history.lock().await.get_rolled_back_state(block_info.number);
-                        }
+                        state = history.lock().await.get_rolled_back_state(block_info.number);
 
-                        Some((block_info, blocks))
+                        None
                     }
-                    RollbackWrapper::Rollback(_) => None,
                 };
 
             // read epoch boundary messages
