@@ -259,10 +259,10 @@ impl EpochsState {
                         }
                     });
                 }
-                RollbackWrapper::Rollback(raw_message) => {
+                RollbackWrapper::Rollback((_, message)) => {
                     ctx.handle(
                         "publishing rollback message",
-                        epoch_activity_publisher.publish_rollback(raw_message).await,
+                        epoch_activity_publisher.publish_rollback(message).await,
                     );
                 }
             }

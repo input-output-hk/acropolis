@@ -22,7 +22,7 @@ use acropolis_common::{
     },
     rational_number::RationalNumber,
     state_history::{StateHistory, StateHistoryStore},
-    BlockStatus, Era, PoolId,
+    Era, PoolId,
 };
 use anyhow::{bail, Result};
 use caryatid_sdk::{module, Context, Subscription};
@@ -249,16 +249,15 @@ impl SPOState {
             let certs_msg = match ctx
                 .consume_sync("certs", certs_reader.read_with_rollbacks().await)?
             {
-                RollbackWrapper::Normal((block_info, certs_msg)) => {
+                RollbackWrapper::Normal((block_info, certs_msg)) => Some((block_info, certs_msg)),
+                RollbackWrapper::Rollback((block_info, message)) => {
                     // Handle rollbacks on this topic only
-                    if block_info.status == BlockStatus::RolledBack {
-                        state = history.lock().await.get_rolled_back_state(block_info.number);
-                    }
-                    Some((block_info, certs_msg))
-                }
-                RollbackWrapper::Rollback(message) => {
+                    state = history.lock().await.get_rolled_back_state(block_info.number);
+
+                    // Publish rollbacks downstream
                     spo_state_publisher.publish_rollback(message.clone()).await?;
                     pool_registration_updates_publisher.publish_rollback(message.clone()).await?;
+
                     None
                 }
             };
