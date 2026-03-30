@@ -164,35 +164,39 @@ impl ChainStore {
                 let mut ctx = ValidationContext::new(&run_ctx, &validation_topic, "chain_store");
 
                 let mut state = history.lock().await.get_or_init_with(State::new);
-                match ctx.consume_sync("blocks", blocks_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal((block_info, block)) => {
-                        if block_info.status == BlockStatus::RolledBack {
-                            let mut history = history.lock().await;
-                            state = history.get_rolled_back_state(block_info.number);
-                            store.rollback(&block_info)?;
-                        }
-
-                        if let Err(err) =
-                            State::handle_new_block(&store, block_info.as_ref(), block.as_ref())
-                        {
-                            error!("Could not insert block: {err}");
-                        }
-
-                        if block_info.new_epoch {
-                            match ctx
-                                .consume_sync("params", params_reader.read_with_rollbacks().await)?
-                            {
-                                RollbackWrapper::Normal((_, params)) => {
-                                    state.handle_new_params(params.as_ref());
-                                }
-                                RollbackWrapper::Rollback(_) => {}
+                let block_msg =
+                    match ctx.consume_sync("blocks", blocks_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((block_info, block)) => {
+                            if block_info.status == BlockStatus::RolledBack {
+                                let mut history = history.lock().await;
+                                state = history.get_rolled_back_state(block_info.number);
+                                store.rollback(&block_info)?;
                             }
+
+                            if let Err(err) =
+                                State::handle_new_block(&store, block_info.as_ref(), block.as_ref())
+                            {
+                                error!("Could not insert block: {err}");
+                            }
+
+                            Some((block_info, block))
                         }
-                        let mut history = history.lock().await;
-                        history.commit(block_info.number, state);
+                        RollbackWrapper::Rollback(_) => None,
+                    };
+
+                if block_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+                    match ctx.consume_sync("params", params_reader.read_with_rollbacks().await)? {
+                        RollbackWrapper::Normal((_, params)) => {
+                            state.handle_new_params(params.as_ref());
+                        }
+                        RollbackWrapper::Rollback(_) => {}
                     }
-                    RollbackWrapper::Rollback(_) => {}
-                };
+                }
+
+                if let Some((block_info, _)) = block_msg {
+                    let mut history = history.lock().await;
+                    history.commit(block_info.number, state);
+                }
             }
         });
 
