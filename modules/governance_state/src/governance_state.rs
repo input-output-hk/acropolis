@@ -343,68 +343,63 @@ impl GovernanceState {
 
             let gov_msg =
                 match vld.consume_sync("gov", readers.gov_reader.read_with_rollbacks().await)? {
-                    RollbackWrapper::Normal(gov_msg) => Some(gov_msg),
+                    RollbackWrapper::Normal((block_info, gov_msg)) => Some((block_info, gov_msg)),
                     RollbackWrapper::Rollback(message) => {
                         let mut state = state.lock().await;
                         state.publish_rollback(message).await?;
+                        tracing::error!("gov: published rollback");
                         None
                     }
                 };
+            tracing::error!("gov: passed gov message");
 
-            async {
-                if let Some((blk_g, gov_procs)) = gov_msg {
-                    if blk_g.new_epoch {
-                        // New governance from new epoch means that we must prepare all governance
-                        // outcome for the previous epoch.
-                        let mut state = state.lock().await;
-                        let gov_outcomes = state.process_new_epoch(&blk_g);
-                        if let Some(gov_outcomes) =
-                            vld.handle("process outcome", gov_outcomes.map(Some))
-                        {
-                            vld.handle("send outcome", state.send(&blk_g, gov_outcomes).await);
-                        }
+            if let Some((block_info, gov_procs)) = gov_msg.as_ref() {
+                if block_info.new_epoch {
+                    // New governance from new epoch means that we must prepare all governance
+                    // outcome for the previous epoch.
+                    let mut state = state.lock().await;
+                    let gov_outcomes = state.process_new_epoch(block_info);
+                    if let Some(gov_outcomes) =
+                        vld.handle("process outcome", gov_outcomes.map(Some))
+                    {
+                        vld.handle("send outcome", state.send(block_info, gov_outcomes).await);
                     }
+                }
 
-                    // Governance may present in any block -- not only in 'new epoch' blocks.
-                    vld.handle(
-                        "governance",
-                        state.lock().await.handle_governance(&blk_g, &gov_procs).await,
-                    );
+                // Governance may present in any block -- not only in 'new epoch' blocks.
+                vld.handle(
+                    "governance",
+                    state.lock().await.handle_governance(block_info, gov_procs).await,
+                );
+            }
 
-                    if blk_g.new_epoch {
-                        match vld.consume_sync(
+            if gov_msg.as_ref().map(|(b, _)| b.new_epoch).unwrap_or(true) {
+                match vld
+                    .consume_sync("params", readers.param_reader.read_with_rollbacks().await)?
+                {
+                    RollbackWrapper::Normal((blk_g, params)) => {
+                        vld.handle(
                             "params",
-                            readers.param_reader.read_with_rollbacks().await,
-                        )? {
-                            RollbackWrapper::Normal((blk_g, params)) => {
-                                vld.handle(
-                                    "params",
-                                    state.lock().await.handle_protocol_parameters(&params).await,
-                                );
+                            state.lock().await.handle_protocol_parameters(&params).await,
+                        );
 
-                                if blk_g.epoch > 0 {
-                                    Self::process_drep_spo(&mut vld, state.clone(), &mut readers)
-                                        .await?;
-                                }
-
-                                vld.handle(
-                                    "advancing epoch",
-                                    state.lock().await.advance_epoch(&blk_g),
-                                );
-                            }
-                            RollbackWrapper::Rollback(_) => {}
-                        }
+                        vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk_g));
                     }
-                } else {
-                    vld.consume_sync("params", readers.param_reader.read_with_rollbacks().await)?;
+                    RollbackWrapper::Rollback(_) => {}
+                }
+
+                if gov_msg.as_ref().map(|(b, _)| b.epoch > 0).unwrap_or(true) {
                     Self::process_drep_spo(&mut vld, state.clone(), &mut readers).await?;
                 }
 
-                Ok::<(), anyhow::Error>(())
-            }
-            .await?;
+                if let Some((blk, _)) = gov_msg {
+                    vld.handle("advancing epoch", state.lock().await.advance_epoch(&blk));
 
-            vld.publish().await;
+                    if blk.intent.do_validation() {
+                        vld.publish().await;
+                    }
+                }
+            }
         }
     }
 
